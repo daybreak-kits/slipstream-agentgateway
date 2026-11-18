@@ -1,0 +1,1 @@
+{"llm": {"port": 3692, "models": [{"name": "x", "provider": "openAI"}], "virtualModels": [{"name": "v", "routing": {"failover": {"targets": [{"model": "x", "priority": 0}]}}}]}}

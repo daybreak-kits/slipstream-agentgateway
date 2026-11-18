@@ -1,0 +1,840 @@
+{
+  "config": {
+    "adminAddr": "127.0.0.1:3921",
+    "statsAddr": "127.0.0.1:3922",
+    "readinessAddr": "127.0.0.1:3923",
+    "database": {
+      "url": "sqlite://data.db"
+    },
+    "storage": {
+      "mode": "file"
+    }
+  },
+  "llm": {
+    "port": 3692,
+    "providers": [
+      {
+        "name": "mock-ok",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8099/ok/v1",
+          "apiKey": "test-key"
+        }
+      },
+      {
+        "name": "mock-fail",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8099/fail/v1",
+          "apiKey": "test-key"
+        }
+      },
+      {
+        "name": "mock-t1",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8099/t1/v1",
+          "apiKey": "test-key"
+        }
+      },
+      {
+        "name": "mock-t2",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8099/t2/v1",
+          "apiKey": "test-key"
+        }
+      },
+      {
+        "name": "mock-slow",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8099/slow/v1",
+          "apiKey": "test-key"
+        }
+      },
+      {
+        "name": "mock-sc200",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8099/sc200/v1",
+          "apiKey": "test-key"
+        }
+      },
+      {
+        "name": "mock-sc400",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8099/sc400/v1",
+          "apiKey": "test-key"
+        }
+      },
+      {
+        "name": "mock-sc401",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8099/sc401/v1",
+          "apiKey": "test-key"
+        }
+      },
+      {
+        "name": "mock-sc403",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8099/sc403/v1",
+          "apiKey": "test-key"
+        }
+      },
+      {
+        "name": "mock-sc404",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8099/sc404/v1",
+          "apiKey": "test-key"
+        }
+      },
+      {
+        "name": "mock-sc408",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8099/sc408/v1",
+          "apiKey": "test-key"
+        }
+      },
+      {
+        "name": "mock-sc429",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8099/sc429/v1",
+          "apiKey": "test-key"
+        }
+      },
+      {
+        "name": "mock-sc499",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8099/sc499/v1",
+          "apiKey": "test-key"
+        }
+      },
+      {
+        "name": "mock-sc500",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8099/sc500/v1",
+          "apiKey": "test-key"
+        }
+      },
+      {
+        "name": "mock-sc502",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8099/sc502/v1",
+          "apiKey": "test-key"
+        }
+      },
+      {
+        "name": "mock-sc503",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8099/sc503/v1",
+          "apiKey": "test-key"
+        }
+      },
+      {
+        "name": "mock-sc504",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8099/sc504/v1",
+          "apiKey": "test-key"
+        }
+      },
+      {
+        "name": "mock-sc505",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8099/sc505/v1",
+          "apiKey": "test-key"
+        }
+      },
+      {
+        "name": "mock-sc520",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8099/sc520/v1",
+          "apiKey": "test-key"
+        }
+      },
+      {
+        "name": "mock-sc599",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8099/sc599/v1",
+          "apiKey": "test-key"
+        }
+      },
+      {
+        "name": "mock-sctimeout",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8099/sctimeout/v1",
+          "apiKey": "test-key"
+        }
+      },
+      {
+        "name": "mock-dead",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8098/v1",
+          "apiKey": "test-key"
+        }
+      }
+    ],
+    "models": [
+      {
+        "name": "m-ok",
+        "visibility": "internal",
+        "provider": {
+          "reference": "mock-ok"
+        },
+        "params": {
+          "model": "model-ok"
+        }
+      },
+      {
+        "name": "m-fail",
+        "visibility": "internal",
+        "provider": {
+          "reference": "mock-fail"
+        },
+        "params": {
+          "model": "model-fail"
+        }
+      },
+      {
+        "name": "m-t1",
+        "visibility": "internal",
+        "provider": {
+          "reference": "mock-t1"
+        },
+        "params": {
+          "model": "model-t1"
+        }
+      },
+      {
+        "name": "m-t2",
+        "visibility": "internal",
+        "provider": {
+          "reference": "mock-t2"
+        },
+        "params": {
+          "model": "model-t2"
+        }
+      },
+      {
+        "name": "m-slow",
+        "visibility": "internal",
+        "provider": {
+          "reference": "mock-slow"
+        },
+        "params": {
+          "model": "model-slow"
+        }
+      },
+      {
+        "name": "m-code-200",
+        "visibility": "internal",
+        "provider": {
+          "reference": "mock-sc200"
+        },
+        "params": {
+          "model": "code-200"
+        }
+      },
+      {
+        "name": "m-code-400",
+        "visibility": "internal",
+        "provider": {
+          "reference": "mock-sc400"
+        },
+        "params": {
+          "model": "code-400"
+        }
+      },
+      {
+        "name": "m-code-401",
+        "visibility": "internal",
+        "provider": {
+          "reference": "mock-sc401"
+        },
+        "params": {
+          "model": "code-401"
+        }
+      },
+      {
+        "name": "m-code-403",
+        "visibility": "internal",
+        "provider": {
+          "reference": "mock-sc403"
+        },
+        "params": {
+          "model": "code-403"
+        }
+      },
+      {
+        "name": "m-code-404",
+        "visibility": "internal",
+        "provider": {
+          "reference": "mock-sc404"
+        },
+        "params": {
+          "model": "code-404"
+        }
+      },
+      {
+        "name": "m-code-408",
+        "visibility": "internal",
+        "provider": {
+          "reference": "mock-sc408"
+        },
+        "params": {
+          "model": "code-408"
+        }
+      },
+      {
+        "name": "m-code-429",
+        "visibility": "internal",
+        "provider": {
+          "reference": "mock-sc429"
+        },
+        "params": {
+          "model": "code-429"
+        }
+      },
+      {
+        "name": "m-code-499",
+        "visibility": "internal",
+        "provider": {
+          "reference": "mock-sc499"
+        },
+        "params": {
+          "model": "code-499"
+        }
+      },
+      {
+        "name": "m-code-500",
+        "visibility": "internal",
+        "provider": {
+          "reference": "mock-sc500"
+        },
+        "params": {
+          "model": "code-500"
+        }
+      },
+      {
+        "name": "m-code-502",
+        "visibility": "internal",
+        "provider": {
+          "reference": "mock-sc502"
+        },
+        "params": {
+          "model": "code-502"
+        }
+      },
+      {
+        "name": "m-code-503",
+        "visibility": "internal",
+        "provider": {
+          "reference": "mock-sc503"
+        },
+        "params": {
+          "model": "code-503"
+        }
+      },
+      {
+        "name": "m-code-504",
+        "visibility": "internal",
+        "provider": {
+          "reference": "mock-sc504"
+        },
+        "params": {
+          "model": "code-504"
+        }
+      },
+      {
+        "name": "m-code-505",
+        "visibility": "internal",
+        "provider": {
+          "reference": "mock-sc505"
+        },
+        "params": {
+          "model": "code-505"
+        }
+      },
+      {
+        "name": "m-code-520",
+        "visibility": "internal",
+        "provider": {
+          "reference": "mock-sc520"
+        },
+        "params": {
+          "model": "code-520"
+        }
+      },
+      {
+        "name": "m-code-599",
+        "visibility": "internal",
+        "provider": {
+          "reference": "mock-sc599"
+        },
+        "params": {
+          "model": "code-599"
+        }
+      },
+      {
+        "name": "m-code-timeout",
+        "visibility": "internal",
+        "provider": {
+          "reference": "mock-sctimeout"
+        },
+        "params": {
+          "model": "code-timeout-40"
+        }
+      },
+      {
+        "name": "m-dead",
+        "visibility": "internal",
+        "provider": {
+          "reference": "mock-dead"
+        },
+        "params": {
+          "model": "code-200"
+        }
+      }
+    ],
+    "virtualModels": [
+      {
+        "name": "vm-e1",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "m-fail",
+                "priority": 1
+              },
+              {
+                "model": "m-ok",
+                "priority": 1
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "vm-e7a",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "m-t1",
+                "priority": 1
+              },
+              {
+                "model": "m-t2",
+                "priority": 1
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "vm-e7b",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "m-t1",
+                "priority": 1
+              },
+              {
+                "model": "m-t2",
+                "priority": 2
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "vm-e2",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "m-slow",
+                "priority": 1
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "vm-e14-200",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "m-code-200",
+                "priority": 1
+              },
+              {
+                "model": "m-ok",
+                "priority": 2
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "vm-e14-400",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "m-code-400",
+                "priority": 1
+              },
+              {
+                "model": "m-ok",
+                "priority": 2
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "vm-e14-401",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "m-code-401",
+                "priority": 1
+              },
+              {
+                "model": "m-ok",
+                "priority": 2
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "vm-e14-403",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "m-code-403",
+                "priority": 1
+              },
+              {
+                "model": "m-ok",
+                "priority": 2
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "vm-e14-404",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "m-code-404",
+                "priority": 1
+              },
+              {
+                "model": "m-ok",
+                "priority": 2
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "vm-e14-408",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "m-code-408",
+                "priority": 1
+              },
+              {
+                "model": "m-ok",
+                "priority": 2
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "vm-e14-429",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "m-code-429",
+                "priority": 1
+              },
+              {
+                "model": "m-ok",
+                "priority": 2
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "vm-e14-499",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "m-code-499",
+                "priority": 1
+              },
+              {
+                "model": "m-ok",
+                "priority": 2
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "vm-e14-500",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "m-code-500",
+                "priority": 1
+              },
+              {
+                "model": "m-ok",
+                "priority": 2
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "vm-e14-502",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "m-code-502",
+                "priority": 1
+              },
+              {
+                "model": "m-ok",
+                "priority": 2
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "vm-e14-503",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "m-code-503",
+                "priority": 1
+              },
+              {
+                "model": "m-ok",
+                "priority": 2
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "vm-e14-504",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "m-code-504",
+                "priority": 1
+              },
+              {
+                "model": "m-ok",
+                "priority": 2
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "vm-e14-505",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "m-code-505",
+                "priority": 1
+              },
+              {
+                "model": "m-ok",
+                "priority": 2
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "vm-e14-520",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "m-code-520",
+                "priority": 1
+              },
+              {
+                "model": "m-ok",
+                "priority": 2
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "vm-e14-599",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "m-code-599",
+                "priority": 1
+              },
+              {
+                "model": "m-ok",
+                "priority": 2
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "vm-e14-timeout",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "m-code-timeout",
+                "priority": 1
+              },
+              {
+                "model": "m-ok",
+                "priority": 2
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "vm-e14-dead",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "m-dead",
+                "priority": 1
+              },
+              {
+                "model": "m-ok",
+                "priority": 2
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "vm-e14b",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "m-ok",
+                "priority": 1
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "policies": {
+      "apiKey": {
+        "mode": "strict",
+        "keys": [
+          {
+            "key": "sk-ss-lab-client-0001",
+            "metadata": {
+              "name": "lab-client"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "frontendPolicies": {
+    "accessLog": {
+      "database": {
+        "llm": "full"
+      }
+    }
+  },
+  "gateways": {
+    "gw-lab": {
+      "port": 3694,
+      "bindAddress": "127.0.0.1"
+    }
+  },
+  "routes": [
+    {
+      "name": "retry-e14",
+      "gateways": "gw-lab",
+      "matches": [
+        {
+          "path": {
+            "pathPrefix": "/"
+          }
+        }
+      ],
+      "policies": {
+        "retry": {
+          "attempts": 2,
+          "codes": [
+            429,
+            500,
+            502,
+            503
+          ],
+          "backoff": "100ms"
+        }
+      },
+      "backends": [
+        {
+          "host": "127.0.0.1:8099"
+        }
+      ]
+    }
+  ]
+}

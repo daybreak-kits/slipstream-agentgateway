@@ -1,0 +1,264 @@
+{
+  "config": {
+    "adminAddr": "127.0.0.1:3921",
+    "statsAddr": "127.0.0.1:3922",
+    "readinessAddr": "127.0.0.1:3923",
+    "database": {
+      "url": "sqlite://data.db"
+    },
+    "storage": {
+      "mode": "file"
+    }
+  },
+  "llm": {
+    "port": 3692,
+    "providers": [
+      {
+        "name": "mock-ok",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8099/ok/v1",
+          "apiKey": "test-key"
+        }
+      },
+      {
+        "name": "mock-fail",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8099/fail/v1",
+          "apiKey": "test-key"
+        }
+      },
+      {
+        "name": "mock-t1",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8099/t1/v1",
+          "apiKey": "test-key"
+        }
+      },
+      {
+        "name": "mock-t2",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8099/t2/v1",
+          "apiKey": "test-key"
+        }
+      },
+      {
+        "name": "mock-slow",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8099/slow/v1",
+          "apiKey": "test-key"
+        }
+      }
+    ],
+    "models": [
+      {
+        "name": "m-ok",
+        "visibility": "internal",
+        "provider": {
+          "reference": "mock-ok"
+        },
+        "params": {
+          "model": "model-ok"
+        }
+      },
+      {
+        "name": "m-fail",
+        "visibility": "internal",
+        "provider": {
+          "reference": "mock-fail"
+        },
+        "params": {
+          "model": "model-fail"
+        }
+      },
+      {
+        "name": "m-t1",
+        "visibility": "internal",
+        "provider": {
+          "reference": "mock-t1"
+        },
+        "params": {
+          "model": "model-t1"
+        }
+      },
+      {
+        "name": "m-t2",
+        "visibility": "internal",
+        "provider": {
+          "reference": "mock-t2"
+        },
+        "params": {
+          "model": "model-t2"
+        }
+      },
+      {
+        "name": "m-slow",
+        "visibility": "internal",
+        "provider": {
+          "reference": "mock-slow"
+        },
+        "params": {
+          "model": "model-slow"
+        }
+      },
+      {
+        "name": "m-p100",
+        "visibility": "internal",
+        "provider": {
+          "reference": "mock-ok"
+        },
+        "params": {
+          "model": "usage-p100"
+        }
+      },
+      {
+        "name": "m-c100",
+        "visibility": "internal",
+        "provider": {
+          "reference": "mock-ok"
+        },
+        "params": {
+          "model": "usage-c100"
+        }
+      }
+    ],
+    "virtualModels": [
+      {
+        "name": "vm-e1",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "m-fail",
+                "priority": 1
+              },
+              {
+                "model": "m-ok",
+                "priority": 1
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "vm-e7a",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "m-t1",
+                "priority": 1
+              },
+              {
+                "model": "m-t2",
+                "priority": 1
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "vm-e7b",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "m-t1",
+                "priority": 1
+              },
+              {
+                "model": "m-t2",
+                "priority": 2
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "vm-e2",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "m-slow",
+                "priority": 1
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "vm-e12",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "m-ok",
+                "priority": 1
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "vm-e12p",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "m-p100",
+                "priority": 1
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "vm-e12c",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "m-c100",
+                "priority": 1
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "policies": {
+      "apiKey": {
+        "mode": "strict",
+        "keys": [
+          {
+            "key": "sk-ss-lab-client-0001",
+            "metadata": {
+              "name": "lab-client"
+            }
+          }
+        ]
+      },
+      "retry": {
+        "attempts": 2,
+        "codes": [
+          500,
+          502,
+          503
+        ],
+        "backoff": "50ms"
+      }
+    }
+  },
+  "frontendPolicies": {
+    "accessLog": {
+      "database": {
+        "llm": "full"
+      }
+    }
+  }
+}
