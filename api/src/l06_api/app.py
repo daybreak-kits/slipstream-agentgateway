@@ -29,6 +29,7 @@ from l06_api.routers_meta import router as meta_router
 from l06_api.routers_models import router as models_router
 from l06_api.routers_ops import router as ops_router
 from l06_api.routers_policies import router as policies_router
+from l06_api.routers_pricing_io import router as pricing_io_router
 from l06_api.routers_reports import router as reports_router
 from l06_api.routers_roles import router as roles_router
 from l06_api.routers_upstreams import router as upstreams_router
@@ -46,6 +47,7 @@ ALL_ROUTERS = (
     availability_router,
     usage_router,
     billing_router,
+    pricing_io_router,
     bills_router,
     reports_router,
     roles_router,

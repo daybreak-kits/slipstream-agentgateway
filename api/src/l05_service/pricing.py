@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from l01_core.errors import AppError, ErrorCode
+from l01_core.timeutil import now_ms
 from l04_repo.orm import ModelTargetORM, PublicModelORM, UpstreamModelORM
 
 MICRO = Decimal("1000000")  # 1 CNY == 1_000_000 micro
@@ -218,3 +219,144 @@ def public_model_price_rows(session: Session) -> list[dict]:
     ).all():
         output.append(public_model_price(public, grouped.get(public.id, []), models))
     return output
+
+
+# ------------------------------------------------------- ADR-020 price JSON export/import
+
+PRICE_EXPORT_SCHEMA_VERSION = 1
+#: v1 scope note carried in every export payload and doc: cache prices stay on the
+#: legacy versioned book (/admin/prices/upstream) and are not part of this file.
+CACHE_PRICES_SCOPE = "not_included_v1"
+
+
+def export_model_prices(session: Session) -> dict:
+    """Current effective prices for every upstream model (ADR-020 authority).
+
+    Model rows are the one truth source, so the export covers exactly the three
+    editable fields (cost in / out per 1M + markup) plus the locators. Decimals
+    travel as strings in the same wire form as the model list endpoint, and
+    unpriced costs export as null - re-importing an unedited export is a no-op.
+    """
+    rows = session.scalars(
+        select(UpstreamModelORM).order_by(
+            UpstreamModelORM.upstream_id, UpstreamModelORM.name, UpstreamModelORM.id
+        )
+    ).all()
+    return {
+        "schema_version": PRICE_EXPORT_SCHEMA_VERSION,
+        "exported_at_ms": now_ms(),
+        "meta": {"cache_prices": CACHE_PRICES_SCOPE},
+        "upstream_models": [
+            {
+                "id": row.id,
+                "name": row.name,
+                "model_type": row.model_type,
+                "cost_input_per_1m": decimal_text(row.cost_input_per_1m),
+                "cost_output_per_1m": decimal_text(row.cost_output_per_1m),
+                "markup": markup_text(row.markup),
+            }
+            for row in rows
+        ],
+    }
+
+
+def _locate_import_target(
+    models: dict[str, UpstreamModelORM],
+    by_name: dict[str, list[UpstreamModelORM]],
+    model_id: str,
+    name: str,
+) -> UpstreamModelORM | None:
+    """Resolve one import row to an existing model row; None means "report an error".
+
+    id wins when present (an unknown id is an error, not a fallback: a silent
+    name fallback could price the wrong row); name is only used when id is
+    absent, and an ambiguous name is an error (names are not unique upstream).
+    """
+    if model_id:
+        if model_id not in models:
+            raise LookupError(f"未知上游模型 id: {model_id}")
+        return models[model_id]
+    if name:
+        matches = by_name.get(name, [])
+        if len(matches) > 1:
+            raise LookupError(
+                f"模型名重名歧义: {name}（{len(matches)} 条同名模型，请改用 id 定位）"
+            )
+        if not matches:
+            raise LookupError(f"未知上游模型: {name}")
+        return matches[0]
+    raise LookupError("缺少 id 或 name，无法定位上游模型")
+
+
+def import_model_prices(session: Session, rows: list[dict]) -> dict:
+    """Validate the whole batch, then update model rows in one transaction.
+
+    Every row must resolve to an existing upstream_model (id first, then name);
+    provided prices must pass validate_cost / validate_markup (same bounds as
+    the single-row editor). Blank price fields (missing / null / "") leave that
+    field untouched - the console batch editor sends blanks for columns it does
+    not edit. Unknown models, out-of-range values and duplicate entries fail
+    the WHOLE import with per-line errors before any row is written; the
+    caller commits only on success, so a rejected batch changes nothing.
+    """
+    models = {row.id: row for row in session.scalars(select(UpstreamModelORM)).all()}
+    by_name: dict[str, list[UpstreamModelORM]] = {}
+    for row in models.values():
+        by_name.setdefault(row.name, []).append(row)
+
+    errors: list[dict] = []
+    updates: list[tuple[UpstreamModelORM, dict[str, Decimal]]] = []
+    claimed: set[str] = set()
+    for index, item in enumerate(rows):
+        model_id = str(item.get("id") or "").strip()
+        name = str(item.get("name") or "").strip()
+        where = {"index": index, "id": model_id or None, "name": name or None}
+        try:
+            target = _locate_import_target(models, by_name, model_id, name)
+        except LookupError as exc:
+            errors.append({**where, "message": str(exc)})
+            continue
+        if target.id in claimed:
+            errors.append(
+                {
+                    **where,
+                    "message": f"重复条目：模型 {target.id}（{target.name}）在本批中出现多次",
+                }
+            )
+            continue
+        problems: list[str] = []
+        patch: dict[str, Decimal] = {}
+        for field in ("cost_input_per_1m", "cost_output_per_1m", "markup"):
+            value = item.get(field)
+            if value is None:  # blank = untouched (validator normalized "" to None)
+                continue
+            try:
+                if field == "markup":
+                    patch[field] = validate_markup(value)
+                else:
+                    patch[field] = validate_cost(value, field)
+            except AppError as exc:
+                problems.append(exc.message)
+        if problems:
+            errors.append({**where, "message": "；".join(problems)})
+            continue
+        claimed.add(target.id)
+        updates.append((target, patch))
+
+    if errors:
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR,
+            f"价目导入校验失败，全部未生效（{len(errors)} 行有误）",
+            details={"errors": errors},
+        )
+
+    changed = 0
+    skipped = 0
+    for target, patch in updates:
+        if not patch:  # locator-only row: nothing to write
+            skipped += 1
+            continue
+        for field, value in patch.items():
+            setattr(target, field, value)
+        changed += 1
+    return {"changed": changed, "missing": [], "skipped": skipped}

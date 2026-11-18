@@ -13,7 +13,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from l05_service.rollout import RevisionStatus
 
@@ -274,6 +274,61 @@ class FxPut(BaseModel):
 
 class RecomputeIn(BaseModel):
     event_ids: list[str] = Field(default_factory=list)
+
+
+class PriceImportRow(BaseModel):
+    """One row of the ADR-020 price JSON import (same shape as an export row).
+
+    id/name locate the existing upstream model (id wins; name only without id).
+    Blank price fields (missing / null / "") mean "leave that field untouched"
+    - the console batch editor sends blanks for columns it does not edit.
+    model_type is accepted so a raw export round-trips, but import never writes
+    it (price-only import; enabled/cooldown are rejected outright).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str | None = None
+    name: str | None = None
+    model_type: str | None = None
+    cost_input_per_1m: Decimal | None = None
+    cost_output_per_1m: Decimal | None = None
+    markup: Decimal | None = None
+
+    @field_validator(
+        "id", "name", "cost_input_per_1m", "cost_output_per_1m", "markup", mode="before"
+    )
+    @classmethod
+    def _blank_is_untouched(cls, value: object) -> object:
+        """The console's 留空 (empty input) travels as ""; treat it like an omitted field."""
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return None
+        return value
+
+
+class PriceImportIn(BaseModel):
+    """POST /admin/prices/import body: isomorphic to the GET /admin/prices/export file.
+
+    The router validates through PriceImportIn.model_validate instead of a
+    signature annotation on purpose: a request model referenced by FastAPI
+    would enter components.schemas and make the committed
+    web/src/generated/contract.ts stale. Switching to a typed body parameter is
+    a one-line follow-up once web/ can be regenerated in the same change.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: int = 1
+    exported_at_ms: int | None = None
+    meta: dict | None = None
+    upstream_models: list[PriceImportRow] = Field(min_length=1)
+
+    @field_validator("schema_version")
+    @classmethod
+    def _only_v1(cls, value: int) -> int:
+        if value != 1:
+            raise ValueError("不支持的 schema_version，当前仅支持 1")
+        return value
 
 
 class RollbackIn(BaseModel):

@@ -492,11 +492,64 @@ AES-GCM 密文 + sk-...abcd 掩码。
 | GET/POST | /admin/prices/upstream | 上游进价（vendor+model+item，版本自动 +1） |
 | GET/POST | /admin/prices/charge | 对外计费价（mode=markup 万分比 12000=1.2x，或 fixed） |
 | GET | /admin/prices/public-models | prices:read | **公开模型售价**（裸数组，只读派生）：按成员上游模型成本 × 倍率加权平均实时计算，不落库、不独立维护（ADR-017/GLOSSARY §5 口径）；成员价或权重变化后立即生效 |
+| GET | /admin/prices/export | upstream_models:read | **价目 JSON 一键导出**（ADR-020，权威=模型行）：见下方「价目 JSON 导入/导出」 |
+| POST | /admin/prices/import | upstream_models:write | **价目 JSON 整体导入**（ADR-020/023 dry-run，全部通过才落库）：见下方「价目 JSON 导入/导出」 |
 | GET | /admin/unpriced | 缺价清单，`{cost:[...], charge:[...]}` 两个数组（demo 各 3 条） |
 | POST | /admin/unpriced/recompute | 补价后重算：{resolved, remaining} |
 | GET | /admin/cost/entries | 上游成本分录（status: ok\|unpriced） |
 | GET | /admin/charge/entries | 用户计费分录（status: ok\|unpriced\|free） |
 | GET/PUT | /admin/fx | 汇率快照（USD→CNY，rate_micro） |
+
+#### 价目 JSON 导入/导出（ADR-020）
+
+数据源=**上游模型行**（`cost_input_per_1m` / `cost_output_per_1m` / `markup`，现行权威），两请求体同构。
+**v1 不含缓存价**：缓存价仍走 `/admin/prices/upstream` 版本化端点维护，导出文件 `meta.cache_prices` 恒为
+`"not_included_v1"`。金额为字符串（成本 6 位小数，倍率 4 位小数）；未配价导出为 `null`。无 `billing:cost`
+权限的调用方，导出响应中成本/倍率键被中央过滤整体剔除（§0.5）。
+
+**GET /admin/prices/export**（权限 `upstream_models:read`）：
+
+```json
+{
+  "schema_version": 1,
+  "exported_at_ms": 1731974400000,
+  "meta": {"cache_prices": "not_included_v1"},
+  "upstream_models": [
+    {"id": "umdl_01", "name": "glm-5.3", "model_type": "chat",
+     "cost_input_per_1m": "2.000000", "cost_output_per_1m": "8.000000", "markup": "1.2000"}
+  ]
+}
+```
+
+**POST /admin/prices/import**（权限 `upstream_models:write`）：
+
+- 请求体与导出文件同构（`schema_version` 必须=1，`exported_at_ms`/`meta` 收下忽略；`upstream_models`
+  必填非空数组；未知键 → 422）。
+- 定位：每行**按 id 优先**匹配既有 upstream_model；无 id 才按 name，重名歧义即错（同名模型跨上游合法，
+  请用导出文件里的 id）。id 存在但查不到 → 未知模型错误，**不会回退按 name 匹配**。
+- 校验（与单行编辑同界）：cost ≥ 0（未配价行为 `null`）；markup ∈ (0,100]（复用 `validate_markup`）。
+  **空白字段（缺省 / `null` / `""`）= 不动该项**（与前端批量改价「留空」语义一致）；清除某字段定价请走
+  模型行 PATCH（显式 null=清为未配价）。
+- **整体事务（dry-run 原则 ADR-023）**：未知模型 / 数值越界 / 同批重复条目 → 422
+  `VALIDATION_ERROR`，`details.errors` 逐行列明（`{index, id, name, message}`），**零落库**；
+  全部通过才逐条 UPDATE 模型行价格字段（`enabled`/`cooldown`/`model_type` 等非价格字段永不改动，
+  行内出现未知键直接 422）。
+- 成功响应：`{"changed": 1, "missing": [], "skipped": 0}`（changed=实际更新的行数；skipped=只有定位无
+  价格字段的行数；missing 恒为空数组——未知模型已在校验阶段整批拒绝）。
+
+```json
+// 请求（部分字段缺失=不动）
+{"schema_version": 1, "upstream_models": [
+  {"id": "umdl_01", "cost_input_per_1m": "2.500000", "markup": "1.5000"},
+  {"name": "glm-5.3-flash", "cost_output_per_1m": "1.200000"}
+]}
+// 失败响应（422，零落库）
+{"code": "VALIDATION_ERROR", "message": "价目导入校验失败，全部未生效（2 行有误）",
+ "details": {"errors": [
+   {"index": 1, "id": null, "name": "glm-4.6", "message": "未知上游模型: glm-4.6"},
+   {"index": 2, "id": "umdl_03", "name": null, "message": "markup 不能超过 100"}
+ ]}, "request_id": "9f2c..."}
+```
 
 ### 4.4 日志
 | 方法 | 路径 | 说明 |
