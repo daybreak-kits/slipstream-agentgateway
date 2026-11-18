@@ -1,0 +1,713 @@
+import type {
+  AdminAccount, ApiKey, AuditLog, AvailabilityRule, ChargePrice, ChargeEntry, ConfigRevision,
+  CostEntry, EndUser, GuardrailMatrix, LedgerRow, McpServersInfo, ModelTarget, OverviewStats,
+  PolicySnapshot, PublicModel, PublicModelPrice, SettingItem, TransformPreviewResult, UnpricedList, Upstream,
+  UpstreamModel, UpstreamPrice, UpstreamTransforms, Vendor,
+} from "../types";
+
+/**
+ * Mock 数据开关：只有显式设置 VITE_MOCK=1 才启用（默认关闭，全部走真实 /admin 接口）。
+ * 离线开发 / 演示：`VITE_MOCK=1 npm run dev`；生产构建不设置即真实数据。
+ */
+export const useMock: boolean = ["1", "true"].includes(String(import.meta.env.VITE_MOCK ?? ""));
+
+const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** mock 会话：登录成功置 true，退出置 false；刷新页面即回到未登录（演示足够）。 */
+let mockLoggedIn = false;
+/** 与后端管理用户角色一致：mock 会话默认拥有全部权限，前端只做显隐不做安全边界。 */
+const MOCK_ALL_PERMISSIONS = [
+  "vendors:read", "vendors:write", "upstreams:read", "upstreams:write",
+  "upstream_models:read", "upstream_models:write", "public_models:read", "public_models:write",
+  "model_targets:read", "model_targets:write", "availability:read", "availability:write",
+  "transforms:read", "transforms:write", "config:read", "config:write", "settings:read",
+  "settings:write", "audits:read", "policies:read", "policies:write", "prices:read", "prices:write",
+  "billing:cost", "billing:spend", "billing:subtree", "ledger:read", "logs:read",
+  "logs:pull", "reports:read", "users:read", "users:create", "users:update", "users:delete",
+  "apikeys:read", "apikeys:write", "admins:read", "admins:write", "roles:read", "roles:write",
+  "playground:use",
+];
+const MOCK_ADMIN = {
+  id: "adm_mock",
+  username: "admin",
+  name: "张三",
+  role: "admin",
+  status: "active",
+  permissions: MOCK_ALL_PERMISSIONS,
+  expires_at: "2026-11-18T00:00:00",
+};
+
+const vendors: Vendor[] = [
+  { id: "vd_zai", name: "智谱 AI", slug: "zai", note: "智谱开放平台，旗舰 GLM 系列", upstream_seq: 3, created_at_ms: Date.parse("2026-11-01T09:00:00") },
+  { id: "vd_or", name: "OpenRouter", slug: "or", note: "海外聚合路由", upstream_seq: 2, created_at_ms: Date.parse("2026-11-01T09:00:00") },
+  { id: "vd_nebula", name: "青岚云", slug: "nebula", note: "云厂商大模型服务，合规通道", upstream_seq: 1, created_at_ms: Date.parse("2026-11-01T09:00:00") },
+  { id: "vd_doubao", name: "字节火山方舟", slug: "doubao", note: "豆包系列，待补上游价目", upstream_seq: 0, created_at_ms: Date.parse("2026-11-01T09:00:00") },
+];
+let vendorSeq = 3;
+
+/** 实测 /admin/upstreams 形状：名称形如 {vendor_slug}-NN，无 vendor_name/has_api_key/model_count */
+const upstreams: Upstream[] = [
+  { id: "up_01", name: "zai-01", vendor_id: "vd_zai", base_url: "https://open.bigmodel.cn/api/paas/v4", api_style: "openai_chat", transforms: null, max_buffer_bytes: 2097152, enabled: true, created_at_ms: Date.parse("2026-11-01T09:00:00") },
+  { id: "up_02", name: "or-01", vendor_id: "vd_or", base_url: "https://openrouter.ai/api/v1", api_style: "openai_chat", transforms: null, max_buffer_bytes: 2097152, enabled: true, created_at_ms: Date.parse("2026-11-01T09:01:00") },
+  { id: "up_03", name: "nebula-01", vendor_id: "vd_nebula", base_url: "https://api.nebula.example/v1", api_style: "anthropic_messages", transforms: null, max_buffer_bytes: 2097152, enabled: false, created_at_ms: Date.parse("2026-11-01T09:02:00") },
+];
+
+const upstreamModels: UpstreamModel[] = [
+  { id: "um_01", upstream_id: "up_01", name: "glm-5.3", model_type: "chat", enabled: true, created_at_ms: Date.parse("2026-11-01T09:00:00"), upstream_name: "zai-01", vendor_name: "智谱 AI", cost_input_per_1m: "2.500000", cost_output_per_1m: "10.000000", markup: "1.2000" },
+  { id: "um_02", upstream_id: "up_01", name: "glm-5.3-flash", model_type: "chat", enabled: true, created_at_ms: Date.parse("2026-11-01T09:00:00"), upstream_name: "zai-01", vendor_name: "智谱 AI", cost_input_per_1m: "0.300000", cost_output_per_1m: "1.200000", markup: "1.5000" },
+  { id: "um_03", upstream_id: "up_01", name: "embedding-4", model_type: "embedding", enabled: true, created_at_ms: Date.parse("2026-11-01T09:00:00"), upstream_name: "zai-01", vendor_name: "智谱 AI", cost_input_per_1m: "0.050000", cost_output_per_1m: "0.000000", markup: "1.0000" },
+  { id: "um_04", upstream_id: "up_02", name: "deepseek/v5-chat", model_type: "chat", enabled: true, created_at_ms: Date.parse("2026-11-02T09:00:00"), upstream_name: "or-01", vendor_name: "OpenRouter", cost_input_per_1m: null, cost_output_per_1m: null, markup: "1.0000" },
+  { id: "um_05", upstream_id: "up_02", name: "qwen/max-next", model_type: "chat", enabled: false, created_at_ms: Date.parse("2026-11-02T09:00:00"), upstream_name: "or-01", vendor_name: "OpenRouter", cost_input_per_1m: "1.200000", cost_output_per_1m: "4.800000", markup: "1.1000" },
+];
+
+const publicModels: PublicModel[] = [
+  { id: "pm_01", name: "glm-5.3", routing_mode: "failover", note: "主力对话", enabled: true, created_at_ms: Date.parse("2026-11-05T10:00:00") },
+  { id: "pm_02", name: "glm-flash", routing_mode: "weighted", note: "轻量对话", enabled: true, created_at_ms: Date.parse("2026-11-06T10:00:00") },
+  { id: "pm_03", name: "embed-v4", routing_mode: "conditional", note: null, enabled: false, created_at_ms: Date.parse("2026-11-07T10:00:00") },
+];
+
+const modelTargets: ModelTarget[] = [
+  { id: "mt_01", public_model_id: "pm_01", upstream_model_name: "glm-5.3", upstream_name: "智谱直连", priority: 1, weight: null, when: null, enabled: true },
+  { id: "mt_02", public_model_id: "pm_01", upstream_model_name: "deepseek/v5-chat", upstream_name: "OpenRouter 聚合", priority: 2, weight: null, when: null, enabled: true },
+  { id: "mt_03", public_model_id: "pm_02", upstream_model_name: "glm-5.3-flash", upstream_name: "智谱直连", priority: null, weight: 12000, when: null, enabled: true },
+  { id: "mt_04", public_model_id: "pm_03", upstream_model_name: "embedding-4", upstream_name: "智谱直连", priority: null, weight: null, when: 'request.user_tier == "trial"', enabled: true },
+];
+let mtSeq = 4;
+
+const clientKeys: ApiKey[] = [
+  { id: "ak_01", user_id: "eu_01", mask: "sk-…G7H8", key_suffix: "G7H8", status: "active", created_at_ms: Date.parse("2026-11-01T10:00:00") },
+  { id: "ak_02", user_id: "eu_02", mask: "sk-…R5S6", key_suffix: "R5S6", status: "active", created_at_ms: Date.parse("2026-11-10T14:30:00") },
+  { id: "ak_03", user_id: "eu_03", mask: "sk-…Z3A4", key_suffix: "Z3A4", status: "disabled", created_at_ms: Date.parse("2026-10-20T09:00:00") },
+];
+
+const availabilityRules: AvailabilityRule[] = [
+  { id: "ar_01", kind: "ban", scope: "model_target", scope_id: "mt_01", recurrence: "once", expires_at_ms: null, schedule_json: null, note: "连续超时，人工封禁待查", created_at_ms: Date.parse("2026-11-17T08:00:00") },
+  { id: "ar_02", kind: "cooldown", scope: "model_target", scope_id: "mt_02", recurrence: "once", expires_at_ms: Date.parse("2026-11-17T02:30:00"), schedule_json: null, note: "429 限流自动冷却", created_at_ms: Date.parse("2026-11-17T01:30:00") },
+  { id: "ar_03", kind: "cooldown", scope: "upstream", scope_id: "up_02", recurrence: "daily", expires_at_ms: null, schedule_json: JSON.stringify({ windows: [{ start: "22:00", end: "06:00" }] }), note: "每日 22:00-06:00 例行维护", created_at_ms: Date.parse("2026-11-15T09:00:00") },
+];
+
+const billingRequests: CostEntry[] = Array.from({ length: 12 }, (_, i) => {
+  const vendors = [["vd_zai", "um_01"], ["vd_zai", "um_02"], ["vd_or", "um_04"]];
+  const v = vendors[i % 3]!;
+  const unpriced = i === 3;
+  const free = i === 7;
+  return {
+    id: "ce_" + String(5000 + i),
+    gateway_event_id: "gev_" + String(9000 + i),
+    vendor_id: v[0]!,
+    upstream_model_id: v[1]!,
+    input_tokens: 380 + i * 41,
+    output_tokens: 74 + i * 13,
+    amount_micro: unpriced ? 0 : 6200 + i * 1450,
+    currency: "CNY",
+    price_version_id: unpriced ? null : "pv_20261101",
+    status: unpriced ? "unpriced" : free ? "free" : "ok",
+  };
+});
+
+const revenueRows: ChargeEntry[] = Array.from({ length: 14 }, (_, i) => {
+  const users = ["eu_01", "eu_02", "eu_03"];
+  const pms = ["pm_01", "pm_02", "pm_03"];
+  const unpriced = i === 5;
+  const free = i === 9;
+  return {
+    id: "ch_" + String(7000 + i),
+    gateway_event_id: "gev_" + String(9000 + i),
+    user_id: users[i % 3]!,
+    public_model_id: pms[i % 3]!,
+    input_tokens: 380 + i * 41,
+    output_tokens: 74 + i * 13,
+    amount_micro: unpriced ? 0 : free ? 0 : 7440 + i * 1740,
+    currency: "CNY",
+    price_version_id: unpriced ? null : "pv_20261101",
+    status: unpriced ? "unpriced" : free ? "free" : "ok",
+  };
+});
+
+const upstreamPrices: UpstreamPrice[] = [
+  { id: "up_01", vendor_name: "智谱直连", upstream_model: "glm-5.3", item: "input", unit_price_micro: 2000000, currency: "CNY", effective_from: "2026-11-01T00:00:00", version: 3 },
+  { id: "up_02", vendor_name: "智谱直连", upstream_model: "glm-5.3", item: "output", unit_price_micro: 8000000, currency: "CNY", effective_from: "2026-11-01T00:00:00", version: 3 },
+  { id: "up_03", vendor_name: "智谱直连", upstream_model: "glm-flash", item: "input", unit_price_micro: 300000, currency: "CNY", effective_from: "2026-11-01T00:00:00", version: 1 },
+  { id: "up_04", vendor_name: "智谱直连", upstream_model: "glm-flash", item: "output", unit_price_micro: 1200000, currency: "CNY", effective_from: "2026-11-01T00:00:00", version: 1 },
+  { id: "up_05", vendor_name: "OpenRouter 聚合", upstream_model: "deepseek/v5-chat", item: "input", unit_price_micro: 270000, currency: "USD", effective_from: "2026-10-15T00:00:00", version: 2 },
+  { id: "up_06", vendor_name: "OpenRouter 聚合", upstream_model: "deepseek/v5-chat", item: "output", unit_price_micro: 1090000, currency: "USD", effective_from: "2026-10-15T00:00:00", version: 2 },
+  { id: "up_07", vendor_name: "OpenRouter 聚合", upstream_model: "embedding-4", item: "request", unit_price_micro: 1000, currency: "USD", effective_from: "2026-10-15T00:00:00", version: 1 },
+];
+
+const chargePrices: ChargePrice[] = [
+  { id: "cp_01", public_model: "glm-5.3", item: "input", mode: "markup", value: 12000, currency: "CNY", effective_from: "2026-11-01T00:00:00", version: 2 },
+  { id: "cp_02", public_model: "glm-5.3", item: "output", mode: "markup", value: 12000, currency: "CNY", effective_from: "2026-11-01T00:00:00", version: 2 },
+  { id: "cp_03", public_model: "glm-flash", item: "input", mode: "markup", value: 15000, currency: "CNY", effective_from: "2026-11-01T00:00:00", version: 1 },
+  { id: "cp_04", public_model: "embed-v4", item: "request", mode: "fixed", value: 500000, currency: "CNY", effective_from: "2026-11-05T00:00:00", version: 1 },
+];
+
+const unpricedRows: UnpricedList = {
+  cost: [
+    { id: "ce_5020", gateway_event_id: "gev_9020", vendor_id: "vd_doubao", upstream_model_id: "um_90", input_tokens: 912, output_tokens: 233, amount_micro: 0, currency: "CNY", price_version_id: null, status: "unpriced" },
+  ],
+  charge: [
+    { id: "ch_7015", gateway_event_id: "gev_9015", user_id: "eu_02", public_model_id: "pm_90", input_tokens: 22100, output_tokens: 1902, amount_micro: 0, currency: "CNY", price_version_id: null, status: "unpriced" },
+  ],
+};
+
+const configRevisions: ConfigRevision[] = [
+  { id: "cr_03", artifact_hash: "h3f9a2c1e5", adapter_id: "openai-chat", operator: "admin", reason: "新增 embed-v4 目标", status: "active", previous_revision_id: "cr_02", created_at_ms: Date.parse("2026-11-17T01:05:12") },
+  { id: "cr_02", artifact_hash: "h7b1e8d0f2", adapter_id: "openai-chat", operator: "admin", reason: "OpenRouter 密钥轮换", status: "superseded", previous_revision_id: "cr_01", created_at_ms: Date.parse("2026-11-16T15:40:00") },
+  { id: "cr_01", artifact_hash: "h5c0a9f2d8", adapter_id: "openai-chat", operator: "admin", reason: "校验失败", status: "failed", error_detail: "数据面校验失败：未知字段 model_aliases", previous_revision_id: null, created_at_ms: Date.parse("2026-11-16T15:12:44") },
+];
+
+const auditLogs: AuditLog[] = [
+  { id: "al_01", actor: "admin", action: "config.apply", target: "rev_20261117_03", created_at: "2026-11-17T01:05:12", detail: "下发成功，hash h3f9a2c1" },
+  { id: "al_02", actor: "admin", action: "client_key.create", target: "ck_02", created_at: "2026-11-16T18:22:03", detail: "创建密钥 数据分析组" },
+  { id: "al_03", actor: "admin", action: "config.rollback", target: "rev_20261116_01", created_at: "2026-11-16T15:12:44", detail: "热加载确认超时，自动回滚" },
+];
+
+const policies: PolicySnapshot = {
+  cors: {
+    allow_origins: ["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials: false,
+    env_override: "SLIPSTREAM_CORS_ORIGINS (comma separated)",
+    note: "控制面管理 API 的浏览器 CORS；数据面不受此项影响",
+  },
+  key_auth: {
+    scheme: "Authorization: Bearer sk-...",
+    storage: "unsalted sha256(key) key_hash（E11，与 AG 校验逐字节一致）",
+    reveal: "明文仅通过带审计的 reveal 接口可见",
+    failure: "认证失败返回纯文本 401 authentication failed（E4）",
+  },
+  local_rate_limit: {
+    key: "apiKey.user_id",
+    type: "tokens",
+    tokensPerFill: 0,
+    semantics: "预付费：余额即初始令牌桶，永不回填；网关重启桶清零，台账才是权威（E10）",
+  },
+  transforms_defaults: {
+    response_header_deletes: ["server", "x-powered-by"],
+    response_body_guard: "用户 body 规则原样生效，不注入 response.code < 400 默认条件（W1）",
+    protected_request_headers: ["api-key", "authorization", "content-length", "content-type", "cookie", "host", "set-cookie", "x-api-key", "x-request-id"],
+    forbidden_body_paths: [],
+    mount: "providers[].policies.transformations，AG 侧确认待 E9",
+  },
+  routing: {
+    modes: ["failover", "weighted", "conditional"],
+    failover: "分层故障转移，仅影响后续请求（E1）；同层由数据面按健康与延迟选择，不保证均匀分配（E7）",
+    weighted: "加权路由，weight 大者优先渲染在前（ADR-014）",
+    conditional: "CEL 条件路由，末位无 when 为兜底（ADR-014）",
+  },
+  counts: { upstreams: 3, upstream_models: 5, public_models: 3, model_targets: 4, api_keys: 3, users: 3 },
+};
+
+const guardrails: GuardrailMatrix = {
+  adapter: "agentgateway",
+  items: [
+    { key: "routing.priority_failover", supported: true, since_version: "1.7.0", note: "分层故障转移", verified: false },
+    { key: "routing.weighted", supported: true, since_version: "1.7.0", note: "加权路由 (ADR-014)", verified: false },
+    { key: "routing.conditional", supported: true, since_version: "1.7.0", note: "条件路由 CEL (ADR-014)", verified: false },
+    { key: "auth.api_key_static", supported: true, since_version: "1.7.0", note: "静态密钥表", verified: false },
+    { key: "observe.request_log", supported: true, since_version: "1.7.0", note: "请求日志落自身 SQLite", verified: false },
+    { key: "config.hot_reload", supported: true, since_version: "1.7.0", note: "热加载；在飞影响待 P0-R2", verified: false },
+    { key: "usage.read_events", supported: true, since_version: "1.7.0", note: "SQLite 只读增量", verified: false },
+    { key: "health.eviction_params", supported: false, since_version: "", note: "健康驱逐参数不可配（简化模式，仅默认行为说明）", verified: false },
+    { key: "backends.session_affinity", supported: false, since_version: "", note: "会话亲和仅 backends 层级，简化模式不可配", verified: false },
+    { key: "health.fine_policies", supported: false, since_version: "", note: "精细健康策略仅 backends 层级，简化模式不可配", verified: false },
+  ],
+  note: "supported=false 为路线图说明而非今日可配置；verified=false 表示尚未经数据面实测",
+};
+
+const mcpServers: McpServersInfo = {
+  supported: false,
+  note: "AG v1.7 LLM 配置面不支持 MCP servers；本字段为前端预留，接入需升级数据面",
+  servers: [],
+};
+
+const settings: SettingItem[] = [
+  { key: "base_currency", value: "CNY", label: "基准币", updated_at: "2026-11-15T09:00:00" },
+  { key: "timezone", value: "Asia/Shanghai", label: "展示时区", updated_at: "2026-11-15T09:00:00" },
+  { key: "log_retention_days", value: "30", label: "请求日志保留", updated_at: "2026-11-15T09:00:00" },
+  { key: "audit_retention_days", value: "180", label: "审计日志保留", updated_at: "2026-11-15T09:00:00" },
+  { key: "default_tokens_per_minute", value: "60000", label: "默认 Token 限速（每密钥）", updated_at: "2026-11-15T09:00:00" },
+  { key: "default_concurrency", value: "8", label: "默认并发上限（每密钥）", updated_at: "2026-11-15T09:00:00" },
+  { key: "gateway_base_url", value: "", label: "公网连接地址", updated_at: "2026-11-15T09:00:00" },
+  { key: "gateway_artifact_path", value: "/etc/slipstream/ag.yaml", label: "下发配置落盘路径", updated_at: "2026-11-15T09:00:00" },
+  { key: "usage_poll_interval_s", value: "30", label: "用量拉取周期（秒）", updated_at: "2026-11-15T09:00:00" },
+  { key: "client_key_length", value: "64", label: "客户端密钥长度档位", updated_at: "2026-11-16T10:00:00" },
+  { key: "price_version", value: "pv_20261101", label: "当前计价快照", updated_at: "2026-11-01T00:00:00" },
+];
+
+/** 与 l05_service/settings_schema.py 同形；演示时由 mock 路由下发。 */
+const settingsSchema = {
+  groups: [
+    {
+      key: "money",
+      title: "计量与货币",
+      description: "账本与用量一律按整数 micro 记账；本币种只影响报表与账单展示。",
+      fields: [{
+        key: "base_currency", label: "基准币",
+        description: "报表与账单的展示币种。USD 仅用于展示，请求级强制仍按账本 micro 记账。",
+        kind: "select", default: "CNY", unit: "", min: null, max: null,
+        options: [{ value: "CNY", label: "CNY 人民币" }, { value: "USD", label: "USD 美元" }],
+      }],
+    },
+    {
+      key: "time",
+      title: "时区与时间",
+      description: "入库时间统一毫秒 epoch；这里只决定界面与报表的渲染时区。",
+      fields: [{
+        key: "timezone", label: "展示时区",
+        description: "影响报表日期切分与时间展示，不改变入库时间戳。",
+        kind: "select", default: "Asia/Shanghai", unit: "", min: null, max: null,
+        options: [
+          { value: "Asia/Shanghai", label: "Asia/Shanghai（UTC+8）" },
+          { value: "Asia/Singapore", label: "Asia/Singapore（UTC+8）" },
+          { value: "Asia/Tokyo", label: "Asia/Tokyo（UTC+9）" },
+          { value: "UTC", label: "UTC" },
+        ],
+      }],
+    },
+    {
+      key: "logs",
+      title: "日志与留存",
+      description: "请求日志、审计与账本的保留周期；超期数据按天滚动清理。",
+      fields: [
+        { key: "log_retention_days", label: "请求日志保留", description: "usage_events / 请求日志的保留天数。", kind: "number", default: "30", unit: "天", min: 1, max: 365, options: [] },
+        { key: "audit_retention_days", label: "审计日志保留", description: "审计与账本属于合规数据，默认保留更久。", kind: "number", default: "180", unit: "天", min: 7, max: 3650, options: [] },
+      ],
+    },
+    {
+      key: "limits",
+      title: "默认限流参数",
+      description: "新建客户端密钥 / 用户时的默认限流；单个密钥可在客户端密钥页覆盖。",
+      fields: [
+        { key: "default_tokens_per_minute", label: "默认 Token 限速（每密钥）", description: "新建密钥默认的 token 每分钟配额；0 表示不限制。", kind: "number", default: "60000", unit: "token / min", min: 0, max: 1000000, options: [] },
+        { key: "default_concurrency", label: "默认并发上限（每密钥）", description: "新建密钥默认的并发请求上限；0 表示不限制。", kind: "number", default: "8", unit: "并发", min: 0, max: 1000, options: [] },
+      ],
+    },
+    {
+      key: "connection",
+      title: "连接地址",
+      description: "所有控制台用户共用的接入地址；留空跟随浏览器当前 host + 3600 端口。",
+      fields: [{
+        key: "gateway_base_url", label: "公网连接地址",
+        description: "留空 = 自动取浏览器当前 host + 3600；必须 http(s) 且带主机名，不能含账号密码/查询参数/锚点。",
+        kind: "text", default: "", unit: "", min: null, max: null, options: [],
+      }],
+    },
+  ],
+};
+
+const overview: OverviewStats = {
+  requests: 12846,
+  input_tokens: 18422300,
+  output_tokens: 2415800,
+  charge_micro: 51350800,
+  cost_micro: 38501200,
+  margin_micro: 12849600,
+  currency: "CNY",
+  latency_p50_ms: 842,
+  latency_p95_ms: 3120,
+  ttft_p50_ms: 391,
+  estimate_note: "近似值：按价目快照折算",
+};
+
+const sampleTransforms: UpstreamTransforms = {
+  request_headers: [
+    { op: "update", name: "x-trace", value: "slipstream", conditions: [] },
+    {
+      op: "update", path: "temperature", value: "0.2",
+      conditions: [{ field: "model", mode: "full", value: "glm-5.3" }],
+    },
+  ],
+  request_body: [
+    { op: "copy", path: "top_p", source_path: "temperature", conditions: [] },
+  ],
+  response_headers: [],
+  response_body: [],
+};
+
+const adminAccounts: AdminAccount[] = [
+  { id: "ad_01", username: "owner", role: "owner", enabled: true, created_at: "2026-10-01T08:00:00", last_login_at: "2026-11-17T02:00:00" },
+  { id: "ad_02", username: "ops-admin", role: "admin", enabled: true, created_at: "2026-10-12T08:00:00", last_login_at: "2026-11-16T23:30:00" },
+  { id: "ad_03", username: "audit-viewer", role: "viewer", enabled: false, created_at: "2026-11-01T08:00:00", last_login_at: null },
+];
+
+const endUsers: EndUser[] = [
+  { id: "eu_01", name: "内部平台", key_masked: "sk-…G7H8", balance_micro: 1200000000, consumed_micro: 823400000, enabled: true, created_at: "2026-11-01T10:00:00" },
+  { id: "eu_02", name: "数据分析组", key_masked: "sk-…R5S6", balance_micro: 480000000, consumed_micro: 152080000, enabled: true, created_at: "2026-11-10T14:30:00" },
+  { id: "eu_03", name: "试用-临时", key_masked: "sk-…Z3A4", balance_micro: 0, consumed_micro: 96500000, enabled: false, created_at: "2026-10-20T09:00:00" },
+];
+
+function ledgerFor(userId: string): LedgerRow[] {
+  const base = 1200000000;
+  return [
+    { id: userId + "-lg1", ts: "2026-11-15T09:00:00", kind: "topup", delta_micro: 1000000000, balance_after_micro: base, note: "管理员充值" },
+    { id: userId + "-lg2", ts: "2026-11-16T10:12:00", kind: "charge", delta_micro: -28650200, balance_after_micro: base - 28650200, note: "调用计费" },
+    { id: userId + "-lg3", ts: "2026-11-16T20:40:00", kind: "charge", delta_micro: -15650400, balance_after_micro: base - 44300600, note: "调用计费" },
+    { id: userId + "-lg4", ts: "2026-11-17T01:22:00", kind: "charge", delta_micro: -7040200, balance_after_micro: base - 51340800, note: "调用计费" },
+  ];
+}
+
+/** 公开模型价格 = 成员有效单价（成本 × 倍率）加权平均；与后端 pricing.public_model_price_rows 同口径。 */
+function derivePublicModelPrices(): PublicModelPrice[] {
+  return publicModels.map((publicModel) => {
+    const targets = modelTargets.filter(
+      (target) => target.public_model_id === publicModel.id && target.enabled,
+    );
+    const basis: "weight" | "equal" =
+      publicModel.routing_mode === "weighted" ? "weight" : "equal";
+    let inputWeight = 0;
+    let outputWeight = 0;
+    let inputTotal = 0;
+    let outputTotal = 0;
+    let pricedMembers = 0;
+    for (const target of targets) {
+      const member = upstreamModels.find((model) => model.name === target.upstream_model_name);
+      if (!member) continue;
+      const weight = basis === "weight" ? Number(target.weight ?? 0) : 1;
+      const markup = Number(member.markup ?? "1");
+      if (!Number.isFinite(weight) || weight <= 0 || !Number.isFinite(markup) || markup <= 0) {
+        continue;
+      }
+      const input = member.cost_input_per_1m == null ? null : Number(member.cost_input_per_1m);
+      const output = member.cost_output_per_1m == null ? null : Number(member.cost_output_per_1m);
+      if (input === null && output === null) continue;
+      pricedMembers += 1;
+      if (input !== null && Number.isFinite(input)) {
+        inputTotal += input * markup * weight;
+        inputWeight += weight;
+      }
+      if (output !== null && Number.isFinite(output)) {
+        outputTotal += output * markup * weight;
+        outputWeight += weight;
+      }
+    }
+    const available = pricedMembers > 0 && (inputWeight > 0 || outputWeight > 0);
+    return {
+      public_model_id: publicModel.id,
+      name: publicModel.name,
+      routing_mode: publicModel.routing_mode,
+      currency: "CNY",
+      price_input_per_1m: inputWeight > 0 ? (inputTotal / inputWeight).toFixed(6) : null,
+      price_output_per_1m: outputWeight > 0 ? (outputTotal / outputWeight).toFixed(6) : null,
+      priced_members: pricedMembers,
+      total_members: targets.length,
+      weight_basis: basis,
+      available,
+      reason: available ? "" : basis === "weight" ? "weights_zero" : "no_priced_members",
+      read_only: true,
+    };
+  });
+}
+
+const routes: Array<[RegExp, unknown]> = [
+  [/^\/admin\/upstreams\/[^/]+\/transforms$/, { upstream_id: "up_01", transforms: sampleTransforms }],
+  [/^\/admin\/reports\/overview/, overview],
+  [/^\/admin\/reports\/trend/, { metric: "requests", range: "today", points: [], estimate_note: "近似值：按价目快照折算" }],
+  [/^\/admin\/reports\/flow/, { nodes: [], links: [], estimate_note: "近似值：按价目快照折算" }],
+  [/^\/admin\/health/, { status: "ok", ir_version: "ir-7", adapter: "openai-chat", now_ms: Date.now(), data_plane_port: 3600 }],
+  [/^\/admin\/vendors$/, vendors],
+  [/^\/admin\/upstreams$/, upstreams],
+  [/^\/admin\/upstream-models$/, upstreamModels],
+  [/^\/admin\/public-models$/, publicModels],
+  [/^\/admin\/api-keys$/, clientKeys],
+  [/^\/admin\/availability-rules$/, availabilityRules],
+  [/^\/admin\/cost\/entries$/, billingRequests],
+  [/^\/admin\/charge\/entries$/, revenueRows],
+  [/^\/admin\/prices\/upstream$/, upstreamPrices],
+  [/^\/admin\/prices\/charge$/, chargePrices],
+  [/^\/admin\/unpriced$/, unpricedRows],
+  [/^\/admin\/config\/revisions/, configRevisions],
+  [/^\/admin\/audit-logs$/, { items: auditLogs, total: auditLogs.length }],
+  [/^\/admin\/policies$/, policies],
+  [/^\/admin\/guardrails$/, guardrails],
+  [/^\/admin\/mcp-servers$/, mcpServers],
+  [/^\/admin\/admins$/, adminAccounts],
+  [/^\/admin\/users$/, endUsers],
+  [/^\/admin\/settings\/schema$/, settingsSchema],
+  [/^\/admin\/settings$/, { items: settings }],
+  [/^\/admin\/logs$/, { total: 0, items: [] }],
+];
+
+const PREVIEW_BODY = JSON.stringify({
+  model: "glm-5.3",
+  temperature: 0.9,
+  messages: [{ role: "user", content: "hi" }],
+});
+
+/** mock 模式：按路径返回内置数据，模拟网络延迟，保证后端未就绪也能演示。 */
+export async function mockRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  await delay(220);
+  // 登录（演示）：admin/admin12345（兼容旧 owner/admin123）签发 mock 会话
+  if (init?.method === "POST" && path === "/admin/auth/login") {
+    const body = JSON.parse(String(init.body ?? "{}")) as { username?: string; password?: string };
+    const knownUser = body.username === "admin" || body.username === "owner";
+    const knownPassword = body.password === "admin12345" || body.password === "admin123";
+    if (knownUser && knownPassword) {
+      mockLoggedIn = true;
+      return { user: MOCK_ADMIN } as T;
+    }
+    throw new Error("用户名或密码错误（mock 演示账号：admin / admin12345）");
+  }
+  if (init?.method === "GET" && path === "/admin/auth/me") {
+    if (!mockLoggedIn) throw new Error("未登录或会话已失效");
+    return MOCK_ADMIN as T;
+  }
+  if (init?.method === "POST" && path === "/admin/auth/logout") {
+    mockLoggedIn = false;
+    return { ok: true } as T;
+  }
+  if (init?.method === "POST" && /\/transforms\/preview$/.test(path)) {
+    const result: TransformPreviewResult = {
+      upstream_id: "up_01",
+      before: JSON.parse(PREVIEW_BODY) as unknown,
+      after: {
+        request: { set: { "x-trace": '"slipstream"' } },
+        conditional: [{ predicate: "json(request.body).model == 'glm-5.3'", set: {} }],
+      },
+      skipped: [],
+      notes: [],
+    };
+    return result as T;
+  }
+  if (init?.method === "PUT" && /\/transforms$/.test(path)) {
+    return { saved: true } as T;
+  }
+  // 明文只在点击复制时经 reveal 取一次，mock 返回固定明文，前端不落状态
+  if (init?.method === "POST" && /\/api-keys\/[^/]+\/reveal$/.test(path)) {
+    return { key: "sk-A1B2C3D4E5F6G7H8" } as T;
+  }
+  // 待补价：补价并重算只写 cost/charge，不重复写 usage event（billing.md §7）
+  if (init?.method === "POST" && /\/unpriced\/[^/]+\/reprice$/.test(path)) {
+    const id = (path.split("?")[0] ?? "").split("/")[3] ?? "";
+    let removed = 0;
+    for (let i = unpricedRows.cost.length - 1; i >= 0; i--) {
+      const r = unpricedRows.cost[i];
+      if (r && r.id === id) { unpricedRows.cost.splice(i, 1); removed += 1; }
+    }
+    for (let i = unpricedRows.charge.length - 1; i >= 0; i--) {
+      const r = unpricedRows.charge[i];
+      if (r && r.id === id) { unpricedRows.charge.splice(i, 1); removed += 1; }
+    }
+    return { resolved: removed, remaining: unpricedRows.cost.length + unpricedRows.charge.length } as T;
+  }
+  if (init?.method === "POST" && path === "/admin/users") {
+    const body = JSON.parse(String(init.body ?? "{}")) as { name?: string };
+    const created: EndUser = {
+      id: "eu_" + String(endUsers.length + 1).padStart(2, "0"),
+      name: body.name ?? "未命名用户",
+      key_masked: "sk-…NEW1",
+      balance_micro: 0,
+      consumed_micro: 0,
+      enabled: true,
+      created_at: "2026-11-17T03:10:00",
+    };
+    endUsers.push(created);
+    return created as T;
+  }
+  if (init?.method === "POST" && /\/admin\/users\/[^/]+\/balance$/.test(path)) {
+    const body = JSON.parse(String(init.body ?? "{}")) as { delta_micro?: number };
+    const delta = Number(body.delta_micro ?? 0);
+    const uid = path.split("/")[3] ?? "";
+    const u = endUsers.find((x) => x.id === uid);
+    if (u) u.balance_micro += delta;
+    return { balance_micro: u ? u.balance_micro : 0 } as T;
+  }
+  if (init?.method === "PUT" && path === "/admin/settings") {
+    const body = JSON.parse(String(init.body ?? "{}")) as { values?: Record<string, string> };
+    for (const [k, v] of Object.entries(body.values ?? {})) {
+      const row = settings.find((x) => x.key === k);
+      if (row) row.value = v;
+    }
+    return { values: body.values ?? {} } as T;
+  }
+  if (init?.method === "GET" && /\/admin\/users\/[^/]+\/ledger$/.test(path)) {
+    const uid = path.split("/")[3] ?? "";
+    return ledgerFor(uid) as T;
+  }
+  // —— B2 CRUD：上游 ——
+  // 契约 3.2：POST body {vendor_id, base_url, api_style, api_key}；name 由 {vendor_slug}-NN 自动生成
+  if (init?.method === "POST" && (path.split("?")[0] ?? "") === "/admin/upstreams") {
+    const body = JSON.parse(String(init.body ?? "{}")) as { vendor_id?: string; base_url?: string; api_style?: string; api_key?: string };
+    const vendor = vendors.find((x) => x.id === (body.vendor_id ?? ""));
+    vendorSeq += 1;
+    const created: Upstream = {
+      id: "up_" + String(upstreams.length + 1).padStart(2, "0"),
+      name: (vendor ? vendor.slug : "new") + "-" + String(vendorSeq).padStart(2, "0"),
+      vendor_id: body.vendor_id ?? "",
+      base_url: body.base_url ?? "",
+      api_style: body.api_style ?? "openai_chat",
+      transforms: null,
+      max_buffer_bytes: 2097152,
+      enabled: true,
+      created_at_ms: Date.now(),
+    };
+    upstreams.push(created);
+    return created as T;
+  }
+  // 契约 3.2 PATCH：可改 base_url/api_style/enabled；DELETE 契约未定义，mock 保留容错
+  if ((init?.method === "PATCH" || init?.method === "PUT" || init?.method === "DELETE") && /^\/admin\/upstreams\/[^/?]+$/.test(path.split("?")[0] ?? "")) {
+    const id = (path.split("?")[0] ?? "").split("/")[3] ?? "";
+    const idx = upstreams.findIndex((u) => u.id === id);
+    if (idx < 0) return { error: "not_found" } as T;
+    if (init.method === "DELETE") {
+      upstreams.splice(idx, 1);
+      return { deleted: true } as T;
+    }
+    const body = JSON.parse(String(init.body ?? "{}")) as { base_url?: string; api_style?: string; enabled?: boolean };
+    const row = upstreams[idx];
+    if (row) {
+      if (body.base_url !== undefined) row.base_url = body.base_url;
+      if (body.api_style !== undefined) row.api_style = body.api_style;
+      if (body.enabled !== undefined) row.enabled = body.enabled;
+    }
+    return row as T;
+  }
+  // —— B2 CRUD：上游模型 ——
+  if (init?.method === "POST" && (path.split("?")[0] ?? "") === "/admin/upstream-models") {
+    const body = JSON.parse(String(init.body ?? "{}")) as { upstream_id?: string; name?: string; model_type?: string; enabled?: boolean };
+    const created: UpstreamModel = {
+      id: "um_" + String(upstreamModels.length + 1).padStart(2, "0"),
+      upstream_id: body.upstream_id ?? "",
+      name: body.name ?? "未命名模型",
+      model_type: body.model_type ?? "chat",
+      enabled: body.enabled ?? true,
+      created_at_ms: Date.now(),
+    };
+    upstreamModels.push(created);
+    return created as T;
+  }
+  // 价目管理：PATCH 成本/倍率（省略字段保持不动，显式 null 清空成本）
+  if (init?.method === "PATCH" && /^\/admin\/upstream-models\/(?!batch$)[^/?]+$/.test(path.split("?")[0] ?? "")) {
+    const id = (path.split("?")[0] ?? "").split("/")[3] ?? "";
+    const row = upstreamModels.find((x) => x.id === id);
+    if (!row) return { error: "not_found" } as T;
+    const body = JSON.parse(String(init.body ?? "{}")) as {
+      cost_input_per_1m?: string | null;
+      cost_output_per_1m?: string | null;
+      markup?: string;
+    };
+    if (body.cost_input_per_1m !== undefined) row.cost_input_per_1m = body.cost_input_per_1m;
+    if (body.cost_output_per_1m !== undefined) row.cost_output_per_1m = body.cost_output_per_1m;
+    if (body.markup !== undefined) row.markup = body.markup;
+    return row as T;
+  }
+  if (init?.method === "PUT" && /^\/admin\/upstream-models\/[^/?]+$/.test(path.split("?")[0] ?? "")) {
+    const id = (path.split("?")[0] ?? "").split("/")[3] ?? "";
+    const row = upstreamModels.find((x) => x.id === id);
+    if (!row) return { error: "not_found" } as T;
+    const body = JSON.parse(String(init.body ?? "{}")) as Partial<UpstreamModel>;
+    if (body.name !== undefined) row.name = body.name;
+    if (body.model_type !== undefined) row.model_type = body.model_type;
+    if (body.enabled !== undefined) row.enabled = body.enabled;
+    return row as T;
+  }
+  const routePath = path.split("?")[0] ?? "";
+  // —— B2 CRUD：对外模型 ——
+  if (init?.method === "POST" && (path.split("?")[0] ?? "") === "/admin/public-models") {
+    const body = JSON.parse(String(init.body ?? "{}")) as { name?: string; routing_mode?: string; note?: string | null; enabled?: boolean };
+    const created: PublicModel = {
+      id: "pm_" + String(publicModels.length + 1).padStart(2, "0"),
+      name: body.name ?? "未命名对外模型",
+      routing_mode: (body.routing_mode ?? "failover") as PublicModel["routing_mode"],
+      note: body.note ?? null,
+      enabled: body.enabled ?? true,
+      created_at_ms: Date.now(),
+    };
+    publicModels.push(created);
+    return created as T;
+  }
+  if ((init?.method === "PUT" || init?.method === "DELETE") && /^\/admin\/public-models\/[^/?]+$/.test(path.split("?")[0] ?? "")) {
+    const id = (path.split("?")[0] ?? "").split("/")[3] ?? "";
+    const idx = publicModels.findIndex((p) => p.id === id);
+    if (idx < 0) return { error: "not_found" } as T;
+    if (init.method === "DELETE") {
+      publicModels.splice(idx, 1);
+      for (let i = modelTargets.length - 1; i >= 0; i--) {
+        const mt = modelTargets[i];
+        if (mt && mt.public_model_id === id) modelTargets.splice(i, 1);
+      }
+      return { deleted: true } as T;
+    }
+    const body = JSON.parse(String(init.body ?? "{}")) as Partial<PublicModel>;
+    const row = publicModels[idx];
+    if (row) {
+      if (body.name !== undefined) row.name = body.name;
+      if (body.routing_mode !== undefined) row.routing_mode = body.routing_mode;
+      if (body.note !== undefined) row.note = body.note;
+      if (body.enabled !== undefined) row.enabled = body.enabled;
+    }
+    return row as T;
+  }
+  // —— 目标绑定：GET 按 public_model_id 过滤；PUT 整批替换 ——
+  if (init?.method === "GET" && (path.split("?")[0] ?? "") === "/admin/model-targets") {
+    const pmid = new URLSearchParams(path.split("?")[1] ?? "").get("public_model_id") ?? "";
+    return modelTargets.filter((mt) => mt.public_model_id === pmid) as T;
+  }
+  if (init?.method === "PUT" && (path.split("?")[0] ?? "") === "/admin/model-targets") {
+    const body = JSON.parse(String(init.body ?? "{}")) as { public_model_id?: string; targets?: Array<{ upstream_model_name?: string; upstream_name?: string; priority?: number | null; weight?: number | null; when?: string | null; enabled?: boolean }> };
+    const pmid = body.public_model_id ?? "";
+    for (let i = modelTargets.length - 1; i >= 0; i--) {
+      const mt = modelTargets[i];
+      if (mt && mt.public_model_id === pmid) modelTargets.splice(i, 1);
+    }
+    for (const t of body.targets ?? []) {
+      mtSeq += 1;
+      modelTargets.push({
+        id: "mt_" + String(mtSeq).padStart(2, "0"),
+        public_model_id: pmid,
+        upstream_model_name: t.upstream_model_name ?? "",
+        upstream_name: t.upstream_name ?? "",
+        priority: t.priority ?? null,
+        weight: t.weight ?? null,
+        when: t.when ?? null,
+        enabled: t.enabled ?? true,
+      });
+    }
+    return { saved: modelTargets.filter((mt) => mt.public_model_id === pmid).length } as T;
+  }
+
+  if (init?.method === "GET" && (path.split("?")[0] ?? "") === "/admin/prices/public-models") {
+    return derivePublicModelPrices() as T;
+  }
+
+  // —— ADR-004 规则表：周期冷却由模型页创建/删除 ——
+  if (init?.method === "POST" && routePath === "/admin/availability-rules") {
+    const body = JSON.parse(String(init.body ?? "{}")) as Partial<AvailabilityRule>;
+    const created: AvailabilityRule = {
+      id: "ar_" + String(availabilityRules.length + 1).padStart(2, "0"),
+      kind: (body.kind ?? "cooldown") as AvailabilityRule["kind"],
+      scope: body.scope ?? "upstream_model",
+      scope_id: body.scope_id ?? "",
+      recurrence: (body.recurrence ?? "once") as AvailabilityRule["recurrence"],
+      expires_at_ms: body.expires_at_ms ?? null,
+      schedule_json: body.schedule_json ?? null,
+      note: body.note ?? "",
+      created_at_ms: Date.now(),
+    };
+    availabilityRules.push(created);
+    return created as T;
+  }
+  if ((init?.method === "PATCH" || init?.method === "DELETE") && /^\/admin\/availability-rules\/[^/?]+$/.test(routePath)) {
+    const id = routePath.split("/")[3] ?? "";
+    const idx = availabilityRules.findIndex((rule) => rule.id === id);
+    if (idx < 0) return { error: "not_found" } as T;
+    if (init.method === "DELETE") {
+      availabilityRules.splice(idx, 1);
+      return { deleted: true } as T;
+    }
+    const body = JSON.parse(String(init.body ?? "{}")) as Partial<AvailabilityRule>;
+    const row = availabilityRules[idx];
+    if (row) Object.assign(row, body);
+    return row as T;
+  }
+
+  if (init?.method === "GET" && routePath === "/admin/audit-logs") {
+    const params = new URLSearchParams(path.split("?")[1] ?? "");
+    const limit = Number(params.get("limit") ?? auditLogs.length);
+    const offset = Number(params.get("offset") ?? 0);
+    return { items: auditLogs.slice(offset, offset + limit), total: auditLogs.length } as T;
+  }
+
+  const hit = routes.find(([re]) => re.test(routePath));
+  if (!hit) throw new Error("mock 未覆盖该路径：" + path);
+  return structuredClone(hit[1]) as T;
+}

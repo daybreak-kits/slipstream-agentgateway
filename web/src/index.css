@@ -1,0 +1,424 @@
+@import "tailwindcss";
+/* shadcn 组件的 animate-in/zoom-in-95/slide-in-from-* 等类由该包提供（Tailwind v4 兼容实现） */
+@import "tw-animate-css";
+
+/* 深色用 class 策略：index.html 的反闪烁脚本在渲染前给 <html> 加 .dark */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: Inter, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+
+  /* 圆角两套标尺：语义三档（badge/control/card）+ shadcn 四档（浮层内嵌容器用 xl） */
+  --radius-badge: 6px;
+  --radius-control: 8px;
+  --radius-card: 12px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* 布局宽度：旧系统侧栏 248，折叠 72 */
+  --width-sidebar: 248px;
+  --width-sidebar-collapsed: 72px;
+
+  /* 字号四档：11/16、12/16（内置 text-xs）、13/20、14/20（内置 text-sm）；只加档不覆盖内置 */
+  --text-2xs: 11px;
+  --text-2xs--line-height: 16px;
+  --text-2sm: 13px;
+  --text-2sm--line-height: 20px;
+  --text-metric: 19px;
+  --text-metric--line-height: 26px;
+  --text-h1: 22px;
+  --text-h1--line-height: 28px;
+
+  /* 阴影只允许两档：静止卡片 / 浮层（菜单、popover、dialog、toast） */
+  --shadow-card: 0 1px 2px rgba(17, 24, 39, 0.04), 0 8px 24px -18px rgba(17, 24, 39, 0.28);
+  --shadow-pop: 0 18px 40px -20px rgba(17, 24, 39, 0.35), 0 2px 8px rgba(17, 24, 39, 0.06);
+
+  /* 进入动效：只允许 fade-up / fade-in，200ms ease-out，上限 300ms */
+  --animate-fade-up: fade-up 200ms ease-out both;
+  --animate-fade-in: fade-in 200ms ease-out both;
+
+  @keyframes fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+}
+
+/* 语义色全部转发 :root/.dark 变量，必须 @theme inline 才能在深色下跟随 .dark 覆盖 */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-title: var(--text-title);
+  --color-body: var(--text-body);
+  --color-muted: var(--surface-2);
+  --color-faint: var(--text-faint);
+
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-active: var(--primary-active);
+  --color-primary-soft: var(--primary-soft);
+  --color-primary-on: var(--primary-on);
+
+  --color-success: var(--success);
+  --color-success-text: var(--success-text);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-text: var(--warning-text);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-text: var(--danger-text);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-focus-ring: var(--focus-ring);
+  --color-overlay: var(--overlay);
+
+  /* shadcn 别名层：组件源码（bg-background / text-muted-foreground / border-input …）直接可用 */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* 图表 16 槽：浅/深各一套独立亮度集，主色靛蓝不入板（ADR-040） */
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
+  --color-chart-7: var(--chart-7);
+  --color-chart-8: var(--chart-8);
+  --color-chart-9: var(--chart-9);
+  --color-chart-10: var(--chart-10);
+  --color-chart-11: var(--chart-11);
+  --color-chart-12: var(--chart-12);
+  --color-chart-13: var(--chart-13);
+  --color-chart-14: var(--chart-14);
+  --color-chart-15: var(--chart-15);
+  --color-chart-16: var(--chart-16);
+}
+
+:root {
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --surface-2: #f3f4f6;
+  --border: #e5e7eb;
+  --border-strong: #d1d5db;
+  --text-title: #111827;
+  --text-body: #1f2937;
+  --text-muted: #5b6573;
+  --text-faint: #7b8494;
+
+  --primary: #4f46e5;
+  --primary-hover: #4338ca;
+  --primary-active: #3730a3;
+  --primary-soft: #eef2ff;
+  --primary-on: #ffffff;
+
+  --success: #16a34a;
+  --success-text: #15803d;
+  --success-soft: #f0fdf4;
+  --warning: #d97706;
+  --warning-text: #b45309;
+  --warning-soft: #fffbeb;
+  --danger: #dc2626;
+  --danger-text: #b91c1c;
+  --danger-soft: #fef2f2;
+  --info: #475569;
+  --focus-ring: #4f46e5;
+
+  /* 徽标 tint（6 组：bg/fg） */
+  --badge-flow-bg: #e8efff;
+  --badge-flow-fg: #1d4ed8;
+  --badge-token-bg: #e0f6f7;
+  --badge-token-fg: #0e7490;
+  --badge-cache-bg: #f0ecfe;
+  --badge-cache-fg: #6d28d9;
+  --badge-cost-bg: #fdf3e2;
+  --badge-cost-fg: #b45309;
+  --badge-error-bg: #fdeaea;
+  --badge-error-fg: #b91c1c;
+  --badge-latency-bg: #e6f6ec;
+  --badge-latency-fg: #15803d;
+
+  /* 浮层与代码块 */
+  --overlay: rgba(11, 15, 23, 0.45);
+  --tooltip-bg: rgba(11, 15, 23, 0.95);
+  --tooltip-border: #273244;
+  --tooltip-fg: #f1f5f9;
+  --tooltip-fg-muted: rgba(241, 245, 249, 0.6);
+  --code-bg: #0b0f17;
+  --code-fg: #e2e8f0;
+  --code-fg-strong: #f8fafc;
+  --code-fg-muted: #94a3b8;
+  --code-fg-faint: #64748b;
+  --code-hover: rgba(148, 163, 184, 0.15);
+
+  /* 登录域固定配色（不随主题） */
+  --login-ink: #0b1020;
+  --login-ink-2: #0e1526;
+  --login-accent: #4f46e5;
+  --login-teal: #14b8a6;
+  --login-teal-bright: #2dd4bf;
+  --login-green: #4ade80;
+  --login-amber: #fbbf24;
+  --login-indigo: #a5b4fc;
+
+  /* 图表 16 槽（浅色） */
+  --chart-1: #2563eb;
+  --chart-2: #0d9488;
+  --chart-3: #d97706;
+  --chart-4: #dc2626;
+  --chart-5: #7c3aed;
+  --chart-6: #0891b2;
+  --chart-7: #65a30d;
+  --chart-8: #db2777;
+  --chart-9: #ea580c;
+  --chart-10: #059669;
+  --chart-11: #b45309;
+  --chart-12: #a16207;
+  --chart-13: #0284c7;
+  --chart-14: #be123c;
+  --chart-15: #0f766e;
+  --chart-16: #7c2d12;
+
+  /* z-index 五档（旧标准另有两档：表格吸顶列 5、全局搜索 60） */
+  --z-sticky: 10;
+  --z-topbar: 30;
+  --z-popover: 40;
+  --z-modal: 50;
+  --z-toast: 70;
+
+  /* shadcn 别名层（.dark 同元素覆盖自动跟随） */
+  --background: var(--bg);
+  --foreground: var(--text-title);
+  --card: var(--surface);
+  --card-foreground: var(--text-title);
+  --popover: var(--surface);
+  --popover-foreground: var(--text-title);
+  --primary-foreground: var(--primary-on);
+  --secondary: var(--surface-2);
+  --secondary-foreground: var(--text-body);
+  --muted: var(--surface-2);
+  --muted-foreground: var(--text-muted);
+  --accent: var(--primary-soft);
+  --accent-foreground: var(--primary-active);
+  --destructive: var(--danger);
+  --destructive-foreground: var(--primary-on);
+  --input: var(--border-strong);
+  --ring: var(--focus-ring);
+  --radius: 8px;
+}
+
+.dark {
+  --bg: #0b0f17;
+  --surface: #111827;
+  --surface-2: #172033;
+  --border: #273244;
+  --border-strong: #374357;
+  --text-title: #f9fafb;
+  --text-body: #e5e7eb;
+  --text-muted: #9ca3af;
+  --text-faint: #7f8a9c;
+
+  --primary: #818cf8;
+  --primary-hover: #a5b4fc;
+  --primary-active: #6366f1;
+  --primary-soft: rgba(129, 140, 248, 0.14);
+  --primary-on: #0b0f17;
+
+  --success: #4ade80;
+  --success-text: #4ade80;
+  --success-soft: rgba(74, 222, 128, 0.14);
+  --warning: #fbbf24;
+  --warning-text: #fbbf24;
+  --warning-soft: rgba(251, 191, 36, 0.14);
+  --danger: #f87171;
+  --danger-text: #f87171;
+  --danger-soft: rgba(248, 113, 113, 0.14);
+  --info: #94a3b8;
+  --focus-ring: #a5b4fc;
+
+  --badge-flow-bg: rgba(96, 165, 250, 0.16);
+  --badge-flow-fg: #93c5fd;
+  --badge-token-bg: rgba(34, 211, 238, 0.16);
+  --badge-token-fg: #67e8f9;
+  --badge-cache-bg: rgba(167, 139, 250, 0.16);
+  --badge-cache-fg: #c4b5fd;
+  --badge-cost-bg: rgba(251, 191, 36, 0.16);
+  --badge-cost-fg: #fcd34d;
+  --badge-error-bg: rgba(248, 113, 113, 0.16);
+  --badge-error-fg: #fca5a5;
+  --badge-latency-bg: rgba(74, 222, 128, 0.16);
+  --badge-latency-fg: #86efac;
+
+  --overlay: rgba(11, 15, 23, 0.72);
+  --tooltip-fg: #e5e7eb;
+  --tooltip-fg-muted: rgba(229, 231, 235, 0.55);
+
+  --chart-1: #60a5fa;
+  --chart-2: #2dd4bf;
+  --chart-3: #fbbf24;
+  --chart-4: #f87171;
+  --chart-5: #a78bfa;
+  --chart-6: #22d3ee;
+  --chart-7: #a3e635;
+  --chart-8: #f472b6;
+  --chart-9: #fb923c;
+  --chart-10: #34d399;
+  --chart-11: #eab308;
+  --chart-12: #c084fc;
+  --chart-13: #38bdf8;
+  --chart-14: #fb7185;
+  --chart-15: #5eead4;
+  --chart-16: #fdba74;
+}
+
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--border);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    color-scheme: light;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--bg);
+    color: var(--text-body);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  svg text {
+    font-family: var(--font-sans);
+  }
+
+  code,
+  kbd,
+  samp,
+  pre {
+    font-family: var(--font-mono);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    color: var(--text-title);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  ::selection {
+    background-color: var(--primary-soft);
+    color: var(--primary-active);
+  }
+
+  input:-webkit-autofill,
+  textarea:-webkit-autofill,
+  select:-webkit-autofill {
+    -webkit-text-fill-color: var(--text-title);
+    caret-color: var(--text-title);
+    box-shadow: inset 0 0 0 1000px var(--surface);
+    transition: background-color 9999s ease-out 0s;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--text-faint);
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 1ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 1ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* 等宽数字：指标、表格、金额统一用它 */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+@utility scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+@utility bg-blueprint {
+  background-image:
+    linear-gradient(to right, color-mix(in oklab, var(--border) 60%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklab, var(--border) 60%, transparent) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* sonner 注入的样式不带 layer，必须放在 layer 外用 (0,1,1) 特异性覆盖 */
+html [data-sonner-toaster] {
+  font-family: var(--font-sans);
+}
