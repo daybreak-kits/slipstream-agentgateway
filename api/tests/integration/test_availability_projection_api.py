@@ -35,7 +35,11 @@ def test_model_patch_cooldown_creates_one_managed_rule_and_release_removes_it(
     )
     assert patched.status_code == 200, patched.text
     body = patched.json()
-    assert body["availability"] == {"state": "cooling", "cooldown_until_ms": deadline}
+    assert body["availability"] == {
+        "state": "cooling",
+        "cooldown_until_ms": deadline,
+        "window_skip_until_ms": 0,
+    }
     assert body["cooldown_until_ms"] == deadline
 
     managed_id = row_cooldown_rule_id("upstream_model", model_id)
@@ -55,7 +59,11 @@ def test_model_patch_cooldown_creates_one_managed_rule_and_release_removes_it(
         f"/admin/upstream-models/{model_id}", json={"cooldown_until_ms": 0}
     )
     assert released.status_code == 200, released.text
-    assert released.json()["availability"] == {"state": "normal", "cooldown_until_ms": 0}
+    assert released.json()["availability"] == {
+        "state": "normal",
+        "cooldown_until_ms": 0,
+        "window_skip_until_ms": 0,
+    }
     assert all(rule["id"] != managed_id for rule in _rules(client))
     with factory() as session:
         from l04_repo.orm import UpstreamModelORM
@@ -97,7 +105,11 @@ def test_periodic_rule_drives_api_state_and_render_exclusion(
 
     assert client.delete(f"/admin/availability-rules/{rule_id}").status_code == 204
     released = _find(client.get("/admin/upstream-models?page_size=200").json(), model_id)
-    assert released["availability"] == {"state": "normal", "cooldown_until_ms": 0}
+    assert released["availability"] == {
+        "state": "normal",
+        "cooldown_until_ms": 0,
+        "window_skip_until_ms": 0,
+    }
     with factory() as session:
         ir, _keys = build_render_plan(session, revision="rev_periodic_ok")
     assert model_id in {model.id for model in ir.models}
@@ -115,4 +127,8 @@ def test_ban_rule_closes_state_without_disabling_the_row(client, engine_and_sess
 
     listed = _find(client.get("/admin/upstream-models?page_size=200").json(), model_id)
     assert listed["enabled"] is True
-    assert listed["availability"] == {"state": "closed", "cooldown_until_ms": 0}
+    assert listed["availability"] == {
+        "state": "closed",
+        "cooldown_until_ms": 0,
+        "window_skip_until_ms": 0,
+    }

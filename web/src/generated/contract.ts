@@ -395,6 +395,7 @@ export interface UpstreamModelPatch {
 }
 
 export interface UpstreamPatch {
+  name?: string | null;
   base_url?: string | null;
   api_style?: string | null;
   transforms?: Record<string, unknown> | null;

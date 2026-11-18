@@ -7,17 +7,24 @@ suite covers the same semantics through the HTTP API.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import func, select
 from tests.conftest import seed_channel
 
-from l04_repo.orm import AvailabilityRuleORM, UpstreamModelORM
+from l01_core.timeutil import now_ms
+from l04_repo.orm import (
+    AvailabilityRuleORM,
+    ModelTargetORM,
+    PublicModelORM,
+    UpstreamModelORM,
+)
 from l05_service.availability import (
     LEGACY_NOTE,
     AvailabilityState,
     create_rule,
+    enable_model_availability,
     evaluate,
     migrate_legacy_cooldowns,
     release_model_cooldown,
@@ -28,6 +35,7 @@ from l05_service.availability import (
     set_model_cooldown,
     sync_all_cooldown_projections,
     sync_cooldown_projection,
+    update_rule,
 )
 
 
@@ -302,3 +310,283 @@ def test_rules_changed_since_covers_once_expiry_and_window_boundaries(
         changed = rules_changed_since(session, _at(2, 9, 59), _at(2, 10, 30))
         assert {rule.id for rule in changed} == {"rule_once", "rule_daily"}
         assert rules_changed_since(session, _at(2, 11, 30), _at(2, 12, 0)) == []
+
+
+# ---------------------------------------------------------------- window skips
+# GLOSSARY §3 (2026-11-19 ruling): 启用 inside a periodic window skips THAT
+# window only; the rule stays and later windows cool again.
+
+
+def _daily_rule(session, scope_id: str) -> AvailabilityRuleORM:
+    create_rule(
+        session,
+        kind="cooldown",
+        scope="upstream_model",
+        scope_id=scope_id,
+        recurrence="daily",
+        schedule_json='{"windows": [{"start": "02:00", "end": "04:00"}]}',
+    )
+    return session.scalars(
+        select(AvailabilityRuleORM).where(
+            AvailabilityRuleORM.scope_id == scope_id,
+            AvailabilityRuleORM.recurrence == "daily",
+        )
+    ).one()
+
+
+def _enable(session, scope_id: str, moment: int) -> dict | None:
+    """Mirror the router: enabled=True first, then the availability write."""
+    return enable_model_availability(
+        session, scope="upstream_model", scope_id=scope_id, now_ms=moment
+    )
+
+
+def test_enable_inside_window_skips_only_the_current_window(
+    engine_and_sessionmaker,
+) -> None:
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    with factory() as session:
+        row = session.get(UpstreamModelORM, ids["upstream_model_id"])
+        row.enabled = False
+        rule = _daily_rule(session, row.id)
+        session.flush()
+
+        info = _enable(session, row.id, _at(2, 3, 0))
+        assert info is not None
+        assert info["rule_ids"] == [rule.id]
+        assert info["skip_until_ms"] == _at(2, 4, 0)
+        assert info["message"] == "本次启用仅跳过当前窗口，后续窗口照常"
+
+        row.enabled = True
+        session.flush()
+        view = evaluate(session, _at(2, 3, 30)).upstream_model_view(row)
+        assert view.state is AvailabilityState.NORMAL
+        assert view.window_skip_until_ms == _at(2, 4, 0)
+
+        # The rule itself is untouched and cools again in the next window.
+        assert rule.recurrence == "daily"
+        assert rule.skip_until_ms == _at(2, 4, 0)
+        assert rule.skip_set_at_ms == _at(2, 3, 0)
+        later = evaluate(session, _at(3, 3, 0)).upstream_model_view(row)
+        assert later.state is AvailabilityState.COOLING
+        assert later.cooldown_until_ms == _at(3, 4, 0)
+        assert later.window_skip_until_ms == 0
+
+
+def test_enable_outside_window_clears_closed_without_skip(
+    engine_and_sessionmaker,
+) -> None:
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    with factory() as session:
+        row = session.get(UpstreamModelORM, ids["upstream_model_id"])
+        row.enabled = False
+        _daily_rule(session, row.id)
+        session.flush()
+
+        assert _enable(session, row.id, _at(2, 5, 0)) is None
+        rule = session.scalars(
+            select(AvailabilityRuleORM).where(AvailabilityRuleORM.scope_id == row.id)
+        ).one()
+        assert (rule.skip_until_ms, rule.skip_set_at_ms) == (0, 0)
+        row.enabled = True
+        session.flush()
+        view = evaluate(session, _at(2, 5, 30)).upstream_model_view(row)
+        assert view.state is AvailabilityState.NORMAL
+        assert view.window_skip_until_ms == 0
+
+
+def test_enable_releases_managed_cooldown_and_skips_window(
+    engine_and_sessionmaker,
+) -> None:
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    from l01_core.timeutil import now_ms
+
+    with factory() as session:
+        row = session.get(UpstreamModelORM, ids["upstream_model_id"])
+        set_model_cooldown(
+            session, scope="upstream_model", scope_id=row.id, until_ms=now_ms() + 3_600_000
+        )
+        rule = _daily_rule(session, row.id)
+        session.flush()
+
+        info = _enable(session, row.id, _at(2, 3, 0))
+        assert info is not None and info["rule_ids"] == [rule.id]
+        # 启用 keeps its old reset semantics for the managed once-cooldown...
+        managed = session.get(
+            AvailabilityRuleORM, row_cooldown_rule_id("upstream_model", row.id)
+        )
+        assert managed is None
+        # ...while only the periodic window gets the one-shot exception.
+        view = evaluate(session, _at(2, 3, 30)).upstream_model_view(row)
+        assert view.state is AvailabilityState.NORMAL
+
+
+def test_release_clears_the_window_skip(engine_and_sessionmaker) -> None:
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    with factory() as session:
+        row = session.get(UpstreamModelORM, ids["upstream_model_id"])
+        _daily_rule(session, row.id)
+        session.flush()
+        assert _enable(session, row.id, _at(2, 3, 0)) is not None
+        view = evaluate(session, _at(2, 3, 30)).upstream_model_view(row)
+        assert view.state is AvailabilityState.NORMAL
+
+        release_model_cooldown(session, scope="upstream_model", scope_id=row.id)
+        rule = session.scalars(
+            select(AvailabilityRuleORM).where(AvailabilityRuleORM.scope_id == row.id)
+        ).one()
+        assert (rule.skip_until_ms, rule.skip_set_at_ms) == (0, 0)
+        view = evaluate(session, _at(2, 3, 30)).upstream_model_view(row)
+        assert view.state is AvailabilityState.COOLING
+        assert view.cooldown_until_ms == _at(2, 4, 0)
+        assert view.window_skip_until_ms == 0
+
+
+def test_reapplying_the_rule_clears_the_window_skip(engine_and_sessionmaker) -> None:
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    with factory() as session:
+        row = session.get(UpstreamModelORM, ids["upstream_model_id"])
+        rule = _daily_rule(session, row.id)
+        session.flush()
+        assert _enable(session, row.id, _at(2, 3, 0)) is not None
+
+        update_rule(
+            session,
+            rule.id,
+            {"schedule_json": '{"windows": [{"start": "02:00", "end": "05:00"}]}'},
+        )
+        assert (rule.skip_until_ms, rule.skip_set_at_ms) == (0, 0)
+        view = evaluate(session, _at(2, 3, 30)).upstream_model_view(row)
+        assert view.state is AvailabilityState.COOLING
+        assert view.cooldown_until_ms == _at(2, 5, 0)
+
+
+def test_closed_row_and_ban_still_win_over_a_window_skip(
+    engine_and_sessionmaker,
+) -> None:
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    with factory() as session:
+        row = session.get(UpstreamModelORM, ids["upstream_model_id"])
+        _daily_rule(session, row.id)
+        session.flush()
+        assert _enable(session, row.id, _at(2, 3, 0)) is not None
+
+        row.enabled = False
+        session.flush()
+        assert (
+            evaluate(session, _at(2, 3, 30)).upstream_model_view(row).state
+            is AvailabilityState.CLOSED
+        )
+
+        # Bans are human decisions: an enable releases cooldowns but never a ban.
+        row.enabled = True
+        create_rule(session, kind="ban", scope="upstream_model", scope_id=row.id)
+        session.flush()
+        assert (
+            evaluate(session, _at(2, 3, 30)).upstream_model_view(row).state
+            is AvailabilityState.CLOSED
+        )
+
+
+def test_projection_ignores_the_skipped_window(engine_and_sessionmaker) -> None:
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    with factory() as session:
+        row = session.get(UpstreamModelORM, ids["upstream_model_id"])
+        _daily_rule(session, row.id)
+        session.flush()
+        assert _enable(session, row.id, _at(2, 3, 0)) is not None
+
+        sync_all_cooldown_projections(session, now_ms=_at(2, 3, 30))
+        assert row.cooldown_until_ms == 0
+        sync_all_cooldown_projections(session, now_ms=_at(3, 3, 0))
+        assert row.cooldown_until_ms == _at(3, 4, 0)
+
+
+def test_rules_changed_since_detects_window_skip_creation(
+    engine_and_sessionmaker,
+) -> None:
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    with factory() as session:
+        row = session.get(UpstreamModelORM, ids["upstream_model_id"])
+        rule = _daily_rule(session, row.id)
+        session.flush()
+        assert _enable(session, row.id, _at(2, 3, 0)) is not None
+
+        changed = rules_changed_since(session, _at(2, 2, 59), _at(2, 3, 0))
+        assert {item.id for item in changed} == {rule.id}
+        # The next poll sees no further change (the skip stays anchored).
+        assert rules_changed_since(session, _at(2, 3, 1), _at(2, 3, 30)) == []
+
+
+def test_skipped_window_returns_the_target_to_the_rendered_ir(
+    engine_and_sessionmaker,
+) -> None:
+    """evaluate -> IR: while cooling the target leaves the config; a window
+    skip must bring it back without touching render.py.
+
+    build_render_plan stamps with the real wall clock, so the window is built
+    around ``now`` (cross-midnight edges are exercised by the fixed-clock tests
+    above); the enable then runs on the same real clock.
+    """
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    with factory() as session:
+        row = session.get(UpstreamModelORM, ids["upstream_model_id"])
+        spare = UpstreamModelORM(
+            id="umdl_spare",
+            upstream_id=ids["upstream_id"],
+            name="spare-model",
+            model_type="chat",
+            created_at_ms=0,
+        )
+        session.add(spare)
+        session.add(
+            PublicModelORM(id="pmdl_spare", name="spare-pm", created_at_ms=0)
+        )
+        session.add(
+            ModelTargetORM(
+                id="mt_spare",
+                public_model_id="pmdl_spare",
+                upstream_model_id=spare.id,
+                priority=1,
+                created_at_ms=0,
+            )
+        )
+        moment = datetime.fromtimestamp(now_ms() / 1000, tz=UTC)
+        start = moment - timedelta(minutes=2)
+        end = moment + timedelta(minutes=30)
+        windows = [
+            {
+                "start": f"{start.hour:02d}:{start.minute:02d}",
+                "end": f"{end.hour:02d}:{end.minute:02d}",
+            }
+        ]
+        create_rule(
+            session,
+            kind="cooldown",
+            scope="upstream_model",
+            scope_id=row.id,
+            recurrence="daily",
+            schedule_json=json.dumps({"windows": windows}),
+        )
+        session.flush()
+
+        from l05_service.rendering import build_render_plan
+
+        ir, _keys = build_render_plan(session, revision="rev_skip_cooling")
+        assert {model.name for model in ir.public_models} == {"spare-pm"}
+
+        info = enable_model_availability(
+            session, scope="upstream_model", scope_id=row.id
+        )
+        assert info is not None and info["skip_until_ms"] > now_ms()
+        ir, _keys = build_render_plan(session, revision="rev_skip_ok")
+        assert {model.name for model in ir.public_models} == {"flagship", "spare-pm"}

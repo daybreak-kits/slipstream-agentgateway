@@ -9,6 +9,8 @@ really leaves the data plane, not just the console.
 
 from __future__ import annotations
 
+import json
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from tests.conftest import seed_channel
@@ -50,6 +52,28 @@ def _find(items: list[dict], row_id: str) -> dict:
     return next(item for item in items if item["id"] == row_id)
 
 
+def _window_around_now(minutes_before: int = 2, minutes_after: int = 30) -> str:
+    """Daily window that certainly contains the real wall clock, any time of day.
+
+    Cross-midnight edges (start after end) are interpreted by the evaluator as
+    belonging to the day the window started, so this stays correct at 23:59 and
+    00:00 alike.
+    """
+    moment = datetime.fromtimestamp(now_ms() / 1000, tz=UTC)
+    start = moment - timedelta(minutes=minutes_before)
+    end = moment + timedelta(minutes=minutes_after)
+    return json.dumps(
+        {
+            "windows": [
+                {
+                    "start": f"{start.hour:02d}:{start.minute:02d}",
+                    "end": f"{end.hour:02d}:{end.minute:02d}",
+                }
+            ]
+        }
+    )
+
+
 def test_upstream_model_metadata_roundtrip(client, engine_and_sessionmaker):
     engine, factory = engine_and_sessionmaker
     ids = seed_channel(engine, factory)
@@ -62,7 +86,11 @@ def test_upstream_model_metadata_roundtrip(client, engine_and_sessionmaker):
     assert created["parameters"]["max_input_tokens"] == 131072
     assert created["parameters"]["input_types"] == ["text", "image"]
     assert created["parameters"]["structured_output"] is True
-    assert created["availability"] == {"state": "normal", "cooldown_until_ms": 0}
+    assert created["availability"] == {
+        "state": "normal",
+        "cooldown_until_ms": 0,
+        "window_skip_until_ms": 0,
+    }
     assert created["target_count"] == 0
     assert Decimal(created["cost_input_per_1m"]) == Decimal("12.5")
     assert Decimal(created["markup"]) == Decimal("1.3")
@@ -329,7 +357,11 @@ def test_close_enable_cooldown_release(client, engine_and_sessionmaker):
     assert state["cooldown_until_ms"] > now_ms()
 
     released = client.patch(url, json={"cooldown_until_ms": 0})
-    assert released.json()["availability"] == {"state": "normal", "cooldown_until_ms": 0}
+    assert released.json()["availability"] == {
+        "state": "normal",
+        "cooldown_until_ms": 0,
+        "window_skip_until_ms": 0,
+    }
 
     past = client.patch(url, json={"cooldown_until_ms": now_ms() - 1000})
     assert past.status_code == 422
@@ -345,6 +377,157 @@ def test_close_enable_cooldown_release(client, engine_and_sessionmaker):
         .json()["availability"]["state"]
         == "normal"
     )
+
+
+def test_enable_inside_schedule_window_skips_only_current_window(
+    client, engine_and_sessionmaker
+):
+    """GLOSSARY §3 (2026-11-19 ruling): 启用 inside a periodic window skips
+    THAT window only — the rule stays listed, 解除冷却 clears the exception
+    and the still-open window cools the row again."""
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    url = f"/admin/upstream-models/{ids['upstream_model_id']}"
+
+    closed = client.patch(url, json={"enabled": False})
+    assert closed.json()["availability"]["state"] == "closed"
+
+    created = client.post(
+        "/admin/availability-rules",
+        json={
+            "kind": "cooldown",
+            "scope": "upstream_model",
+            "scope_id": ids["upstream_model_id"],
+            "recurrence": "daily",
+            "schedule_json": _window_around_now(),
+        },
+    )
+    assert created.status_code == 201, created.text
+    rule_id = created.json()["id"]
+
+    enabled = client.patch(url, json={"enabled": True})
+    assert enabled.status_code == 200, enabled.text
+    body = enabled.json()
+    skip = body["window_skip"]
+    assert skip["rule_ids"] == [rule_id]
+    assert skip["skip_until_ms"] > now_ms()
+    assert skip["message"] == "本次启用仅跳过当前窗口，后续窗口照常"
+    assert body["availability"]["state"] == "normal"
+    assert body["availability"]["window_skip_until_ms"] == skip["skip_until_ms"]
+
+    # The rule survives untouched apart from the anchored exception.
+    listed = [r for r in client.get("/admin/availability-rules").json() if r["id"] == rule_id]
+    assert listed and listed[0]["recurrence"] == "daily"
+    with factory() as session:
+        from l04_repo.orm import AvailabilityRuleORM
+
+        row = session.get(AvailabilityRuleORM, rule_id)
+        assert row is not None
+        assert row.skip_until_ms == skip["skip_until_ms"]
+        assert row.schedule_json == created.json()["schedule_json"]
+
+    # 解除冷却 = clear the exception; the rule re-applies inside its window.
+    released = client.patch(url, json={"cooldown_until_ms": 0})
+    assert released.status_code == 200, released.text
+    assert released.json()["window_skip"] is None
+    state = released.json()["availability"]
+    assert state["state"] == "cooling"
+    assert state["cooldown_until_ms"] == skip["skip_until_ms"]
+    assert state["window_skip_until_ms"] == 0
+
+
+def test_enable_outside_schedule_window_does_not_skip(client, engine_and_sessionmaker):
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    url = f"/admin/upstream-models/{ids['upstream_model_id']}"
+
+    # A weekday that is neither today nor yesterday can never contain now,
+    # whatever wall-clock time the suite runs at.
+    today = datetime.fromtimestamp(now_ms() / 1000, tz=UTC).isoweekday()
+    other_day = today % 7 + 1
+    created = client.post(
+        "/admin/availability-rules",
+        json={
+            "kind": "cooldown",
+            "scope": "upstream_model",
+            "scope_id": ids["upstream_model_id"],
+            "recurrence": "weekly",
+            "schedule_json": json.dumps(
+                {"windows": [{"start": "02:00", "end": "04:00", "days": [other_day]}]}
+            ),
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    closed = client.patch(url, json={"enabled": False})
+    assert closed.json()["availability"]["state"] == "closed"
+    enabled = client.patch(url, json={"enabled": True})
+    assert enabled.status_code == 200, enabled.text
+    body = enabled.json()
+    assert body["window_skip"] is None
+    assert body["availability"]["state"] == "normal"
+
+
+def test_public_model_enable_skips_window_too(client, engine_and_sessionmaker):
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    url = f"/admin/public-models/{ids['public_id']}"
+    created = client.post(
+        "/admin/availability-rules",
+        json={
+            "kind": "cooldown",
+            "scope": "public_model",
+            "scope_id": ids["public_id"],
+            "recurrence": "daily",
+            "schedule_json": _window_around_now(),
+        },
+    )
+    assert created.status_code == 201, created.text
+    rule_id = created.json()["id"]
+
+    cooling = client.get("/admin/public-models").json()[0]
+    assert cooling["availability"]["state"] == "cooling"
+
+    enabled = client.patch(url, json={"enabled": True})
+    assert enabled.status_code == 200, enabled.text
+    body = enabled.json()
+    assert body["window_skip"]["rule_ids"] == [rule_id]
+    assert body["availability"]["state"] == "normal"
+    # Members stay blocked while the window rule is active, so the skip brings
+    # the public model's targets back to the data plane.
+    from l05_service.rendering import build_render_plan
+
+    with factory() as session:
+        ir, _keys = build_render_plan(session, revision="rev_pm_skip")
+    assert "mt_test" in {t.id for spec in ir.public_models for t in spec.targets}
+
+
+def test_batch_enable_reports_skipped_windows(client, engine_and_sessionmaker):
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    free = _create_upstream_model(client, ids["upstream_id"], name="batch-cool")
+    created = client.post(
+        "/admin/availability-rules",
+        json={
+            "kind": "cooldown",
+            "scope": "upstream_model",
+            "scope_id": free["id"],
+            "recurrence": "daily",
+            "schedule_json": _window_around_now(),
+        },
+    )
+    assert created.status_code == 201, created.text
+    rule_id = created.json()["id"]
+
+    batch = client.patch(
+        "/admin/upstream-models/batch",
+        json={"ids": [free["id"], ids["upstream_model_id"]], "action": "enable"},
+    )
+    assert batch.status_code == 200, batch.text
+    result = batch.json()
+    assert result["changed"] == [free["id"], ids["upstream_model_id"]]
+    assert [item["id"] for item in result["window_skipped"]] == [free["id"]]
+    assert result["window_skipped"][0]["rule_ids"] == [rule_id]
 
 
 def test_upstream_cooldown_leaves_data_plane_until_expiry(

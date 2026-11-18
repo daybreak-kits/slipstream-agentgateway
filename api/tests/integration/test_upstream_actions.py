@@ -273,6 +273,59 @@ def test_batch_only_reports_missing_ids(client, missing_action):
     assert response.json()["changed"] == []
 
 
+# --- ADR-023 #6: explicit rename via PATCH ------------------------------------
+
+
+def _named_upstream(client, name: str, base_url: str) -> dict:
+    response = client.post(
+        "/admin/upstreams",
+        json={
+            "name": name,
+            "base_url": base_url,
+            "api_style": "openai_chat",
+            "api_key": "sk-rename",
+        },
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def test_patch_upstream_renames_and_keeps_the_explicit_name(client):
+    _named_upstream(client, "alpha", "https://a.example/v1")
+    beta = _named_upstream(client, "beta", "https://b.example/v1")
+    url = f"/admin/upstreams/{beta['id']}"
+
+    renamed = client.patch(url, json={"name": "gamma"})
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["name"] == "gamma"
+
+    # Duplicate names are a 422 like every other entity.
+    conflict = client.patch(url, json={"name": "alpha"})
+    assert conflict.status_code == 422
+    assert conflict.json()["code"] == "VALIDATION_ERROR"
+
+    # A blank value and renaming to the current name are both no-ops.
+    blank = client.patch(url, json={"name": "   "})
+    assert blank.status_code == 200, blank.text
+    assert blank.json()["name"] == "gamma"
+    same = client.patch(url, json={"name": "gamma"})
+    assert same.status_code == 200
+
+    # Without name the field is untouched; the explicit name is authoritative
+    # afterwards, so changing base_url never re-derives a host:port name.
+    moved = client.patch(url, json={"base_url": "https://c.example:8443/v1"})
+    assert moved.status_code == 200, moved.text
+    assert moved.json()["name"] == "gamma"
+    assert moved.json()["base_url"] == "https://c.example:8443/v1"
+
+
+def test_patch_upstream_name_strips_surrounding_whitespace(client):
+    row = _named_upstream(client, "padded-target", "https://d.example/v1")
+    patched = client.patch(f"/admin/upstreams/{row['id']}", json={"name": "  tidy  "})
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["name"] == "tidy"
+
+
 # --- ADR-023 #6: api_style="auto" protocol detection -------------------------
 
 
