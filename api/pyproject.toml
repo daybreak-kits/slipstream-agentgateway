@@ -1,0 +1,46 @@
+[project]
+name = "slipstream-api"
+version = "0.1.0"
+description = "Slipstream control plane: layered backend skeleton (l01-l07)"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+  "sqlalchemy>=2.0.35",
+  "pydantic>=2.8",
+  "pydantic-settings>=2.5",
+  "cryptography>=43",
+  "httpx>=0.27",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=0.24",
+  "ruff>=0.6",
+  "mypy>=1.11",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# FastAPI dependency injection is idiomatic in the routers; B008 flags the
+# Depends(...)/Query(...) default-argument pattern that the framework requires.
+"src/l06_api/routers_*.py" = ["B008"]
+
+[tool.mypy]
+python_version = "3.11"
+check_untyped_defs = true
+ignore_missing_imports = true

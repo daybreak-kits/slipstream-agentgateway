@@ -1,0 +1,153 @@
+# rate limits are global request/token rules; limiter state resets on restart. Per-user prepaid balances are NOT rendered as buckets - AG 1.7 has one maxTokens per rule (E12), so the control-plane ledger is authoritative
+# client auth failures return plain-text 401 'authentication failed' (E4)
+# failover priority is numeric SMALL first; equal priorities form one group, groups are tried in ascending order. failover affects SUBSEQUENT requests only, never in-request retries (E1)
+# transforms: request transforms mount on llm.models[].requestTransformation; response header rules on llm.models[].responseHeaders; only the global llm.policies.transformations surface carries conditional rows
+# transforms present on upstream ups_a
+# mcp: 1 top-level target(s); not inside llm
+llm:
+  port: 3600
+  providers:
+    - name: ups_a
+      provider: openai
+      params:
+        baseUrl: "https://api.example.com/v1"
+        apiKey:
+          file: keys/ups_a.key
+      defaults:
+        requestHeaders:
+          set:
+            x-team: slipstream
+    - name: ups_b
+      provider: anthropic
+      params:
+        baseUrl: "https://api.anthropic.com/v1"
+        apiKey:
+          file: keys/ups_b.key
+  models:
+    - name: umdl_a
+      provider:
+        reference: ups_a
+      visibility: internal
+      params:
+        model: "glm-5.3"
+      requestTransformation:
+        set:
+          x-trace: "slipstream"
+        body: "toJson(json(request.body).with(b, b.merge({\"temperature\": b[\"temperature\"] != null ? 0.2 : b[\"temperature\"]})))"
+      responseHeaders:
+        remove:
+          - "x-internal-debug"
+          - server
+          - "x-powered-by"
+      guardrails:
+        request:
+          - regex:
+              action: mask
+              rules:
+                - pattern: "secret-[0-9]+"
+            scope:
+              - messages
+      promptCaching:
+        cacheSystem: true
+        minTokens: 1024
+    - name: umdl_b
+      provider:
+        reference: ups_b
+      visibility: internal
+      params:
+        model: "claude-sonnet-4-5"
+      responseHeaders:
+        remove:
+          - server
+          - "x-powered-by"
+  virtualModels:
+    - name: flagship
+      routing:
+        failover:
+          targets:
+            - model: umdl_b
+              priority: 0
+            - model: umdl_a
+              priority: 10
+    - name: "test-model"
+      routing:
+        weighted:
+          targets:
+            - model: umdl_a
+              weight: 3
+            - model: umdl_b
+              weight: 1
+    - name: "route-by-header"
+      routing:
+        conditional:
+          targets:
+            - model: umdl_a
+              when: "request.headers[\"x-route\"] == \"a\""
+            - model: umdl_b
+  policies:
+    apiKey:
+      mode: strict
+      keys:
+        - keyHash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          metadata:
+            name: key_a
+            key_id: key_a
+            user_id: usr_a
+    localRateLimit:
+      - key: apiKey.metadata.user_id
+        type: requests
+        maxTokens: 120
+        fillInterval: 1m
+      - key: apiKey.metadata.user_id
+        type: tokens
+        maxTokens: 200000
+        fillInterval: 1m
+    cors:
+      allowOrigins:
+        - "https://app.example.com"
+      allowCredentials: true
+      allowMethods:
+        - POST
+        - OPTIONS
+      allowHeaders:
+        - authorization
+        - "content-type"
+      exposeHeaders:
+        - "x-request-id"
+      maxAge: 600s
+    timeout:
+      requestTimeout: 60s
+      backendRequestTimeout: 30s
+    guardrails:
+      request:
+        - regex:
+            action: mask
+            rules:
+              - pattern: "secret-[0-9]+"
+          scope:
+            - messages
+    transformations:
+      conditional:
+        - predicate: "request.headers[\"x-mode\"] == \"golden\""
+          request:
+            set:
+              x-tenant: "golden"
+mcp:
+  targets:
+    - name: files
+      sse:
+        host: "https://mcp.example.com"
+  policies:
+    cors:
+      allowOrigins:
+        - "https://app.example.com"
+      exposeHeaders:
+        - "x-request-id"
+config:
+  logging:
+    database:
+      url: "ag-data.db"
+frontendPolicies:
+  accessLog:
+    database:
+      llm: full

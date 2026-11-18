@@ -1,0 +1,583 @@
+"""Ticket 09: upstream keys, probes, discovery/import, delete protection and batch."""
+
+from __future__ import annotations
+
+import pytest
+
+from conftest import seed_channel
+from l05_service import upstream_ops
+
+
+def _vendor(client, slug: str = "acme") -> str:
+    response = client.post(
+        "/admin/vendors", json={"name": f"Acme {slug}", "slug": slug}
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["id"]
+
+
+def _upstream(client, vendor_id: str, *, key: str = "sk-initial") -> dict:
+    # No explicit name: it would now be honoured (ADR-023 #6) and clash within
+    # one test, so vendor-scoped upstreams get the generated {slug}-NN instead.
+    response = client.post(
+        "/admin/upstreams",
+        json={
+            "vendor_id": vendor_id,
+            "base_url": "https://api.example/v1",
+            "api_style": "openai_chat",
+            "api_key": key,
+        },
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def _keys(client, upstream_id: str) -> dict:
+    response = client.get(f"/admin/upstreams/{upstream_id}/keys")
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_new_upstream_has_one_primary_masked_key(client):
+    upstream = _upstream(client, _vendor(client))
+    keys = _keys(client, upstream["id"])
+    assert keys["limit"] == 20
+    assert len(keys["items"]) == 1
+    key = keys["items"][0]
+    assert key["is_primary"] is True
+    assert key["masked"] == "…tial"
+    assert "sk-initial" not in key["masked"]
+
+    listed = client.get("/admin/upstreams").json()
+    row = next(item for item in listed if item["id"] == upstream["id"])
+    assert row["key_count"] == 1
+    assert row["model_count"] == 0
+    assert row["last_probe"] is None
+
+
+def test_key_add_patch_primary_rotate_and_delete(client):
+    upstream = _upstream(client, _vendor(client))
+    upstream_id = upstream["id"]
+
+    added = client.post(
+        f"/admin/upstreams/{upstream_id}/keys",
+        json={"label": "backup", "api_key": "sk-backup-9999"},
+    )
+    assert added.status_code == 201, added.text
+    second = added.json()
+    assert second["label"] == "backup" and second["is_primary"] is False
+    assert second["masked"] == "…9999"
+
+    duplicate = client.post(
+        f"/admin/upstreams/{upstream_id}/keys",
+        json={"label": "dup", "api_key": "sk-backup-9999"},
+    )
+    assert duplicate.status_code == 409
+
+    renamed = client.patch(
+        f"/admin/upstreams/{upstream_id}/keys/{second['id']}",
+        json={"label": "backup-2", "is_primary": True},
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["label"] == "backup-2"
+    assert renamed.json()["is_primary"] is True
+
+    rotated = client.post(
+        f"/admin/upstreams/{upstream_id}/rotate-key", json={"api_key": "sk-rotated-2026"}
+    )
+    assert rotated.status_code == 200, rotated.text
+    keys = _keys(client, upstream_id)["items"]
+    primaries = [key for key in keys if key["is_primary"]]
+    assert len(primaries) == 1
+    assert primaries[0]["id"] == second["id"]
+    assert primaries[0]["masked"] == "…2026"
+    assert len(keys) == 2  # rotation edits the primary key, it does not add one
+
+    removed = client.delete(f"/admin/upstreams/{upstream_id}/keys/{second['id']}")
+    assert removed.status_code == 200, removed.text
+    remaining = _keys(client, upstream_id)["items"]
+    assert len(remaining) == 1
+    assert remaining[0]["is_primary"] is True  # promotion is automatic
+
+
+def test_legacy_inline_key_can_be_renamed_before_the_first_extra_key(
+    client, engine_and_sessionmaker
+):
+    ids = seed_channel(*engine_and_sessionmaker)
+    keys = _keys(client, ids["upstream_id"])["items"]
+    assert [key["id"] for key in keys] == ["legacy"]
+    renamed = client.patch(
+        f"/admin/upstreams/{ids['upstream_id']}/keys/legacy", json={"label": "主密钥"}
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["label"] == "主密钥"
+    assert renamed.json()["id"] != "legacy"
+    after = _keys(client, ids["upstream_id"])["items"]
+    assert len(after) == 1 and after[0]["is_primary"] is True
+
+
+def test_key_cap_is_twenty_and_last_key_is_protected(client):
+    upstream_id = _upstream(client, _vendor(client))["id"]
+    for index in range(19):
+        response = client.post(
+            f"/admin/upstreams/{upstream_id}/keys",
+            json={"label": f"k{index}", "api_key": f"sk-extra-{index:04d}"},
+        )
+        assert response.status_code == 201, response.text
+    assert len(_keys(client, upstream_id)["items"]) == 20
+
+    overflow = client.post(
+        f"/admin/upstreams/{upstream_id}/keys",
+        json={"label": "too-many", "api_key": "sk-overflow"},
+    )
+    assert overflow.status_code == 409
+    assert "20" in overflow.json()["message"]
+
+    fresh_id = _upstream(client, _vendor(client, "solo"), key="sk-solo-1111")["id"]
+    only_key = _keys(client, fresh_id)["items"][0]
+    blocked = client.delete(f"/admin/upstreams/{fresh_id}/keys/{only_key['id']}")
+    assert blocked.status_code == 409
+    assert len(_keys(client, fresh_id)["items"]) == 1
+
+
+def test_connection_and_discovery_share_the_probe_record(client, monkeypatch):
+    seen: list[tuple[str, str, str]] = []
+
+    def fake_fetch_models(*, base_url, api_style, api_key, timeout_s=8.0):
+        seen.append((base_url, api_style, api_key))
+        return 200, ["glm-5.3", "deepseek-v3"], 7
+
+    monkeypatch.setattr(upstream_ops, "fetch_models", fake_fetch_models)
+    upstream_id = _upstream(client, _vendor(client), key="sk-probe-7777")["id"]
+
+    tested = client.post(f"/admin/upstreams/{upstream_id}/test-connection")
+    assert tested.status_code == 200, tested.text
+    body = tested.json()
+    assert body["status"] == "ok"
+    assert body["http_status"] == 200
+    assert body["latency_ms"] == 7
+    assert body["model_count"] == 2
+    assert seen == [("https://api.example/v1", "openai_chat", "sk-probe-7777")]
+
+    detail = client.get(f"/admin/upstreams/{upstream_id}").json()
+    assert detail["last_probe"]["status"] == "ok"
+    assert detail["last_probe"]["model_count"] == 2
+
+    discovered = client.post(f"/admin/upstreams/{upstream_id}/discover-models")
+    assert discovered.status_code == 200, discovered.text
+    assert set(discovered.json()["models"]) == {"deepseek-v3", "glm-5.3"}
+
+    imported = client.post(
+        f"/admin/upstreams/{upstream_id}/import-models",
+        json={"names": sorted(discovered.json()["models"])},
+    )
+    assert imported.status_code == 200, imported.text
+    assert imported.json()["created"] == ["deepseek-v3", "glm-5.3"]
+    assert imported.json()["skipped"] == []
+    assert client.get(f"/admin/upstreams/{upstream_id}").json()["model_count"] == 2
+
+    again = client.post(
+        f"/admin/upstreams/{upstream_id}/import-models",
+        json={"names": ["glm-5.3", "new-model"]},
+    )
+    assert again.json()["created"] == ["new-model"]
+    assert again.json()["skipped"] == ["glm-5.3"]
+
+
+def test_failed_probe_is_reported_not_raised(client, monkeypatch):
+    def fake_fetch_models(*, base_url, api_style, api_key, timeout_s=8.0):
+        return 401, [], 12
+
+    monkeypatch.setattr(upstream_ops, "fetch_models", fake_fetch_models)
+    upstream_id = _upstream(client, _vendor(client))["id"]
+    response = client.post(f"/admin/upstreams/{upstream_id}/test-connection")
+    assert response.status_code == 200
+    assert response.json()["status"] == "error"
+    assert response.json()["http_status"] == 401
+    assert "401" in response.json()["message"]
+
+
+def test_delete_blocked_when_a_public_model_references_it(client, engine_and_sessionmaker):
+    ids = seed_channel(*engine_and_sessionmaker)
+    response = client.delete(f"/admin/upstreams/{ids['upstream_id']}")
+    assert response.status_code == 409
+    payload = response.json()
+    assert payload["code"] == "CONFLICT"
+    assert payload["details"]["models"] == ["glm-5.3"]
+    assert client.get(f"/admin/upstreams/{ids['upstream_id']}").status_code == 200
+
+
+def test_delete_removes_keys_and_models_for_an_unreferenced_upstream(client):
+    upstream_id = _upstream(client, _vendor(client))["id"]
+    client.post(
+        f"/admin/upstreams/{upstream_id}/import-models", json={"names": ["m1"]}
+    )
+    deleted = client.delete(f"/admin/upstreams/{upstream_id}")
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json() == {"deleted": upstream_id}
+    assert client.get(f"/admin/upstreams/{upstream_id}").status_code == 404
+    assert client.get(f"/admin/upstreams/{upstream_id}/keys").status_code == 404
+
+
+def test_batch_enable_disable_delete_with_per_item_report(client, engine_and_sessionmaker):
+    vendor_id = _vendor(client, "batchv")
+    first = _upstream(client, vendor_id, key="sk-a-1111")["id"]
+    second = _upstream(client, vendor_id, key="sk-b-2222")["id"]
+
+    disabled = client.patch(
+        "/admin/upstreams/batch",
+        json={"ids": [first, second, "ups_missing"], "action": "disable"},
+    )
+    assert disabled.status_code == 200, disabled.text
+    report = disabled.json()
+    assert report["changed"] == [first, second]
+    assert report["missing"] == ["ups_missing"]
+    assert report["failed"] == []
+    assert client.get(f"/admin/upstreams/{first}").json()["enabled"] is False
+    assert client.get(f"/admin/upstreams/{second}").json()["enabled"] is False
+
+    enabled = client.patch(
+        "/admin/upstreams/batch", json={"ids": [first], "action": "enable"}
+    )
+    assert enabled.json()["changed"] == [first]
+    assert client.get(f"/admin/upstreams/{first}").json()["enabled"] is True
+
+    ids = seed_channel(*engine_and_sessionmaker)
+    deleted = client.patch(
+        "/admin/upstreams/batch",
+        json={"ids": [ids["upstream_id"], second], "action": "delete"},
+    )
+    report = deleted.json()
+    assert report["changed"] == [second]
+    assert report["failed"][0]["id"] == ids["upstream_id"]
+    assert report["failed"][0]["code"] == "CONFLICT"
+    assert client.get(f"/admin/upstreams/{second}").status_code == 404
+    assert client.get(f"/admin/upstreams/{ids['upstream_id']}").status_code == 200
+
+
+def test_batch_validation_rejects_unknown_action(client):
+    response = client.patch(
+        "/admin/upstreams/batch", json={"ids": ["ups_x"], "action": "explode"}
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("missing_action", ["enable", "disable", "delete"])
+def test_batch_only_reports_missing_ids(client, missing_action):
+    response = client.patch(
+        "/admin/upstreams/batch",
+        json={"ids": ["ups_nope"], "action": missing_action},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["missing"] == ["ups_nope"]
+    assert response.json()["changed"] == []
+
+
+# --- ADR-023 #6: api_style="auto" protocol detection -------------------------
+
+
+def _detect_result(protocol: str | None, steps: list[dict] | None = None) -> dict:
+    return {
+        "protocol": protocol,
+        "steps": steps
+        if steps is not None
+        else [{"order": 1, "protocol": protocol, "method": "GET", "url": "u",
+               "http_status": 200, "latency_ms": 3, "ok": True, "detail": ""}],
+        "models": ["glm-5.3"] if protocol else [],
+        "message": f"自动探测命中 {protocol}" if protocol else "四种协议均未命中",
+        "latency_ms": 12,
+    }
+
+
+def test_create_with_auto_resolves_and_records_the_detection(client, monkeypatch):
+    monkeypatch.setattr(
+        upstream_ops, "detect_api_style", lambda **kw: _detect_result("openai_chat")
+    )
+    response = client.post(
+        "/admin/upstreams",
+        json={
+            "vendor_id": _vendor(client, "autov"),
+            "base_url": "https://api.example/v1",
+            "api_style": "auto",
+            "api_key": "sk-auto-1111",
+        },
+    )
+    assert response.status_code == 201, response.text
+    body = response.json()
+    # stored value is the resolved concrete style; "auto" never lands in the db
+    assert body["api_style"] == "openai_chat"
+    assert body["api_style_source"] == "auto"
+    assert body["last_probe"]["kind"] == "detect"
+
+    detail = client.get(f"/admin/upstreams/{body['id']}").json()
+    assert detail["api_style"] == "openai_chat"
+    assert detail["api_style_source"] == "auto"
+
+    # a later manual style edit flips the reported source back to manual
+    patched = client.patch(f"/admin/upstreams/{body['id']}", json={"api_style": "gemini"})
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["api_style"] == "gemini"
+    assert patched.json()["api_style_source"] == "manual"
+
+
+def test_create_with_auto_fails_422_with_per_protocol_reasons(client, monkeypatch):
+    steps = [
+        {"order": 1, "protocol": "openai_chat", "method": "GET", "url": "u",
+         "http_status": 401, "latency_ms": 3, "ok": False, "detail": "HTTP 401"},
+        {"order": 2, "protocol": "anthropic_messages", "method": "GET", "url": "u",
+         "http_status": 401, "latency_ms": 3, "ok": False, "detail": "HTTP 401"},
+        {"order": 3, "protocol": "gemini", "method": "GET", "url": "u",
+         "http_status": 401, "latency_ms": 3, "ok": False, "detail": "HTTP 401"},
+    ]
+    monkeypatch.setattr(
+        upstream_ops, "detect_api_style", lambda **kw: _detect_result(None, steps)
+    )
+    vendor_id = _vendor(client, "autofail")
+    response = client.post(
+        "/admin/upstreams",
+        json={
+            "vendor_id": vendor_id,
+            "base_url": "https://api.example/v1",
+            "api_style": "auto",
+            "api_key": "sk-auto-2222",
+        },
+    )
+    assert response.status_code == 422, response.text
+    payload = response.json()
+    assert "均未命中" in payload["message"]
+    assert [step["protocol"] for step in payload["details"]["probe_steps"]] == [
+        "openai_chat",
+        "anthropic_messages",
+        "gemini",
+    ]
+    # nothing was created and the same vendor's counter did not move
+    retry = client.post(
+        "/admin/upstreams",
+        json={
+            "vendor_id": vendor_id,
+            "base_url": "https://api.example/v1",
+            "api_style": "openai_chat",
+            "api_key": "sk-plain-4444",
+        },
+    )
+    assert retry.status_code == 201, retry.text
+    assert retry.json()["name"] == "autofail-01"
+
+
+def test_patch_with_auto_resolves_against_the_stored_key(client, monkeypatch):
+    upstream = _upstream(client, _vendor(client, "autoup"), key="sk-patch-3333")
+    seen: dict = {}
+
+    def fake_detect(*, base_url, api_key, timeout_s=8.0):
+        seen.update(base_url=base_url, api_key=api_key)
+        return _detect_result("anthropic_messages")
+
+    monkeypatch.setattr(upstream_ops, "detect_api_style", fake_detect)
+    patched = client.patch(
+        f"/admin/upstreams/{upstream['id']}",
+        json={"api_style": "auto", "base_url": "https://api.example/v2"},
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["api_style"] == "anthropic_messages"
+    assert patched.json()["api_style_source"] == "auto"
+    # the probe used the updated base_url and the decrypted primary key
+    assert seen == {"base_url": "https://api.example/v2", "api_key": "sk-patch-3333"}
+
+
+def test_discover_models_with_auto_returns_protocol_and_steps(client, monkeypatch):
+    upstream_id = _upstream(client, _vendor(client))["id"]
+    steps = [
+        {"order": 1, "protocol": "openai_chat", "method": "GET", "url": "u1",
+         "http_status": 401, "latency_ms": 2, "ok": False, "detail": "HTTP 401"},
+        {"order": 2, "protocol": "anthropic_messages", "method": "GET", "url": "u2",
+         "http_status": 200, "latency_ms": 5, "ok": True, "detail": ""},
+    ]
+    monkeypatch.setattr(
+        upstream_ops, "detect_api_style", lambda **kw: _detect_result("anthropic_messages", steps)
+    )
+    response = client.post(
+        f"/admin/upstreams/{upstream_id}/discover-models", json={"api_style": "auto"}
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["protocol"] == "anthropic_messages"
+    assert body["protocol_source"] == "auto"
+    assert body["probe_steps"] == steps
+    # the models array keeps its historical shape (plain list of ids)
+    assert body["models"] == ["glm-5.3"]
+    assert body["status"] == "ok"
+    assert body["model_count"] == 1
+
+
+def test_discover_and_test_connection_keep_legacy_fields_for_a_fixed_style(
+    client, monkeypatch
+):
+    def fake_fetch_models(*, base_url, api_style, api_key, timeout_s=8.0):
+        return 200, ["glm-5.3"], 7
+
+    monkeypatch.setattr(upstream_ops, "fetch_models", fake_fetch_models)
+    upstream_id = _upstream(client, _vendor(client, "legacyv"))["id"]
+
+    tested = client.post(f"/admin/upstreams/{upstream_id}/test-connection")
+    assert tested.status_code == 200, tested.text
+    body = tested.json()
+    assert body["protocol"] == "openai_chat"
+    assert body["protocol_source"] == "manual"
+    assert body["probe_steps"] == [
+        {
+            "order": 1,
+            "protocol": "openai_chat",
+            "method": "GET",
+            "url": "https://api.example/v1/models",
+            "http_status": 200,
+            "latency_ms": 7,
+            "ok": True,
+            "detail": "",
+        }
+    ]
+    # historical keys survive untouched
+    for key in ("id", "kind", "status", "http_status", "latency_ms", "message",
+                "model_count", "models", "tested_at_ms"):
+        assert key in body
+
+    detail = client.get(f"/admin/upstreams/{upstream_id}").json()
+    assert detail["api_style_source"] == "manual"
+
+
+def test_probe_request_can_override_the_style_for_one_call(client, monkeypatch):
+    seen: list[str] = []
+
+    def fake_fetch_models(*, base_url, api_style, api_key, timeout_s=8.0):
+        seen.append(api_style)
+        return 200, ["claude-x"], 4
+
+    monkeypatch.setattr(upstream_ops, "fetch_models", fake_fetch_models)
+    upstream_id = _upstream(client, _vendor(client, "override"))["id"]
+    response = client.post(
+        f"/admin/upstreams/{upstream_id}/discover-models",
+        json={"api_style": "anthropic_messages"},
+    )
+    assert response.status_code == 200, response.text
+    assert seen == ["anthropic_messages"]
+    assert response.json()["protocol"] == "anthropic_messages"
+    assert response.json()["protocol_source"] == "manual"
+
+
+def test_auto_probe_failure_is_reported_not_raised(client, monkeypatch):
+    steps = [
+        {"order": 1, "protocol": "openai_chat", "method": "GET", "url": "u",
+         "http_status": 0, "latency_ms": 0, "ok": False, "detail": "连接失败：boom"},
+    ]
+    monkeypatch.setattr(
+        upstream_ops, "detect_api_style", lambda **kw: _detect_result(None, steps)
+    )
+    upstream_id = _upstream(client, _vendor(client, "autodown"))["id"]
+    response = client.post(
+        f"/admin/upstreams/{upstream_id}/test-connection", json={"api_style": "auto"}
+    )
+    assert response.status_code == 200  # probe outcome is data, not a request error
+    body = response.json()
+    assert body["status"] == "error"
+    assert body["protocol"] is None
+    assert body["protocol_source"] == "auto"
+    assert body["probe_steps"] == steps
+    assert "均未命中" in body["message"]
+
+
+def test_unknown_probe_style_is_rejected(client):
+    upstream_id = _upstream(client, _vendor(client, "badstyle"))["id"]
+    response = client.post(
+        f"/admin/upstreams/{upstream_id}/test-connection", json={"api_style": "nope"}
+    )
+    assert response.status_code == 422
+    assert "unknown api_style" in response.json()["message"]
+
+
+# --------------------------------------------------------------- ADR-023 #6:
+# 厂商可选 + 名称由连接地址生成（工单 D）。vendor_id 缺省时名称不依赖厂商 slug。
+
+
+def _bare_upstream(client, base_url: str, **extra) -> dict:
+    response = client.post(
+        "/admin/upstreams",
+        json={"base_url": base_url, "api_style": "openai_chat", "api_key": "sk-bare", **extra},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def test_vendorless_upstream_generates_name_from_base_url(client):
+    upstream = _bare_upstream(client, "https://www.abc.com:8080/v1")
+    assert upstream["vendor_id"] is None
+    assert upstream["name"] == "www-abc-com-8080"
+
+    # 默认端口去掉；非 [a-z0-9] 字符折叠为 -
+    dropped = _bare_upstream(client, "https://WWW.Abc.com:443/v1")
+    assert dropped["name"] == "www-abc-com"
+    plain_http = _bare_upstream(client, "http://1.2.3.4:80/v1")
+    assert plain_http["name"] == "1-2-3-4"
+    kept = _bare_upstream(client, "http://10.0.0.9:8000/v1")
+    assert kept["name"] == "10-0-0-9-8000"
+
+
+def test_vendorless_names_dedupe_with_numeric_suffix(client):
+    first = _bare_upstream(client, "https://www.abc.com:8080/v1")
+    second = _bare_upstream(client, "https://www.abc.com:8080/v1")
+    assert (first["name"], second["name"]) == ("www-abc-com-8080", "www-abc-com-8080-2")
+    third = _bare_upstream(client, "https://www.abc.com:8080/v1")
+    assert third["name"] == "www-abc-com-8080-3"
+
+
+def test_explicit_name_wins_and_duplicates_are_422(client):
+    upstream = _bare_upstream(client, "https://host.example/v1", name="自命名渠道")
+    assert upstream["name"] == "自命名渠道"
+    clash = client.post(
+        "/admin/upstreams",
+        json={
+            "name": "自命名渠道",
+            "base_url": "https://other.example/v1",
+            "api_style": "openai_chat",
+            "api_key": "sk-x",
+        },
+    )
+    assert clash.status_code == 422
+    assert "already exists" in clash.json()["message"]
+
+
+def test_explicit_vendor_keeps_the_slug_counter(client):
+    vendor_id = _vendor(client, "acme")
+    second = _bare_upstream(client, "https://acme.example/v1", vendor_id=vendor_id)
+    third = _bare_upstream(client, "https://acme.example/v1", vendor_id=vendor_id)
+    # 未带 name 时沿用 {slug}-NN 计数器；计数器只在这条路径递增
+    assert (second["name"], third["name"]) == ("acme-01", "acme-02")
+    assert second["vendor_id"] == vendor_id
+
+
+def test_unknown_vendor_id_is_still_404(client):
+    response = client.post(
+        "/admin/upstreams",
+        json={
+            "vendor_id": "vend_missing",
+            "base_url": "https://x.example/v1",
+            "api_style": "openai_chat",
+            "api_key": "sk-x",
+        },
+    )
+    assert response.status_code == 404
+
+
+def test_discover_models_route_is_registered_exactly_once(client):
+    """routers_ops 的死路由删除后，探测端点只剩 C 工单版本。"""
+    from l06_api import routers_ops, routers_upstreams
+
+    def _discover_paths(router):
+        return [
+            route.path
+            for route in router.routes
+            if getattr(route, "path", "") and "discover-models" in route.path
+        ]
+
+    assert _discover_paths(routers_upstreams.router) == [
+        "/admin/upstreams/{upstream_id}/discover-models"
+    ]
+    assert _discover_paths(routers_ops.router) == []
