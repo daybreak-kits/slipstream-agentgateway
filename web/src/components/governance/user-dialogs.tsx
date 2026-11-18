@@ -360,7 +360,7 @@ export function CreateUserDialog({ open, pending, errorText, onClose, onSubmit }
         <DialogHeader>
           <DialogTitle>新建用户</DialogTitle>
           <DialogDescription>
-            用户是 API 消费者（持有客户端密钥与预付余额），与管理员的账号体系相互独立。
+            用户是 API 消费者（持有连接密钥与预付余额）。
           </DialogDescription>
         </DialogHeader>
 

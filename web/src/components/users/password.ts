@@ -11,26 +11,29 @@ const ALL = UPPER + LOWER + DIGIT + SYMBOL;
 
 function randomIndex(bound: number): number {
   const buffer = new Uint32Array(1);
-  const limit = Math.floor(0xffffffff / bound) * bound;
-  let value = 0;
-  do {
+  const limit = Math.floor(0x1_0000_0000 / bound) * bound;
+  for (;;) {
     crypto.getRandomValues(buffer);
-    value = buffer[0];
-  } while (value >= limit);
-  return value % bound;
+    const value: number = buffer[0] ?? 0;
+    if (value < limit) return value % bound;
+  }
 }
 
 function pick(source: string): string {
-  return source[randomIndex(source.length)];
+  return source.charAt(randomIndex(source.length));
 }
 
 export function generatePassword(length = 12): string {
-  // 每类至少一个，其余从全集随机取，最后 Fisher–Yates 打乱
-  const chars = [pick(UPPER), pick(LOWER), pick(DIGIT), pick(SYMBOL)];
-  for (let i = chars.length; i < length; i += 1) chars.push(pick(ALL));
-  for (let i = chars.length - 1; i > 0; i -= 1) {
-    const j = randomIndex(i + 1);
-    [chars[i], chars[j]] = [chars[j], chars[i]];
+  // 每类至少一个：先把全集填满，再把保证位放到随机位置（避免 Fisher–Yates 的索引读数）
+  const chars: string[] = [];
+  for (let i = 0; i < length; i += 1) chars.push(pick(ALL));
+  const required: string[] = [pick(UPPER), pick(LOWER), pick(DIGIT), pick(SYMBOL)];
+  const positions = new Set<number>();
+  while (positions.size < required.length) positions.add(randomIndex(length));
+  let slot = 0;
+  for (const position of positions) {
+    chars[position] = required[slot] ?? pick(ALL);
+    slot += 1;
   }
   return chars.join("");
 }

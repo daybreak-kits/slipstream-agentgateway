@@ -1,200 +1,238 @@
-import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
+import { useState } from "react";
 import { toast } from "sonner";
 
+import { CopyKeyButton } from "@/components/keys/copy-key-button";
+import { RenameKeyDialog } from "@/components/keys/rename-key-dialog";
 import { DataTable } from "@/components/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Table, TableWrap, TD, TH, THead, TR } from "@/components/ui/table";
-import { api, apiList, ENDPOINTS } from "@/lib/api";
-import { fmtCny } from "@/lib/format";
-import type { ApiKey as ApiKeyRow, EndUser, LedgerRow } from "@/types";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { fmtMs } from "@/components/governance/format";
+import { OneTimeSecretDialog } from "@/components/users/one-time-secret-dialog";
+import { ENDPOINTS, api } from "@/lib/api";
+import { usePermissions } from "@/lib/permissions";
+import type { ApiKey } from "@/types";
 
+const KEYS_QUERY_KEY = ["api-keys"] as const;
+
+/**
+ * 连接密钥（ADR-023）：掩码常驻、明文只经审计化 reveal 取回；
+ * 充值入口移到用户管理，每用户最多 50 把。启停可逆不弹确认，
+ * 重置（rotate）与删除走危险操作确认。
+ */
 export function ClientKeysPage() {
-  const qc = useQueryClient();
-  const qKeys = useQuery({ queryKey: ["api-keys"], queryFn: () => apiList<ApiKeyRow>(ENDPOINTS.apiKeys) });
-  const qUsers = useQuery({ queryKey: ["users"], queryFn: () => apiList<EndUser>(ENDPOINTS.users) });
+  const queryClient = useQueryClient();
+  const { can } = usePermissions();
+  const canWrite = can("apikeys:write");
 
-  const [revealed, setRevealed] = useState<{ keyId: string; plaintext: string } | null>(null);
-  const reveal = useMutation({
-    mutationFn: (id: string) => api.post<{ plaintext: string }>(ENDPOINTS.apiKeyReveal(id), {}),
-    onSuccess: (data, keyId) => setRevealed({ keyId, plaintext: data.plaintext }),
-    onError: (e: Error) => toast.error("无法读取明文", { description: e.message }),
-  });
-  const [ledgerFor, setLedgerFor] = useState<string | null>(null);
-  const qLedger = useQuery({
-    queryKey: ["user-ledger", ledgerFor],
-    queryFn: () => apiList<LedgerRow>(ENDPOINTS.userLedger(ledgerFor ?? "")),
-    enabled: ledgerFor !== null,
-  });
-  const [topupUserId, setTopupUserId] = useState<string | null>(null);
-  const [topupAmount, setTopupAmount] = useState("");
-  const topup = useMutation({
-    mutationFn: (input: { userId: string; deltaMicro: number }) =>
-      api.post(ENDPOINTS.userBalance(input.userId), { delta_micro: input.deltaMicro }),
-    onSuccess: () => {
-      toast.success("充值成功");
-      void qc.invalidateQueries({ queryKey: ["users"] });
-      setTopupUserId(null);
-      setTopupAmount("");
-    },
-    onError: (e: Error) => toast.error("充值失败", { description: e.message }),
+  const qKeys = useQuery({
+    queryKey: KEYS_QUERY_KEY,
+    queryFn: () => api.get<ApiKey[]>(ENDPOINTS.apiKeys + "?page_size=200&offset=0"),
   });
 
-  const userName = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const u of qUsers.data?.items ?? []) m.set(u.id, u.name);
-    return m;
-  }, [qUsers.data]);
-  const userById = useMemo(() => {
-    const m = new Map<string, EndUser>();
-    for (const u of qUsers.data?.items ?? []) m.set(u.id, u);
-    return m;
-  }, [qUsers.data]);
+  const [renameTarget, setRenameTarget] = useState<ApiKey | null>(null);
+  const [rotateTarget, setRotateTarget] = useState<ApiKey | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ApiKey | null>(null);
+  /** rotate 返回的新明文：仅弹窗存活期可见，关闭即不再持有 */
+  const [rotatedSecret, setRotatedSecret] = useState<string | null>(null);
 
-  const doTopup = () => {
-    if (topupUserId === null) return;
-    const yuan = Number(topupAmount);
-    if (Number.isNaN(yuan) || yuan <= 0) {
-      toast.error("请输入有效金额（元）");
-      return;
-    }
-    topup.mutate({ userId: topupUserId, deltaMicro: Math.round(yuan * 1_000_000) });
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: KEYS_QUERY_KEY });
   };
 
-  const columns: ColumnDef<ApiKeyRow, unknown>[] = [
+  const setStatus = useMutation({
+    mutationFn: (vars: { keyId: string; status: "active" | "disabled" }) =>
+      api.patch<ApiKey>(ENDPOINTS.apiKeys + "/" + vars.keyId + "/status", { status: vars.status }),
+    onSuccess: (key) => {
+      toast.success(key.status === "active" ? "密钥已启用" : "密钥已关闭", {
+        description: key.name ?? key.key_suffix,
+      });
+      invalidate();
+    },
+    onError: (error: Error) => toast.error("状态更新失败", { description: error.message }),
+  });
+
+  const rename = useMutation({
+    mutationFn: (vars: { keyId: string; name: string }) =>
+      api.patch<ApiKey>(ENDPOINTS.apiKeys + "/" + vars.keyId, { name: vars.name }),
+    onSuccess: (key) => {
+      toast.success("密钥已重命名", { description: key.name ?? undefined });
+      setRenameTarget(null);
+      invalidate();
+    },
+    onError: (error: Error) => toast.error("重命名失败", { description: error.message }),
+  });
+
+  const rotate = useMutation({
+    mutationFn: (keyId: string) => api.post<{ key: string }>(ENDPOINTS.apiKeyRotate(keyId), {}),
+    onSuccess: (data) => {
+      setRotateTarget(null);
+      setRotatedSecret(data.key);
+      toast.success("密钥已重置", { description: "旧密钥材料随本次下发失效" });
+      invalidate();
+    },
+    onError: (error: Error) => {
+      setRotateTarget(null);
+      toast.error("重置密钥失败", { description: error.message });
+    },
+  });
+
+  const deleteKey = useMutation({
+    mutationFn: (keyId: string) => api.del<void>(ENDPOINTS.apiKeys + "/" + keyId),
+    onSuccess: () => {
+      toast.success("密钥已删除", { description: "删除立即生效，不可恢复" });
+      setDeleteTarget(null);
+      invalidate();
+    },
+    onError: (error: Error) => {
+      setDeleteTarget(null);
+      toast.error("删除密钥失败", { description: error.message });
+    },
+  });
+
+  const columns: ColumnDef<ApiKey, unknown>[] = [
+    {
+      accessorKey: "name",
+      header: "名称",
+      cell: (cell) => (
+        <span className="font-medium text-title">{cell.row.original.name ?? "未命名密钥"}</span>
+      ),
+    },
     {
       accessorKey: "mask",
       header: "密钥",
-      cell: (c) => (
-        <span className="tnum font-mono text-2xs">{c.row.original.mask}…{c.row.original.key_suffix}</span>
+      cell: (cell) => (
+        <span className="inline-flex items-center gap-1">
+          <span className="font-mono text-2xs tnum">{cell.row.original.mask}</span>
+          {canWrite && <CopyKeyButton keyId={cell.row.original.id} />}
+        </span>
       ),
     },
     {
-      accessorKey: "user_id",
-      header: "所属用户",
-      cell: (c) => userName.get(c.row.original.user_id) ?? c.row.original.user_id,
-    },
-    {
-      id: "balance",
-      header: "余额",
-      cell: (c) => {
-        const u = userById.get(c.row.original.user_id);
-        return <span className="tnum">{u ? fmtCny(u.balance_micro) : "—"}</span>;
+      accessorKey: "last_used_at_ms",
+      header: "最后使用",
+      cell: (cell) => {
+        const usedAt = cell.row.original.last_used_at_ms;
+        return <span className="tnum text-2xs">{usedAt ? fmtMs(usedAt) : "—"}</span>;
       },
-    },
-    {
-      id: "topup",
-      header: "充值",
-      cell: (c) => (
-        <Button variant="outline" size="sm" onClick={() => { setTopupUserId(c.row.original.user_id); setTopupAmount(""); }}>充值</Button>
-      ),
-    },
-    {
-      id: "ledger",
-      header: "流水",
-      cell: (c) => (
-        <Button variant="ghost" size="sm" onClick={() => setLedgerFor(c.row.original.user_id)}>查看</Button>
-      ),
     },
     {
       accessorKey: "status",
       header: "状态",
-      cell: (c) => <Badge tone={c.row.original.status === "active" ? "success" : "neutral"}>{c.row.original.status === "active" ? "启用" : "停用"}</Badge>,
+      cell: (cell) => {
+        const active = cell.row.original.status === "active";
+        return <Badge tone={active ? "success" : "neutral"}>{active ? "启用" : "关闭"}</Badge>;
+      },
     },
     {
-      id: "reveal",
-      header: "明文",
-      cell: (c) => (
-        <Button variant="ghost" size="sm" onClick={() => reveal.mutate(c.row.original.id)}>查看明文</Button>
-      ),
+      accessorKey: "created_at_ms",
+      header: "创建时间",
+      cell: (cell) => <span className="tnum text-2xs">{fmtMs(cell.row.original.created_at_ms)}</span>,
+    },
+    {
+      id: "actions",
+      header: "操作",
+      cell: (cell) => {
+        if (!canWrite) return <span className="text-2xs text-faint">只读</span>;
+        const key = cell.row.original;
+        const active = key.status === "active";
+        return (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={setStatus.isPending}
+              onClick={() => setStatus.mutate({ keyId: key.id, status: active ? "disabled" : "active" })}
+            >
+              {active ? "关闭" : "启用"}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setRenameTarget(key)}>
+              重命名
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setRotateTarget(key)}>
+              重置
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-danger-text"
+              onClick={() => setDeleteTarget(key)}
+            >
+              删除
+            </Button>
+          </div>
+        );
+      },
     },
   ];
 
   return (
     <div className="space-y-2">
-      <p className="text-2xs text-faint">密钥列表只显示掩码；明文仅在点击查看后返回一次，不缓存。余额耗尽后请求返回 429；充值走用户余额（元，两位小数以内）。</p>
+      <p className="text-2xs text-faint">
+        密钥只显示掩码；点行内复制图标会经审计化接口取回明文并写入剪贴板（留审计记录属预期行为）。
+        每用户最多 50 把；余额耗尽后请求返回 429，充值在用户管理页进行。
+      </p>
       <DataTable
         columns={columns}
-        data={qKeys.data?.items}
+        data={qKeys.data}
         loading={qKeys.isPending}
         error={qKeys.isError ? (qKeys.error as Error).message : null}
         onRetry={() => void qKeys.refetch()}
-        emptyText="还没有 API 密钥"
-        filterPlaceholder="筛选密钥 / 用户"
+        emptyText="还没有连接密钥"
+        filterPlaceholder="筛选名称 / 掩码"
       />
 
-      <Dialog open={revealed !== null} onOpenChange={(v) => { if (!v) setRevealed(null); }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>密钥明文</DialogTitle>
-            <DialogDescription>关闭后不再展示；请立即复制保存。</DialogDescription>
-          </DialogHeader>
-          <p className="break-all rounded-md border border-border bg-surface-2 p-2 font-mono text-2xs">{revealed?.plaintext}</p>
-          <DialogFooter>
-            <Button onClick={() => { void navigator.clipboard.writeText(revealed?.plaintext ?? ""); toast.success("已复制"); }}>复制</Button>
-            <Button variant="outline" onClick={() => setRevealed(null)}>关闭</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <RenameKeyDialog
+        open={renameTarget !== null}
+        keyName={renameTarget?.name ?? null}
+        pending={rename.isPending}
+        onClose={() => setRenameTarget(null)}
+        onSubmit={(name) => {
+          if (renameTarget === null) return;
+          rename.mutate({ keyId: renameTarget.id, name });
+        }}
+      />
 
-      <Dialog open={topupUserId !== null} onOpenChange={(v) => { if (!v) setTopupUserId(null); }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>充值 · {topupUserId ? userName.get(topupUserId) ?? topupUserId : ""}</DialogTitle>
-            <DialogDescription>金额以元为单位，最多两位小数。</DialogDescription>
-          </DialogHeader>
-          <Input className="h-auto px-3 py-2 text-sm" placeholder="如 50.00" inputMode="decimal" value={topupAmount} onChange={(e) => setTopupAmount(e.target.value)} />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setTopupUserId(null)}>取消</Button>
-            <Button onClick={doTopup} disabled={topup.isPending}>{topup.isPending ? "充值中…" : "确认充值"}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={rotateTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setRotateTarget(null);
+        }}
+        title={"重置密钥「" + (rotateTarget?.name ?? rotateTarget?.key_suffix ?? "") + "」？"}
+        description="重置会生成新密钥材料，旧密钥在本次下发后立即失效；新密钥明文仅展示一次，请先复制再关闭。"
+        confirmLabel="重置密钥"
+        destructive
+        onConfirm={() => {
+          if (rotateTarget === null) return;
+          rotate.mutate(rotateTarget.id);
+        }}
+      />
 
-      <Dialog open={ledgerFor !== null} onOpenChange={(v) => { if (!v) setLedgerFor(null); }}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>余额流水 · {ledgerFor ? userName.get(ledgerFor) ?? ledgerFor : ""}</DialogTitle>
-          </DialogHeader>
-          {qLedger.isError && <p className="text-2xs text-danger-text">{(qLedger.error as Error).message}</p>}
-          <TableWrap className="max-h-80 overflow-auto">
-            <Table className="text-2xs">
-              <THead className="bg-transparent">
-                <TR className="border-t-0 border-b border-border text-faint hover:bg-transparent">
-                  <TH className="p-1 text-left font-normal text-faint">时间</TH>
-                  <TH className="p-1 text-left font-normal text-faint">类型</TH>
-                  <TH className="p-1 text-right font-normal text-faint">变动（元）</TH>
-                  <TH className="p-1 text-right font-normal text-faint">变动后余额（元）</TH>
-                  <TH className="p-1 text-left font-normal text-faint">说明</TH>
-                </TR>
-              </THead>
-              <tbody>
-                {(qLedger.data?.items ?? []).map((r) => (
-                  <TR key={r.id} className="border-t border-border">
-                    <TD className="p-1">{r.ts}</TD>
-                    <TD className="p-1">{r.kind === "topup" ? "充值" : "消费"}</TD>
-                    <TD className="p-1 text-right tnum">{r.delta_micro >= 0 ? "+" : ""}{fmtCny(r.delta_micro)}</TD>
-                    <TD className="p-1 text-right tnum">{fmtCny(r.balance_after_micro)}</TD>
-                    <TD className="p-1">{r.note}</TD>
-                  </TR>
-                ))}
-                {(qLedger.data?.items.length ?? 0) === 0 && !qLedger.isError && (
-                  <TR><TD className="p-2 text-faint" colSpan={5}>暂无流水</TD></TR>
-                )}
-              </tbody>
-            </Table>
-          </TableWrap>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setLedgerFor(null)}>关闭</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        title={"删除密钥「" + (deleteTarget?.name ?? deleteTarget?.key_suffix ?? "") + "」？"}
+        description="删除后该密钥立即失效且不可恢复，使用它的客户端会收到 401。此操作不可撤销。"
+        confirmLabel="删除密钥"
+        destructive
+        onConfirm={() => {
+          if (deleteTarget === null) return;
+          deleteKey.mutate(deleteTarget.id);
+        }}
+      />
+
+      <OneTimeSecretDialog
+        open={rotatedSecret !== null}
+        title="新密钥已生成"
+        description="此密钥仅显示一次，请立即复制保存；关闭后不再可见。"
+        secret={rotatedSecret ?? ""}
+        showRecopy
+        onClose={() => setRotatedSecret(null)}
+      />
     </div>
   );
 }
