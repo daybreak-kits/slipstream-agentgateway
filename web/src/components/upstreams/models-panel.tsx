@@ -1,13 +1,13 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Radar } from "lucide-react";
+import { Plus } from "lucide-react";
 import { toast } from "sonner";
 
 import { DataTable } from "@/components/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   Dialog,
   DialogContent,
@@ -16,36 +16,188 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api, apiList, ENDPOINTS } from "@/lib/api";
-import { formatDateTime, useTimezone } from "@/lib/time";
-import type {
-  UpstreamImportResult,
-  UpstreamModel,
-  UpstreamProbeResult,
-} from "@/types";
+import { costText, markupText, MODEL_TYPE_OPTIONS, type UpstreamRow } from "./shared";
+import type { ModelParameters, UpstreamModel } from "@/types";
 
-const MODEL_TYPES = ["chat", "embedding", "rerank", "image"] as const;
+/** 能力位摘要：输入类型 → 输出类型 · 能力（与模型管理页同一口径）。 */
+function parameterSummary(parameters?: ModelParameters): string {
+  if (!parameters) return "—";
+  const input = parameters.input_types.length > 0 ? parameters.input_types.join("/") : "—";
+  const output = parameters.output_types.length > 0 ? parameters.output_types.join("/") : "—";
+  const caps: string[] = [];
+  if (parameters.tool_call) caps.push("工具");
+  if (parameters.reasoning) caps.push("推理");
+  if (parameters.structured_output) caps.push("结构化");
+  return input + " → " + output + (caps.length > 0 ? " · " + caps.join("/") : "");
+}
 
-export function UpstreamModelsPanel({ upstreamId }: { upstreamId: string }) {
-  const { mode: timezone } = useTimezone();
+/** 添加 / 编辑上游模型弹窗：模型名 + 类型 + 进价（入 / 出 / 倍率），留空 = 不修改。 */
+function ModelDialog({
+  upstreamId,
+  initial,
+  onClose,
+}: {
+  upstreamId: string;
+  initial: UpstreamModel | null;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const isEdit = initial !== null;
+  const [name, setName] = useState(initial?.name ?? "");
+  const [modelType, setModelType] = useState(initial?.model_type ?? "chat");
+  const [costIn, setCostIn] = useState(initial?.cost_input_per_1m ?? "");
+  const [costOut, setCostOut] = useState(initial?.cost_output_per_1m ?? "");
+  const [markup, setMarkup] = useState(initial?.markup ?? "");
+
+  const numericOrUndefined = (value: string): string | undefined => {
+    const text = value.trim();
+    if (text === "") return undefined;
+    return Number.isNaN(Number(text)) ? "" : text;
+  };
+  const badNumber = [costIn, costOut, markup].some((value) => {
+    const text = value.trim();
+    return text !== "" && Number.isNaN(Number(text));
+  });
+
+  const save = useMutation({
+    mutationFn: () => {
+      if (isEdit && initial) {
+        const patch: Record<string, unknown> = { name: name.trim(), model_type: modelType };
+        const cin = numericOrUndefined(costIn);
+        const cout = numericOrUndefined(costOut);
+        const mk = numericOrUndefined(markup);
+        if (cin !== undefined) patch.cost_input_per_1m = cin;
+        if (cout !== undefined) patch.cost_output_per_1m = cout;
+        if (mk !== undefined) patch.markup = mk;
+        return api.patch<UpstreamModel>(ENDPOINTS.upstreamModelUpdate(initial.id), patch);
+      }
+      return api.post<UpstreamModel>(ENDPOINTS.upstreamModelCreate, {
+        upstream_id: upstreamId,
+        name: name.trim(),
+        model_type: modelType,
+        ...(costIn.trim() !== "" ? { cost_input_per_1m: costIn.trim() } : {}),
+        ...(costOut.trim() !== "" ? { cost_output_per_1m: costOut.trim() } : {}),
+        ...(markup.trim() !== "" ? { markup: markup.trim() } : {}),
+      });
+    },
+    onSuccess: () => {
+      toast.success(isEdit ? "模型已更新" : "模型已登记");
+      void qc.invalidateQueries({ queryKey: ["upstream-models"] });
+      void qc.invalidateQueries({ queryKey: ["upstreams"] });
+      void qc.invalidateQueries({ queryKey: ["upstream", upstreamId] });
+      onClose();
+    },
+  });
+
+  const canSave = name.trim() !== "" && !badNumber;
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{isEdit ? "编辑模型 " + initial.name : "添加模型"}</DialogTitle>
+          <DialogDescription>
+            上游模型是发给上游的原始名称；进价为元 / 1M 词元，倍率 = 花费 ÷ 成本，价格也可在价目管理维护。
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <Field>
+            <FieldLabel htmlFor="up-model-name">模型名</FieldLabel>
+            <Input id="up-model-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="如 gpt-5-mini" className="font-mono" />
+          </Field>
+          <Field>
+            <FieldLabel>类型</FieldLabel>
+            <Select value={modelType} onValueChange={setModelType}>
+              <SelectTrigger aria-label="模型类型">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {MODEL_TYPE_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <div className="grid grid-cols-3 gap-2">
+            <Field>
+              <FieldLabel htmlFor="up-model-cost-in">进价·输入</FieldLabel>
+              <Input id="up-model-cost-in" inputMode="decimal" value={costIn} onChange={(e) => setCostIn(e.target.value)} placeholder="元 / 1M" />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="up-model-cost-out">进价·输出</FieldLabel>
+              <Input id="up-model-cost-out" inputMode="decimal" value={costOut} onChange={(e) => setCostOut(e.target.value)} placeholder="元 / 1M" />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="up-model-markup">倍率</FieldLabel>
+              <Input id="up-model-markup" inputMode="decimal" value={markup} onChange={(e) => setMarkup(e.target.value)} placeholder="如 1.2" />
+            </Field>
+          </div>
+          {badNumber ? <p className="text-2xs text-danger-text">进价与倍率必须是数字</p> : null}
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>取消</Button>
+          <Button disabled={!canSave || save.isPending} onClick={() => save.mutate()}>
+            {save.isPending ? "保存中…" : "保存"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Tab2 路由与映射：本上游登记的上游模型表。
+ *  说明：后端只有上游级 test-connection，没有模型级探测；「探测」列如实展示上游级最近探测。 */
+export function UpstreamModelsPanel({ upstream }: { upstream: UpstreamRow }) {
+  const qc = useQueryClient();
   const q = useQuery({
     queryKey: ["upstream-models"],
     queryFn: () => apiList<UpstreamModel>(ENDPOINTS.upstreamModels),
   });
-  const [discovering, setDiscovering] = useState(false);
-  // 稳定引用：TanStack Table 的行模型 memo 依赖 data 引用，每次渲染都 filter 出新数组
-  // 会触发 _autoResetPageIndex → setState → 再渲染的同步死循环（筛选框一输入就卡死）。
+  const [dialog, setDialog] = useState<{ open: boolean; initial: UpstreamModel | null }>({ open: false, initial: null });
+  const [deleting, setDeleting] = useState<UpstreamModel | null>(null);
+
+  // 稳定引用：TanStack Table 行模型 memo 依赖 data 引用（见 DataTable 注释）。
   const rows = useMemo(
-    () => (q.data?.items ?? []).filter((model) => model.upstream_id === upstreamId),
-    [q.data, upstreamId],
+    () => (q.data?.items ?? []).filter((model) => model.upstream_id === upstream.id),
+    [q.data, upstream.id],
+  );
+
+  const toggle = useMutation({
+    mutationFn: (model: UpstreamModel) =>
+      api.patch<UpstreamModel>(ENDPOINTS.upstreamModelUpdate(model.id), { enabled: !model.enabled }),
+    onSuccess: (model) => {
+      toast.success(model.enabled ? "模型已启用" : "模型已关闭");
+      void qc.invalidateQueries({ queryKey: ["upstream-models"] });
+    },
+  });
+
+  const del = useMutation({
+    mutationFn: (model: UpstreamModel) => api.del<void>(ENDPOINTS.upstreamModelUpdate(model.id)),
+    onSuccess: () => {
+      toast.success("模型已删除");
+      setDeleting(null);
+      void qc.invalidateQueries({ queryKey: ["upstream-models"] });
+      void qc.invalidateQueries({ queryKey: ["upstream", upstream.id] });
+    },
+  });
+
+  const probe = upstream.last_probe;
+  const probeBadge = probe ? (
+    <Badge tone={probe.status === "ok" ? "success" : probe.status === "timeout" ? "warning" : "danger"}>
+      {probe.status === "ok" ? "连通" : probe.status === "timeout" ? "超时" : "失败"}
+    </Badge>
+  ) : (
+    <Badge tone="neutral">未测试</Badge>
   );
 
   const columns: ColumnDef<UpstreamModel, unknown>[] = [
     {
       accessorKey: "name",
-      header: "模型名",
+      header: "上游模型",
       cell: (c) => <span className="tnum font-medium text-title">{c.row.original.name}</span>,
     },
     {
@@ -54,19 +206,54 @@ export function UpstreamModelsPanel({ upstreamId }: { upstreamId: string }) {
       cell: (c) => <Badge tone="info">{c.row.original.model_type}</Badge>,
     },
     {
+      id: "params",
+      header: "参数摘要",
+      cell: (c) => <span className="text-2xs text-body">{parameterSummary(c.row.original.parameters)}</span>,
+    },
+    {
+      id: "price",
+      header: "进价（入 · 出 · 倍率）",
+      cell: (c) => (
+        <span className="tnum text-2sm text-body">
+          {costText(c.row.original.cost_input_per_1m)} · {costText(c.row.original.cost_output_per_1m)} · {markupText(c.row.original.markup)}
+        </span>
+      ),
+    },
+    {
       accessorKey: "enabled",
       header: "状态",
       cell: (c) =>
-        c.row.original.enabled ? <Badge tone="success">启用</Badge> : <Badge tone="neutral">停用</Badge>,
+        c.row.original.enabled ? <Badge tone="success">启用</Badge> : <Badge tone="neutral">关闭</Badge>,
     },
     {
-      accessorKey: "created_at_ms",
-      header: "登记时间",
-      cell: (c) => (
-        <span className="tnum text-2xs text-body">
-          {formatDateTime(c.row.original.created_at_ms, timezone)}
-        </span>
-      ),
+      id: "probe",
+      header: "探测",
+      cell: () => probeBadge,
+    },
+    {
+      id: "actions",
+      header: "操作",
+      cell: (c) => {
+        const row = c.row.original;
+        return (
+          <div className="flex flex-wrap gap-1">
+            <Button variant="ghost" size="dense" onClick={() => setDialog({ open: true, initial: row })}>编辑</Button>
+            <Button variant="ghost" size="dense" disabled={toggle.isPending} onClick={() => toggle.mutate(row)}>
+              {row.enabled ? "关闭" : "启用"}
+            </Button>
+            <Button
+              variant="ghost"
+              size="dense"
+              className="text-danger-text"
+              disabled={(row.target_count ?? 0) > 0}
+              title={(row.target_count ?? 0) > 0 ? "被公开模型成员引用，先移除成员再删除" : undefined}
+              onClick={() => setDeleting(row)}
+            >
+              删除
+            </Button>
+          </div>
+        );
+      },
     },
   ];
 
@@ -74,12 +261,11 @@ export function UpstreamModelsPanel({ upstreamId }: { upstreamId: string }) {
     <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-2xs text-faint">
-          本上游登记 <span className="tnum">{rows.length}</span> 个模型；「发现模型」会探测{" "}
-          <span className="font-mono">{"<base_url>/models"}</span>{" "}
-          并写一条探测记录，选中结果可批量导入。
+          已接入 <span className="tnum">{rows.length}</span> 个模型；公开模型通过成员引用这里的行。
+          探测列为上游级连通状态（后端仅提供上游级测试连接，没有模型级探测）。
         </p>
-        <Button size="sm" onClick={() => setDiscovering(true)}>
-          <Radar className="h-3.5 w-3.5" /> 发现模型
+        <Button size="sm" onClick={() => setDialog({ open: true, initial: null })}>
+          <Plus className="h-3.5 w-3.5" /> 添加模型
         </Button>
       </div>
       <DataTable
@@ -88,174 +274,31 @@ export function UpstreamModelsPanel({ upstreamId }: { upstreamId: string }) {
         loading={q.isPending}
         error={q.isError ? (q.error as Error).message : null}
         onRetry={() => void q.refetch()}
-        emptyText="还没有登记模型，试试「发现模型」"
-        filterPlaceholder="筛选模型名 / 类型"
+        emptyText="还没有登记模型；用页头「获取上游模型」探测导入，或手动添加"
+        filterPlaceholder="搜索模型名"
       />
-      {discovering ? (
-        <DiscoverModelsDialog
-          upstreamId={upstreamId}
-          onClose={() => setDiscovering(false)}
-        />
+      {dialog.open ? (
+        <ModelDialog upstreamId={upstream.id} initial={dialog.initial} onClose={() => setDialog({ open: false, initial: null })} />
       ) : null}
+      <ConfirmDialog
+        open={deleting !== null}
+        onOpenChange={(open) => { if (!open) setDeleting(null); }}
+        title={"删除上游模型 " + (deleting?.name ?? "") + "？"}
+        description="被公开模型引用的模型不能删除；历史计费流水保留。此操作不可逆。"
+        confirmLabel="确认删除"
+        destructive
+        onConfirm={() => { if (deleting !== null) del.mutate(deleting); }}
+      />
     </div>
   );
 }
 
-function DiscoverModelsDialog({
-  upstreamId,
-  onClose,
-}: {
-  upstreamId: string;
-  onClose: () => void;
-}) {
-  const qc = useQueryClient();
-  const discover = useQuery({
-    queryKey: ["upstream-discover", upstreamId],
-    queryFn: () => api.post<UpstreamProbeResult>(ENDPOINTS.discoverModels(upstreamId)),
-    retry: false,
-    staleTime: Number.POSITIVE_INFINITY,
-  });
-  const [selected, setSelected] = useState<Set<string> | null>(null);
-  const [modelType, setModelType] = useState<string>("chat");
-
-  const models = discover.data?.models ?? [];
-  const chosen = selected ?? new Set(models);
-  const allSelected = models.length > 0 && models.every((name) => chosen.has(name));
-  const ok = discover.data?.status === "ok";
-
-  const toggle = (name: string) => {
-    const next = new Set(chosen);
-    if (next.has(name)) next.delete(name);
-    else next.add(name);
-    setSelected(next);
-  };
-
-  const importModels = useMutation({
-    mutationFn: () =>
-      api.post<UpstreamImportResult>(ENDPOINTS.upstreamImportModels(upstreamId), {
-        names: models.filter((name) => chosen.has(name)),
-        model_type: modelType,
-      }),
-    onSuccess: (result) => {
-      toast.success("导入完成", {
-        description:
-          "新增 " +
-          result.created.length +
-          " 个" +
-          (result.skipped.length > 0
-            ? "；已存在跳过 " + result.skipped.length + " 个"
-            : "") +
-          (result.errors.length > 0 ? "；失败 " + result.errors.length + " 个" : ""),
-      });
-      void qc.invalidateQueries({ queryKey: ["upstream-models"] });
-      void qc.invalidateQueries({ queryKey: ["upstreams"] });
-      void qc.invalidateQueries({ queryKey: ["upstream", upstreamId] });
-      onClose();
-    },
-    onError: (e: Error) => toast.error("导入失败", { description: e.message }),
-  });
-
+/** 未保存草稿占位：路由与映射 / 请求与响应两个 Tab 在新建时不可用。 */
+export function LockedTabNotice({ subject }: { subject: string }) {
   return (
-    <Dialog
-      open
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
-    >
-      <DialogContent className="max-w-xl">
-        <DialogHeader>
-          <DialogTitle>发现模型</DialogTitle>
-          <DialogDescription>
-            调用上游的 models 接口；结果同时记入「健康」页的最近探测。导入只登记模型，价格在价目页维护。
-          </DialogDescription>
-        </DialogHeader>
-
-        {discover.isPending ? (
-          <p className="py-6 text-center text-2sm text-faint">正在请求上游…</p>
-        ) : discover.isError ? (
-          <div className="space-y-2 py-4 text-2sm text-danger-text">
-            <p>发现失败：{(discover.error as Error).message}</p>
-            <Button variant="outline" size="sm" onClick={() => void discover.refetch()}>
-              重试
-            </Button>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-center gap-3 text-2xs text-body">
-              <Badge tone={ok ? "success" : "danger"}>
-                {ok ? "连接正常" : "连接失败"}
-              </Badge>
-              <span className="tnum">HTTP {discover.data?.http_status ?? "—"}</span>
-              <span className="tnum">{discover.data?.latency_ms ?? 0} ms</span>
-              <span className="tnum">发现 {models.length} 个模型</span>
-            </div>
-            {discover.data?.message ? (
-              <p className="text-2sm text-danger-text">{discover.data.message}</p>
-            ) : null}
-            {ok && models.length > 0 ? (
-              <>
-                <label className="flex items-center gap-2 text-2sm text-body">
-                  <Checkbox
-                    checked={allSelected ? true : chosen.size > 0 ? "indeterminate" : false}
-                    onCheckedChange={() =>
-                      setSelected(allSelected ? new Set() : new Set(models))
-                    }
-                    aria-label="全选发现结果"
-                  />
-                  全选（已选 {chosen.size} / {models.length}）
-                </label>
-                <div className="max-h-64 space-y-1 overflow-y-auto rounded-md border border-border p-2">
-                  {models.map((name) => (
-                    <label
-                      key={name}
-                      className="flex items-center gap-2 rounded px-1 py-1 text-2sm text-body hover:bg-surface-2"
-                    >
-                      <Checkbox
-                        checked={chosen.has(name)}
-                        onCheckedChange={() => toggle(name)}
-                        aria-label={"选择 " + name}
-                      />
-                      <span className="tnum font-mono text-2xs">{name}</span>
-                    </label>
-                  ))}
-                </div>
-                <div className="flex items-center gap-2">
-                  <Label>导入类型</Label>
-                  <Select value={modelType} onValueChange={setModelType}>
-                    <SelectTrigger className="h-8 w-36">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {MODEL_TYPES.map((type) => (
-                        <SelectItem key={type} value={type}>
-                          {type}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </>
-            ) : (
-              <p className="text-2sm text-faint">
-                上游返回 2xx 但没有可识别的模型列表（支持 {"{data:[{id}]}"} 与{" "}
-                {"{models:[...]}"} 两种形态）。
-              </p>
-            )}
-          </div>
-        )}
-
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>
-            关闭
-          </Button>
-          <Button
-            disabled={!ok || chosen.size === 0 || importModels.isPending}
-            onClick={() => importModels.mutate()}
-          >
-            {importModels.isPending ? "导入中…" : "导入所选 " + chosen.size + " 个"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <div className="rounded-lg border border-dashed border-border bg-surface-2/40 px-6 py-12 text-center">
+      <p className="text-2sm text-body">先保存上游渠道，再配置{subject}</p>
+      <p className="mt-1 text-2xs text-faint">路由与映射、改写规则都挂在已保存的上游上。</p>
+    </div>
   );
 }

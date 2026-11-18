@@ -1,10 +1,9 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ColumnDef } from "@tanstack/react-table";
-import { Link } from "react-router-dom";
+import { Plus } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
-import { DataTable } from "@/components/data-table";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,429 +17,419 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Empty } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { PAGE_SIZE_OPTIONS, Pagination } from "@/components/ui/pagination";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Table, TableWrap, TD, TH, THead, TR } from "@/components/ui/table";
 import { api, apiList, ENDPOINTS } from "@/lib/api";
-import type { Upstream, UpstreamBatchResult, UpstreamProbeResult, Vendor } from "@/types";
-
-const STYLE_LABELS: Record<string, string> = {
-  openai_chat: "OpenAI Chat",
-  anthropic_messages: "Anthropic Messages",
-  other: "其他",
-};
-const STYLES = ["openai_chat", "anthropic_messages", "other"];
+import { formatDateTime, useTimezone } from "@/lib/time";
+import { usePermissions } from "@/lib/permissions";
+import { API_STYLE_LABELS, probeStatusView, type ProbeResultView, type UpstreamRow } from "@/components/upstreams/shared";
+import type { UpstreamBatchResult, Vendor } from "@/types";
 
 type BatchAction = "enable" | "disable" | "delete";
 
 const BATCH_LABEL: Record<BatchAction, string> = {
   enable: "批量启用",
-  disable: "批量停用",
+  disable: "批量关闭",
   delete: "批量删除",
 };
 
-function ProbeBadge({ upstream }: { upstream: Upstream }) {
-  const probe = upstream.last_probe;
-  if (!probe) return <Badge tone="neutral">未测试</Badge>;
-  if (probe.status === "ok") {
-    return <Badge tone="success">正常 {probe.latency_ms}ms</Badge>;
-  }
-  if (probe.status === "timeout") return <Badge tone="warning">超时</Badge>;
-  return <Badge tone="danger">失败</Badge>;
-}
+const STATUS_OPTIONS = [
+  { value: "all", label: "全部" },
+  { value: "enabled", label: "启用" },
+  { value: "disabled", label: "关闭" },
+];
 
-function UpstreamDialog({ initial, vendors, onClose }: { initial: Upstream | null; vendors: Vendor[]; onClose: () => void }) {
-  const qc = useQueryClient();
-  const isEdit = initial !== null;
-  const [vendorId, setVendorId] = useState(initial?.vendor_id ?? vendors[0]?.id ?? "");
-  const [baseUrl, setBaseUrl] = useState(initial?.base_url ?? "");
-  const [apiStyle, setApiStyle] = useState(initial?.api_style ?? "openai_chat");
-  const [apiKey, setApiKey] = useState("");
-  const [enabled, setEnabled] = useState(initial?.enabled ?? true);
-
-  const save = useMutation({
-    mutationFn: () =>
-      isEdit && initial
-        ? api.patch<Upstream>(ENDPOINTS.upstreamDetail(initial.id), { base_url: baseUrl.trim(), api_style: apiStyle, enabled })
-        : api.post<Upstream>(ENDPOINTS.upstreamCreate, { vendor_id: vendorId, base_url: baseUrl.trim(), api_style: apiStyle, api_key: apiKey }),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["upstreams"] });
-      toast.success(isEdit ? "上游已更新" : "上游已创建", {
-        description: isEdit ? undefined : "首把密钥已登记为「默认密钥」，可在详情页添加备用密钥。",
-      });
-      onClose();
-    },
-    onError: (e) => toast.error("保存失败", { description: (e as Error).message }),
-  });
-
-  const canSave = baseUrl.trim() !== "" && (isEdit ? true : vendorId !== "" && apiKey.trim() !== "");
-
+/** 批量删除红色确认；超过 10 条需手动输入「删除」二字（DESIGN-AUDIT §4 三档确认）。 */
+function BatchDeleteDialog({
+  count,
+  pending,
+  onConfirm,
+  onClose,
+}: {
+  count: number;
+  pending: boolean;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const [typed, setTyped] = useState("");
+  const needTyping = count > 10;
+  const ready = !needTyping || typed.trim() === "删除";
   return (
-    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{isEdit && initial ? "编辑上游 " + initial.name : "新建上游"}</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-3">
-          {isEdit && initial ? (
-            <div className="rounded-md border border-border bg-surface-2 px-3 py-2 text-2xs text-faint">
-              名称与厂商不可修改：名称由厂商 slug 自动编号（{"{vendor_slug}-NN"}）；密钥在详情页「密钥」标签管理。
-            </div>
-          ) : (
-            <div className="space-y-1">
-              <Label>厂商</Label>
-              <Select value={vendorId} onValueChange={setVendorId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="选择厂商" />
-                </SelectTrigger>
-                <SelectContent>
-                  {vendors.map((v) => (
-                    <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-2xs text-faint">名称自动编号为 {"{vendor_slug}-NN"}，无需填写。</p>
-            </div>
-          )}
-          <div className="space-y-1">
-            <Label>Base URL</Label>
-            <Input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://..." />
-          </div>
-          <div className="space-y-1">
-            <Label>接口风格</Label>
-            <Select value={apiStyle} onValueChange={setApiStyle}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {STYLES.map((s) => (
-                  <SelectItem key={s} value={s}>{STYLE_LABELS[s] ?? s}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {isEdit ? (
-            <div className="flex items-center gap-2">
-              <Checkbox id="up-enabled" checked={enabled} onCheckedChange={(checked) => setEnabled(checked === true)} />
-              <Label htmlFor="up-enabled">启用该上游</Label>
-            </div>
-          ) : (
-            <div className="space-y-1">
-              <Label>API Key</Label>
-              <Input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="仅提交后保存为密文，控制台不回显" />
-            </div>
-          )}
-        </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>取消</Button>
-          <Button disabled={save.isPending || !canSave} onClick={() => save.mutate()}>
-            {save.isPending ? "保存中…" : "保存"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <AlertDialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>批量删除 {count} 个上游渠道？</AlertDialogTitle>
+          <AlertDialogDescription>
+            此操作不可逆：逐项处理，被公开模型目标引用的上游会单独拒绝并保留，其余照常删除；密钥、上游模型与探测记录连带删除，历史计费流水保留。
+            {needTyping ? "数量超过 10 条，请输入「删除」二字确认。" : ""}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        {needTyping ? (
+          <Input
+            value={typed}
+            onChange={(event) => setTyped(event.target.value)}
+            placeholder="输入「删除」以确认"
+            aria-label="输入删除以确认"
+            autoFocus
+          />
+        ) : null}
+        <AlertDialogFooter>
+          <AlertDialogCancel>取消</AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-danger text-white hover:bg-danger/90"
+            disabled={!ready || pending}
+            onClick={(event) => { event.preventDefault(); onConfirm(); }}
+          >
+            {pending ? "删除中…" : "确认删除"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 
 export function UpstreamsPage() {
   const qc = useQueryClient();
-  const q = useQuery({ queryKey: ["upstreams"], queryFn: () => apiList<Upstream>(ENDPOINTS.upstreams) });
+  const navigate = useNavigate();
+  const { can } = usePermissions();
+  const canWrite = can("upstreams:write");
+  const { mode: timezone } = useTimezone();
+
+  const q = useQuery({ queryKey: ["upstreams"], queryFn: () => apiList<UpstreamRow>(ENDPOINTS.upstreams) });
   const vendorsQ = useQuery({ queryKey: ["vendors"], queryFn: () => apiList<Vendor>(ENDPOINTS.vendors) });
-  const [dialog, setDialog] = useState<{ open: boolean; initial: Upstream | null }>({ open: false, initial: null });
+
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [deleting, setDeleting] = useState<Upstream | null>(null);
-  const [deleteError, setDeleteError] = useState("");
-  const [batchConfirm, setBatchConfirm] = useState<BatchAction | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_OPTIONS[0]);
+  const [deleting, setDeleting] = useState<UpstreamRow | null>(null);
+  const [batchDelete, setBatchDelete] = useState(false);
 
-  // 稳定引用：加载中 `?? []` 每次渲染都是新数组，见 DataTable 注释。
-  const rows = useMemo(() => q.data?.items ?? [], [q.data]);
-  const allSelected = rows.length > 0 && rows.every((row) => selected.has(row.id));
+  const allItems = q.data?.items ?? [];
+  const vendorName = (vendorId: string | null | undefined) =>
+    vendorsQ.data?.items.find((vendor) => vendor.id === vendorId)?.name ?? "未分组";
+
+  const needle = search.trim().toLowerCase();
+  const rows = useMemo(
+    () => allItems.filter((row) => {
+      if (status === "enabled" && !row.enabled) return false;
+      if (status === "disabled" && row.enabled) return false;
+      if (needle === "") return true;
+      return (
+        row.name.toLowerCase().includes(needle) ||
+        row.base_url.toLowerCase().includes(needle)
+      );
+    }),
+    [allItems, needle, status],
+  );
+
+  const totalPages = Math.max(1, Math.ceil(rows.length / Math.max(1, pageSize)));
+  const currentPage = Math.min(Math.max(1, page), totalPages);
+  const pagedRows = useMemo(
+    () => rows.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+    [rows, currentPage, pageSize],
+  );
+
+  const allSelected = pagedRows.length > 0 && pagedRows.every((row) => selected.has(row.id));
   const someSelected = selected.size > 0 && !allSelected;
-  const vendorName = (id: string) => vendorsQ.data?.items.find((v) => v.id === id)?.name ?? id;
-
-  const toggleRow = (id: string) => {
+  const toggleRow = (rowId: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(rowId)) next.delete(rowId);
+      else next.add(rowId);
       return next;
     });
   };
-
-  const toggleAll = () => {
-    if (allSelected) setSelected(new Set());
-    else setSelected(new Set(rows.map((row) => row.id)));
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(pagedRows.map((row) => row.id)));
+  const clearFilters = () => {
+    setSearch("");
+    setStatus("all");
+    setPage(1);
   };
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ["upstreams"] });
-    void qc.invalidateQueries({ queryKey: ["upstream-keys"] });
-    void qc.invalidateQueries({ queryKey: ["upstream-models"] });
   };
 
   const toggle = useMutation({
-    mutationFn: (upstream: Upstream) =>
-      api.patch<Upstream>(ENDPOINTS.upstreamDetail(upstream.id), { enabled: !upstream.enabled }),
+    mutationFn: (upstream: UpstreamRow) =>
+      api.patch<UpstreamRow>(ENDPOINTS.upstreamDetail(upstream.id), { enabled: !upstream.enabled }),
     onSuccess: (upstream) => {
-      toast.success(upstream.enabled ? "上游已启用" : "上游已停用");
+      toast.success(upstream.enabled ? "上游已启用" : "上游已关闭");
       refresh();
     },
-    onError: (e: Error) => toast.error("操作失败", { description: e.message }),
+    onError: () => { /* api.ts 已统一提示 */ },
   });
 
   const test = useMutation({
-    mutationFn: (upstream: Upstream) =>
-      api.post<UpstreamProbeResult>(ENDPOINTS.upstreamTest(upstream.id)),
+    mutationFn: (upstream: UpstreamRow) => api.post<ProbeResultView>(ENDPOINTS.upstreamTest(upstream.id)),
     onSuccess: (result) => {
       if (result.status === "ok") {
-        toast.success("连通性测试通过", {
-          description: result.model_count + " 个模型 · " + result.latency_ms + " ms",
-        });
+        toast.success("连通性测试通过", { description: (result.model_count ?? 0) + " 个模型 · " + result.latency_ms + " ms" });
       } else {
-        toast.error("连通性测试未通过", { description: result.message });
+        toast.error("连通性测试未通过", { description: result.message || undefined });
       }
       refresh();
     },
-    onError: (e: Error) => toast.error("连通性测试失败", { description: e.message }),
   });
 
   const del = useMutation({
-    mutationFn: (upstream: Upstream) =>
-      api.del<{ deleted: string }>(ENDPOINTS.upstreamDetail(upstream.id)),
+    mutationFn: (upstream: UpstreamRow) => api.del<{ deleted: string }>(ENDPOINTS.upstreamDetail(upstream.id)),
     onSuccess: () => {
-      toast.success("上游已删除");
+      toast.success("上游渠道已删除");
       setDeleting(null);
-      setDeleteError("");
       refresh();
     },
-    onError: (e: Error) => setDeleteError(e.message),
   });
 
   const batch = useMutation({
     mutationFn: (vars: { ids: string[]; action: BatchAction }) =>
       api.patch<UpstreamBatchResult>(ENDPOINTS.upstreamBatch, { ids: vars.ids, action: vars.action }),
     onSuccess: (result, vars) => {
-      const nameOf = (id: string) => rows.find((row) => row.id === id)?.name ?? id;
+      const nameOf = (rowId: string) => allItems.find((row) => row.id === rowId)?.name ?? rowId;
       const parts = ["成功 " + result.changed.length + " 个"];
       if (result.missing.length > 0) parts.push(result.missing.length + " 个不存在");
       if (result.failed.length > 0) {
         parts.push(
-          result.failed.length +
-            " 个被拒绝：" +
-            result.failed.map((item) => nameOf(item.id) + "（" + item.message + "）").join("；"),
+          result.failed.length + " 个被拒绝：" +
+          result.failed.map((item) => nameOf(item.id) + "（" + item.message + "）").join("；"),
         );
       }
       const description = parts.join("；");
       if (result.failed.length > 0) toast.warning(BATCH_LABEL[vars.action] + "部分完成", { description });
       else toast.success(BATCH_LABEL[vars.action] + "完成", { description });
       setSelected(new Set());
-      setBatchConfirm(null);
+      setBatchDelete(false);
       refresh();
     },
-    onError: (e: Error) => toast.error("批量操作失败", { description: e.message }),
+    onError: () => { /* api.ts 已统一提示 */ },
   });
 
-  const columns: ColumnDef<Upstream, unknown>[] = [
-    {
-      id: "select",
-      header: () => (
-        <Checkbox
-          checked={allSelected ? true : someSelected ? "indeterminate" : false}
-          onCheckedChange={() => toggleAll()}
-          aria-label="全选当前列表"
-        />
-      ),
-      cell: (cell) => (
-        <Checkbox
-          checked={selected.has(cell.row.original.id)}
-          onCheckedChange={() => toggleRow(cell.row.original.id)}
-          aria-label={"选择 " + cell.row.original.name}
-        />
-      ),
-    },
-    {
-      accessorKey: "name",
-      header: "名称",
-      cell: (c) => (
-        <Link to={"/upstreams/" + c.row.original.id} className="font-medium text-primary-text hover:underline">
-          {c.row.original.name}
-        </Link>
-      ),
-    },
-    { id: "vendor", accessorFn: (r) => vendorName(r.vendor_id), header: "厂商", cell: (c) => <span>{String(c.getValue())}</span> },
-    { accessorKey: "base_url", header: "Base URL", cell: (c) => <span className="font-mono text-2xs text-body">{c.row.original.base_url}</span> },
-    {
-      id: "keys",
-      accessorFn: (r) => r.key_count ?? 0,
-      header: "密钥",
-      cell: (c) => <span className="tnum">{String(c.getValue())}</span>,
-    },
-    {
-      id: "models",
-      accessorFn: (r) => r.model_count ?? 0,
-      header: "模型数",
-      cell: (c) => <span className="tnum">{String(c.getValue())}</span>,
-    },
-    {
-      id: "probe",
-      header: "连通性",
-      cell: (c) => <ProbeBadge upstream={c.row.original} />,
-    },
-    {
-      accessorKey: "enabled",
-      header: "状态",
-      cell: (c) => (
-        <Switch
-          checked={c.row.original.enabled}
-          disabled={toggle.isPending && toggle.variables?.id === c.row.original.id}
-          onCheckedChange={() => toggle.mutate(c.row.original)}
-          aria-label={(c.row.original.enabled ? "停用 " : "启用 ") + c.row.original.name}
-        />
-      ),
-    },
-    {
-      id: "actions",
-      header: "操作",
-      cell: (c) => (
-        <div className="flex gap-1">
-          <Button variant="ghost" size="dense" onClick={() => setDialog({ open: true, initial: c.row.original })}>
-            编辑
-          </Button>
-          <Button
-            variant="ghost"
-            size="dense"
-            disabled={test.isPending && test.variables?.id === c.row.original.id}
-            onClick={() => test.mutate(c.row.original)}
-          >
-            {test.isPending && test.variables?.id === c.row.original.id ? "测试中…" : "测试"}
-          </Button>
-          <Button
-            variant="ghost"
-            size="dense"
-            className="text-danger-text"
-            onClick={() => {
-              setDeleteError("");
-              setDeleting(c.row.original);
-            }}
-          >
-            删除
-          </Button>
-        </div>
-      ),
-    },
-  ];
+  const openEditor = (row: UpstreamRow) => navigate("/upstreams/" + row.id);
 
   return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-2xs text-faint">
-          名称由厂商 slug 自动编号；勾选行可批量启用 / 停用 / 删除。删除受引用保护：被对外模型引用的上游拒绝删除。
-        </p>
-        <Button size="sm" onClick={() => setDialog({ open: true, initial: null })}>新建上游</Button>
-      </div>
-
-      {selected.size > 0 && (
-        <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-surface-2 px-3 py-2">
-          <span className="text-2sm text-body">
-            已选 <span className="tnum font-medium text-title">{selected.size}</span> / <span className="tnum">{rows.length}</span> 个上游
-          </span>
-          <Button variant="outline" size="sm" disabled={batch.isPending} onClick={() => batch.mutate({ ids: Array.from(selected), action: "enable" })}>
-            批量启用
-          </Button>
-          <Button variant="outline" size="sm" disabled={batch.isPending} onClick={() => batch.mutate({ ids: Array.from(selected), action: "disable" })}>
-            批量停用
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-danger-text"
-            disabled={batch.isPending}
-            onClick={() => setBatchConfirm("delete")}
-          >
-            批量删除
-          </Button>
-          <Button variant="ghost" size="sm" className="ml-auto" disabled={batch.isPending} onClick={() => setSelected(new Set())}>
-            清除选择
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          value={search}
+          onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+          placeholder="搜索名称或连接地址"
+          aria-label="搜索名称或连接地址"
+          className="max-w-64"
+        />
+        <Select value={status} onValueChange={(value) => { setStatus(value); setPage(1); }}>
+          <SelectTrigger className="w-28" aria-label="按状态筛选">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {STATUS_OPTIONS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {selected.size > 0 ? (
+            <>
+              <span className="text-2xs text-faint">已选 <span className="tnum font-medium text-title">{selected.size}</span></span>
+              <Button variant="outline" size="sm" disabled={batch.isPending || !canWrite} onClick={() => batch.mutate({ ids: Array.from(selected), action: "enable" })}>
+                批量启用
+              </Button>
+              <Button variant="outline" size="sm" disabled={batch.isPending || !canWrite} onClick={() => batch.mutate({ ids: Array.from(selected), action: "disable" })}>
+                批量关闭
+              </Button>
+              <Button variant="ghost" size="sm" className="text-danger-text" disabled={batch.isPending || !canWrite} onClick={() => setBatchDelete(true)}>
+                批量删除
+              </Button>
+              <Button variant="ghost" size="sm" disabled={batch.isPending} onClick={() => setSelected(new Set())}>
+                清除选择
+              </Button>
+            </>
+          ) : null}
+          <Button size="sm" disabled={!canWrite} onClick={() => navigate("/upstreams/new")}>
+            <Plus className="h-3.5 w-3.5" /> 新建上游渠道
           </Button>
         </div>
-      )}
+      </div>
 
-      <DataTable
-        columns={columns}
-        data={rows}
-        loading={q.isPending}
-        error={q.isError ? (q.error as Error).message : null}
-        onRetry={() => void q.refetch()}
-        emptyText="暂无上游"
-        emptyAction={<Button size="sm" onClick={() => setDialog({ open: true, initial: null })}>新建上游</Button>}
-        filterPlaceholder="筛选名称 / 厂商 / 地址"
+      <TableWrap className="rounded-lg border border-border bg-surface">
+        <Table>
+          <THead>
+            <tr>
+              <TH className="w-10">
+                <Checkbox
+                  checked={allSelected ? true : someSelected ? "indeterminate" : false}
+                  onCheckedChange={() => toggleAll()}
+                  aria-label="全选当前页"
+                />
+              </TH>
+              <TH>名称</TH>
+              <TH>类型</TH>
+              <TH className="text-right">密钥数</TH>
+              <TH className="text-right">模型数</TH>
+              <TH>最近探测</TH>
+              <TH>操作</TH>
+            </tr>
+          </THead>
+          <tbody data-testid="upstream-table-body">
+            {q.isPending ? (
+              Array.from({ length: 5 }, (_, index) => (
+                <TR key={index}>
+                  {["w-10", "", "", "text-right", "text-right", "", ""].map((cell, cellIndex) => (
+                    <TD key={cellIndex} className={cell}>
+                      <Skeleton className="h-4 w-full max-w-32" />
+                    </TD>
+                  ))}
+                </TR>
+              ))
+            ) : q.isError ? (
+              <tr>
+                <td colSpan={7}>
+                  <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
+                    <p className="text-sm text-danger-text">加载失败：{(q.error as Error).message}</p>
+                    <Button variant="outline" size="sm" onClick={() => void q.refetch()}>重试</Button>
+                  </div>
+                </td>
+              </tr>
+            ) : allItems.length === 0 ? (
+              <tr>
+                <td colSpan={7}>
+                  <Empty
+                    title="暂无上游渠道"
+                    description="先建一个上游渠道：填连接地址、选协议风格（推荐自动探测）、登记第一把密钥。"
+                    action={canWrite ? (
+                      <Button size="sm" onClick={() => navigate("/upstreams/new")}>新建上游渠道</Button>
+                    ) : undefined}
+                  />
+                </td>
+              </tr>
+            ) : pagedRows.length === 0 ? (
+              <tr>
+                <td colSpan={7}>
+                  <Empty
+                    title="没有匹配的上游渠道"
+                    description="换个关键词，或清除筛选条件重试。"
+                    action={<Button variant="outline" size="sm" onClick={clearFilters}>清除筛选</Button>}
+                  />
+                </td>
+              </tr>
+            ) : (
+              pagedRows.map((row) => {
+                const probe = row.last_probe;
+                const probeStatus = probeStatusView(probe?.status);
+                return (
+                  <TR key={row.id} className="cursor-pointer transition-colors hover:bg-surface-2" onClick={() => openEditor(row)}>
+                    <TD onClick={(event) => event.stopPropagation()}>
+                      <Checkbox
+                        checked={selected.has(row.id)}
+                        onCheckedChange={() => toggleRow(row.id)}
+                        aria-label={"选择 " + row.name}
+                      />
+                    </TD>
+                    <TD onClick={(event) => event.stopPropagation()}>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <Link
+                            to={"/upstreams/" + row.id}
+                            className="font-medium text-primary-text hover:underline"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            {row.name}
+                          </Link>
+                          {!row.enabled ? <Badge tone="neutral">已关闭</Badge> : null}
+                        </div>
+                        <div className="text-2xs text-faint">{vendorName(row.vendor_id)}</div>
+                      </div>
+                    </TD>
+                    <TD>
+                      <Badge tone="info">{API_STYLE_LABELS[row.api_style] ?? row.api_style}</Badge>
+                    </TD>
+                    <TD className="text-right"><span className="tnum text-2sm">{row.key_count ?? 0}</span></TD>
+                    <TD className="text-right"><span className="tnum text-2sm">{row.model_count ?? 0}</span></TD>
+                    <TD>
+                      {probe ? (
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <Badge tone={probeStatus.tone}>{probeStatus.label}</Badge>
+                            <span className="tnum text-2xs text-body">{probe.latency_ms} ms</span>
+                          </div>
+                          <div className="tnum text-2xs text-faint">{formatDateTime(probe.tested_at_ms, timezone)}</div>
+                        </div>
+                      ) : (
+                        <span className="text-faint">—</span>
+                      )}
+                    </TD>
+                    <TD onClick={(event) => event.stopPropagation()}>
+                      <div className="flex flex-wrap gap-1">
+                        <Button
+                          variant="ghost"
+                          size="dense"
+                          disabled={toggle.isPending || !canWrite}
+                          onClick={() => toggle.mutate(row)}
+                        >
+                          {row.enabled ? "关闭" : "启用"}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="dense"
+                          disabled={test.isPending || !canWrite}
+                          title={test.isPending && test.variables?.id === row.id ? "测试中…" : undefined}
+                          onClick={() => test.mutate(row)}
+                        >
+                          {test.isPending && test.variables?.id === row.id ? "测试中…" : "测试连接"}
+                        </Button>
+                        <Button variant="ghost" size="dense" onClick={() => openEditor(row)}>编辑</Button>
+                        <Button
+                          variant="ghost"
+                          size="dense"
+                          className="text-danger-text"
+                          disabled={!canWrite}
+                          onClick={() => setDeleting(row)}
+                        >
+                          删除
+                        </Button>
+                      </div>
+                    </TD>
+                  </TR>
+                );
+              })
+            )}
+          </tbody>
+        </Table>
+      </TableWrap>
+
+      <Pagination
+        page={currentPage}
+        pageSize={pageSize}
+        total={rows.length}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+        className="rounded-lg border border-border bg-surface"
       />
-      {dialog.open ? (
-        <UpstreamDialog
-          initial={dialog.initial}
-          vendors={vendorsQ.data?.items ?? []}
-          onClose={() => setDialog({ open: false, initial: null })}
+
+      <ConfirmDialog
+        open={deleting !== null}
+        onOpenChange={(open) => { if (!open) setDeleting(null); }}
+        title={"删除上游渠道 " + (deleting?.name ?? "") + "？"}
+        description="连带删除该上游的全部密钥、上游模型与探测记录；被公开模型目标引用的上游会被拒绝删除。此操作不可逆。"
+        confirmLabel="确认删除"
+        destructive
+        onConfirm={() => { if (deleting !== null) del.mutate(deleting); }}
+      />
+
+      {batchDelete ? (
+        <BatchDeleteDialog
+          count={selected.size}
+          pending={batch.isPending}
+          onConfirm={() => batch.mutate({ ids: Array.from(selected), action: "delete" })}
+          onClose={() => setBatchDelete(false)}
         />
       ) : null}
-
-      <AlertDialog
-        open={deleting !== null}
-        onOpenChange={(v) => {
-          if (!v) {
-            setDeleting(null);
-            setDeleteError("");
-          }
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>删除上游 {deleting?.name ?? ""}？</AlertDialogTitle>
-            <AlertDialogDescription>
-              连带删除密钥、模型和探测记录；被对外模型目标引用的上游会被拒绝删除。此操作不可撤销。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {deleteError ? <p className="text-2sm text-danger-text">删除失败：{deleteError}</p> : null}
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-danger text-white hover:bg-danger/90"
-              onClick={() => { if (deleting) del.mutate(deleting); }}
-            >
-              确认删除
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={batchConfirm !== null} onOpenChange={(v) => { if (!v) setBatchConfirm(null); }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{BATCH_LABEL[batchConfirm ?? "delete"]} {selected.size} 个上游？</AlertDialogTitle>
-            <AlertDialogDescription>
-              {batchConfirm === "delete"
-                ? "批量删除逐项返回：被引用的上游会单独拒绝并保留，其余照常删除；删除不可撤销。"
-                : "启用 / 停用立即写库，停用的上游不再参与渲染计划。"}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction
-              className={batchConfirm === "delete" ? "bg-danger text-white hover:bg-danger/90" : undefined}
-              onClick={() => { if (batchConfirm !== null) batch.mutate({ ids: Array.from(selected), action: batchConfirm }); }}
-            >
-              确认{batchConfirm === "delete" ? "删除" : "执行"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }
