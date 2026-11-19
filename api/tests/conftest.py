@@ -21,6 +21,7 @@ from l04_repo.base import init_db
 from l04_repo.orm import (
     ModelTargetORM,
     PublicModelORM,
+    UpstreamKeyORM,
     UpstreamModelORM,
     UpstreamORM,
     UserORM,
@@ -305,11 +306,23 @@ def seed_channel(engine, session_factory, *, transforms=None) -> dict:
             name="testv-01",
             base_url="https://upstream.example/v1",
             api_style="openai_chat",
+            # ADR-026: the inline column is retired; the key row below is what
+            # the renderer expands into its own provider.
             api_key_enc=secret_box.encrypt("raw-upstream-key"),
             transforms_json=transforms or "",
             created_at_ms=now_ms(),
         )
         session.add(upstream)
+        session.add(
+            UpstreamKeyORM(
+                id="upk_test",
+                upstream_id=upstream.id,
+                label="默认密钥",
+                key_enc=secret_box.encrypt("raw-upstream-key"),
+                key_suffix="-key",
+                created_at_ms=now_ms(),
+            )
+        )
         model = UpstreamModelORM(
             id="umdl_test",
             upstream_id=upstream.id,

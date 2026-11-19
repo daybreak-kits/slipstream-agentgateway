@@ -38,13 +38,15 @@ def _keys(client, upstream_id: str) -> dict:
     return response.json()
 
 
-def test_new_upstream_has_one_primary_masked_key(client):
+def test_new_upstream_has_one_masked_key(client):
     upstream = _upstream(client, _vendor(client))
     keys = _keys(client, upstream["id"])
     assert keys["limit"] == 20
     assert len(keys["items"]) == 1
     key = keys["items"][0]
-    assert key["is_primary"] is True
+    # ADR-026: no primary concept; the row has never been tested.
+    assert "is_primary" not in key
+    assert key["last_test"] is None and key["last_test_at_ms"] == 0
     assert key["masked"] == "…tial"
     assert "sk-initial" not in key["masked"]
 
@@ -55,7 +57,7 @@ def test_new_upstream_has_one_primary_masked_key(client):
     assert row["last_probe"] is None
 
 
-def test_key_add_patch_primary_rotate_and_delete(client):
+def test_key_add_patch_and_delete_stay_equal_peers(client):
     upstream = _upstream(client, _vendor(client))
     upstream_id = upstream["id"]
 
@@ -65,8 +67,9 @@ def test_key_add_patch_primary_rotate_and_delete(client):
     )
     assert added.status_code == 201, added.text
     second = added.json()
-    assert second["label"] == "backup" and second["is_primary"] is False
+    assert second["label"] == "backup"
     assert second["masked"] == "…9999"
+    assert "is_primary" not in second
 
     duplicate = client.post(
         f"/admin/upstreams/{upstream_id}/keys",
@@ -76,44 +79,156 @@ def test_key_add_patch_primary_rotate_and_delete(client):
 
     renamed = client.patch(
         f"/admin/upstreams/{upstream_id}/keys/{second['id']}",
-        json={"label": "backup-2", "is_primary": True},
+        json={"label": "backup-2"},
     )
     assert renamed.status_code == 200, renamed.text
     assert renamed.json()["label"] == "backup-2"
-    assert renamed.json()["is_primary"] is True
 
+    # ADR-026 ②: is_primary is retired - the schema rejects the field (422),
+    # and the rotate endpoint no longer exists.
+    rejected = client.patch(
+        f"/admin/upstreams/{upstream_id}/keys/{second['id']}",
+        json={"label": "x", "is_primary": True},
+    )
+    assert rejected.status_code == 422, rejected.text
     rotated = client.post(
         f"/admin/upstreams/{upstream_id}/rotate-key", json={"api_key": "sk-rotated-2026"}
     )
-    assert rotated.status_code == 200, rotated.text
-    keys = _keys(client, upstream_id)["items"]
-    primaries = [key for key in keys if key["is_primary"]]
-    assert len(primaries) == 1
-    assert primaries[0]["id"] == second["id"]
-    assert primaries[0]["masked"] == "…2026"
-    assert len(keys) == 2  # rotation edits the primary key, it does not add one
+    assert rotated.status_code in (404, 405)
 
     removed = client.delete(f"/admin/upstreams/{upstream_id}/keys/{second['id']}")
     assert removed.status_code == 200, removed.text
     remaining = _keys(client, upstream_id)["items"]
     assert len(remaining) == 1
-    assert remaining[0]["is_primary"] is True  # promotion is automatic
+    assert "is_primary" not in remaining[0]
+
+
+def test_batch_delete_reports_per_key_and_keeps_the_last(client):
+    upstream_id = _upstream(client, _vendor(client))["id"]
+    initial = _keys(client, upstream_id)["items"][0]["id"]
+    ids = []
+    for index in range(2):
+        response = client.post(
+            f"/admin/upstreams/{upstream_id}/keys",
+            json={"label": f"b{index}", "api_key": f"sk-batch-{index}"},
+        )
+        assert response.status_code == 201, response.text
+        ids.append(response.json()["id"])
+
+    # three deletable keys + one unknown id; the batch never aborts on a miss
+    response = client.post(
+        f"/admin/upstreams/{upstream_id}/keys/batch-delete",
+        json={"ids": [initial, ids[0], "upk_missing"]},
+    )
+    assert response.status_code == 200, response.text
+    report = response.json()
+    assert report["upstream_id"] == upstream_id
+    assert report["deleted"] == 2
+    assert [item["key_id"] for item in report["items"]] == [initial, ids[0], "upk_missing"]
+    assert report["items"][0]["ok"] is True
+    assert report["items"][2]["ok"] is False and "不存在" in report["items"][2]["error"]
+
+    keys = _keys(client, upstream_id)["items"]
+    assert [key["id"] for key in keys] == [ids[1]]
+
+    # the last remaining key is refused as a per-item 409-shaped error, not an abort
+    blocked = client.post(
+        f"/admin/upstreams/{upstream_id}/keys/batch-delete",
+        json={"ids": [ids[1]]},
+    )
+    assert blocked.status_code == 200, blocked.text
+    assert blocked.json()["deleted"] == 0
+    assert blocked.json()["items"][0]["ok"] is False
+    assert "至少保留一把" in blocked.json()["items"][0]["error"]
+    assert len(_keys(client, upstream_id)["items"]) == 1
+
+    empty = client.post(
+        f"/admin/upstreams/{upstream_id}/keys/batch-delete", json={"ids": []}
+    )
+    assert empty.status_code == 422
+
+
+def test_key_test_reports_and_persists_per_key(client, monkeypatch):
+    seen: list[str] = []
+
+    def fake_fetch_models(*, base_url, api_style, api_key, timeout_s=8.0):
+        seen.append(api_key)
+        if api_key == "sk-bad-9999":
+            return 401, [], 11
+        return 200, ["glm-5.3"], 5
+
+    monkeypatch.setattr(upstream_ops, "fetch_models", fake_fetch_models)
+    upstream_id = _upstream(client, _vendor(client), key="sk-bad-9999")["id"]
+    good = client.post(
+        f"/admin/upstreams/{upstream_id}/keys",
+        json={"label": "good", "api_key": "sk-good-0001"},
+    )
+    assert good.status_code == 201, good.text
+
+    response = client.post(f"/admin/upstreams/{upstream_id}/keys/test")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["upstream_id"] == upstream_id
+    assert body["api_style"] == "openai_chat"
+    items = body["items"]
+    assert len(items) == 2
+    by_ok = {item["ok"]: item for item in items}
+    assert by_ok[True]["status_code"] == 200 and by_ok[True]["latency_ms"] == 5
+    assert by_ok[True]["error"] == ""
+    assert by_ok[False]["status_code"] == 401
+    assert "401" in by_ok[False]["error"]
+
+    # the outcome lands on each row and survives a re-list
+    keys = _keys(client, upstream_id)["items"]
+    tests = {key["masked"]: key["last_test"] for key in keys}
+    assert tests["…0001"]["ok"] is True
+    assert tests["…9999"]["ok"] is False
+    for key in keys:
+        assert key["last_test_at_ms"] > 0
+
+    # an unknown style override is rejected before any request
+    bad_style = client.post(
+        f"/admin/upstreams/{upstream_id}/keys/test", json={"api_style": "nope"}
+    )
+    assert bad_style.status_code == 422
+    assert seen == ["sk-bad-9999", "sk-good-0001"]
 
 
 def test_legacy_inline_key_can_be_renamed_before_the_first_extra_key(
     client, engine_and_sessionmaker
 ):
-    ids = seed_channel(*engine_and_sessionmaker)
-    keys = _keys(client, ids["upstream_id"])["items"]
+    """A pre-upstream_keys database (inline credential, no rows) shows the
+    synthetic legacy row; the first write materializes it as a real row."""
+    from l01_core.crypto import SecretBox
+    from l01_core.timeutil import now_ms
+    from l04_repo.orm import UpstreamORM
+
+    engine, factory = engine_and_sessionmaker
+    box = SecretBox("test-secret")
+    with factory() as session:
+        upstream = UpstreamORM(
+            id="ups_inline",
+            name="inline-era",
+            base_url="https://inline.example/v1",
+            api_style="openai_chat",
+            api_key_enc=box.encrypt("sk-inline-7777"),
+            created_at_ms=now_ms(),
+        )
+        session.add(upstream)
+        session.commit()
+    assert seed_channel  # conftest import guard: the fixture stays wired
+
+    keys = _keys(client, upstream.id)["items"]
     assert [key["id"] for key in keys] == ["legacy"]
+    assert keys[0]["masked"] == "…7777"
     renamed = client.patch(
-        f"/admin/upstreams/{ids['upstream_id']}/keys/legacy", json={"label": "主密钥"}
+        f"/admin/upstreams/{upstream.id}/keys/legacy", json={"label": "首把密钥"}
     )
     assert renamed.status_code == 200, renamed.text
-    assert renamed.json()["label"] == "主密钥"
+    assert renamed.json()["label"] == "首把密钥"
     assert renamed.json()["id"] != "legacy"
-    after = _keys(client, ids["upstream_id"])["items"]
-    assert len(after) == 1 and after[0]["is_primary"] is True
+    after = _keys(client, upstream.id)["items"]
+    assert len(after) == 1 and "is_primary" not in after[0]
 
 
 def test_key_cap_is_twenty_and_last_key_is_protected(client):

@@ -115,6 +115,7 @@ def validate_gateway_ir(ir: GatewayIR) -> ValidationResult:
                 f"对外模型 {public.name} routing_mode 非法: {public.routing_mode!r}"
                 f"（允许: {ROUTING_MODES}）"
             )
+        catch_all_started = False  # conditional: a when-empty entry has been seen
         for index, target in enumerate(public.targets):
             if target.upstream_model_id not in model_set:
                 errors.append(
@@ -154,11 +155,18 @@ def validate_gateway_ir(ir: GatewayIR) -> ValidationResult:
                         f"weighted 模式忽略 priority={target.priority}"
                     )
             else:  # conditional
-                is_last = index == len(public.targets) - 1
-                if not target.when and not is_last:
+                # when-empty entries must form one trailing suffix: AG evaluates
+                # conditional targets in order, so a no-when (catch-all) entry
+                # followed by a predicate would never be reachable. ADR-026 key
+                # expansion turns the single catch-all tail into one entry per
+                # key, hence a suffix instead of "only the last target".
+                if not target.when:
+                    catch_all_started = True
+                elif catch_all_started:
                     errors.append(
                         f"对外模型 {public.name} 目标 {target.id}: "
-                        f"conditional 模式仅末位目标可省略 when"
+                        f"conditional 模式仅末段目标可省略 when（无 when 的条目"
+                        "必须是连续末段）"
                     )
 
     for alias in ir.model_aliases:

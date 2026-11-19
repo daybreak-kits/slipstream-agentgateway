@@ -1,8 +1,8 @@
 """CRUD use-cases: the only place that assigns ids, enforces uniqueness and names.
 
-The data plane still consumes one credential per upstream, stored inline; since
-ticket 09 the console's key list lives in `upstream_keys` and keeps the primary
-key mirrored into `upstreams.api_key_enc` (see l05_service/upstream_ops.py).
+ADR-026 多密钥平权: a credential's only home is its `upstream_keys` row - each
+row is expanded by the renderer into its own AG provider, so there is no primary
+key and no mirror into `upstreams.api_key_enc` (see l05_service/upstream_ops.py).
 """
 
 from __future__ import annotations
@@ -186,40 +186,16 @@ def create_upstream(
         name=name,
         base_url=base_url,
         api_style=api_style,
-        api_key_enc=secret_box.encrypt(api_key),
+        # ADR-026: no inline credential anymore - the key row created below is
+        # the single source the renderer expands into per-key providers.
+        api_key_enc="",
         transforms_json=transforms_json,
         max_buffer_bytes=max_buffer_bytes,
         created_at_ms=now_ms(),
     )
     UPSTREAM_REPO.add(session, upstream)
-    create_initial_key(session, upstream, api_key=api_key)
+    create_initial_key(session, upstream, api_key=api_key, secret_box=secret_box)
     _audit(session, actor=actor, action="create", entity_type="upstream", entity_id=upstream.id)
-    return upstream
-
-
-def reveal_upstream_key(
-    session: Session, upstream_id: str, secret_box: SecretBox
-) -> str:
-    upstream = session.get(UpstreamORM, upstream_id)
-    if upstream is None:
-        raise AppError(ErrorCode.NOT_FOUND, f"upstream not found: {upstream_id}")
-    return secret_box.decrypt(upstream.api_key_enc)
-
-
-def rotate_upstream_key(
-    session: Session,
-    upstream_id: str,
-    *,
-    api_key: str,
-    secret_box: SecretBox,
-    actor: str = "",
-) -> UpstreamORM:
-    upstream = session.get(UpstreamORM, upstream_id)
-    if upstream is None:
-        raise AppError(ErrorCode.NOT_FOUND, f"upstream not found: {upstream_id}")
-    upstream.api_key_enc = secret_box.encrypt(api_key)
-    session.flush()
-    _audit(session, actor=actor, action="rotate_key", entity_type="upstream", entity_id=upstream.id)
     return upstream
 
 

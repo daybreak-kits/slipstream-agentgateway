@@ -451,19 +451,37 @@ class UpstreamPatch(BaseModel):
     enabled: bool | None = None
 
 
-class UpstreamKeyRotate(BaseModel):
-    api_key: str = Field(min_length=1)
-
-
 class UpstreamKeyCreate(BaseModel):
+    """ADR-026: keys are equal peers - no primary flag to set."""
+
+    model_config = ConfigDict(extra="forbid")
+
     label: str = Field(default="", max_length=64)
     api_key: str = Field(min_length=1)
-    set_primary: bool = False
 
 
 class UpstreamKeyPatch(BaseModel):
+    """ADR-026 ②: label only; is_primary is retired and rejected (extra=forbid)."""
+
+    model_config = ConfigDict(extra="forbid")
+
     label: str | None = Field(default=None, max_length=64)
-    is_primary: bool | None = None
+
+
+class UpstreamKeyBatchDelete(BaseModel):
+    """POST /{id}/keys/batch-delete body: per-key report, last key refused (409 item)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ids: list[str] = Field(min_length=1, max_length=20)
+
+
+class UpstreamKeyTestIn(BaseModel):
+    """POST /{id}/keys/test body: per-key probe; optional style override for this call."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    api_style: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class UpstreamBatch(BaseModel):

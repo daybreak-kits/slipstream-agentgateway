@@ -59,9 +59,13 @@ class UpstreamORM(Base):
 class UpstreamKeyORM(Base):
     """One credential of an upstream; at most 20 rows per upstream (ticket 09).
 
-    upstreams.api_key_enc mirrors the primary row so the data-plane renderer and
-    its key files keep working unchanged; this table is the console's source of
-    truth for labels, masked display and rotation.
+    ADR-026 多密钥平权: every row IS an independent data-plane credential - the
+    renderer expands each row into its own AG provider/key file, so there is no
+    primary row and no mirror into ``upstreams.api_key_enc`` (the legacy column
+    is kept one version for the migration, never written anymore). Keys are
+    equal peers: label/suffix for display, last_test_* for the per-key probe
+    result (upstream_ops.test_keys), is_primary stays as a dead column until the
+    next schema cleanup.
     """
 
     __tablename__ = "upstream_keys"
@@ -73,8 +77,14 @@ class UpstreamKeyORM(Base):
     label: Mapped[str] = mapped_column(String(128), default="")
     key_enc: Mapped[str] = mapped_column(Text, default="")
     key_suffix: Mapped[str] = mapped_column(String(16), default="")
+    # ADR-026: the "primary key" concept is retired; the column is kept one
+    # version so old databases keep loading, nothing reads or writes it.
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at_ms: Mapped[int] = mapped_column(BigInteger, default=0, index=True)
+    # Per-key connectivity test (ADR-026 ③): the last POST keys/test outcome for
+    # THIS row as a JSON array fragment payload; empty means "never tested".
+    last_test_json: Mapped[str] = mapped_column(Text, default="")
+    last_test_at_ms: Mapped[int] = mapped_column(BigInteger, default=0)
 
 
 class UpstreamProbeORM(Base):

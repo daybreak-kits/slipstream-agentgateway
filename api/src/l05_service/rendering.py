@@ -1,11 +1,15 @@
 """Build the IR from repository state and drive one full configuration rollout.
 
 Single-render source of truth (ADR-002): every rollout renders the complete
-desired state from the DB. Upstream keys decrypt from upstreams.api_key_enc into
-per-upstream key files; the IR references files, never inline keys. Per-upstream
-transforms load from upstreams.transforms_json (task-164). ADR-010 hardening:
-active ban/cooldown rules exclude targets at render time (E3: health is AG-
-process-local), the IR self-validates before any write (E8: AG accepts
+desired state from the DB. ADR-026 多密钥平权: every ``upstream_keys`` row of an
+upstream expands into its own IR upstream (provider id ``{upstream_id}#{seq}``,
+key file ``keys/{upstream_id}#{seq}.key``) and its own copy of every upstream
+model (``{model_id}#k{seq}``); public-model targets expand the same way, so one
+logical target becomes one same-priority routing layer entry per key (E18:
+P2C 下的平权分流). The IR references key files, never inline keys.
+Per-upstream transforms load from upstreams.transforms_json (task-164). ADR-010
+hardening: active ban/cooldown rules exclude targets at render time (E3: health
+is AG-process-local), the IR self-validates before any write (E8: AG accepts
 priority=0), and failed rollouts are archived as status="failed" revisions.
 """
 
@@ -41,6 +45,7 @@ from l04_repo.orm import (
     ConfigRevisionORM,
     ModelTargetORM,
     PublicModelORM,
+    UpstreamKeyORM,
     UpstreamModelORM,
     UpstreamORM,
     UserORM,
@@ -91,34 +96,51 @@ def build_render_plan(
     for target in targets:
         targets_by_public.setdefault(target.public_model_id, []).append(target)
 
+    # ADR-026 密钥展开: one provider per key row. The seq is the 1-based ordinal
+    # in (created_at_ms, id) order - the same stable order the console lists.
     upstream_specs: list[UpstreamSpec] = []
     key_files: dict[str, str] = {}
+    key_seqs_by_upstream: dict[str, list[int]] = {}
     for upstream in upstreams:
-        key_file = _key_file_name(settings.ag_config_dir, upstream.id)
-        key_files[key_file] = secret_box.decrypt(upstream.api_key_enc)
-        upstream_specs.append(
-            UpstreamSpec(
-                id=upstream.id,
-                base_url=upstream.base_url,
-                api_style=upstream.api_style,
-                key_file=key_file,
-                transforms=transforms_from_json(upstream.transforms_json),
-                max_buffer_bytes=upstream.max_buffer_bytes,
+        key_rows = _upstream_key_rows(session, upstream.id)
+        if not key_rows:
+            raise AppError(
+                ErrorCode.APPLY_FAILED,
+                f"上游 {upstream.name}（{upstream.id}）没有可用密钥行，拒绝下发："
+                "每把密钥展开为独立 provider，必须携带自己的密钥文件（E17 安全红线）；"
+                "旧库请先运行 scripts/migrate_multikey_v2.py",
             )
-        )
+        seqs: list[int] = []
+        for seq, row in enumerate(key_rows, start=1):
+            key_file = _key_file_name(settings.ag_config_dir, upstream.id, seq)
+            key_files[key_file] = secret_box.decrypt(row.key_enc)
+            seqs.append(seq)
+            upstream_specs.append(
+                UpstreamSpec(
+                    id=provider_id(upstream.id, seq),
+                    base_url=upstream.base_url,
+                    api_style=upstream.api_style,
+                    key_file=key_file,
+                    transforms=transforms_from_json(upstream.transforms_json),
+                    max_buffer_bytes=upstream.max_buffer_bytes,
+                )
+            )
+        key_seqs_by_upstream[upstream.id] = seqs
 
-    upstream_ids = {u.id for u in upstream_specs}
+    upstream_ids = {u.id for u in upstreams}
+    routable_models = [m for m in models if m.upstream_id in upstream_ids]
+    model_db_ids = {m.id for m in routable_models}
+    upstream_id_by_model = {m.id: m.upstream_id for m in routable_models}
     model_specs = [
         UpstreamModelSpec(
-            id=model.id,
-            upstream_id=model.upstream_id,
+            id=model_alias(model.id, seq),
+            upstream_id=provider_id(model.upstream_id, seq),
             upstream_model_name=model.name,
             model_type=model.model_type,
         )
-        for model in models
-        if model.upstream_id in upstream_ids
+        for model in routable_models
+        for seq in key_seqs_by_upstream[model.upstream_id]
     ]
-    model_ids = {m.id for m in model_specs}
 
     public_specs: list[PublicModelSpec] = []
     for public in public_models:
@@ -129,14 +151,17 @@ def build_render_plan(
             rows = sorted(rows, key=lambda t: t.priority)
         spec_targets = tuple(
             TargetSpec(
-                id=t.id,
-                upstream_model_id=t.upstream_model_id,
+                id=f"{t.id}#k{seq}",
+                upstream_model_id=model_alias(t.upstream_model_id, seq),
                 priority=t.priority,
                 weight=t.weight,
                 when=t.when_expr,
             )
             for t in rows
-            if t.upstream_model_id in model_ids
+            if t.upstream_model_id in model_db_ids
+            for seq in key_seqs_by_upstream[
+                upstream_id_by_model[t.upstream_model_id]
+            ]
         )
         if not spec_targets:
             continue  # no-target public models never render (contract invariant 1)
@@ -200,8 +225,29 @@ def build_render_plan(
     return ir, key_files
 
 
-def _key_file_name(config_dir: str, upstream_id: str) -> str:
-    return os.path.join(config_dir, "keys", f"{upstream_id}.key")
+def _upstream_key_rows(session: Session, upstream_id: str) -> list[UpstreamKeyORM]:
+    """The upstream's credential rows in the console's stable listing order."""
+    stmt = (
+        select(UpstreamKeyORM)
+        .where(UpstreamKeyORM.upstream_id == upstream_id)
+        .order_by(UpstreamKeyORM.created_at_ms, UpstreamKeyORM.id)
+    )
+    return list(session.scalars(stmt).all())
+
+
+def provider_id(upstream_id: str, seq: int) -> str:
+    """ADR-026/E18 provider name: one independent AG upstream per key."""
+    return f"{upstream_id}#{seq}"
+
+
+def model_alias(model_id: str, seq: int) -> str:
+    """E18 裁决的唯一别名形态 ``{model}#k{seq}``，禁用同名多条（validate 抓不住，
+    首条独占其余静默丢弃）。"""
+    return f"{model_id}#k{seq}"
+
+
+def _key_file_name(config_dir: str, upstream_id: str, seq: int) -> str:
+    return os.path.join(config_dir, "keys", f"{upstream_id}#{seq}.key")
 
 
 def _access_log_spec(session: Session, settings) -> AccessLogSpec:

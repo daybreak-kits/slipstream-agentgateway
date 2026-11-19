@@ -24,9 +24,10 @@ from l06_api.schemas import (
     UpstreamBatch,
     UpstreamCreate,
     UpstreamImportModels,
+    UpstreamKeyBatchDelete,
     UpstreamKeyCreate,
     UpstreamKeyPatch,
-    UpstreamKeyRotate,
+    UpstreamKeyTestIn,
     UpstreamPatch,
     UpstreamProbeIn,
 )
@@ -143,16 +144,51 @@ def add_key(
         api_key=payload.api_key,
         secret_box=_secret_box(),
     )
-    if payload.set_primary:
-        upstream_ops.update_key(
-            session,
-            upstream,
-            row.id,
-            is_primary=True,
-            secret_box=_secret_box(),
-        )
     session.commit()
     return upstream_ops.key_view(row)
+
+
+@router.post(
+    "/{upstream_id}/keys/batch-delete",
+    dependencies=[Depends(require("upstreams:write"))],
+)
+def batch_delete_keys(
+    upstream_id: str,
+    payload: UpstreamKeyBatchDelete,
+    session: Session = Depends(session_of),
+) -> dict:
+    """ADR-026 ②: keys are equal peers, so removal is per-key with a report."""
+    upstream = _load(session, upstream_id)
+    result = upstream_ops.batch_delete_keys(
+        session, upstream, ids=payload.ids, secret_box=_secret_box()
+    )
+    session.commit()
+    return {"upstream_id": upstream_id, **result}
+
+
+@router.post(
+    "/{upstream_id}/keys/test",
+    dependencies=[Depends(require("upstreams:write"))],
+)
+def test_keys(
+    upstream_id: str,
+    payload: UpstreamKeyTestIn | None = None,
+    session: Session = Depends(session_of),
+) -> dict:
+    """ADR-026 ③: one minimal authenticated request per key row.
+
+    Outcomes land on each row (last_test_json / last_test_at_ms) and are
+    returned in request order; network failures are outcomes, not raises.
+    """
+    upstream = _load(session, upstream_id)
+    result = upstream_ops.test_keys(
+        session,
+        upstream,
+        secret_box=_secret_box(),
+        api_style_override=payload.api_style if payload else None,
+    )
+    session.commit()
+    return result
 
 
 @router.patch(
@@ -172,7 +208,6 @@ def patch_key(
         upstream,
         key_id,
         label=fields.get("label"),
-        is_primary=fields.get("is_primary"),
         secret_box=_secret_box(),
     )
     session.commit()
@@ -302,24 +337,6 @@ def patch_upstream(
     crud.update_upstream(session, upstream_id, fields=fields, secret_box=_secret_box())
     session.commit()
     return _body(session, _load(session, upstream_id))
-
-
-@router.post(
-    "/{upstream_id}/rotate-key",
-    dependencies=[Depends(require("upstreams:write"))],
-)
-def rotate_key(
-    upstream_id: str, payload: UpstreamKeyRotate, session: Session = Depends(session_of)
-) -> dict:
-    upstream = _load(session, upstream_id)
-    upstream_ops.rotate_primary_key(
-        session,
-        upstream,
-        api_key=payload.api_key,
-        secret_box=_secret_box(),
-    )
-    session.commit()
-    return _body(session, upstream)
 
 
 @router.get(

@@ -1,12 +1,13 @@
 """Upstream operations beyond CRUD (ticket 09): multi-key, probes, discovery, batch.
 
-The data plane consumes exactly one credential per upstream (the gateway exposes a
-single api key per provider), so the console's primary key mirrors into
-``upstreams.api_key_enc``; ``upstream_keys`` is the source of truth for labels,
-masked display and rotation. Probe rows are append-only so the list can show the
-last outcome. ``fetch_models`` (one style) and ``detect_api_style`` (ADR-023 #6
-auto-probing) are the network calls, kept module level so tests can replace them
-without touching HTTP.
+ADR-026 多密钥平权: every ``upstream_keys`` row is an equal credential and the
+renderer expands each row into its own AG provider/key file - there is no
+primary key, no rotation and no mirror into ``upstreams.api_key_enc`` (the
+legacy column is retired; ``_ensure_rows`` materializes it into a real row for
+databases that predate this table). Probe rows are append-only so the list can
+show the last outcome. ``fetch_models`` (one style) and ``detect_api_style``
+(ADR-023 #6 auto-probing) are the network calls, kept module level so tests can
+replace them without touching HTTP.
 """
 
 from __future__ import annotations
@@ -106,13 +107,15 @@ def _mask(suffix: str) -> str:
 
 
 def key_view(row: UpstreamKeyORM) -> dict[str, Any]:
+    """Masked key row plus the last per-key test outcome (ADR-026 ③)."""
     return {
         "id": row.id,
         "label": row.label,
         "masked": _mask(row.key_suffix),
         "key_suffix": row.key_suffix,
-        "is_primary": row.is_primary,
         "created_at_ms": row.created_at_ms,
+        "last_test": (json.loads(row.last_test_json) if row.last_test_json else None),
+        "last_test_at_ms": row.last_test_at_ms,
     }
 
 
@@ -141,9 +144,10 @@ def list_keys(
             "label": "默认密钥",
             "masked": _mask(suffix),
             "key_suffix": suffix,
-            "is_primary": True,
             "created_at_ms": upstream.created_at_ms,
             "legacy": True,
+            "last_test": None,
+            "last_test_at_ms": 0,
         }
     ]
 
@@ -159,7 +163,13 @@ def key_count(session: Session, upstream: UpstreamORM) -> int:
 def _ensure_rows(
     session: Session, upstream: UpstreamORM, secret_box: SecretBox
 ) -> list[UpstreamKeyORM]:
-    """Persist the legacy inline credential as the first key row when needed."""
+    """Persist the legacy inline credential as the first key row when needed.
+
+    ADR-026 retired the mirror, but a database created before ``upstream_keys``
+    still carries the credential in ``upstreams.api_key_enc``; materializing it
+    here (write paths only) keeps that one inline key from being orphaned by the
+    first key-panel action. The bulk path is scripts/migrate_multikey_v2.py.
+    """
     rows = _key_rows(session, upstream.id)
     if rows or not upstream.api_key_enc:
         return rows
@@ -169,35 +179,31 @@ def _ensure_rows(
         label="默认密钥",
         key_enc=upstream.api_key_enc,
         key_suffix=_suffix(_decrypt(secret_box, upstream.api_key_enc)),
-        is_primary=True,
         created_at_ms=upstream.created_at_ms or now_ms(),
     )
     UPSTREAM_KEY_REPO.add(session, row)
     return [row]
 
 
-def create_initial_key(session: Session, upstream: UpstreamORM, *, api_key: str) -> UpstreamKeyORM:
-    """Create the first key row for a freshly created upstream (mirrors inline key)."""
+def create_initial_key(
+    session: Session, upstream: UpstreamORM, *, api_key: str, secret_box: SecretBox
+) -> UpstreamKeyORM:
+    """Create the first key row for a freshly created upstream.
+
+    ADR-026: this row is the credential's only home - ``upstreams.api_key_enc``
+    is no longer written, and the renderer expands the row into its own
+    provider/key file.
+    """
     row = UpstreamKeyORM(
         id=new_id("upk"),
         upstream_id=upstream.id,
         label="默认密钥",
-        key_enc=upstream.api_key_enc,
+        key_enc=secret_box.encrypt(api_key),
         key_suffix=_suffix(api_key),
-        is_primary=True,
         created_at_ms=now_ms(),
     )
     UPSTREAM_KEY_REPO.add(session, row)
     return row
-
-
-def _mirror_primary(
-    session: Session, upstream: UpstreamORM, primary: UpstreamKeyORM
-) -> None:
-    for row in _key_rows(session, upstream.id):
-        row.is_primary = row.id == primary.id
-    upstream.api_key_enc = primary.key_enc
-    session.flush()
 
 
 def _resolve(rows: list[UpstreamKeyORM], key_id: str) -> UpstreamKeyORM:
@@ -220,6 +226,7 @@ def add_key(
     secret_box: SecretBox,
     actor: str = "",
 ) -> UpstreamKeyORM:
+    """Add one equal credential row (ADR-026: no primary semantics)."""
     rows = _ensure_rows(session, upstream, secret_box)
     if len(rows) >= MAX_UPSTREAM_KEYS:
         raise AppError(
@@ -236,12 +243,9 @@ def add_key(
         label=label,
         key_enc=secret_box.encrypt(api_key),
         key_suffix=_suffix(api_key),
-        is_primary=not rows,
         created_at_ms=now_ms(),
     )
     UPSTREAM_KEY_REPO.add(session, row)
-    if row.is_primary:
-        _mirror_primary(session, upstream, row)
     _audit(
         session,
         actor=actor,
@@ -259,16 +263,14 @@ def update_key(
     key_id: str,
     *,
     label: str | None = None,
-    is_primary: bool | None = None,
     secret_box: SecretBox,
     actor: str = "",
 ) -> UpstreamKeyORM:
+    """Rename one key row; label is the only editable field (ADR-026 ②)."""
     rows = _ensure_rows(session, upstream, secret_box)
     row = _resolve(rows, key_id)
     if label is not None:
         row.label = label
-    if is_primary:
-        _mirror_primary(session, upstream, row)
     session.flush()
     _audit(
         session,
@@ -276,7 +278,7 @@ def update_key(
         action="update_key",
         entity_type="upstream",
         entity_id=upstream.id,
-        detail_json=json.dumps({"key_id": row.id, "primary": bool(is_primary)}),
+        detail_json=json.dumps({"key_id": row.id}),
     )
     return row
 
@@ -289,6 +291,7 @@ def delete_key(
     secret_box: SecretBox,
     actor: str = "",
 ) -> None:
+    """Delete one key row; the last remaining key is protected (ADR-026 ⑥)."""
     rows = _ensure_rows(session, upstream, secret_box)
     row = _resolve(rows, key_id)
     if len(rows) <= 1:
@@ -296,56 +299,120 @@ def delete_key(
             ErrorCode.CONFLICT,
             "至少保留一把密钥；如需停止调用请直接停用上游",
         )
-    was_primary = row.is_primary
     UPSTREAM_KEY_REPO.delete(session, row)
-    remaining = [item for item in rows if item.id != row.id]
-    if was_primary:
-        _mirror_primary(session, upstream, remaining[0])
     _audit(
         session,
         actor=actor,
         action="delete_key",
         entity_type="upstream",
         entity_id=upstream.id,
-        detail_json=json.dumps({"key_id": key_id, "new_primary": remaining[0].id}),
+        detail_json=json.dumps({"key_id": key_id}),
     )
 
 
-def rotate_primary_key(
+def batch_delete_keys(
     session: Session,
     upstream: UpstreamORM,
     *,
-    api_key: str,
+    ids: list[str],
     secret_box: SecretBox,
     actor: str = "",
-) -> UpstreamKeyORM:
+) -> dict[str, Any]:
+    """Delete many keys with a per-key report; the last key is refused (409).
+
+    Items report in request order; a missing id and the "at least one key"
+    refusal are per-item errors, never an abort of the whole batch.
+    """
     rows = _ensure_rows(session, upstream, secret_box)
-    primary = next((row for row in rows if row.is_primary), rows[0] if rows else None)
-    if primary is None:
-        primary = UpstreamKeyORM(
-            id=new_id("upk"),
-            upstream_id=upstream.id,
-            label="默认密钥",
-            key_enc="",
-            key_suffix="",
-            is_primary=True,
-            created_at_ms=now_ms(),
-        )
-        UPSTREAM_KEY_REPO.add(session, primary)
-    primary.key_enc = secret_box.encrypt(api_key)
-    primary.key_suffix = _suffix(api_key)
-    primary.is_primary = True
-    upstream.api_key_enc = primary.key_enc
+    by_id = {row.id: row for row in rows}
+    items: list[dict[str, Any]] = []
+    deleted: list[str] = []
+    for key_id in ids:
+        row = by_id.get(key_id)
+        if row is None:
+            items.append({"key_id": key_id, "ok": False, "error": "密钥不存在"})
+            continue
+        if len(rows) - len(deleted) <= 1:
+            items.append(
+                {"key_id": key_id, "ok": False, "error": "至少保留一把密钥；如需停止调用请直接停用上游"}
+            )
+            continue
+        UPSTREAM_KEY_REPO.delete(session, row)
+        deleted.append(key_id)
+        items.append({"key_id": key_id, "ok": True})
     session.flush()
     _audit(
         session,
         actor=actor,
-        action="rotate_key",
+        action="batch_delete_keys",
         entity_type="upstream",
         entity_id=upstream.id,
-        detail_json=json.dumps({"key_id": primary.id}),
+        detail_json=json.dumps({"deleted": deleted}),
     )
-    return primary
+    return {"items": items, "deleted": len(deleted)}
+
+
+def test_keys(
+    session: Session,
+    upstream: UpstreamORM,
+    *,
+    secret_box: SecretBox,
+    api_style_override: str | None = None,
+    actor: str = "",
+) -> dict[str, Any]:
+    """Test every key of this upstream against its base_url (ADR-026 ③).
+
+    One minimal authenticated GET per row; the outcome lands on the row
+    (last_test_json/last_test_at_ms) and in the response. Network failures are
+    outcomes, not raises.
+    """
+    requested = api_style_override or upstream.api_style
+    try:
+        ApiStyle(requested)
+    except ValueError:
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR, f"unknown api_style: {requested}"
+        ) from None
+    rows = _ensure_rows(session, upstream, secret_box)
+    items: list[dict[str, Any]] = []
+    for row in rows:
+        api_key = _decrypt(secret_box, row.key_enc)
+        status_code, _models, latency_ms = 0, [], 0
+        error = ""
+        try:
+            status_code, _models, latency_ms = fetch_models(
+                base_url=upstream.base_url,
+                api_style=requested,
+                api_key=api_key,
+            )
+            if not 200 <= status_code < 300:
+                error = f"上游返回 HTTP {status_code}"
+        except httpx.TimeoutException:
+            latency_ms = int(PROBE_TIMEOUT_SECONDS * 1000)
+            error = f"请求超时（{int(PROBE_TIMEOUT_SECONDS)} 秒）"
+        except httpx.HTTPError as exc:
+            error = f"连接失败：{exc}"
+        items.append(
+            {
+                "key_id": row.id,
+                "ok": 200 <= status_code < 300,
+                "status_code": status_code,
+                "latency_ms": latency_ms,
+                "error": error,
+            }
+        )
+        row.last_test_json = json.dumps(items[-1], ensure_ascii=False)
+        row.last_test_at_ms = now_ms()
+    session.flush()
+    _audit(
+        session,
+        actor=actor,
+        action="test_keys",
+        entity_type="upstream",
+        entity_id=upstream.id,
+        detail_json=json.dumps({"ok": sum(1 for item in items if item["ok"]), "total": len(items)}),
+    )
+    return {"upstream_id": upstream.id, "api_style": requested, "items": items}
 
 
 def _probe_url(base_url: str) -> str:
@@ -731,16 +798,13 @@ def primary_key_plaintext(
     secret_box: SecretBox,
     key_id: str | None = None,
 ) -> str:
-    """The probe credential: named key, else the primary row, else the inline key."""
+    """The probe credential: the named key, else the first key row (ADR-026 ③:
+    probing uses any one credential; there is no primary row anymore)."""
     rows = _ensure_rows(session, upstream, secret_box)
-    selected = None
-    if rows:
-        selected = _resolve(rows, key_id) if key_id else next(
-            (row for row in rows if row.is_primary), rows[0]
-        )
-    return _decrypt(secret_box, selected.key_enc) if selected else _decrypt(
-        secret_box, upstream.api_key_enc
-    )
+    if not rows:
+        return ""
+    selected = _resolve(rows, key_id) if key_id else rows[0]
+    return _decrypt(secret_box, selected.key_enc)
 
 
 def probe(

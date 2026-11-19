@@ -96,7 +96,7 @@ def test_periodic_rule_drives_api_state_and_render_exclusion(
     assert listed["availability"]["state"] == "cooling"
     assert listed["availability"]["cooldown_until_ms"] > now_ms()
 
-    from l05_service.rendering import build_render_plan
+    from l05_service.rendering import build_render_plan, model_alias
 
     # The only upstream model is cooling, so no public model has a target left.
     with factory() as session:
@@ -112,7 +112,8 @@ def test_periodic_rule_drives_api_state_and_render_exclusion(
     }
     with factory() as session:
         ir, _keys = build_render_plan(session, revision="rev_periodic_ok")
-    assert model_id in {model.id for model in ir.models}
+    # ADR-026: the IR carries one expanded model entry per key ({id}#k{seq}).
+    assert model_alias(model_id, 1) in {model.id for model in ir.models}
 
 
 def test_ban_rule_closes_state_without_disabling_the_row(client, engine_and_sessionmaker):

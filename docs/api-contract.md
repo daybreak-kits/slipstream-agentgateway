@@ -342,11 +342,12 @@ AG 1.7 拒绝（`mcp.transport.http=false`），保存即 422。渲染到顶层 
 | GET | /admin/upstreams/{upstream_id} | upstreams:read | 详情（含密钥数、模型数、最近探测、`api_style_source`） |
 | PATCH | /admin/upstreams/{upstream_id} | upstreams:write | 可改 name/base_url/api_style/enabled；`name` 可选（缺省或空白=不改名，显式改名重名 422）；api_style 同创建一样接受 `auto`，落库前解析为具体风格 |
 | DELETE | /admin/upstreams/{upstream_id} | upstreams:write | 被 `model_targets` 引用时 409，不级联 |
-| GET | /admin/upstreams/{id}/keys | upstreams:read | `{items, limit: 20}`；只回 masked/key_suffix，不回明文 |
-| POST | /admin/upstreams/{id}/keys | upstreams:write | {label, api_key, set_primary?}；重复密钥 409；超过 20 把 409 |
-| PATCH | /admin/upstreams/{id}/keys/{key_id} | upstreams:write | 改 label / is_primary；主密钥同步到 `upstreams.api_key_enc` |
-| DELETE | /admin/upstreams/{id}/keys/{key_id} | upstreams:write | 最后一把 409「至少保留一把密钥；如需停止调用请直接停用上游」；删主密钥时自动把剩余第一把设为主密钥 |
-| POST | /admin/upstreams/{id}/rotate-key | upstreams:write | 轮换主密钥 |
+| GET | /admin/upstreams/{id}/keys | upstreams:read | `{items, limit: 20}`；只回 masked/key_suffix 与每把的 `last_test`/`last_test_at_ms`，不回明文；密钥平权无主备（ADR-026） |
+| POST | /admin/upstreams/{id}/keys | upstreams:write | {label, api_key}；重复密钥 409；超过 20 把 409；每把密钥渲染为一个独立 AG 上游（`{upstream_id}#{seq}`） |
+| PATCH | /admin/upstreams/{id}/keys/{key_id} | upstreams:write | 仅改 label；`is_primary` 已废，请求携带即 422（schema extra=forbid） |
+| DELETE | /admin/upstreams/{id}/keys/{key_id} | upstreams:write | 最后一把 409「至少保留一把密钥；如需停止调用请直接停用上游」 |
+| POST | /admin/upstreams/{id}/keys/batch-delete | upstreams:write | body {ids[]}；逐把删除并返回逐把结果 `{items:[{key_id, ok, error?}], deleted}`；最后一把以 per-item 错误拒绝 |
+| POST | /admin/upstreams/{id}/keys/test | upstreams:write | body {api_style?}；逐把按 base_url 发最小鉴权请求，返回 `{items:[{key_id, ok, status_code, latency_ms, error}]}`；结果落每把的 last_test_json/last_test_at_ms |
 | POST | /admin/upstreams/{id}/test-connection | upstreams:write | 8s 超时，写 `upstream_probes`；返回 kind/status/http_status/latency_ms/model_count/tested_at_ms + 协议探测三字段（见下） |
 | POST | /admin/upstreams/{id}/discover-models | upstreams:write | 探测候选模型，不自动建记录；响应同样带协议探测三字段 |
 | POST | /admin/upstreams/{id}/import-models | upstreams:write | body {names, model_type}，创建缺失的上游模型 |

@@ -13,6 +13,11 @@ Shapes verified against the pinned 1.7 binary with --validate-only:
   keyed by provider id is rejected ("invalid type: map, expected a sequence").
 - llm.models[] is a SEQUENCE of {name, provider: {reference}, visibility,
   params: {model}, ...}; internal visibility keeps direct upstream names 404.
+- ADR-026 多密钥平权: build_render_plan expands every upstream key into its own
+  provider ({upstream_id}#{seq}) and its own {model}#k{seq} llm.models entry;
+  virtualModels reference every key entry in one same-priority layer (E18).
+  The renderer self-checks the no-duplicate-name invariant below because AG's
+  validate silently collapses same-name entries.
 - gateways.<name>.port + llm.gateways: <name> supersede the deprecated
   llm.port; the implicit LLM route is namespace internal, name "llm:request".
 - Per-model tls.hostname is emitted for https upstreams; per-model health
@@ -497,6 +502,24 @@ def _render_access_log(ir: GatewayIR) -> tuple[dict, dict]:
     return config_block, frontend
 
 
+def _assert_no_duplicate_model_names(models: list[dict]) -> None:
+    """E18 不变量：llm.models[] 禁止同名条目（渲染层自检）。
+
+    AG 1.7 validate 对同名多条静默通过且运行时首条独占、其余静默丢弃（60:0，
+    无告警）——这是不能依赖的语义，validate 也抓不住，所以控制面渲染层必须
+    把关：发现同名即 ValueError（rollout 记为失败 revision，绝不带病下发）。
+    """
+    seen: set[str] = set()
+    for entry in models:
+        name = entry["name"]
+        if name in seen:
+            raise ValueError(
+                f"llm.models[] 出现同名条目 {name!r}：AG 会静默塌缩为首条独占"
+                "（E18 实测 60:0 无告警），渲染层拒绝下发；请检查密钥展开命名"
+            )
+        seen.add(name)
+
+
 def render_config(ir: GatewayIR, llm_port: int) -> dict:
     """Full config.yaml body for the ADR-024 hybrid shape.
 
@@ -528,6 +551,7 @@ def render_config(ir: GatewayIR, llm_port: int) -> dict:
         raise ValueError(
             "AG 1.7 没有 modelAliases 配置面；请删除模型别名或改用 llm.virtualModels"
         )
+    _assert_no_duplicate_model_names(models)
     model_ids = {model.id for model in ir.models}
     virtual_models = _render_virtual_models(ir, model_ids)
 

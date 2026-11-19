@@ -513,7 +513,8 @@ def test_public_model_enable_skips_window_too(client, engine_and_sessionmaker):
 
     with factory() as session:
         ir, _keys = build_render_plan(session, revision="rev_pm_skip")
-    assert "mt_test" in {t.id for spec in ir.public_models for t in spec.targets}
+    # ADR-026: one expanded target per key ({target}#k{seq}) shares the layer.
+    assert "mt_test#k1" in {t.id for spec in ir.public_models for t in spec.targets}
 
 
 def test_batch_enable_reports_skipped_windows(client, engine_and_sessionmaker):

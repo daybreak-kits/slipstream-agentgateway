@@ -29,6 +29,9 @@ class GatewayIR:
 
 ```python
 class UpstreamSpec:
+    # ADR-026 多密钥平权（E18 形态）：build_render_plan 把每把 upstream_keys 行
+    # 展开为一个 IR 上游——id={upstream_id}#{seq}、key_file=keys/{upstream_id}#{seq}.key；
+    # 上游模型条目为 {model_id}#k{seq} 并逐条进 virtualModel 同层 targets。
     id; base_url; api_style        # openai_chat / openai_responses / anthropic_messages / gemini
     key_file                       # 密钥文件路径，绝不内联
     transforms: TransformsSpec | None
@@ -48,7 +51,7 @@ class TargetSpec:
     priority: int                  # failover：>= 0，越小越先；同值成组
     display_name: str = ""
     weight: int = 0                # 仅 weighted 使用，>= 1
-    when: str = ""                 # conditional：CEL，只有末位可省
+    when: str = ""                 # conditional：CEL，只有连续末段可省（多密钥展开后末段含每把一条）
 
 class PublicModelSpec:
     name; targets; routing_mode = "failover"   # failover / weighted / conditional
@@ -86,17 +89,19 @@ class PoliciesSpec:
   迁移后 0 表示最高优先级。
 - 只有 weighted 使用 `weight`；failover/conditional 输出不包含 weight 字段。
   非 weighted 上的 weight 只产生 warning，是给 05/10 预留字段，不参与渲染。
-- conditional 的 `when` 只有末位目标可省略；其余必须给 CEL 谓词。
+- conditional 的 `when` 只有**连续末段**目标可省略；其余必须给 CEL 谓词。
+  （ADR-026 密钥展开把末位 catch-all 目标扩成每把密钥一条，故规则从「末位」放宽为「末段」；
+  AG 按序求值，无 when 条目之后再出现带 when 条目则后者永不可达，一律拒绝。）
 - failover 只影响**后续请求**的选路，不做请求内重试（E1）。
 
 ## 3. 映射表
 
 | IR | agentgateway 1.7 配置 | 说明 |
 |---|---|---|
-| `UpstreamSpec` | `llm.providers[]` | **数组**，每项 `{name, provider, params}`；`provider` 由 `api_style` 映射，未映射直接 `ValueError` |
+| `UpstreamSpec` | `llm.providers[]` | **数组**，每项 `{name, provider, params}`；`provider` 由 `api_style` 映射，未映射直接 `ValueError`。ADR-026：每把密钥一行（name=`{upstream_id}#{seq}`，各自 key_file），`llm.models[]` 禁同名由渲染层自检（E18：validate 静默塌缩，违反即 `ValueError`） |
 | `extra_headers` | `providers[].defaults.requestHeaders.set` | 1.7 的 provider 没有 `params.headers` |
 | `max_buffer_bytes` | 不输出 | 1.7 无该字段；非默认值在 validate 里 warning，不伪造 |
-| `UpstreamModelSpec` | `llm.models[]` | **数组**，`name=model.id`、`provider.reference=upstream_id`、`params.model=upstream_model_name`、`visibility`（默认 internal） |
+| `UpstreamModelSpec` | `llm.models[]` | **数组**，`name=model.id`、`provider.reference=upstream_id`、`params.model=upstream_model_name`、`visibility`（默认 internal）。多密钥时 builder 产出 `{model_id}#k{seq}` 条目，公开模型 targets 逐条同层引用（E18 裁决形态） |
 | `display_name` | ❌ 显式错误 | 1.7 的 `llm.models[]` 没有 `displayName`（validate: unknown field） |
 | `aliases` / `model_aliases` | ❌ 显式错误 | 1.7 没有 modelAliases 配置面；对外名只能走 virtualModels |
 | `model.guardrails` | `llm.models[].guardrails` | PromptGuard：streaming + request/response regex 规则 |
