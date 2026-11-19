@@ -17,7 +17,7 @@ from l04_repo.orm import (
     LedgerEntryORM,
     UserDailyORM,
 )
-from l05_service import auth
+from l05_service import auth, user_tree
 from l05_service.usage_pull import pull_once
 from l06_api import field_filter
 from l06_api.adapter_factory import make_adapter
@@ -122,12 +122,20 @@ def list_ledger(
     page_size: int = 50,
     offset: int = 0,
 ) -> list[dict]:
+    """Ledger movements of the users this caller may see (ADR-019 subtree rule).
+
+    `visible_ids` returns None for an unrestricted role (every row), a subtree for
+    a branch role and a single id for an ordinary user, so one filter covers all
+    three cases. Cross-branch rows are not hidden by omission here but never
+    selected in the first place.
+    """
     limit, off = page_params(page_size, offset)
+    visible = user_tree.visible_ids(session, principal)
+    query = select(LedgerEntryORM)
+    if visible is not None:
+        query = query.where(LedgerEntryORM.user_id.in_(visible))
     rows = session.scalars(
-        select(LedgerEntryORM)
-        .order_by(LedgerEntryORM.created_at_ms.desc())
-        .offset(off)
-        .limit(limit)
+        query.order_by(LedgerEntryORM.created_at_ms.desc()).offset(off).limit(limit)
     ).all()
     return [
         {
@@ -152,9 +160,13 @@ def list_daily(
     page_size: int = 50,
     offset: int = 0,
 ) -> list[dict]:
-    """User/day charge aggregates backing the revenue dashboard."""
+    """User/day charge aggregates for the visible user set (revenue dashboard)."""
     limit, off = page_params(page_size, offset)
-    rows = session.scalars(select(UserDailyORM).offset(off).limit(limit)).all()
+    visible = user_tree.visible_ids(session, principal)
+    query = select(UserDailyORM)
+    if visible is not None:
+        query = query.where(UserDailyORM.user_id.in_(visible))
+    rows = session.scalars(query.offset(off).limit(limit)).all()
     return [
         {
             "day": row.day,

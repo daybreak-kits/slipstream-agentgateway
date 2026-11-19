@@ -43,6 +43,20 @@ def _at(day: int, hour: int, minute: int = 0, month: int = 3, year: int = 2026) 
     return int(datetime(year, month, day, hour, minute, tzinfo=UTC).timestamp() * 1000)
 
 
+@pytest.fixture(autouse=True)
+def _pin_operations_timezone_to_utc(engine_and_sessionmaker):
+    """Fixed UTC instants keep their meaning: pin the operations timezone to
+    UTC for the session-based evaluator (which reads app_settings). The P1-6
+    timezone test overrides the row to Asia/Shanghai inside its own body."""
+    _, factory = engine_and_sessionmaker
+    from l01_core.timeutil import now_ms as _now
+    from l04_repo.repository import put_setting
+
+    with factory() as session:
+        put_setting(session, "timezone", '"UTC"', _now())
+        session.commit()
+
+
 def _periodic(
     recurrence: str,
     *,
@@ -113,6 +127,37 @@ def test_cross_midnight_window_ends_on_the_current_day_after_midnight() -> None:
     assert rule_deadline_ms(rule, _at(2, 23, 30)) == _at(3, 1, 0)
     assert rule_deadline_ms(rule, _at(3, 0, 30)) == _at(3, 1, 0)
     assert rule_is_active(rule, _at(3, 1, 0)) is False
+
+
+def test_recurring_windows_use_the_operations_timezone(engine_and_sessionmaker) -> None:
+    """P1-6: 02:00-04:00 means local (operations) time, not UTC.
+
+    With the timezone row set to Asia/Shanghai, 02:00-04:00 Shanghai is
+    18:00-20:00 UTC the day before; a fixed UTC instant inside that span is
+    active through the session-based evaluator (which reads app_settings).
+    """
+    from tests.conftest import seed_channel
+
+    from l01_core.timeutil import now_ms as _now
+    from l04_repo.repository import put_setting
+
+    engine, factory = engine_and_sessionmaker
+    seed_channel(engine, factory)
+    with factory() as session:
+        put_setting(session, "timezone", '"Asia/Shanghai"', _now())
+        session.add(_periodic("daily", start="02:00", end="04:00", rule_id="rule_sh"))
+        session.commit()
+
+        # 2026-03-02 18:30 UTC == 2026-03-03 02:30 Asia/Shanghai (inside window).
+        inside = evaluate(session, now_ms=_at(2, 18, 30))
+        assert inside.excluded_upstream_model_ids == frozenset({"umdl_test"})
+        model = session.get(UpstreamModelORM, "umdl_test")
+        assert inside.upstream_model_view(model).cooldown_until_ms == _at(2, 20, 0)
+
+        # 15:00 UTC == 23:00 Shanghai: outside, though it would be inside a
+        # 02:00-04:00 UTC window. Same UTC instant, different local reading.
+        outside = evaluate(session, now_ms=_at(2, 15, 0))
+        assert outside.excluded_upstream_model_ids == frozenset()
 
 
 def test_model_patch_cooldown_is_one_managed_rule_and_projection(

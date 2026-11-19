@@ -13,6 +13,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+import pytest
 from tests.conftest import seed_channel
 
 from l01_core.timeutil import now_ms
@@ -28,6 +29,19 @@ PARAMETERS = {
     "attachment": False,
     "structured_output": True,
 }
+
+
+@pytest.fixture(autouse=True)
+def _pin_operations_timezone_to_utc(engine_and_sessionmaker):
+    """_window_around_now builds HH:MM from the UTC wall clock; keep the
+    evaluator's operations timezone (app_settings) at UTC for these skip
+    semantics. The timezone itself is exercised in test_availability."""
+    _, factory = engine_and_sessionmaker
+    from l04_repo.repository import put_setting
+
+    with factory() as session:
+        put_setting(session, "timezone", '"UTC"', now_ms())
+        session.commit()
 
 
 def _future_ms(offset: int = 3_600_000) -> int:

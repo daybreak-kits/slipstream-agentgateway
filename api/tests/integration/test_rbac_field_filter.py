@@ -17,14 +17,14 @@ from l04_repo.orm import (
 from l06_api.deps import SESSION_COOKIE
 
 
-def _browser(factory, role: str, username: str):
-    admin_id = make_admin(factory, username=username, role=role)
+def _browser(factory, role: str, username: str, user_id: str = ""):
+    admin_id = make_admin(factory, username=username, role=role, user_id=user_id)
     client = _app_client(factory)
     client.cookies.set(SESSION_COOKIE, new_session_token(factory, admin_id))
     return client
 
 
-def _seed_books(factory) -> None:
+def _seed_books(factory, user_id: str = "usr_filter") -> None:
     now = now_ms()
     with factory() as session:
         session.add(
@@ -59,7 +59,7 @@ def _seed_books(factory) -> None:
             ChargeEntryORM(
                 id="ce_filter",
                 gateway_event_id="evt_filter",
-                user_id="usr_filter",
+                user_id=user_id,
                 amount_micro=1000,
                 currency="CNY",
                 status="ok",
@@ -69,7 +69,7 @@ def _seed_books(factory) -> None:
         session.add(
             UserDailyORM(
                 day="2026-01-01",
-                user_id="usr_filter",
+                user_id=user_id,
                 requests=1,
                 input_tokens=10,
                 output_tokens=5,
@@ -80,7 +80,7 @@ def _seed_books(factory) -> None:
         session.add(
             LedgerEntryORM(
                 id="led_filter",
-                user_id="usr_filter",
+                user_id=user_id,
                 kind="charge",
                 delta_micro=-1000,
                 balance_after_micro=0,
@@ -91,12 +91,14 @@ def _seed_books(factory) -> None:
         session.commit()
 
 
-def _custom_role_browser(admin_client, factory, permissions: list[str], name: str):
+def _custom_role_browser(
+    admin_client, factory, permissions: list[str], name: str, user_id: str = ""
+):
     created = admin_client.post(
         "/admin/roles", json={"name": name, "permissions": permissions}
     )
     assert created.status_code == 201, created.text
-    return _browser(factory, created.json()["key"], "custom-" + name)
+    return _browser(factory, created.json()["key"], "custom-" + name, user_id=user_id)
 
 
 def test_ordinary_user_overview_hides_cost_keeps_spend(client, engine_and_sessionmaker):
@@ -116,7 +118,11 @@ def test_role_without_billing_gets_no_money_keys(client, engine_and_sessionmaker
     _, factory = engine_and_sessionmaker
     _seed_books(factory)
     browser = _custom_role_browser(
-        client, factory, ["reports:read", "logs:read", "ledger:read"], "无金额"
+        client,
+        factory,
+        ["reports:read", "logs:read", "ledger:read"],
+        "无金额",
+        user_id="usr_filter",
     )
 
     overview = browser.get("/admin/reports/overview").json()
@@ -147,7 +153,7 @@ def test_role_without_billing_gets_no_money_keys(client, engine_and_sessionmaker
 def test_ordinary_user_sees_spend_fields(client, engine_and_sessionmaker):
     _, factory = engine_and_sessionmaker
     _seed_books(factory)
-    browser = _browser(factory, "user", "plain-spend")
+    browser = _browser(factory, "user", "plain-spend", user_id="usr_filter")
     daily = browser.get("/admin/usage/daily").json()
     assert daily[0]["amount_micro"] == 1000
     ledger = browser.get("/admin/usage/ledger").json()

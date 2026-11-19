@@ -122,6 +122,21 @@ def _box() -> AesGcmBox:
     return AesGcmBox(get_settings().secret_key)
 
 
+def _visible_key(session: Session, principal, key_id: str) -> ApiKeyORM:
+    """Load one key inside the caller's user scope (ADR-008 owner/admin).
+
+    Keys hang off a user, so the subtree rule that guards users guards them too:
+    an all-permission admin sees every key, a subtree role sees its branch, and
+    anyone else is stopped with 403 before the key is touched. 404 for an
+    unknown key keeps the two cases from being distinguished from the outside.
+    """
+    row = session.get(ApiKeyORM, key_id)
+    if row is None:
+        raise AppError(ErrorCode.NOT_FOUND, f"api key not found: {key_id}")
+    user_tree.get_visible(session, principal, row.user_id)
+    return row
+
+
 def _audit(session: Session, *, actor: str, action: str, entity_id: str, detail: str) -> None:
     session.add(
         AuditLogORM(
@@ -482,9 +497,12 @@ def issue_key(
     adapter: DataPlaneAdapter = Depends(get_adapter),
     principal: auth.Principal = Depends(require("apikeys:write")),
 ) -> dict:
-    """Issue one more key (ADR-023: up to 50 per user); plaintext appears once."""
-    if session.get(UserORM, user_id) is None:
-        raise AppError(ErrorCode.NOT_FOUND, f"user not found: {user_id}")
+    """Issue one more key (ADR-023: up to 50 per user); plaintext appears once.
+
+    The target user must be inside the caller's scope (ADR-019 subtree rule), so
+    a branch admin cannot mint a key for another branch.
+    """
+    user_tree.get_visible(session, principal, user_id)
     issued = client_keys.issue_client_key(
         session,
         user_id=user_id,
@@ -510,10 +528,22 @@ def issue_key(
 
 @router.get("/admin/api-keys", dependencies=[Depends(require("apikeys:read"))])
 def list_keys(
-    session: Session = Depends(session_of), page_size: int = 50, offset: int = 0
+    session: Session = Depends(session_of),
+    principal: auth.Principal = Depends(require("apikeys:read")),
+    page_size: int = 50,
+    offset: int = 0,
 ) -> list[dict]:
+    """Keys of the users this caller may see (ADR-008/019); admin sees all.
+
+    The subtree rule is the same one the user routes use, so a branch admin's key
+    list stops at its own branch instead of leaking sibling key metadata.
+    """
     limit, off = page_params(page_size, offset)
-    rows = session.scalars(select(ApiKeyORM).offset(off).limit(limit)).all()
+    visible = user_tree.visible_ids(session, principal)
+    query = select(ApiKeyORM)
+    if visible is not None:
+        query = query.where(ApiKeyORM.user_id.in_(visible))
+    rows = session.scalars(query.offset(off).limit(limit)).all()
     return [_key_body(row) for row in rows]
 
 
@@ -616,7 +646,12 @@ def reveal_key(
     session: Session = Depends(session_of),
     principal: auth.Principal = Depends(require("apikeys:write")),
 ) -> dict:
-    """ADR-008 copy-key feature: audited plaintext reveal (owner/admin only)."""
+    """ADR-008 copy-key feature: audited plaintext reveal (owner/admin only).
+
+    Visibility follows the caller's user scope (ADR-019): the built-in admin role
+    sees every key, a subtree role only its own branch, everyone else is 403.
+    """
+    _visible_key(session, principal, key_id)
     plaintext = client_keys.reveal_client_key(session, key_id, _box())
     _audit(
         session,

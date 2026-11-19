@@ -35,7 +35,7 @@ import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 from enum import StrEnum
 from typing import Any
 
@@ -53,6 +53,7 @@ from l04_repo.orm import (
     UpstreamORM,
 )
 from l04_repo.repository import AVAILABILITY_REPO
+from l05_service.aggregates import report_timezone
 
 SCOPE_MODEL_TARGET = "model_target"
 SCOPE_UPSTREAM = "upstream"
@@ -110,6 +111,8 @@ class AvailabilitySnapshot:
     excluded_public_model_ids: frozenset[str]
     rules_by_scope: Mapping[tuple[str, str], tuple[AvailabilityRuleORM, ...]]
     upstream_id_by_model: Mapping[str, str]
+    # Operations timezone the recurring windows were read in (GLOSSARY §3).
+    tz: tzinfo = UTC
 
     def upstream_model_view(self, row: UpstreamModelORM) -> AvailabilityView:
         upstream_id = self.upstream_id_by_model.get(row.id, "")
@@ -121,6 +124,7 @@ class AvailabilitySnapshot:
             now_ms=self.now_ms,
             rules_by_scope=self.rules_by_scope,
             ancestor_scope=(SCOPE_UPSTREAM, upstream_id) if upstream_id else None,
+            tz=self.tz,
         )
 
     def public_model_view(self, row: PublicModelORM) -> AvailabilityView:
@@ -134,12 +138,15 @@ class AvailabilitySnapshot:
         )
 
 
-def rule_is_active(rule: AvailabilityRuleORM, now_ms: int) -> bool:
+def rule_is_active(
+    rule: AvailabilityRuleORM, now_ms: int, tz: tzinfo | None = None
+) -> bool:
     """Evaluate one rule against a wall-clock instant.
 
     A one-shot window exception (``skip_until_ms`` in the future, GLOSSARY §3)
     suppresses only that schedule rule's current window; bans are human
-    decisions and can never be skipped by an enable.
+    decisions and can never be skipped by an enable. Recurring windows are read
+    in ``tz`` (the operations timezone, GLOSSARY §3); None means UTC.
     """
     if rule.kind == "ban":
         return True
@@ -154,10 +161,12 @@ def rule_is_active(rule: AvailabilityRuleORM, now_ms: int) -> bool:
         return now_ms < rule.expires_at_ms
     schedule = _load_schedule(rule.schedule_json)
     windows = schedule.get("windows", [])
-    return _in_any_window(windows, recurrence, now_ms)
+    return _in_any_window(windows, recurrence, now_ms, tz)
 
 
-def rule_deadline_ms(rule: AvailabilityRuleORM, now_ms: int) -> int:
+def rule_deadline_ms(
+    rule: AvailabilityRuleORM, now_ms: int, tz: tzinfo | None = None
+) -> int:
     """When an active cooldown recovers (0 for bans, inactive windows and no deadline)."""
     if rule.kind != "cooldown":
         return 0
@@ -165,16 +174,24 @@ def rule_deadline_ms(rule: AvailabilityRuleORM, now_ms: int) -> int:
     if recurrence == "once":
         deadline = int(rule.expires_at_ms or 0)
         return deadline if deadline > now_ms else 0
-    if not rule_is_active(rule, now_ms):
+    if not rule_is_active(rule, now_ms, tz):
         return 0
-    return _window_end_ms(_load_schedule(rule.schedule_json).get("windows", []), recurrence, now_ms)
+    return _window_end_ms(
+        _load_schedule(rule.schedule_json).get("windows", []), recurrence, now_ms, tz
+    )
 
 
 def evaluate(session: Session, now_ms: int | None = None) -> AvailabilitySnapshot:
-    """Evaluate every rule once; render and the API derive everything from this."""
+    """Evaluate every rule once; render and the API derive everything from this.
+
+    Recurring windows are interpreted in the operations timezone (app_settings
+    `timezone`, GLOSSARY §3), not UTC; the zone rides on the snapshot so every
+    view built from it reads the same wall clock.
+    """
     moment = int(now_ms if now_ms is not None else utc_now_ms())
+    tz = report_timezone(session)
     rules = list(session.scalars(select(AvailabilityRuleORM)).all())
-    active = [rule for rule in rules if rule_is_active(rule, moment)]
+    active = [rule for rule in rules if rule_is_active(rule, moment, tz)]
     rules_by_scope: dict[tuple[str, str], list[AvailabilityRuleORM]] = {}
     for rule in rules:
         rules_by_scope.setdefault((rule.scope, rule.scope_id), []).append(rule)
@@ -233,6 +250,7 @@ def evaluate(session: Session, now_ms: int | None = None) -> AvailabilitySnapsho
 
     return AvailabilitySnapshot(
         now_ms=moment,
+        tz=tz,
         blocked_target_ids=frozenset(blocked),
         excluded_upstream_model_ids=frozenset(excluded_models),
         excluded_public_model_ids=frozenset(excluded_public),
@@ -418,6 +436,7 @@ def enable_model_availability(
             f"scope 必须是 {'/'.join(MODEL_SCOPES)}，得到 {scope!r}",
         )
     moment = int(now_ms if now_ms is not None else utc_now_ms())
+    tz = report_timezone(session)
     rules = list(
         session.scalars(
             select(AvailabilityRuleORM).where(
@@ -431,9 +450,9 @@ def enable_model_availability(
     for rule in rules:
         if rule.kind != "cooldown" or (rule.recurrence or "once") == "once":
             continue
-        if not rule_is_active(rule, moment):
+        if not rule_is_active(rule, moment, tz):
             continue  # only a rule inside its window right now gets skipped
-        deadline = rule_deadline_ms(rule, moment)
+        deadline = rule_deadline_ms(rule, moment, tz)
         if deadline <= moment:
             continue
         rule.skip_until_ms = deadline
@@ -480,6 +499,7 @@ def sync_cooldown_projection(
     if scope not in MODEL_SCOPES:
         return 0
     moment = int(now_ms if now_ms is not None else utc_now_ms())
+    tz = report_timezone(session)
     orm = UpstreamModelORM if scope == SCOPE_UPSTREAM_MODEL else PublicModelORM
     row = session.get(orm, scope_id)
     if row is None:
@@ -492,7 +512,7 @@ def sync_cooldown_projection(
             )
         ).all()
     )
-    deadline = _projected_deadline(rules, now_ms=moment)
+    deadline = _projected_deadline(rules, now_ms=moment, tz=tz)
     if int(row.cooldown_until_ms or 0) != deadline:
         row.cooldown_until_ms = deadline
     return deadline
@@ -501,6 +521,7 @@ def sync_cooldown_projection(
 def sync_all_cooldown_projections(session: Session, now_ms: int | None = None) -> int:
     """Refresh every model row projection; used at startup and on window boundaries."""
     moment = int(now_ms if now_ms is not None else utc_now_ms())
+    tz = report_timezone(session)
     rules = list(session.scalars(select(AvailabilityRuleORM)).all())
     by_scope: dict[tuple[str, str], list[AvailabilityRuleORM]] = {}
     for rule in rules:
@@ -512,7 +533,7 @@ def sync_all_cooldown_projections(session: Session, now_ms: int | None = None) -
     ):
         for row in session.scalars(select(orm)).all():
             deadline = _projected_deadline(
-                by_scope.get((scope, row.id), []), now_ms=moment
+                by_scope.get((scope, row.id), []), now_ms=moment, tz=tz
             )
             if int(row.cooldown_until_ms or 0) != deadline:
                 row.cooldown_until_ms = deadline
@@ -575,6 +596,7 @@ def rules_changed_since(
     render job uses this to know when the data plane must be refreshed.
     """
     moment = int(now_ms if now_ms is not None else utc_now_ms())
+    tz = report_timezone(session)
     rules = list(
         session.scalars(
             select(AvailabilityRuleORM).where(AvailabilityRuleORM.kind == "cooldown")
@@ -583,7 +605,7 @@ def rules_changed_since(
     return [
         rule
         for rule in rules
-        if rule_is_active(rule, since_ms) != rule_is_active(rule, moment)
+        if rule_is_active(rule, since_ms, tz) != rule_is_active(rule, moment, tz)
         or since_ms < int(rule.skip_set_at_ms or 0) <= moment
     ]
 
@@ -636,17 +658,18 @@ def _row_view(
     now_ms: int,
     rules_by_scope: Mapping[tuple[str, str], tuple[AvailabilityRuleORM, ...]],
     ancestor_scope: tuple[str, str] | None = None,
+    tz: tzinfo | None = None,
 ) -> AvailabilityView:
     if not enabled:
         return AvailabilityView(AvailabilityState.CLOSED)
     rules = list(rules_by_scope.get((scope, scope_id), ()))
     if ancestor_scope is not None:
         rules.extend(rules_by_scope.get(ancestor_scope, ()))
-    active = [rule for rule in rules if rule_is_active(rule, now_ms)]
+    active = [rule for rule in rules if rule_is_active(rule, now_ms, tz)]
     if any(rule.kind == "ban" for rule in active):
         return AvailabilityView(AvailabilityState.CLOSED)
     deadlines = [
-        rule_deadline_ms(rule, now_ms) for rule in active if rule.kind == "cooldown"
+        rule_deadline_ms(rule, now_ms, tz) for rule in active if rule.kind == "cooldown"
     ]
     managed_id = row_cooldown_rule_id(scope, scope_id)
     if not any(rule.id == managed_id for rule in rules_by_scope.get((scope, scope_id), ())):
@@ -664,13 +687,15 @@ def _row_view(
     return AvailabilityView(AvailabilityState.NORMAL, 0, window_skip)
 
 
-def _projected_deadline(rules: list[AvailabilityRuleORM], *, now_ms: int) -> int:
+def _projected_deadline(
+    rules: list[AvailabilityRuleORM], *, now_ms: int, tz: tzinfo | None = None
+) -> int:
     """The cache value is derived only from rules; a stale column never feeds itself."""
     return max(
         (
-            rule_deadline_ms(rule, now_ms)
+            rule_deadline_ms(rule, now_ms, tz)
             for rule in rules
-            if rule.kind == "cooldown" and rule_is_active(rule, now_ms)
+            if rule.kind == "cooldown" and rule_is_active(rule, now_ms, tz)
         ),
         default=0,
     )
@@ -712,14 +737,16 @@ def _load_schedule(schedule_json: str | None) -> dict[str, Any]:
     return parsed
 
 
-def _in_any_window(windows: list[Any], recurrence: str, now_ms: int) -> bool:
-    return _matching_window(windows, recurrence, now_ms) is not None
+def _in_any_window(
+    windows: list[Any], recurrence: str, now_ms: int, tz: tzinfo | None = None
+) -> bool:
+    return _matching_window(windows, recurrence, now_ms, tz) is not None
 
 
 def _matching_window(
-    windows: list[Any], recurrence: str, now_ms: int
+    windows: list[Any], recurrence: str, now_ms: int, tz: tzinfo | None = None
 ) -> dict[str, Any] | None:
-    moment = datetime.fromtimestamp(now_ms / 1000, tz=UTC)
+    moment = datetime.fromtimestamp(now_ms / 1000, tz=tz or UTC)
     minutes_now = moment.hour * 60 + moment.minute
     for window in windows:
         if not isinstance(window, dict):
@@ -745,14 +772,21 @@ def _matching_window(
     return None
 
 
-def _window_end_ms(windows: list[Any], recurrence: str, now_ms: int) -> int:
-    """End of the window containing ``now_ms``, or 0 when no window matches."""
-    window = _matching_window(windows, recurrence, now_ms)
+def _window_end_ms(
+    windows: list[Any], recurrence: str, now_ms: int, tz: tzinfo | None = None
+) -> int:
+    """End of the window containing ``now_ms``, or 0 when no window matches.
+
+    The end instant is built in ``tz`` (the operations timezone), so a 02:00-04:00
+    window means 02:00-04:00 local time, not UTC (GLOSSARY §3).
+    """
+    zone = tz or UTC
+    window = _matching_window(windows, recurrence, now_ms, tz)
     if window is None:
         return 0
     start = _parse_hhmm(window.get("start", "00:00"))
     end = _parse_hhmm(window.get("end", "23:59"))
-    moment = datetime.fromtimestamp(now_ms / 1000, tz=UTC)
+    moment = datetime.fromtimestamp(now_ms / 1000, tz=zone)
     minutes_now = moment.hour * 60 + moment.minute
     # Half-open [start, end); end <= start crosses midnight (start == end is a full
     # day). A cross-midnight window that began yesterday ends TODAY, not tomorrow.
@@ -766,7 +800,7 @@ def _window_end_ms(windows: list[Any], recurrence: str, now_ms: int) -> int:
         day_offset += 1
     target = (moment + timedelta(days=day_offset)).date()
     end_at = datetime(
-        target.year, target.month, target.day, end_minutes // 60, end_minutes % 60, tzinfo=UTC
+        target.year, target.month, target.day, end_minutes // 60, end_minutes % 60, tzinfo=zone
     )
     return int(end_at.timestamp() * 1000)
 
