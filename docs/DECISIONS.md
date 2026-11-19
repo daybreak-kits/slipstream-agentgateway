@@ -428,6 +428,8 @@
 
 **后果**：M3 开放 /admin/policies 的 retry/health 配置面与 UI → M4 回归；usage.py 列映射不变（E17-T2-c 实测）；AG panic（outlierdetection SystemTime overflow，OR :free 429 触发）上报上游跟踪；ADR-014 简化模式选型相关条目由本 ADR 取代。
 
+**后果修正（2026-11-20，E19 实测裁决）**：「路由链可视化不回归」修正为**可经 OTel Traces 实现、列为独立后续工单（M5，待立项）**：pinned 1.7.0 渲染 `frontendPolicies.tracing`（顶层 tracing 键属 xds 根、standalone 拒收）后，1 请求产生 1 server 根 span + 每次上游尝试 1 个 client span（含上游身份/逐次状态码/错误类型），根 span 带 retry.attempt，且 request_logs.trace_id/span_id 同步填充可与 span 树 join（9c5ad71）。1.7.0 的 accessLog upstreamCalls CEL 字段实测静默失效（文档宣称支持）——访问日志路线不可用；metrics 仅宏观无 endpoint 标签；agctl 不存在。M5 范围草案：AG 渲染 tracing（randomSampling 策略）→ 控制面常驻轻量 OTLP/HTTP 接收器 → 按 trace_id join 复原 attempts[] → 日志详情路由链展示；量产需采样/过滤。本批四期不含 M5。
+
 ## ADR-025 可用性措施归属上游模型，公开模型只有启停
 
 - 状态：已定（2026-11-19 用户裁决；收窄 ADR-004「可用性并入模型管理」的适用面）
