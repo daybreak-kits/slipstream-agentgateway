@@ -132,7 +132,7 @@ export function GlobalSearch() {
       })),
     },
     {
-      heading: "客户端密钥",
+      heading: "连接密钥",
       items: (apiKeys.data?.items ?? []).map<SearchHit>((row) => ({
         id: "api-key-" + row.id,
         label: row.mask,
@@ -166,11 +166,11 @@ export function GlobalSearch() {
         <DialogContent className="overflow-hidden p-0">
           <DialogTitle className="sr-only">全局搜索</DialogTitle>
           <DialogDescription className="sr-only">
-            搜索上游、上游模型、对外模型与客户端密钥；↑↓ 选择，回车跳转。
+            搜索上游、上游模型、公开模型与连接密钥；↑↓ 选择，回车跳转。
           </DialogDescription>
           <Command shouldFilter={false}>
             <CommandInput
-              placeholder="搜索上游 / 上游模型 / 对外模型 / 客户端密钥…"
+              placeholder="搜索上游 / 上游模型 / 公开模型 / 连接密钥…"
               value={query}
               onValueChange={setQuery}
             />

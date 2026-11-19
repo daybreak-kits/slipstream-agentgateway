@@ -1,58 +1,15 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
-
-import { readValue, writeValue } from "@/lib/storage";
-
 export type TimezoneMode = "local" | "utc";
 
 interface TimezoneContextValue {
   mode: TimezoneMode;
-  setMode: (mode: TimezoneMode) => void;
-  toggle: () => void;
 }
 
-const LOCAL_FALLBACK: TimezoneContextValue = {
-  mode: "local",
-  setMode: () => undefined,
-  toggle: () => undefined,
-};
-
-// Defaulting keeps isolated renders (tests, storybook-style previews) working;
-// the app root always supplies a real TimezoneProvider.
-const TimezoneContext = createContext<TimezoneContextValue>(LOCAL_FALLBACK);
-
-function readInitialMode(): TimezoneMode {
-  return readValue<string>("timezone") === "utc" ? "utc" : "local";
-}
-
-export function TimezoneProvider({ children }: { children: ReactNode }) {
-  const [mode, setModeState] = useState<TimezoneMode>(readInitialMode);
-
-  const setMode = useCallback((next: TimezoneMode) => {
-    setModeState(next);
-    writeValue("timezone", next);
-  }, []);
-
-  const toggle = useCallback(() => {
-    setMode(mode === "utc" ? "local" : "utc");
-  }, [mode, setMode]);
-
-  const value = useMemo<TimezoneContextValue>(
-    () => ({ mode, setMode, toggle }),
-    [mode, setMode, toggle],
-  );
-
-  return <TimezoneContext.Provider value={value}>{children}</TimezoneContext.Provider>;
-}
+// 时区切换随 TimezoneProvider 一并移除（W6 死代码清理）：无 UI 可切换时区，
+// useTimezone 恒返回本地时区；将来要加切换时再引入 Provider + context。
+const LOCAL_MODE: TimezoneContextValue = { mode: "local" };
 
 export function useTimezone(): TimezoneContextValue {
-  return useContext(TimezoneContext);
+  return LOCAL_MODE;
 }
 
 export const TIMEZONE_LABEL: Record<TimezoneMode, string> = {

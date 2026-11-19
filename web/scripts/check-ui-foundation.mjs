@@ -357,7 +357,6 @@ check("指标条：grid gap-3 + 2/3/6 列响应式（≥1440 六列）", () => {
   );
   for (const file of [
     "src/components/billing/cost-panel.tsx",
-    "src/components/billing/revenue-panel.tsx",
     "src/components/billing/unpriced-panel.tsx",
     "src/components/billing/my-spend-panel.tsx",
     "src/pages/quick-start.tsx",
@@ -366,10 +365,9 @@ check("指标条：grid gap-3 + 2/3/6 列响应式（≥1440 六列）", () => {
   }
 });
 
-check("页面接线：cost / revenue / unpriced / upstream_detail 用 MetricCard + 统一图标映射", () => {
+check("页面接线：cost / unpriced / upstream_detail 用 MetricCard + 统一图标映射", () => {
   for (const file of [
     "src/components/billing/cost-panel.tsx",
-    "src/components/billing/revenue-panel.tsx",
     "src/components/billing/unpriced-panel.tsx",
     "src/pages/upstream_detail.tsx",
   ]) {

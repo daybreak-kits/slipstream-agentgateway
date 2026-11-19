@@ -22,56 +22,10 @@ import type {
   TrendMetric,
 } from "./report-types";
 
-/** 活跃上游：/admin/upstreams 裸数组里 enabled 的数量。 */
-export interface UpstreamSummary {
-  enabled: number;
-  total: number;
-}
-
 /**
  * 全部报表 hooks 都把 react-query 的 queryFn signal 透传给 lib/api（AbortController）：
  * 换区间/换维度/换指标时旧请求立刻取消，连点不排队（W6 验收流程 4）。
  */
-export function useUpstreamSummary() {
-  return useQuery({
-    queryKey: ["reports", "upstream-summary"],
-    queryFn: async ({ signal }): Promise<UpstreamSummary> => {
-      if (useMock) return { enabled: 3, total: 5 };
-      const rows = await api.get<Array<{ enabled: boolean }>>("/admin/upstreams", { signal });
-      return { enabled: rows.filter((row) => row.enabled).length, total: rows.length };
-    },
-    staleTime: 60_000,
-  });
-}
-
-/** 可用率近似：1 - (status:5xx 条数 / 总请求条数)，取自 /admin/logs 的 total。 */
-export interface AvailabilitySummary {
-  total: number;
-  errors: number;
-  rate: number | null;
-}
-
-/** 当前无消费方（可用性并入模型管理页自有 hooks）；保留并按 F1 工单把两次串行 await 并行化。 */
-export function useAvailability() {
-  return useQuery({
-    queryKey: ["reports", "availability"],
-    queryFn: async ({ signal }): Promise<AvailabilitySummary> => {
-      if (useMock) {
-        const total = 18_642;
-        const errors = 41;
-        return { total, errors, rate: 1 - errors / total };
-      }
-      // 并行打两个 total（原先串行 2×RTT）
-      const [all, failed] = await Promise.all([
-        api.get<{ total: number }>("/admin/logs?page_size=25&offset=0", { signal }),
-        api.get<{ total: number }>("/admin/logs?query=status%3A5xx&page_size=25&offset=0", { signal }),
-      ]);
-      const rate = all.total > 0 ? 1 - failed.total / all.total : null;
-      return { total: all.total, errors: failed.total, rate };
-    },
-    staleTime: 60_000,
-  });
-}
 
 /**
  * 时间窗 → query 参数。预设区间只传 range 枚举（桶边界按报表时区切，前端不自算毫秒）；

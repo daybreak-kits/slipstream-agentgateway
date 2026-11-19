@@ -7,18 +7,16 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableWrap, TD, TH, THead, TR } from "@/components/ui/table";
 import { invalidatePricing } from "@/components/pricing/queries";
-import { api } from "@/lib/api";
+import { api, ENDPOINTS } from "@/lib/api";
 import { ApiError } from "@/lib/api";
 import { formatDateTime, useTimezone } from "@/lib/time";
 
 /**
- * ADR-020 价目 JSON 导入导出端点（l06_api/routers_pricing_io.py）。
- * lib/api.ts 的 ENDPOINTS 由另一工位所有、本工单禁改，故路径就近常量化；
- * 形状与后端对齐：导出 {schema_version, exported_at_ms, meta, upstream_models[]}，
- * 导入成功 {changed, skipped}，失败 422 details.errors 逐行 {index, id, name, message}。
+ * ADR-020 价目 JSON 导入导出端点（l06_api/routers_pricing_io.py），路径见 lib/api.ts
+ * ENDPOINTS.pricesExport/pricesImport。形状与后端对齐：导出 {schema_version,
+ * exported_at_ms, meta, upstream_models[]}，导入成功 {changed, skipped}，失败 422
+ * details.errors 逐行 {index, id, name, message}。
  */
-const PRICES_EXPORT = "/admin/prices/export";
-const PRICES_IMPORT = "/admin/prices/import";
 
 interface PriceExportFile {
   schema_version?: number;
@@ -53,7 +51,7 @@ export function PriceIoActions({ canExport, canImport }: { canExport: boolean; c
 
   const exportMutation = useMutation({
     mutationFn: async () => {
-      const file = await api.get<PriceExportFile>(PRICES_EXPORT);
+      const file = await api.get<PriceExportFile>(ENDPOINTS.pricesExport);
       const blob = new Blob([JSON.stringify(file, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
@@ -125,7 +123,7 @@ function ImportDialog({ onClose, queryClient }: { onClose: () => void; queryClie
   }
 
   const importMutation = useMutation({
-    mutationFn: (body: PriceExportFile) => api.post<{ changed: number; skipped?: number }>(PRICES_IMPORT, body),
+    mutationFn: (body: PriceExportFile) => api.post<{ changed: number; skipped?: number }>(ENDPOINTS.pricesImport, body),
     onSuccess: async (result) => {
       toast.success("价目导入成功", {
         description: "已更新 " + result.changed + " 项" +

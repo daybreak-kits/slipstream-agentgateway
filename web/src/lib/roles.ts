@@ -26,12 +26,6 @@ export interface RoleDefinition {
   member_count: number;
 }
 
-export interface RoleCreateInput {
-  name: string;
-  description?: string;
-  permissions: string[];
-}
-
 export interface RolePatchInput {
   name?: string;
   description?: string;
@@ -114,10 +108,6 @@ export async function fetchRoles(): Promise<RoleDefinition[]> {
   if (useMock) return MOCK_ROLES;
   const payload = await api.get<{ items: RoleDefinition[]; total: number }>("/admin/roles");
   return payload.items;
-}
-
-export async function createRole(input: RoleCreateInput): Promise<RoleDefinition> {
-  return api.post<RoleDefinition>("/admin/roles", input);
 }
 
 export async function updateRole(id: string, input: RolePatchInput): Promise<RoleDefinition> {

@@ -80,8 +80,183 @@ const clientKeys: ApiKey[] = [
   { id: "ak_03", user_id: "eu_03", mask: "sk-…Z3A4", key_suffix: "Z3A4", status: "disabled", created_at_ms: Date.parse("2026-10-20T09:00:00") },
 ];
 
+/**
+ * mock 模式日志行：结构镜像 components/logs/types.ts 的 LogRow（lib 不反向 import
+ * components），供 /admin/logs 的排序/筛选/分页演示（W6 补桩）。
+ */
+interface MockLogRow {
+  event_id: string;
+  started_at_ms: number;
+  completed_at_ms: number;
+  duration_ms: number;
+  time_to_first_token_ms: number;
+  http_status: number;
+  public_model: string;
+  upstream_model: string;
+  upstream_model_id: string;
+  target_priority: number | null;
+  provider: string;
+  user_id: string;
+  user_name: string;
+  api_key_id: string;
+  api_key_label: string;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cache_ratio: number | null;
+  throughput_tps: number | null;
+  is_stream: boolean;
+  has_error: boolean;
+  has_payload: boolean;
+  error: string;
+  cost_micro: number | null;
+  margin_micro: number | null;
+  charge_micro: number | null;
+  currency: string;
+  estimate: boolean;
+}
+
+const MOCK_LOG_START_MS = Date.parse("2026-11-03T08:00:00");
+const MOCK_LOG_MODELS = ["glm-5.3", "glm-4.6", "qwen-max"];
+const MOCK_LOG_PEOPLE = [
+  { id: "eu_01", name: "内部平台" },
+  { id: "eu_02", name: "数据分析组" },
+  { id: "eu_03", name: "试用-临时" },
+];
+const MOCK_LOG_KEYS = ["sk-…G7H8", "sk-…R5S6", "sk-…Z3A4"];
+const MOCK_LOG_UPSTREAMS = ["zai-01", "or-01", "host-01"];
+
+const mockLogs: MockLogRow[] = Array.from({ length: 36 }, (_, i) => {
+  const person = MOCK_LOG_PEOPLE[i % 3]!;
+  const model = MOCK_LOG_MODELS[i % 3]!;
+  const started_at_ms = MOCK_LOG_START_MS + i * 7 * 3600_000 + (i % 5) * 600_000;
+  const duration_ms = 320 + ((i * 977) % 4200);
+  const is_stream = i % 2 === 0;
+  const failed = i % 9 === 5;
+  const input_tokens = 900 + ((i * 613) % 6000);
+  const output_tokens = 120 + ((i * 271) % 900);
+  const cache_read_tokens = i % 3 === 0 ? 400 + ((i * 331) % 1500) : 0;
+  const cache_write_tokens = i % 4 === 0 ? 200 + ((i * 173) % 800) : 0;
+  const cache_total = input_tokens + cache_read_tokens + cache_write_tokens;
+  const cost_micro = failed ? null : 4200 + i * 913;
+  const charge_micro = failed ? null : 5200 + i * 1177;
+  return {
+    event_id: "mev_" + String(1000 + i),
+    started_at_ms,
+    completed_at_ms: started_at_ms + duration_ms,
+    duration_ms,
+    time_to_first_token_ms: is_stream ? 220 + ((i * 149) % 700) : 0,
+    http_status: failed ? (i % 2 === 0 ? 500 : 502) : 200,
+    public_model: model,
+    upstream_model: model,
+    upstream_model_id: "um_0" + String((i % 3) + 1),
+    target_priority: 1,
+    provider: MOCK_LOG_UPSTREAMS[i % 3]!,
+    user_id: person.id,
+    user_name: person.name,
+    api_key_id: "ak_0" + String((i % 3) + 1),
+    api_key_label: MOCK_LOG_KEYS[i % 3]!,
+    input_tokens,
+    output_tokens,
+    total_tokens: input_tokens + output_tokens,
+    cache_read_tokens,
+    cache_write_tokens,
+    cache_ratio: cache_total > 0 ? Math.round((cache_read_tokens / cache_total) * 1000) / 10 : null,
+    throughput_tps: output_tokens > 0 && duration_ms > 300 ? Math.round(output_tokens / ((duration_ms - 300) / 1000)) : null,
+    is_stream,
+    has_error: failed,
+    has_payload: !failed && i % 5 === 0,
+    error: failed ? (i % 2 === 0 ? "upstream 500: internal error" : "upstream 502: bad gateway") : "",
+    cost_micro,
+    margin_micro: cost_micro === null || charge_micro === null ? null : charge_micro - cost_micro,
+    charge_micro,
+    currency: "CNY",
+    estimate: true,
+  };
+});
+
+/** /admin/logs 的筛选（关键词 + model:/upstream:/user:/key:/status:/stream:/latency>/ttft>/cache>）、排序、分页，行为对齐 routers_ops.search_logs。 */
+function queryMockLogs(params: URLSearchParams): { total: number; items: MockLogRow[]; next_offset: number | null } {
+  let rows = mockLogs.slice();
+  const query = (params.get("query") ?? "").trim();
+  if (query) {
+    const tokens = query.split(/\s+/).filter(Boolean);
+    rows = rows.filter((row) =>
+      tokens.every((token) => {
+        const m = /^(model|upstream|user|key|status|stream|latency|ttft|cache)([:><])(.+)$/i.exec(token);
+        if (!m) {
+          const kw = token.toLowerCase();
+          return (
+            row.public_model.toLowerCase().includes(kw) ||
+            row.upstream_model.toLowerCase().includes(kw) ||
+            row.user_name.toLowerCase().includes(kw) ||
+            row.api_key_label.toLowerCase().includes(kw) ||
+            row.event_id.toLowerCase().includes(kw)
+          );
+        }
+        const field = m[1]!.toLowerCase();
+        const op = m[2]!;
+        const value = m[3]!.toLowerCase();
+        if (field === "model") {
+          return row.public_model.toLowerCase().includes(value) || row.upstream_model.toLowerCase().includes(value);
+        }
+        if (field === "upstream") {
+          return row.provider.toLowerCase().includes(value) || row.upstream_model.toLowerCase().includes(value);
+        }
+        if (field === "user") {
+          return row.user_id.toLowerCase().includes(value) || row.user_name.toLowerCase().includes(value);
+        }
+        if (field === "key") {
+          return row.api_key_id.toLowerCase().includes(value) || row.api_key_label.toLowerCase().includes(value);
+        }
+        if (field === "status") {
+          if (/^\dxx$/.test(value)) return String(row.http_status).startsWith(value[0]!);
+          return row.http_status === Number(value);
+        }
+        if (field === "stream") return row.is_stream === (value === "true");
+        const num = Number(m[3]);
+        if (!Number.isFinite(num)) return true;
+        if (field === "latency") return op === ">" ? row.duration_ms > num : row.duration_ms < num;
+        if (field === "ttft") return row.time_to_first_token_ms > num;
+        if (field === "cache") return (row.cache_ratio ?? 0) > num;
+        return true;
+      }),
+    );
+  }
+  const hasError = params.get("has_error");
+  if (hasError === "true") rows = rows.filter((r) => r.has_error);
+  else if (hasError === "false") rows = rows.filter((r) => !r.has_error);
+  const fromMs = Number(params.get("from_ms") ?? 0);
+  const toMs = Number(params.get("to_ms") ?? 0);
+  if (fromMs) rows = rows.filter((r) => r.started_at_ms >= fromMs);
+  if (toMs) rows = rows.filter((r) => r.started_at_ms < toMs);
+  const sort = params.get("sort") ?? "started_at";
+  const dir = params.get("order") === "asc" ? 1 : -1;
+  const keyOf = (r: MockLogRow): number =>
+    sort === "duration_ms"
+      ? r.duration_ms
+      : sort === "total_tokens"
+        ? r.total_tokens
+        : sort === "cost_micro"
+          ? (r.cost_micro ?? -1)
+          : sort === "charge_micro"
+            ? (r.charge_micro ?? -1)
+            : r.started_at_ms;
+  rows.sort((a, b) => (keyOf(a) - keyOf(b)) * dir);
+  const total = rows.length;
+  const pageSize = Math.min(200, Math.max(1, Number(params.get("page_size") ?? 50)));
+  const offset = Math.max(0, Number(params.get("offset") ?? 0));
+  return {
+    total,
+    items: rows.slice(offset, offset + pageSize),
+    next_offset: offset + pageSize < total ? offset + pageSize : null,
+  };
+}
+
 const availabilityRules: AvailabilityRule[] = [
-  { id: "ar_01", kind: "ban", scope: "model_target", scope_id: "mt_01", recurrence: "once", expires_at_ms: null, schedule_json: null, note: "连续超时，人工封禁待查", created_at_ms: Date.parse("2026-11-17T08:00:00") },
+  { id: "ar_01", kind: "ban", scope: "model_target", scope_id: "mt_01", recurrence: "once", expires_at_ms: null, schedule_json: null, note: "连续超时，人工关闭待查", created_at_ms: Date.parse("2026-11-17T08:00:00") },
   { id: "ar_02", kind: "cooldown", scope: "model_target", scope_id: "mt_02", recurrence: "once", expires_at_ms: Date.parse("2026-11-17T02:30:00"), schedule_json: null, note: "429 限流自动冷却", created_at_ms: Date.parse("2026-11-17T01:30:00") },
   { id: "ar_03", kind: "cooldown", scope: "upstream", scope_id: "up_02", recurrence: "daily", expires_at_ms: null, schedule_json: JSON.stringify({ windows: [{ start: "22:00", end: "06:00" }] }), note: "每日 22:00-06:00 例行维护", created_at_ms: Date.parse("2026-11-15T09:00:00") },
 ];
@@ -225,12 +400,12 @@ const settings: SettingItem[] = [
   { key: "timezone", value: "Asia/Shanghai", label: "展示时区", updated_at: "2026-11-15T09:00:00" },
   { key: "log_retention_days", value: "30", label: "请求日志保留", updated_at: "2026-11-15T09:00:00" },
   { key: "audit_retention_days", value: "180", label: "审计日志保留", updated_at: "2026-11-15T09:00:00" },
-  { key: "default_tokens_per_minute", value: "60000", label: "默认 Token 限速（每密钥）", updated_at: "2026-11-15T09:00:00" },
+  { key: "default_tokens_per_minute", value: "60000", label: "默认词元限速（每密钥）", updated_at: "2026-11-15T09:00:00" },
   { key: "default_concurrency", value: "8", label: "默认并发上限（每密钥）", updated_at: "2026-11-15T09:00:00" },
   { key: "gateway_base_url", value: "", label: "公网连接地址", updated_at: "2026-11-15T09:00:00" },
   { key: "gateway_artifact_path", value: "/etc/slipstream/ag.yaml", label: "下发配置落盘路径", updated_at: "2026-11-15T09:00:00" },
   { key: "usage_poll_interval_s", value: "30", label: "用量拉取周期（秒）", updated_at: "2026-11-15T09:00:00" },
-  { key: "client_key_length", value: "64", label: "客户端密钥长度档位", updated_at: "2026-11-16T10:00:00" },
+  { key: "client_key_length", value: "64", label: "连接密钥长度档位", updated_at: "2026-11-16T10:00:00" },
   { key: "price_version", value: "pv_20261101", label: "当前计价快照", updated_at: "2026-11-01T00:00:00" },
 ];
 
@@ -276,9 +451,9 @@ const settingsSchema = {
     {
       key: "limits",
       title: "默认限流参数",
-      description: "新建客户端密钥 / 用户时的默认限流；单个密钥可在客户端密钥页覆盖。",
+      description: "新建连接密钥 / 用户时的默认限流；单个密钥可在连接密钥页覆盖。",
       fields: [
-        { key: "default_tokens_per_minute", label: "默认 Token 限速（每密钥）", description: "新建密钥默认的 token 每分钟配额；0 表示不限制。", kind: "number", default: "60000", unit: "token / min", min: 0, max: 1000000, options: [] },
+        { key: "default_tokens_per_minute", label: "默认词元限速（每密钥）", description: "新建密钥默认的词元每分钟配额；0 表示不限制。", kind: "number", default: "60000", unit: "词元 / min", min: 0, max: 1000000, options: [] },
         { key: "default_concurrency", label: "默认并发上限（每密钥）", description: "新建密钥默认的并发请求上限；0 表示不限制。", kind: "number", default: "8", unit: "并发", min: 0, max: 1000, options: [] },
       ],
     },
@@ -424,7 +599,6 @@ const routes: Array<[RegExp, unknown]> = [
   [/^\/admin\/users$/, endUsers],
   [/^\/admin\/settings\/schema$/, settingsSchema],
   [/^\/admin\/settings$/, { items: settings }],
-  [/^\/admin\/logs$/, { total: 0, items: [] }],
 ];
 
 const PREVIEW_BODY = JSON.stringify({
@@ -606,7 +780,7 @@ export async function mockRequest<T>(path: string, init?: RequestInit): Promise<
     const body = JSON.parse(String(init.body ?? "{}")) as { name?: string; routing_mode?: string; note?: string | null; enabled?: boolean };
     const created: PublicModel = {
       id: "pm_" + String(publicModels.length + 1).padStart(2, "0"),
-      name: body.name ?? "未命名对外模型",
+      name: body.name ?? "未命名公开模型",
       routing_mode: (body.routing_mode ?? "failover") as PublicModel["routing_mode"],
       note: body.note ?? null,
       enabled: body.enabled ?? true,
@@ -705,6 +879,94 @@ export async function mockRequest<T>(path: string, init?: RequestInit): Promise<
     const limit = Number(params.get("limit") ?? auditLogs.length);
     const offset = Number(params.get("offset") ?? 0);
     return { items: auditLogs.slice(offset, offset + limit), total: auditLogs.length } as T;
+  }
+
+  // —— 使用日志：筛选/排序/分页（W6 补桩，对齐 routers_ops.search_logs） ——
+  if (init?.method === "GET" && routePath === "/admin/logs") {
+    return queryMockLogs(new URLSearchParams(path.split("?")[1] ?? "")) as T;
+  }
+
+  // —— 批量操作：上游/公开模型 enable/disable/delete（契约 3.3） ——
+  if (init?.method === "PATCH" && /^\/admin\/(upstream-models|public-models)\/batch$/.test(routePath)) {
+    const body = JSON.parse(String(init.body ?? "{}")) as { ids?: string[]; action?: string };
+    const isPublic = routePath.startsWith("/admin/public-models");
+    const list = isPublic ? publicModels : upstreamModels;
+    const changed: string[] = [];
+    const missing: string[] = [];
+    const failed: Array<{ id: string; code: string; message: string }> = [];
+    for (const id of body.ids ?? []) {
+      const idx = list.findIndex((row) => row.id === id);
+      if (idx < 0) {
+        missing.push(id);
+        continue;
+      }
+      if (body.action === "delete") {
+        list.splice(idx, 1);
+        if (isPublic) {
+          for (let i = modelTargets.length - 1; i >= 0; i--) {
+            if (modelTargets[i]?.public_model_id === id) modelTargets.splice(i, 1);
+          }
+        }
+      } else {
+        list[idx]!.enabled = body.action !== "disable";
+      }
+      changed.push(id);
+    }
+    return { action: body.action ?? "", changed, missing, failed } as T;
+  }
+
+  // 契约 3.4：DELETE /admin/api-keys/{key_id} 直接删除（ADR-023）
+  if (init?.method === "DELETE" && /^\/admin\/api-keys\/[^/?]+$/.test(routePath)) {
+    const id = routePath.split("/")[3] ?? "";
+    const idx = clientKeys.findIndex((k) => k.id === id);
+    if (idx < 0) return { error: "not_found" } as T;
+    clientKeys.splice(idx, 1);
+    return { deleted: true } as T;
+  }
+
+  // —— ADR-020 价目导出/导入（W6 补桩） ——
+  if (init?.method === "GET" && routePath === "/admin/prices/export") {
+    return {
+      schema_version: 1,
+      exported_at_ms: Date.now(),
+      meta: { cache_prices: "out-of-scope-v1" },
+      upstream_models: upstreamModels.map((m) => ({
+        id: m.id,
+        name: m.name,
+        model_type: m.model_type,
+        cost_input_per_1m: m.cost_input_per_1m ?? null,
+        cost_output_per_1m: m.cost_output_per_1m ?? null,
+        markup: m.markup ?? null,
+      })),
+    } as T;
+  }
+  if (init?.method === "POST" && routePath === "/admin/prices/import") {
+    const body = JSON.parse(String(init.body ?? "{}")) as {
+      upstream_models?: Array<{
+        id?: string | null;
+        name?: string | null;
+        cost_input_per_1m?: string | null;
+        cost_output_per_1m?: string | null;
+        markup?: string | null;
+      }>;
+    };
+    let changed = 0;
+    let skipped = 0;
+    for (const item of body.upstream_models ?? []) {
+      const row = upstreamModels.find((m) => (item.id ? m.id === item.id : m.name === item.name));
+      if (!row) continue; // mock 演示：未知行静默跳过（真实后端整批 422）
+      const patch: Partial<UpstreamModel> = {};
+      if (item.cost_input_per_1m !== undefined && item.cost_input_per_1m !== null) patch.cost_input_per_1m = item.cost_input_per_1m;
+      if (item.cost_output_per_1m !== undefined && item.cost_output_per_1m !== null) patch.cost_output_per_1m = item.cost_output_per_1m;
+      if (item.markup !== undefined && item.markup !== null) patch.markup = item.markup;
+      if (Object.keys(patch).length === 0) {
+        skipped += 1;
+        continue;
+      }
+      Object.assign(row, patch);
+      changed += 1;
+    }
+    return { changed, missing: [], skipped } as T;
   }
 
   const hit = routes.find(([re]) => re.test(routePath));

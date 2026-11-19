@@ -179,7 +179,7 @@
         "order": 4,
         "permission": "policies:read"
       },
-      "note": "ADR-023：策略/护栏/MCP 合并单页三 Tab（?tab=policies|guardrails|mcp）；当前为临时壳，重做归 F6 工位"
+      "note": "ADR-023：策略/护栏/MCP 合并单页三 Tab（?tab=policies|guardrails|mcp）；F6 已按三 Tab 正式实现（validate→保存→apply→版本留档），临时壳已替换"
     },
     {
       "path": "/audits",
