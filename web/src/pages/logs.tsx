@@ -12,6 +12,12 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import { toast } from "sonner";
 
 import { DataTable } from "@/components/data-table";
+import { mockLatency } from "@/components/dashboard/report-mocks";
+import {
+  REPORT_PATHS,
+  type AllSamplesLatency,
+  type LatencyReport,
+} from "@/components/dashboard/report-types";
 import {
   cacheHitFraction,
   cacheRatioText,
@@ -20,6 +26,7 @@ import {
   statusLabel,
   statusTone,
 } from "@/components/logs/format";
+import { LATENCY_TONE_BAR_CLASS, latencyTone } from "@/components/logs/latency-tone";
 import { LogDetailDrawer } from "@/components/logs/log-detail-drawer";
 import {
   buildLogQuery,
@@ -47,6 +54,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { api, apiList, ENDPOINTS } from "@/lib/api";
 import { fmtInt, fmtMoney6, fmtPct, fmtSeconds } from "@/lib/format";
 import { ACTION_ICONS } from "@/lib/icons";
+import { useMock } from "@/lib/mock";
 import { usePermissions } from "@/lib/permissions";
 import { SELECT_ALL_VALUE } from "@/lib/select-sentinels";
 import { formatDateTime, useTimezone, type TimezoneMode } from "@/lib/time";
@@ -142,6 +150,27 @@ export function LogsPage() {
     placeholderData: keepPreviousData,
   });
 
+  // 耗时语义色的分位锚（W4-F）：与 /admin/logs 同窗口并发拉取。窗口缺省时不传
+  // from/to（后端缺省=全时段）；取 all 块——全样本、不过滤 ttft>0 配对，非流式
+  // 行的真实耗时也参与锚定（DESIGN-AUDIT §11）。
+  const latencyQuery = useQuery({
+    queryKey: ["logs", "latency", applied.from_ms ?? 0, applied.to_ms ?? 0],
+    placeholderData: keepPreviousData,
+    queryFn: ({ signal }): Promise<LatencyReport> => {
+      if (useMock) {
+        const fromMs = applied.from_ms ?? 0;
+        return Promise.resolve(mockLatency({ kind: "custom", fromMs, toMs: applied.to_ms ?? Date.now() }));
+      }
+      const params = new URLSearchParams();
+      if (applied.from_ms !== undefined && applied.to_ms !== undefined) {
+        params.set("from_ms", String(applied.from_ms));
+        params.set("to_ms", String(applied.to_ms));
+      }
+      const query = params.toString();
+      return api.get<LatencyReport>(REPORT_PATHS.latency + (query ? "?" + query : ""), { signal });
+    },
+  });
+
   const modelOptions = useMemo<ComboboxOption[]>(
     () => (publicModelsQ.data?.items ?? []).map((model) => ({ value: model.name, label: model.name })),
     [publicModelsQ.data],
@@ -221,6 +250,7 @@ export function LogsPage() {
   const { can } = usePermissions();
   const canCost = can("billing:cost");
   const canSpend = can("billing:spend");
+  const latencyAll = latencyQuery.data?.all;
 
   const columns = useMemo(
     () =>
@@ -232,8 +262,9 @@ export function LogsPage() {
         canCost,
         canSpend,
         modelTypes,
+        latencyAll,
       }),
-    [mode, sort, handleSort, openDetail, canCost, canSpend, modelTypes],
+    [mode, sort, handleSort, openDetail, canCost, canSpend, modelTypes, latencyAll],
   );
 
   const total = logsQuery.data?.total ?? 0;
@@ -434,11 +465,41 @@ interface LogColumnSpec {
   canCost: boolean;
   canSpend: boolean;
   modelTypes: Map<string, string>;
+  /** 延迟报表 all 块（W4-F）：耗时列语义色的分位锚；加载中/旧后端缺位时中性灰。 */
+  latencyAll?: AllSamplesLatency;
+}
+
+/**
+ * 语义色条行（DESIGN-AUDIT §5）：竖色条 3px 圆角 + 标签 + 数值。
+ * 色条颜色由 latencyTone 按当前窗口分位动态判定（首字用 all.ttft、耗时用 all.total）。
+ */
+function LatencyLine({
+  label,
+  value,
+  p50,
+  p95,
+}: {
+  label: string;
+  value: number;
+  p50: number | null | undefined;
+  p95: number | null | undefined;
+}) {
+  const tone = latencyTone(value, p50, p95);
+  return (
+    <p className="flex items-center gap-1.5 text-2xs leading-4">
+      <span
+        aria-hidden="true"
+        className={cn("h-3.5 w-[3px] shrink-0 rounded-full", LATENCY_TONE_BAR_CLASS[tone])}
+      />
+      <span className="text-faint">{label}</span>
+      <span className="tnum text-body">{fmtSeconds(value)}</span>
+    </p>
+  );
 }
 
 /** 两行式单元格（DESIGN-AUDIT §2）：主行 primary、次行 muted；数字列右对齐 tnum。 */
 function buildLogColumns(spec: LogColumnSpec): ColumnDef<LogRow, unknown>[] {
-  const { mode, sort, onSort, onOpen, canCost, canSpend, modelTypes } = spec;
+  const { mode, sort, onSort, onOpen, canCost, canSpend, modelTypes, latencyAll } = spec;
   const columns: ColumnDef<LogRow, unknown>[] = [
     {
       id: "datetime",
@@ -566,12 +627,28 @@ function buildLogColumns(spec: LogColumnSpec): ColumnDef<LogRow, unknown>[] {
       header: () => <SortHeader label="耗时" field="duration_ms" sort={sort} onSort={onSort} />,
       enableSorting: false,
       meta: { className: "text-right" },
-      cell: ({ row }) => (
-        <div className="whitespace-nowrap tnum">
-          <p className="text-xs text-body">{fmtSeconds(row.original.duration_ms)}</p>
-          <p className="mt-0.5 text-2xs text-faint">首字 {fmtSeconds(row.original.time_to_first_token_ms)}</p>
-        </div>
-      ),
+      cell: ({ row }) => {
+        const anchors = latencyAll;
+        return (
+          <div
+            className="flex flex-col items-end gap-0.5 whitespace-nowrap tnum"
+            title="色条按当前窗口分位动态着色：≤P50 绿、P50–P95 黄、>P95 红；灰色 = 样本不足或零值"
+          >
+            <LatencyLine
+              label="首字"
+              value={row.original.time_to_first_token_ms}
+              p50={anchors?.ttft.p50_ms}
+              p95={anchors?.ttft.p95_ms}
+            />
+            <LatencyLine
+              label="耗时"
+              value={row.original.duration_ms}
+              p50={anchors?.total.p50_ms}
+              p95={anchors?.total.p95_ms}
+            />
+          </div>
+        );
+      },
     },
     {
       id: "actions",

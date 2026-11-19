@@ -261,12 +261,25 @@ export function mockLatency(window: TimeWindow): LatencyReport {
     p95_ms: Math.round(p95 * jitter),
     p99_ms: Math.round(p99 * jitter),
   });
+  // W4-F 全样本块（不过滤 ttft>0 配对）：样本更多、p50 偏低（非流式 0 首字计入），
+  // 只有 p50/p75/p95（后端契约不回 p99）；日志页耗时列语义色以它为锚。
+  const allBlock = (p50: number, p75: number, p95: number) => ({
+    samples: 20_455,
+    p50_ms: Math.round(p50 * jitter),
+    p75_ms: Math.round(p75 * jitter),
+    p95_ms: Math.round(p95 * jitter),
+  });
   return {
     range: window.kind === "custom" ? "custom" : window.value,
     paired_samples: 17_820,
     min_samples: 5,
     ttft: block(231, 348, 512, 890),
     total: block(642, 1_180, 2_140, 3_980),
+    all: {
+      samples: 20_455,
+      ttft: allBlock(180, 296, 480),
+      total: allBlock(706, 1_265, 2_320),
+    },
     timezone: "Asia/Shanghai",
     currency: CURRENCY,
     estimate_note: ESTIMATE,

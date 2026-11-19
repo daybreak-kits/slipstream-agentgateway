@@ -253,13 +253,33 @@ export interface LatencyBlock {
   p99_ms: number | null;
 }
 
+/**
+ * 全样本分位块（W4-F）：窗口内全部事件——不过滤 ttft>0 配对，非流式（ttft=0）
+ * 也计入——只有语义色锚点 p50/p75/p95（后端不回 p99）。样本不足 5 时分位为 null。
+ */
+export interface AllSamplesBlock {
+  samples: number;
+  p50_ms: number | null;
+  p75_ms: number | null;
+  p95_ms: number | null;
+}
+
+/** 与 paired 块同窗不同口径；all.samples 是窗口内全部事件数（≥ paired_samples）。 */
+export interface AllSamplesLatency {
+  samples: number;
+  ttft: AllSamplesBlock;
+  total: AllSamplesBlock;
+}
+
 export interface LatencyReport {
-  /** 自定义区间生效时后端回显 "custom"。 */
-  range: ReportRange | "custom";
+  /** 自定义区间生效时后端回显 "custom"；窗口缺省（全时段，W4-F）回显 "all"。 */
+  range: ReportRange | "custom" | "all";
   paired_samples: number;
   min_samples: number;
   ttft: LatencyBlock;
   total: LatencyBlock;
+  /** W4-F 新键：日志页耗时语义色的分位锚点；旧后端无此键，消费方一律判空降级。 */
+  all?: AllSamplesLatency;
   timezone?: string;
   currency?: string;
   estimate_note: string;
