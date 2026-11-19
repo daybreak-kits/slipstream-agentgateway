@@ -13,9 +13,12 @@ import {
   CommandList,
   CommandSeparator,
 } from "@/components/ui/command";
+import { roleLabel } from "@/components/governance/roles";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { apiList, ENDPOINTS } from "@/lib/api";
-import type { ApiKey, PublicModel, Upstream, UpstreamModel } from "@/types";
+import { usePermissions } from "@/lib/permissions";
+import { fetchRoles } from "@/lib/roles";
+import type { ApiKey, PublicModel, Upstream, UpstreamModel, UserTreeNode } from "@/types";
 
 interface SearchHit {
   id: string;
@@ -58,6 +61,7 @@ export function GlobalSearch() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const navigate = useNavigate();
+  const { can } = usePermissions();
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -75,6 +79,7 @@ export function GlobalSearch() {
   }, [open]);
 
   // 只在打开时拉取；与页面共享同一组 queryKey，打开即命中缓存。
+  // 用户/角色按权限键拉取（DESIGN-AUDIT §13）：无对应权限不发请求、不出现分组。
   const upstreams = useQuery({
     queryKey: ["upstreams"],
     queryFn: () => apiList<Upstream>(ENDPOINTS.upstreams),
@@ -95,10 +100,22 @@ export function GlobalSearch() {
     queryFn: () => apiList<ApiKey>(ENDPOINTS.apiKeys),
     enabled: open,
   });
+  const canSearchUsers = open && can("users:read");
+  const canSearchRoles = open && can("roles:read");
+  const users = useQuery({
+    queryKey: ["users"],
+    queryFn: () => apiList<UserTreeNode>(ENDPOINTS.users + "?page_size=200&offset=0"),
+    enabled: canSearchUsers,
+  });
+  const roles = useQuery({
+    queryKey: ["roles"],
+    queryFn: fetchRoles,
+    enabled: canSearchRoles,
+  });
 
-  const queries = [upstreams, upstreamModels, publicModels, apiKeys];
-  const loading = queries.some((query) => query.isPending);
-  const failed = queries.find((query) => query.isError);
+  const queries = [upstreams, upstreamModels, publicModels, apiKeys, users, roles];
+  const loading = queries.some((query) => query.isPending && query.isEnabled);
+  const failed = queries.find((query) => query.isEnabled && query.isError);
 
   const groups = [
     {
@@ -141,6 +158,30 @@ export function GlobalSearch() {
         keywords: [row.mask, row.key_suffix, row.user_id, row.status].filter(Boolean).join(" "),
       })),
     },
+    {
+      heading: "用户",
+      items: canSearchUsers
+        ? (users.data?.items ?? []).map<SearchHit>((row) => ({
+            id: "user-" + row.id,
+            label: row.name,
+            detail: [row.username, roleLabel(row.role)].filter(Boolean).join(" · "),
+            path: "/users",
+            keywords: [row.name, row.username, row.role].filter(Boolean).join(" "),
+          }))
+        : [],
+    },
+    {
+      heading: "角色",
+      items: canSearchRoles
+        ? (roles.data ?? []).map<SearchHit>((row) => ({
+            id: "role-" + row.id,
+            label: row.name,
+            detail: [row.key, row.member_count + " 名成员"].filter(Boolean).join(" · "),
+            path: "/roles",
+            keywords: [row.name, row.key, row.description].filter(Boolean).join(" "),
+          }))
+        : [],
+    },
   ].map((group) => ({ heading: group.heading, items: filterHits(group.items, query) }));
   const total = groups.reduce((sum, group) => sum + group.items.length, 0);
 
@@ -166,11 +207,11 @@ export function GlobalSearch() {
         <DialogContent className="overflow-hidden p-0">
           <DialogTitle className="sr-only">全局搜索</DialogTitle>
           <DialogDescription className="sr-only">
-            搜索上游、上游模型、公开模型与连接密钥；↑↓ 选择，回车跳转。
+            搜索上游、模型、连接密钥、用户与角色；↑↓ 选择，回车跳转。
           </DialogDescription>
           <Command shouldFilter={false}>
             <CommandInput
-              placeholder="搜索上游 / 上游模型 / 公开模型 / 连接密钥…"
+              placeholder="搜索上游 / 模型 / 连接密钥 / 用户 / 角色…"
               value={query}
               onValueChange={setQuery}
             />

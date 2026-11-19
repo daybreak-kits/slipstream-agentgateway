@@ -71,7 +71,7 @@ export function LoginPage() {
         <form onSubmit={submit}>
           <Card className="p-6">
           <h1 className="text-h1 font-semibold text-title">登录</h1>
-          <p className="mt-1 text-xs text-faint">使用管理员账号进入控制台。</p>
+          <p className="mt-1 text-xs text-faint">使用管理用户账号进入控制台。</p>
           <div className="mt-5 space-y-3">
             <div className="space-y-1">
               <Label htmlFor="login-username">用户名</Label>

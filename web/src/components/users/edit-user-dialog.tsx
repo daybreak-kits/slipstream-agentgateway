@@ -25,7 +25,7 @@ interface EditUserDialogProps {
   errorText: string | null;
   roles: Array<{ key: string; name: string }>;
   parents: Array<{ id: string; name: string; depth: number }>;
-  /** 层级根（通常是初始管理员）：后端拒绝停用，前端给提示 */
+  /** 层级根（通常是初始管理用户）：后端拒绝关闭，前端给提示 */
   rootIds: readonly string[];
   onClose: () => void;
   onSubmit: (values: EditUserValues) => void;
@@ -154,11 +154,11 @@ export function EditUserDialog({
               <SelectContent>
                 <SelectItem value="active">启用</SelectItem>
                 <SelectItem value="disabled" disabled={isRoot}>
-                  停用
+                  关闭
                 </SelectItem>
               </SelectContent>
             </Select>
-            {isRoot && <p className="text-2xs text-faint">根用户不可停用。</p>}
+            {isRoot && <p className="text-2xs text-faint">根用户不可关闭。</p>}
           </div>
         </div>
 

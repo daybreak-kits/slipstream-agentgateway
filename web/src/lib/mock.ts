@@ -1,8 +1,8 @@
 import type {
   AdminAccount, ApiKey, AuditLog, AvailabilityRule, ChargePrice, ChargeEntry, ConfigRevision,
-  CostEntry, EndUser, GuardrailMatrix, LedgerRow, McpServersInfo, ModelTarget, OverviewStats,
+  CostEntry, GuardrailMatrix, McpServersInfo, ModelTarget, OverviewStats,
   PolicySnapshot, PublicModel, PublicModelPrice, SettingItem, TransformPreviewResult, UnpricedList, Upstream,
-  UpstreamModel, UpstreamPrice, UpstreamTransforms, Vendor,
+  UpstreamModel, UpstreamPrice, UpstreamTransforms, UserPreferences, UserTreeNode, Vendor,
 } from "../types";
 
 /**
@@ -36,6 +36,26 @@ const MOCK_ADMIN = {
   permissions: MOCK_ALL_PERMISSIONS,
   expires_at: "2026-11-18T00:00:00",
 };
+/** 普通用户镜像（l05_service/rbac.py _USER_PERMISSIONS）：只读 + 己方花费 + 模型试验。 */
+const MOCK_USER_PERMISSIONS = [
+  "vendors:read", "upstreams:read", "upstream_models:read", "public_models:read",
+  "model_targets:read", "availability:read", "transforms:read", "config:read",
+  "settings:read", "audits:read", "policies:read", "prices:read",
+  "billing:spend", "reports:read", "users:read", "apikeys:read", "admins:read",
+  "roles:read", "playground:use",
+];
+/** 受限演示账号（W4-E 验收：无 users:update/users:delete/ledger:read/roles:write 的显隐对照）。 */
+const MOCK_USER = {
+  id: "adm_mock_user",
+  username: "user01",
+  name: "李四",
+  role: "user",
+  status: "active",
+  permissions: MOCK_USER_PERMISSIONS,
+  expires_at: "2026-11-18T00:00:00",
+};
+/** 当前 mock 会话身份：登录时按账号切换。 */
+let mockSession: typeof MOCK_ADMIN | typeof MOCK_USER = MOCK_ADMIN;
 
 const vendors: Vendor[] = [
   { id: "vd_zai", name: "智谱 AI", slug: "zai", note: "智谱开放平台，旗舰 GLM 系列", upstream_seq: 3, created_at_ms: Date.parse("2026-11-01T09:00:00") },
@@ -505,20 +525,58 @@ const adminAccounts: AdminAccount[] = [
   { id: "ad_03", username: "audit-viewer", role: "viewer", enabled: false, created_at: "2026-11-01T08:00:00", last_login_at: null },
 ];
 
-const endUsers: EndUser[] = [
-  { id: "eu_01", name: "内部平台", key_masked: "sk-…G7H8", balance_micro: 1200000000, consumed_micro: 823400000, enabled: true, created_at: "2026-11-01T10:00:00" },
-  { id: "eu_02", name: "数据分析组", key_masked: "sk-…R5S6", balance_micro: 480000000, consumed_micro: 152080000, enabled: true, created_at: "2026-11-10T14:30:00" },
-  { id: "eu_03", name: "试用-临时", key_masked: "sk-…Z3A4", balance_micro: 0, consumed_micro: 96500000, enabled: false, created_at: "2026-10-20T09:00:00" },
+/**
+ * ADR-019 统一用户表（GET /admin/users 与 /admin/users/tree 同行形，见 UserTreeNode）。
+ * username 非空 = 可登录控制台（前端「控制台」徽章仅标识，操作显隐一律查权限键）；
+ * eu_04 故意不带 username，用来演示纯 API 用户行。
+ */
+const mockUsers: UserTreeNode[] = [
+  { id: "eu_01", name: "内部平台", username: "internal", balance_micro: 1148659200, role: "admin", parent_user_id: null, status: "active", depth: 0, direct_children: 3, subtree_size: 5, created_at_ms: Date.parse("2026-11-01T10:00:00"), updated_at_ms: Date.parse("2026-11-17T01:22:00") },
+  { id: "eu_02", name: "数据分析组", username: "data-team", balance_micro: 480000000, role: "agent", parent_user_id: "eu_01", status: "active", depth: 1, direct_children: 1, subtree_size: 2, created_at_ms: Date.parse("2026-11-10T14:30:00"), updated_at_ms: Date.parse("2026-11-12T09:00:00") },
+  { id: "eu_03", name: "试用-临时", username: "trial", balance_micro: 0, role: "user", parent_user_id: "eu_02", status: "disabled", depth: 2, direct_children: 0, subtree_size: 1, created_at_ms: Date.parse("2026-10-20T09:00:00"), updated_at_ms: Date.parse("2026-11-14T18:00:00") },
+  { id: "eu_04", name: "分销代理", username: "", balance_micro: 230000000, role: "agent", parent_user_id: "eu_01", status: "active", depth: 1, direct_children: 0, subtree_size: 1, created_at_ms: Date.parse("2026-11-05T11:00:00"), updated_at_ms: Date.parse("2026-11-05T11:00:00") },
+  { id: "eu_05", name: "华东代理", username: "east-agent", balance_micro: 960000000, role: "user", parent_user_id: "eu_01", status: "active", depth: 1, direct_children: 0, subtree_size: 1, created_at_ms: Date.parse("2026-11-15T08:20:00"), updated_at_ms: Date.parse("2026-11-15T08:20:00") },
 ];
 
-function ledgerFor(userId: string): LedgerRow[] {
+/** mock 用户序号：创建新用户时递增（id eu_NN）。 */
+let mockUserSeq = mockUsers.length;
+
+function ledgerFor(userId: string) {
   const base = 1200000000;
   return [
-    { id: userId + "-lg1", ts: "2026-11-15T09:00:00", kind: "topup", delta_micro: 1000000000, balance_after_micro: base, note: "管理员充值" },
-    { id: userId + "-lg2", ts: "2026-11-16T10:12:00", kind: "charge", delta_micro: -28650200, balance_after_micro: base - 28650200, note: "调用计费" },
-    { id: userId + "-lg3", ts: "2026-11-16T20:40:00", kind: "charge", delta_micro: -15650400, balance_after_micro: base - 44300600, note: "调用计费" },
-    { id: userId + "-lg4", ts: "2026-11-17T01:22:00", kind: "charge", delta_micro: -7040200, balance_after_micro: base - 51340800, note: "调用计费" },
+    { id: userId + "-lg1", kind: "topup", delta_micro: 1000000000, balance_after_micro: base, currency: "CNY", ref_type: null, ref_id: null, note: "充值", created_by: "admin", created_at_ms: Date.parse("2026-11-15T09:00:00") },
+    { id: userId + "-lg2", kind: "charge", delta_micro: -28650200, balance_after_micro: base - 28650200, currency: "CNY", ref_type: "usage", ref_id: "gev_9001", note: "调用计费", created_by: "system", created_at_ms: Date.parse("2026-11-16T10:12:00") },
+    { id: userId + "-lg3", kind: "charge", delta_micro: -15650400, balance_after_micro: base - 44300600, currency: "CNY", ref_type: "usage", ref_id: "gev_9002", note: "调用计费", created_by: "system", created_at_ms: Date.parse("2026-11-16T20:40:00") },
+    { id: userId + "-lg4", kind: "charge", delta_micro: -7040200, balance_after_micro: base - 51340800, currency: "CNY", ref_type: "usage", ref_id: "gev_9003", note: "调用计费", created_by: "system", created_at_ms: Date.parse("2026-11-17T01:22:00") },
   ];
+}
+
+/** 用户偏好（GET/PUT /admin/auth/preferences）：mock 会话内可变，演示顶栏/设置页主题服务端持久化。 */
+let mockPreferences: UserPreferences = {
+  theme: "system",
+  notify_email: true,
+  notify_browser: false,
+  notify_weekly: true,
+  bio: "",
+};
+
+/** mock 一次性初始密码：随机生成，仅演示 ADR-019「仅显示一次」。 */
+function mockOneTimePassword(): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*";
+  let out = "";
+  for (let i = 0; i < 12; i += 1) out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  return out;
+}
+
+/** 公开模型列表视图：按契约默认内嵌 targets[]（服务端按 priority 升序）。 */
+function publicModelsView(): PublicModel[] {
+  return publicModels.map((publicModel) => ({
+    ...publicModel,
+    target_count: modelTargets.filter((target) => target.public_model_id === publicModel.id).length,
+    targets: modelTargets
+      .filter((target) => target.public_model_id === publicModel.id)
+      .sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0)),
+  }));
 }
 
 /** 公开模型价格 = 成员有效单价（成本 × 倍率）加权平均；与后端 pricing.public_model_price_rows 同口径。 */
@@ -596,7 +654,7 @@ const routes: Array<[RegExp, unknown]> = [
   [/^\/admin\/guardrails$/, guardrails],
   [/^\/admin\/mcp-servers$/, mcpServers],
   [/^\/admin\/admins$/, adminAccounts],
-  [/^\/admin\/users$/, endUsers],
+  [/^\/admin\/users$/, mockUsers],
   [/^\/admin\/settings\/schema$/, settingsSchema],
   [/^\/admin\/settings$/, { items: settings }],
 ];
@@ -610,20 +668,24 @@ const PREVIEW_BODY = JSON.stringify({
 /** mock 模式：按路径返回内置数据，模拟网络延迟，保证后端未就绪也能演示。 */
 export async function mockRequest<T>(path: string, init?: RequestInit): Promise<T> {
   await delay(220);
-  // 登录（演示）：admin/admin12345（兼容旧 owner/admin123）签发 mock 会话
+  const routePath = path.split("?")[0] ?? "";
+  // 登录（演示）：admin/user01 均为 admin12345（兼容旧 owner/admin123）签发 mock 会话
   if (init?.method === "POST" && path === "/admin/auth/login") {
     const body = JSON.parse(String(init.body ?? "{}")) as { username?: string; password?: string };
-    const knownUser = body.username === "admin" || body.username === "owner";
     const knownPassword = body.password === "admin12345" || body.password === "admin123";
+    const knownUser =
+      (body.username === "admin" || body.username === "owner") ||
+      body.username === "user01";
     if (knownUser && knownPassword) {
+      mockSession = body.username === "user01" ? MOCK_USER : MOCK_ADMIN;
       mockLoggedIn = true;
-      return { user: MOCK_ADMIN } as T;
+      return { user: mockSession } as T;
     }
-    throw new Error("用户名或密码错误（mock 演示账号：admin / admin12345）");
+    throw new Error("用户名或密码错误（mock 演示账号：admin / user01，密码 admin12345）");
   }
   if (init?.method === "GET" && path === "/admin/auth/me") {
     if (!mockLoggedIn) throw new Error("未登录或会话已失效");
-    return MOCK_ADMIN as T;
+    return mockSession as T;
   }
   if (init?.method === "POST" && path === "/admin/auth/logout") {
     mockLoggedIn = false;
@@ -663,27 +725,99 @@ export async function mockRequest<T>(path: string, init?: RequestInit): Promise<
     }
     return { resolved: removed, remaining: unpricedRows.cost.length + unpricedRows.charge.length } as T;
   }
-  if (init?.method === "POST" && path === "/admin/users") {
-    const body = JSON.parse(String(init.body ?? "{}")) as { name?: string };
-    const created: EndUser = {
-      id: "eu_" + String(endUsers.length + 1).padStart(2, "0"),
-      name: body.name ?? "未命名用户",
-      key_masked: "sk-…NEW1",
-      balance_micro: 0,
-      consumed_micro: 0,
-      enabled: true,
-      created_at: "2026-11-17T03:10:00",
-    };
-    endUsers.push(created);
-    return created as T;
+  // —— W4-E：ADR-019 统一用户表 CRUD（require 键对齐 routers_apikeys.py） ——
+  if (init?.method === "GET" && routePath === "/admin/users/tree") {
+    const visible = new Set(mockUsers.filter((u) => u.status !== "deleted").map((u) => u.id));
+    const rootIds = mockUsers
+      .filter((u) => u.status !== "deleted" && (u.parent_user_id === null || !visible.has(u.parent_user_id)))
+      .map((u) => u.id);
+    return {
+      root_id: rootIds[0] ?? null,
+      root_ids: rootIds,
+      total: visible.size,
+      nodes: structuredClone(mockUsers),
+    } as T;
   }
-  if (init?.method === "POST" && /\/admin\/users\/[^/]+\/balance$/.test(path)) {
+  if (init?.method === "POST" && path === "/admin/users") {
+    const body = JSON.parse(String(init.body ?? "{}")) as {
+      name?: string; username?: string; role?: string; parent_user_id?: string | null; status?: string;
+    };
+    const parent = body.parent_user_id ? mockUsers.find((u) => u.id === body.parent_user_id) : undefined;
+    const now = Date.now();
+    const created: UserTreeNode = {
+      id: "eu_" + String(++mockUserSeq).padStart(2, "0"),
+      name: body.name ?? "未命名用户",
+      username: body.username ?? "",
+      balance_micro: 0,
+      role: body.role ?? "user",
+      parent_user_id: parent?.id ?? null,
+      status: body.status ?? "active",
+      depth: (parent?.depth ?? -1) + 1,
+      direct_children: 0,
+      subtree_size: 1,
+      created_at_ms: now,
+      updated_at_ms: now,
+    };
+    mockUsers.push(created);
+    if (parent) {
+      parent.direct_children += 1;
+      parent.subtree_size += 1;
+    }
+    // initial_password 只在创建响应里出现一次（ADR-019），不留在列表数据里
+    return { ...structuredClone(created), initial_password: mockOneTimePassword() } as T;
+  }
+  if (init?.method === "PATCH" && /^\/admin\/users\/[^/?]+$/.test(routePath)) {
+    const id = routePath.split("/")[3] ?? "";
+    const row = mockUsers.find((u) => u.id === id);
+    if (!row) return { error: "not_found" } as T;
+    const body = JSON.parse(String(init.body ?? "{}")) as {
+      name?: string; role?: string; parent_user_id?: string | null; status?: string;
+    };
+    if (body.name !== undefined) row.name = body.name;
+    if (body.role !== undefined) row.role = body.role;
+    if (body.parent_user_id !== undefined) row.parent_user_id = body.parent_user_id;
+    if (body.status !== undefined) row.status = body.status;
+    row.updated_at_ms = Date.now();
+    return structuredClone(row) as T;
+  }
+  if (init?.method === "DELETE" && /^\/admin\/users\/[^/?]+$/.test(routePath)) {
+    const id = routePath.split("/")[3] ?? "";
+    const row = mockUsers.find((u) => u.id === id);
+    if (!row) return { error: "not_found" } as T;
+    row.status = "deleted";
+    row.updated_at_ms = Date.now();
+    return { id: row.id, status: row.status } as T;
+  }
+  if (init?.method === "PUT" && /^\/admin\/users\/[^/]+\/password$/.test(routePath)) {
+    const id = routePath.split("/")[3] ?? "";
+    const row = mockUsers.find((u) => u.id === id);
+    if (!row) return { error: "not_found" } as T;
+    return { id: row.id, username: row.username } as T;
+  }
+  if (init?.method === "POST" && /\/admin\/users\/[^/]+\/balance\/adjust$/.test(routePath)) {
     const body = JSON.parse(String(init.body ?? "{}")) as { delta_micro?: number };
     const delta = Number(body.delta_micro ?? 0);
-    const uid = path.split("/")[3] ?? "";
-    const u = endUsers.find((x) => x.id === uid);
+    const uid = routePath.split("/")[3] ?? "";
+    const u = mockUsers.find((x) => x.id === uid);
     if (u) u.balance_micro += delta;
-    return { balance_micro: u ? u.balance_micro : 0 } as T;
+    return { balance_after_micro: u ? u.balance_micro : 0 } as T;
+  }
+  if (init?.method === "POST" && /\/admin\/users\/[^/]+\/balance$/.test(routePath)) {
+    const body = JSON.parse(String(init.body ?? "{}")) as { amount_micro?: number };
+    const amount = Number(body.amount_micro ?? 0);
+    const uid = routePath.split("/")[3] ?? "";
+    const u = mockUsers.find((x) => x.id === uid);
+    if (u) u.balance_micro += amount;
+    return { balance_after_micro: u ? u.balance_micro : 0 } as T;
+  }
+  // —— 用户偏好（顶栏/用户设置主题同源写服务端） ——
+  if (init?.method === "GET" && routePath === "/admin/auth/preferences") {
+    return structuredClone(mockPreferences) as T;
+  }
+  if (init?.method === "PUT" && routePath === "/admin/auth/preferences") {
+    const body = JSON.parse(String(init.body ?? "{}")) as UserPreferences;
+    mockPreferences = { ...mockPreferences, ...body };
+    return structuredClone(mockPreferences) as T;
   }
   if (init?.method === "PUT" && path === "/admin/settings") {
     const body = JSON.parse(String(init.body ?? "{}")) as { values?: Record<string, string> };
@@ -693,8 +827,8 @@ export async function mockRequest<T>(path: string, init?: RequestInit): Promise<
     }
     return { values: body.values ?? {} } as T;
   }
-  if (init?.method === "GET" && /\/admin\/users\/[^/]+\/ledger$/.test(path)) {
-    const uid = path.split("/")[3] ?? "";
+  if (init?.method === "GET" && /\/admin\/users\/[^/]+\/ledger$/.test(routePath)) {
+    const uid = routePath.split("/")[3] ?? "";
     return ledgerFor(uid) as T;
   }
   // —— B2 CRUD：上游 ——
@@ -749,19 +883,22 @@ export async function mockRequest<T>(path: string, init?: RequestInit): Promise<
     upstreamModels.push(created);
     return created as T;
   }
-  // 价目管理：PATCH 成本/倍率（省略字段保持不动，显式 null 清空成本）
+  // 上游模型 PATCH：成本/倍率（价目管理，显式 null 清空）+ 编辑字段与启停/冷却（省略字段保持不动）
   if (init?.method === "PATCH" && /^\/admin\/upstream-models\/(?!batch$)[^/?]+$/.test(path.split("?")[0] ?? "")) {
     const id = (path.split("?")[0] ?? "").split("/")[3] ?? "";
     const row = upstreamModels.find((x) => x.id === id);
     if (!row) return { error: "not_found" } as T;
-    const body = JSON.parse(String(init.body ?? "{}")) as {
-      cost_input_per_1m?: string | null;
-      cost_output_per_1m?: string | null;
-      markup?: string;
-    };
+    const body = JSON.parse(String(init.body ?? "{}")) as Partial<UpstreamModel>;
     if (body.cost_input_per_1m !== undefined) row.cost_input_per_1m = body.cost_input_per_1m;
     if (body.cost_output_per_1m !== undefined) row.cost_output_per_1m = body.cost_output_per_1m;
     if (body.markup !== undefined) row.markup = body.markup;
+    if (body.name !== undefined) row.name = body.name;
+    if (body.model_type !== undefined) row.model_type = body.model_type;
+    if (body.model_type_source !== undefined) row.model_type_source = body.model_type_source;
+    if (body.parameters !== undefined) row.parameters = body.parameters;
+    if (body.enabled !== undefined) row.enabled = body.enabled;
+    if (body.enabled === true) row.cooldown_until_ms = 0; // 启用同时清掉冷却（GLOSSARY §3）
+    if (body.cooldown_until_ms !== undefined) row.cooldown_until_ms = body.cooldown_until_ms;
     return row as T;
   }
   if (init?.method === "PUT" && /^\/admin\/upstream-models\/[^/?]+$/.test(path.split("?")[0] ?? "")) {
@@ -774,10 +911,16 @@ export async function mockRequest<T>(path: string, init?: RequestInit): Promise<
     if (body.enabled !== undefined) row.enabled = body.enabled;
     return row as T;
   }
-  const routePath = path.split("?")[0] ?? "";
   // —— B2 CRUD：对外模型 ——
+  // GET 实时组装（契约默认内嵌 targets[]），不能用路由表的模块级快照
+  if (init?.method === "GET" && (path.split("?")[0] ?? "") === "/admin/public-models") {
+    return publicModelsView() as T;
+  }
   if (init?.method === "POST" && (path.split("?")[0] ?? "") === "/admin/public-models") {
-    const body = JSON.parse(String(init.body ?? "{}")) as { name?: string; routing_mode?: string; note?: string | null; enabled?: boolean };
+    const body = JSON.parse(String(init.body ?? "{}")) as {
+      name?: string; routing_mode?: string; note?: string | null; enabled?: boolean;
+      targets?: Array<{ upstream_model_id?: string; priority?: number | null; weight?: number | null; when?: string | null }>;
+    };
     const created: PublicModel = {
       id: "pm_" + String(publicModels.length + 1).padStart(2, "0"),
       name: body.name ?? "未命名公开模型",
@@ -787,7 +930,64 @@ export async function mockRequest<T>(path: string, init?: RequestInit): Promise<
       created_at_ms: Date.now(),
     };
     publicModels.push(created);
+    for (const t of body.targets ?? []) {
+      const member = upstreamModels.find((m) => m.id === t.upstream_model_id);
+      mtSeq += 1;
+      modelTargets.push({
+        id: "mt_" + String(mtSeq).padStart(2, "0"),
+        public_model_id: created.id,
+        upstream_model_id: t.upstream_model_id ?? "",
+        upstream_model_name: member?.name ?? "",
+        upstream_name: member?.upstream_name ?? "",
+        priority: t.priority ?? null,
+        weight: t.weight ?? null,
+        when: t.when ?? null,
+        enabled: true,
+      });
+    }
     return created as T;
+  }
+  // 编辑公开模型（PATCH 基本字段）与成员整批替换（PUT .../targets），与既有 PUT 语义一致
+  if (init?.method === "PATCH" && /^\/admin\/public-models\/(?!batch$)[^/?]+$/.test(path.split("?")[0] ?? "")) {
+    const id = (path.split("?")[0] ?? "").split("/")[3] ?? "";
+    const row = publicModels.find((p) => p.id === id);
+    if (!row) return { error: "not_found" } as T;
+    const body = JSON.parse(String(init.body ?? "{}")) as Partial<PublicModel>;
+    if (body.name !== undefined) row.name = body.name;
+    if (body.routing_mode !== undefined) row.routing_mode = body.routing_mode;
+    if (body.note !== undefined) row.note = body.note;
+    if (body.enabled !== undefined) row.enabled = body.enabled;
+    if (body.enabled === true) row.cooldown_until_ms = 0; // 启用同时清掉冷却（GLOSSARY §3）
+    if (body.cooldown_until_ms !== undefined) row.cooldown_until_ms = body.cooldown_until_ms;
+    return row as T;
+  }
+  if (init?.method === "PUT" && /^\/admin\/public-models\/[^/?]+\/targets$/.test(path.split("?")[0] ?? "")) {
+    const id = (path.split("?")[0] ?? "").split("/")[3] ?? "";
+    const row = publicModels.find((p) => p.id === id);
+    if (!row) return { error: "not_found" } as T;
+    const body = JSON.parse(String(init.body ?? "{}")) as {
+      targets?: Array<{ upstream_model_id?: string; priority?: number | null; weight?: number | null; when?: string | null }>;
+    };
+    for (let i = modelTargets.length - 1; i >= 0; i--) {
+      const mt = modelTargets[i];
+      if (mt && mt.public_model_id === id) modelTargets.splice(i, 1);
+    }
+    for (const t of body.targets ?? []) {
+      const member = upstreamModels.find((m) => m.id === t.upstream_model_id);
+      mtSeq += 1;
+      modelTargets.push({
+        id: "mt_" + String(mtSeq).padStart(2, "0"),
+        public_model_id: id,
+        upstream_model_id: t.upstream_model_id ?? "",
+        upstream_model_name: member?.name ?? "",
+        upstream_name: member?.upstream_name ?? "",
+        priority: t.priority ?? null,
+        weight: t.weight ?? null,
+        when: t.when ?? null,
+        enabled: true,
+      });
+    }
+    return { saved: modelTargets.filter((mt) => mt.public_model_id === id).length } as T;
   }
   if ((init?.method === "PUT" || init?.method === "DELETE") && /^\/admin\/public-models\/[^/?]+$/.test(path.split("?")[0] ?? "")) {
     const id = (path.split("?")[0] ?? "").split("/")[3] ?? "";

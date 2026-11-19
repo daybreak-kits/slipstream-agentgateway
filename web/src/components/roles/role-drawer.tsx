@@ -86,13 +86,13 @@ export function RoleDrawer({
       <SheetContent className="flex flex-col gap-3 overflow-y-auto sm:max-w-xl">
         <SheetHeader className="pr-8">
           <SheetTitle>
-            {isCreate ? "新建角色" : readOnly ? "内置角色（只读）" : "编辑角色"}
+            {isCreate ? "新建角色" : readOnly ? "内置角色权限摘要" : "编辑角色"}
           </SheetTitle>
           <SheetDescription>
             {isCreate
               ? "创建自定义角色并勾选权限；权限键以后端注册表为准。"
               : readOnly
-                ? "内置角色权限固定，不可修改或删除。"
+                ? "内置角色权限由后端锁定，仅供查看，不可修改或删除。"
                 : "调整名称与权限后保存，变更立即对使用该角色的账号生效。"}
           </SheetDescription>
         </SheetHeader>

@@ -94,6 +94,17 @@ export const MOCK_ROLES: RoleDefinition[] = [
     permissions: USER_KEYS,
     member_count: 1,
   },
+  // 自定义角色示例：角色管理页用它演示「编辑/删除」入口（内置角色只有只读的「查看权限」）
+  {
+    id: "role_custom_viewer",
+    key: "custom_viewer",
+    name: "运营观察员",
+    description: "示例自定义角色：只读权限子集，可编辑或删除",
+    builtin: false,
+    all_permissions: false,
+    permissions: USER_KEYS.slice(0, 12),
+    member_count: 0,
+  },
 ];
 
 /** GET /admin/permissions：分组权限注册表。 */

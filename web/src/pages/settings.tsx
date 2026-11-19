@@ -120,7 +120,7 @@ function PasswordTile() {
   return (
     <SettingsTile
       title="修改密码"
-      hint="验证旧密码后设置新密码（至少 8 位）；保存后其他已登录会话全部吊销，当前会话保留。管理员重置他人密码在用户管理页。"
+      hint="验证旧密码后设置新密码（至少 8 位）；保存后其他已登录会话全部吊销，当前会话保留。管理用户重置他人密码在用户管理页。"
       className="md:col-span-3 xl:col-span-3"
     >
       <Input
@@ -352,7 +352,7 @@ function ConnectionKeysSection() {
               <li key={item.id} className="flex items-center gap-1.5 text-2xs">
                 <span className="font-mono text-title">{item.mask}</span>
                 <Badge tone={item.status === "active" ? "success" : "neutral"}>
-                  {item.status === "active" ? "启用" : "停用"}
+                  {item.status === "active" ? "启用" : "关闭"}
                 </Badge>
               </li>
             ))}

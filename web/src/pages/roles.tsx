@@ -21,7 +21,7 @@ const ROLES_KEY = ["roles"] as const;
 const PERMISSIONS_KEY = ["permission-groups"] as const;
 
 /**
- * 角色管理（ADR-023 #4：管理员页重做）：角色列表 + 分节权限编辑；
+ * 角色管理（ADR-023 #4）：角色列表 + 分节权限编辑；
  * 控制台账号并入用户管理（ADR-019），本页只管角色与权限键。
  */
 export function AdminsPage() {
@@ -128,7 +128,7 @@ export function AdminsPage() {
             size="sm"
             className="tnum"
             title="查看使用该角色的控制台账号"
-            onClick={() => navigate("/users?tab=console&role=" + encodeURIComponent(role.key))}
+            onClick={() => navigate("/users?role=" + encodeURIComponent(role.key))}
           >
             {role.member_count}
           </Button>
@@ -154,16 +154,32 @@ export function AdminsPage() {
         const role = cell.row.original;
         return (
           <div className="flex flex-wrap items-center gap-1.5">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setEditingRole(role);
-                setDrawerOpen(true);
-              }}
-            >
-              {role.builtin ? "查看" : "编辑"}
-            </Button>
+            {role.builtin ? (
+              // 内置角色只读入口：不要求 roles:write（查看权限摘要不是写操作）
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setEditingRole(role);
+                  setDrawerOpen(true);
+                }}
+              >
+                查看权限
+              </Button>
+            ) : (
+              canManageRoles && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setEditingRole(role);
+                    setDrawerOpen(true);
+                  }}
+                >
+                  编辑
+                </Button>
+              )
+            )}
             {!role.builtin && canManageRoles && (
               <Button
                 variant="ghost"

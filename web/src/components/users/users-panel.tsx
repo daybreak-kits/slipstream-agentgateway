@@ -18,25 +18,41 @@ import { CreateUserDialog } from "./create-user-dialog";
 import { EditUserDialog } from "./edit-user-dialog";
 import { LedgerDrawer } from "./ledger-drawer";
 import { OneTimeSecretDialog } from "./one-time-secret-dialog";
+import { generatePassword } from "./password";
 import { TopupDialog } from "./topup-dialog";
 import { buildTreeRows } from "./tree";
 
+/** 术语门禁：状态动词统一「启用/关闭」（docs/GLOSSARY.md）。 */
 const STATUS_LABEL: Record<string, string> = {
   active: "启用",
-  disabled: "停用",
+  disabled: "关闭",
   deleted: "已删除",
 };
 
-interface ApiUsersTabProps {
+const COLUMN_LABELS: Record<string, string> = {
+  user: "用户",
+  role: "角色",
+  type: "类型",
+  balance_micro: "余额",
+  keys: "密钥数",
+  status: "状态",
+  parent: "层级",
+  actions: "操作",
+};
+
+interface UsersPanelProps {
   /** 作用域内全部用户（后端树序） */
   nodes: UserTreeNode[];
   rootIds: readonly string[];
-  /** 角色下拉（已按权限裁剪；roles:read 不可用时回退内置三角色） */
+  /** 角色下拉（roles:read 不可用时回退内置三角色） */
   roles: Array<{ key: string; name: string }>;
   /** 登录账号是否具备全局层级（决定下拉里是否提供管理用户角色） */
   globalScope: boolean;
   keyCounts: Map<string, number>;
   keyCountsState: "pending" | "error" | "ok";
+  /** /users?role=<key> 预筛选（角色管理页成员数入口跳入）；null = 不筛 */
+  roleFilter: string | null;
+  onRoleFilterChange: (role: string | null) => void;
   canCreate: boolean;
   canUpdate: boolean;
   canDelete: boolean;
@@ -48,22 +64,31 @@ interface ApiUsersTabProps {
 }
 
 type CreatedUser = UserTreeNode & { initial_password?: string };
+type ResetTarget = { id: string; name: string };
 
-/** Tab1「API 用户」：余额/密钥/层级的运营视角，含树视图与充值、流水等操作。 */
-export function ApiUsersTab({
+/**
+ * 用户管理单页（ADR-019 统一用户表；原「API 用户/控制台账号」双页签合并）：
+ * 一张列表承载余额/密钥/层级与登录名/角色/密码两个镜头。
+ * 操作显隐一律查权限键（DESIGN-AUDIT §13 RBAC 红线，键值逐一对应后端 require）：
+ * 充值/调整余额/重置密码/编辑/启闭 = users:update，流水 = ledger:read，删除 = users:delete；
+ * 「控制台」徽章仅标识有登录名的行，不参与任何显隐判断。
+ */
+export function UsersPanel({
   nodes,
   rootIds,
   roles,
   globalScope,
   keyCounts,
   keyCountsState,
+  roleFilter,
+  onRoleFilterChange,
   canCreate,
   canUpdate,
   canDelete,
   canReadLedger,
   loading,
   onChanged,
-}: ApiUsersTabProps) {
+}: UsersPanelProps) {
   const queryClient = useQueryClient();
   const [view, setView] = useState<"tree" | "list">("tree");
   const [createOpen, setCreateOpen] = useState(false);
@@ -71,20 +96,25 @@ export function ApiUsersTab({
   const [topupUser, setTopupUser] = useState<UserTreeNode | null>(null);
   const [adjustUser, setAdjustUser] = useState<UserTreeNode | null>(null);
   const [ledgerUser, setLedgerUser] = useState<UserTreeNode | null>(null);
+  const [resetTarget, setResetTarget] = useState<ResetTarget | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<UserTreeNode | null>(null);
-  /** 创建成功返回的 initial_password（ADR-019：仅此一次），关闭弹窗即不再可见 */
-  const [initialPassword, setInitialPassword] = useState<string | null>(null);
+  /** 创建/重置成功返回的一次性密码（ADR-019：仅此一次），关闭弹窗即不再可见 */
+  const [oneTimeSecret, setOneTimeSecret] = useState<{ title: string; secret: string } | null>(null);
 
   const roleOptions = useMemo(
     () => roles.filter((item) => globalScope || item.key !== "admin"),
     [roles, globalScope],
   );
   const roleName = useMemo(() => new Map(roles.map((item) => [item.key, item.name])), [roles]);
+  const filteredNodes = useMemo(
+    () => (roleFilter === null ? nodes : nodes.filter((node) => node.role === roleFilter)),
+    [nodes, roleFilter],
+  );
   const byId = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
-  const treeRows = useMemo(() => buildTreeRows(nodes, [...rootIds]), [nodes, rootIds]);
+  const treeRows = useMemo(() => buildTreeRows(filteredNodes, [...rootIds]), [filteredNodes, rootIds]);
   const listRows = useMemo(
-    () => [...nodes].sort((a, b) => b.created_at_ms - a.created_at_ms),
-    [nodes],
+    () => [...filteredNodes].sort((a, b) => b.created_at_ms - a.created_at_ms),
+    [filteredNodes],
   );
   const parents = useMemo(
     () => treeRows.map((row) => ({ id: row.node.id, name: row.node.name, depth: row.level })),
@@ -105,10 +135,12 @@ export function ApiUsersTab({
         status: "active",
       }),
     onSuccess: (user) => {
-      toast.success("用户已创建", { description: user.name + "（" + user.username + "）" });
+      toast.success("用户已创建", { description: user.name + (user.username === "" ? "" : "（" + user.username + "）") });
       setCreateOpen(false);
       onChanged();
-      if (user.initial_password) setInitialPassword(user.initial_password);
+      if (user.initial_password) {
+        setOneTimeSecret({ title: "用户已创建", secret: user.initial_password });
+      }
     },
     onError: (error) => toast.error("创建用户失败", { description: describeApiError(error) }),
   });
@@ -132,6 +164,39 @@ export function ApiUsersTab({
       onChanged();
     },
     onError: (error) => toast.error("保存失败", { description: describeApiError(error) }),
+  });
+
+  /** 行内 启用/关闭：只切状态，角色等其余字段走 EditUserDialog。 */
+  const patchStatus = useMutation({
+    mutationFn: (vars: { id: string; status: string }) =>
+      api.patch<UserTreeNode>("/admin/users/" + vars.id, { status: vars.status }),
+    onSuccess: (user) => {
+      toast.success(user.status === "active" ? "用户已启用" : "用户已关闭", {
+        description: user.name + (user.username === "" ? "" : "（" + user.username + "）"),
+      });
+      onChanged();
+    },
+    onError: (error) => toast.error("更新失败", { description: describeApiError(error) }),
+  });
+
+  /**
+   * 重置密码：后端 PUT password 不生成也不回显，因此由前端生成 12 位随机密码
+   * 提交并一次性展示（ADR-019 密码策略）。
+   */
+  const resetPassword = useMutation({
+    mutationFn: (vars: { id: string; password: string }) =>
+      api.put<{ id: string; username: string }>("/admin/users/" + vars.id + "/password", {
+        password: vars.password,
+      }),
+    onSuccess: (result, vars) => {
+      toast.success("密码已重置", { description: result.username === "" ? "已有会话已全部注销" : result.username + " 的已有会话已全部注销" });
+      setResetTarget(null);
+      setOneTimeSecret({ title: "密码已重置", secret: vars.password });
+    },
+    onError: (error) => {
+      setResetTarget(null);
+      toast.error("重置密码失败", { description: describeApiError(error) });
+    },
   });
 
   const topup = useMutation({
@@ -183,7 +248,9 @@ export function ApiUsersTab({
       {level !== undefined && level > 0 && <span className="text-2xs text-faint">└</span>}
       <div className="min-w-0">
         <div className="truncate font-medium text-title">{user.name}</div>
-        <div className="truncate font-mono text-2xs text-faint">{user.username}</div>
+        {user.username !== "" && (
+          <div className="truncate font-mono text-2xs text-faint">{user.username}</div>
+        )}
       </div>
     </div>
   );
@@ -201,6 +268,16 @@ export function ApiUsersTab({
       cell: (cell) => (
         <span className="text-2sm">{roleName.get(cell.row.original.role) ?? cell.row.original.role}</span>
       ),
+    },
+    {
+      id: "type",
+      header: "类型",
+      cell: (cell) =>
+        cell.row.original.username !== "" ? (
+          <Badge tone="neutral">控制台</Badge>
+        ) : (
+          <span className="text-2xs text-faint">—</span>
+        ),
     },
     {
       accessorKey: "balance_micro",
@@ -240,6 +317,8 @@ export function ApiUsersTab({
       cell: (cell) => {
         const user = cell.row.original;
         if (user.status === "deleted") return <span className="text-2xs text-faint">已删除</span>;
+        const isRoot = rootIds.includes(user.id);
+        const disabledNow = user.status === "disabled";
         return (
           <div className="flex flex-wrap items-center gap-1.5">
             {canUpdate && (
@@ -252,6 +331,22 @@ export function ApiUsersTab({
               <Button variant="ghost" size="sm" onClick={() => setLedgerUser(user)}>流水</Button>
             )}
             {canUpdate && (
+              <Button variant="outline" size="sm" onClick={() => setResetTarget({ id: user.id, name: user.name })}>
+                重置密码
+              </Button>
+            )}
+            {canUpdate && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={patchStatus.isPending || (isRoot && !disabledNow)}
+                title={isRoot && !disabledNow ? "根用户不可关闭" : undefined}
+                onClick={() => patchStatus.mutate({ id: user.id, status: disabledNow ? "active" : "disabled" })}
+              >
+                {disabledNow ? "启用" : "关闭"}
+              </Button>
+            )}
+            {canUpdate && (
               <Button variant="outline" size="sm" onClick={() => setEditing(user)}>编辑</Button>
             )}
             {canDelete && (
@@ -259,6 +354,8 @@ export function ApiUsersTab({
                 variant="ghost"
                 size="sm"
                 className="text-danger-text"
+                disabled={isRoot}
+                title={isRoot ? "根用户不可删除" : undefined}
                 onClick={() => setDeleteTarget(user)}
               >
                 删除
@@ -287,8 +384,13 @@ export function ApiUsersTab({
           </Button>
         </div>
         <p className="text-2sm text-faint">
-          共 <span className="tnum">{nodes.length}</span> 位用户 · 树视图按层级展开，列表按创建时间倒序
+          共 <span className="tnum">{filteredNodes.length}</span> 位用户 · 树视图按层级展开，列表按创建时间倒序
         </p>
+        {roleFilter !== null && (
+          <Button variant="outline" size="sm" onClick={() => onRoleFilterChange(null)}>
+            角色：{roleName.get(roleFilter) ?? roleFilter} · 清除筛选
+          </Button>
+        )}
         {canCreate && (
           <Button variant="primary" size="sm" className="ml-auto" onClick={() => setCreateOpen(true)}>
             新建用户
@@ -309,7 +411,8 @@ export function ApiUsersTab({
           pageSize={50}
           filterPlaceholder="筛选显示名 / 登录名"
           emptyText="没有匹配的用户"
-          storageKey="slipstream.cols.users-api"
+          storageKey="slipstream.cols.users"
+          columnLabels={COLUMN_LABELS}
         />
       )}
 
@@ -371,12 +474,27 @@ export function ApiUsersTab({
       />
 
       <ConfirmDialog
+        open={resetTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setResetTarget(null);
+        }}
+        title={"重置「" + (resetTarget?.name ?? "") + "」的控制台密码？"}
+        description="重置会生成新的 12 位随机密码，原密码立即失效，该账号所有已登录会话被注销。"
+        confirmLabel="生成新密码"
+        destructive
+        onConfirm={() => {
+          if (resetTarget === null) return;
+          resetPassword.mutate({ id: resetTarget.id, password: generatePassword(12) });
+        }}
+      />
+
+      <ConfirmDialog
         open={deleteTarget !== null}
         onOpenChange={(open) => {
           if (!open) setDeleteTarget(null);
         }}
         title={"删除用户「" + (deleteTarget?.name ?? "") + "」？"}
-        description="删除后该用户立即失效、界面不再展示（软删除，余额与流水保留存档）；有下级的用户需先迁移或删除下级，根用户不可删除。"
+        description="删除后该用户立即失效、不可再登录且界面不再展示（软删除：余额与流水保留存档）；有下级的用户需先迁移或删除下级，根用户不可删除。"
         confirmLabel="删除用户"
         destructive
         onConfirm={() => {
@@ -386,11 +504,11 @@ export function ApiUsersTab({
       />
 
       <OneTimeSecretDialog
-        open={initialPassword !== null}
-        title="用户已创建"
-        description="初始密码仅显示一次，请立即复制保存；关闭后不再可见。"
-        secret={initialPassword ?? ""}
-        onClose={() => setInitialPassword(null)}
+        open={oneTimeSecret !== null}
+        title={oneTimeSecret?.title ?? ""}
+        description="新密码仅显示一次，请立即复制保存；关闭后不再可见。"
+        secret={oneTimeSecret?.secret ?? ""}
+        onClose={() => setOneTimeSecret(null)}
       />
     </div>
   );

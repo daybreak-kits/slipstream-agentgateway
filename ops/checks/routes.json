@@ -225,7 +225,7 @@
         },
         {
           "path": "/settings/tokens",
-          "title": "连接令牌"
+          "title": "连接密钥"
         },
         {
           "path": "/settings/spend",

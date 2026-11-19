@@ -3,28 +3,15 @@ import { useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { ErrorState } from "@/components/governance/panel";
-import { TabBar } from "@/components/ui/tabs";
+import { UsersPanel } from "@/components/users/users-panel";
 import { api } from "@/lib/api";
 import { usePermissions } from "@/lib/permissions";
+import { fetchRoles } from "@/lib/roles";
 import type { ApiKey, UserTreeResponse } from "@/types";
-
-import { ApiUsersTab } from "@/components/users/api-users-tab";
-import { ConsoleTab } from "@/components/users/console-tab";
 
 const TREE_KEY = ["admin-user-tree"] as const;
 const KEYS_KEY = ["admin-api-keys"] as const;
 const ROLES_KEY = ["admin-roles"] as const;
-
-type TabKey = "api" | "console";
-
-const TAB_ITEMS: Array<{ key: TabKey; label: string }> = [
-  { key: "api", label: "API 用户" },
-  { key: "console", label: "控制台账号" },
-];
-
-function parseTab(raw: string | null): TabKey {
-  return raw === "console" ? "console" : "api";
-}
 
 /** roles:read 不可用（或列表为空）时的兜底：内置三角色仍是合法的 role 值。 */
 const BUILTIN_ROLE_OPTIONS = [
@@ -34,17 +21,15 @@ const BUILTIN_ROLE_OPTIONS = [
 ];
 
 /**
- * 用户管理（ADR-019 统一用户表，ADR-023 两 Tab）：
- * - API 用户：余额/密钥/层级与充值、流水等运营操作；
- * - 控制台账号：登录名/角色/密码的管理视角（重置密码、启停、删除）。
- * 同一张 users 表，两个 Tab 是不同的镜头；?tab=console&role=<key> 支持角色预筛选
- * （角色管理页成员数入口跳入）。
+ * 用户管理单页（ADR-019 统一用户表）：原「API 用户 / 控制台账号」双页签合并为
+ * 一张列表（树视图/列表切换），数据源维持 GET /admin/users/tree；
+ * 角色编辑统一走 EditUserDialog；?role=<key> 支持角色预筛选
+ * （角色管理页成员数入口跳入；旧 ?tab=console&role= 链接的 tab 参数忽略）。
  */
 export function UsersPage() {
   const queryClient = useQueryClient();
   const { can } = usePermissions();
   const [params, setParams] = useSearchParams();
-  const tab = parseTab(params.get("tab"));
   const roleFilter = params.get("role");
 
   const canCreate = can("users:create");
@@ -67,8 +52,8 @@ export function UsersPage() {
   const roles = useQuery({
     queryKey: ROLES_KEY,
     queryFn: async () => {
-      const payload = await api.get<{ items: Array<{ key: string; name: string }> }>("/admin/roles");
-      return payload.items.map((item) => ({ key: item.key, name: item.name }));
+      const fetched = await fetchRoles();
+      return fetched.map((item) => ({ key: item.key, name: item.name }));
     },
     staleTime: 60_000,
     retry: false,
@@ -102,13 +87,6 @@ export function UsersPage() {
 
   return (
     <div className="space-y-3">
-      <TabBar
-        ariaLabel="用户管理分区"
-        items={TAB_ITEMS}
-        value={tab}
-        onValueChange={(key) => setParams({ tab: key }, { replace: true })}
-      />
-
       {tree.isError ? (
         <ErrorState
           title="用户列表加载失败"
@@ -116,32 +94,22 @@ export function UsersPage() {
           onRetry={() => void tree.refetch()}
           retrying={tree.isFetching}
         />
-      ) : tab === "api" ? (
-        <ApiUsersTab
+      ) : (
+        <UsersPanel
           nodes={nodes}
           rootIds={rootIds}
           roles={roleOptions}
           globalScope={globalScope}
           keyCounts={keyCounts}
           keyCountsState={keyCountsState}
+          roleFilter={roleFilter}
+          onRoleFilterChange={(role) =>
+            setParams(role === null ? {} : { role }, { replace: true })
+          }
           canCreate={canCreate}
           canUpdate={canUpdate}
           canDelete={canDelete}
           canReadLedger={canReadLedger}
-          loading={tree.isPending}
-          onChanged={invalidateShared}
-        />
-      ) : (
-        <ConsoleTab
-          nodes={nodes}
-          rootIds={rootIds}
-          roles={roleOptions}
-          roleFilter={roleFilter}
-          onRoleFilterChange={(role) =>
-            setParams(role === null ? { tab: "console" } : { tab: "console", role }, { replace: true })
-          }
-          canUpdate={canUpdate}
-          canDelete={canDelete}
           loading={tree.isPending}
           onChanged={invalidateShared}
         />
