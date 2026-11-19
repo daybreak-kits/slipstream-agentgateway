@@ -1,11 +1,16 @@
 # rate limits are global request/token rules; limiter state resets on restart. Per-user prepaid balances are NOT rendered as buckets - AG 1.7 has one maxTokens per rule (E12), so the control-plane ledger is authoritative
-# client auth failures return plain-text 401 'authentication failed' (E4)
-# failover priority is numeric SMALL first; equal priorities form one group, groups are tried in ascending order. failover affects SUBSEQUENT requests only, never in-request retries (E1)
+# client auth failures return plain-text 401 'authentication failed' (E4); every provider MUST carry its own apiKey file - without it AG forwards the client Authorization header to the upstream verbatim (E17 security red line)
+# failover priority is numeric SMALL first; equal priorities form one group, groups are tried in ascending order. Layer switching is P2C/probabilistic inside one group and never happens after the first response byte (a failed stream is truncated, E14/E17). In-request group switch needs retry + health marks (ADR-024)
 # transforms: request transforms mount on llm.models[].requestTransformation; response header rules on llm.models[].responseHeaders; only the global llm.policies.transformations surface carries conditional rows
+# retry: request retry renders as a route-level policies[] entry targeting the implicit LLM route (internal/llm:request); llm.policies rejects retry. 4xx codes only switch layers together with health.eviction, and the switch happens on the attempt AFTER the mark (attempts >= 2, E16/E17)
+# health: every model renders unhealthyExpression + eviction; expression-only health breaks eviction (E16/E17)
 # transforms present on upstream ups_a
 # mcp: 1 top-level target(s); not inside llm
+gateways:
+  default:
+    port: 3600
 llm:
-  port: 3600
+  gateways: default
   providers:
     - name: ups_a
       provider: openai
@@ -30,6 +35,12 @@ llm:
       visibility: internal
       params:
         model: "glm-5.3"
+      tls:
+        hostname: api.example.com
+      health:
+        unhealthyExpression: "response.code >= 400"
+        eviction:
+          consecutiveFailures: 1
       requestTransformation:
         set:
           x-trace: "slipstream"
@@ -56,6 +67,12 @@ llm:
       visibility: internal
       params:
         model: "claude-sonnet-4-5"
+      tls:
+        hostname: api.anthropic.com
+      health:
+        unhealthyExpression: "response.code >= 400"
+        eviction:
+          consecutiveFailures: 1
       responseHeaders:
         remove:
           - server
@@ -132,6 +149,24 @@ llm:
           request:
             set:
               x-tenant: "golden"
+policies:
+  - name:
+      name: "gateway-retry"
+      namespace: default
+    target:
+      route:
+        name: "llm:request"
+        namespace: internal
+    phase: route
+    policy:
+      retry:
+        attempts: 2
+        codes:
+          - 429
+          - 500
+          - 502
+          - 503
+        backoff: 100ms
 mcp:
   targets:
     - name: files

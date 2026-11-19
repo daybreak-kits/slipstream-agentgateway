@@ -11,6 +11,7 @@ from l02_domain.ir import (
     CorsPolicySpec,
     GatewayIR,
     GuardSpec,
+    HealthPolicySpec,
     LimitsSpec,
     McpPolicySpec,
     McpSpec,
@@ -75,7 +76,10 @@ def _ir(**kwargs) -> GatewayIR:
 def test_providers_and_models_are_yaml_arrays_with_ag_names():
     cfg = render_config(_ir(), 3600)
     llm = cfg["llm"]
-    assert llm["port"] == 3600
+    # ADR-024 M2: the deprecated llm.port moves to the full-form gateway shape.
+    assert cfg["gateways"] == {"default": {"port": 3600}}
+    assert llm["gateways"] == "default"
+    assert "port" not in llm
     assert isinstance(llm["providers"], list) and llm["providers"][0]["name"] == "ups_a"
     provider = llm["providers"][0]
     assert provider["provider"] == "openai"
@@ -329,7 +333,6 @@ def test_global_transformations_can_carry_conditional_rows():
 @pytest.mark.parametrize(
     "policy_kwargs, message",
     [
-        ({"retry": RetryPolicySpec(attempts=2)}, "retry"),
         (
             {"remote_rate_limit": RemoteRateLimitPolicySpec(domain="limits.example.com")},
             "remoteRateLimit",
@@ -339,6 +342,104 @@ def test_global_transformations_can_carry_conditional_rows():
 def test_unsupported_policy_fields_raise_instead_of_being_dropped(policy_kwargs, message):
     with pytest.raises(ValueError, match=message):
         render_config(_ir(policies=PoliciesSpec(**policy_kwargs)), 3600)
+
+
+def test_route_retry_renders_as_top_level_route_policy():
+    """ADR-024 M2: llm.policies rejects retry; it renders on internal/llm:request."""
+    ir = _ir(
+        policies=PoliciesSpec(
+            retry=RetryPolicySpec(
+                attempts=2, codes=(401, 429, 500, 502, 503), backoff="200ms"
+            )
+        )
+    )
+    cfg = render_config(ir, 3600)
+    assert "retry" not in cfg["llm"].get("policies", {})
+    assert cfg["policies"] == [
+        {
+            "name": {"name": "gateway-retry", "namespace": "default"},
+            "target": {"route": {"name": "llm:request", "namespace": "internal"}},
+            "phase": "route",
+            "policy": {
+                "retry": {
+                    "attempts": 2,
+                    "codes": [401, 429, 500, 502, 503],
+                    "backoff": "200ms",
+                }
+            },
+        }
+    ]
+
+
+def test_https_models_render_tls_hostname_and_policy_health():
+    """E17: https upstreams need models[].tls.hostname; health marks ride per model."""
+    ir = _ir(
+        policies=PoliciesSpec(
+            health=HealthPolicySpec(
+                unhealthy_expression="response.code >= 400", consecutive_failures=1
+            )
+        )
+    )
+    cfg = render_config(ir, 3600)
+    for model in cfg["llm"]["models"]:
+        assert model["tls"] == {"hostname": "api.example.com"}
+        assert model["health"] == {
+            "unhealthyExpression": "response.code >= 400",
+            "eviction": {"consecutiveFailures": 1},
+        }
+    # http upstreams must not render a TLS block.
+    http_ir = _ir(
+        upstreams=(
+            UpstreamSpec("ups_a", "http://api.example.com/v1", "openai_chat", "keys/ups_a.key"),
+        )
+    )
+    assert "tls" not in render_config(http_ir, 3600)["llm"]["models"][0]
+
+
+def test_validation_requires_key_file_and_absolute_base_url():
+    ir = _ir(
+        upstreams=(
+            UpstreamSpec("ups_a", "https://api.example.com/v1", "openai_chat", ""),
+        )
+    )
+    result = validate_gateway_ir(ir)
+    assert not result.ok and any("key_file" in e for e in result.errors)
+    bad = _ir(
+        upstreams=(
+            UpstreamSpec("ups_a", "api.example.com/v1", "openai_chat", "keys/ups_a.key"),
+        )
+    )
+    result = validate_gateway_ir(bad)
+    assert not result.ok and any("http(s) URL" in e for e in result.errors)
+
+
+def test_validation_rejects_4xx_retry_without_health_pairing():
+    ir = _ir(policies=PoliciesSpec(retry=RetryPolicySpec(attempts=2, codes=(401, 500))))
+    result = validate_gateway_ir(ir)
+    assert not result.ok and any("4xx" in e and "health" in e for e in result.errors)
+    ok = _ir(
+        policies=PoliciesSpec(
+            retry=RetryPolicySpec(attempts=2, codes=(401, 500)),
+            health=HealthPolicySpec(
+                unhealthy_expression="response.code >= 400", consecutive_failures=1
+            ),
+        )
+    )
+    assert validate_gateway_ir(ok).ok
+
+
+def test_validation_rejects_health_expression_without_eviction():
+    """E16/E17: expression-only health breaks eviction (the 4xx triple)."""
+    ir = _ir(
+        policies=PoliciesSpec(
+            retry=RetryPolicySpec(attempts=2, codes=(500,)),
+            health=HealthPolicySpec(unhealthy_expression="", consecutive_failures=0),
+        )
+    )
+    result = validate_gateway_ir(ir)
+    assert not result.ok
+    assert any("unhealthyExpression" in e for e in result.errors)
+    assert any("consecutiveFailures" in e for e in result.errors)
 
 
 def test_model_aliases_raise_instead_of_being_dropped():
@@ -391,11 +492,23 @@ def test_model_level_conditional_or_response_body_transform_raises():
 
 
 def test_adapter_validate_rejects_retry_and_warns_max_buffer():
+    """Scope: the capability matrix reopens with the M3 API surface.
 
+    M2 already renders and pair-checks retry/health (tests above); adapter.validate
+    keeps refusing policy-level retry so the existing /admin/policies contract and
+    capability flags are unchanged until M3.
+    """
     adapter = AgentgatewayAdapter(config_dir="unused")
-    ir = _ir(policies=PoliciesSpec(retry=RetryPolicySpec(attempts=2)))
-    result = adapter.validate(ir)
-    assert not result.ok and "retry" in result.errors[0]
+    ir = _ir(
+        policies=PoliciesSpec(
+            retry=RetryPolicySpec(attempts=2, codes=(500,)),
+            health=HealthPolicySpec(
+                unhealthy_expression="response.code >= 400", consecutive_failures=1
+            ),
+        )
+    )
+    rejected = adapter.validate(ir)
+    assert not rejected.ok and any("retry" in e for e in rejected.errors)
     big = _ir(
         upstreams=(
             UpstreamSpec(

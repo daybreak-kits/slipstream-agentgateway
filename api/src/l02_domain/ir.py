@@ -296,14 +296,38 @@ class TimeoutPolicySpec:
 
 @dataclass(frozen=True, slots=True)
 class RetryPolicySpec:
-    """Request retry. Kept in the IR so adapters can reject it explicitly:
-    agentgateway 1.7's binary rejects llm.policies.retry (unknown field)."""
+    """Request retry (ADR-024).
+
+    agentgateway 1.7 rejects retry inside llm.policies, but accepts it as a
+    ROUTE-level policy: the renderer emits a top-level policies[] entry
+    targeting the implicit LLM route (namespace internal, name llm:request).
+    E16/E17 evidence: retries stay on the same backend until the upstream is
+    marked unhealthy; the cross-layer failover happens on the following
+    attempt, so attempts >= 2 is required for inter-group failover.
+    """
 
     attempts: int = 1
     backoff: str = ""
     codes: tuple[int, ...] = (502, 503, 504)
     precondition: str = ""
     condition: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class HealthPolicySpec:
+    """Upstream health marks + eviction for every rendered model (ADR-024).
+
+    Rendered as llm.models[].health. E16/E17: an unhealthyExpression alone is
+    NOT enough - eviction.consecutiveFailures must be paired, otherwise a 4xx
+    never removes the primary from rotation and the next priority layer is
+    never reached. The renderer refuses to emit an expression without eviction
+    and validation rejects retry.codes containing 4xx without this block.
+    """
+
+    unhealthy_expression: str = ""
+    consecutive_failures: int = 1
+    duration: str = ""
+    restore_health: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -391,6 +415,9 @@ class PoliciesSpec:
     guardrails: PromptGuardSpec | None = None
     timeout: TimeoutPolicySpec | None = None
     retry: RetryPolicySpec | None = None
+    # ADR-024: per-model health marks + eviction; required when retry codes
+    # contain a 4xx (validation enforces the pairing).
+    health: HealthPolicySpec | None = None
     remote_rate_limit: RemoteRateLimitPolicySpec | None = None
     # ADR-021: global access-log/payload switch (metadata | full).
     access_log: AccessLogSpec | None = None

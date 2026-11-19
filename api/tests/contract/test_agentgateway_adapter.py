@@ -279,6 +279,91 @@ def _create_request_logs_db(path: Path, rows: list[tuple[str, str]]) -> None:
         connection.close()
 
 
+def test_usage_column_contract_unchanged_after_m2_full_form() -> None:
+    """E17-T2-c: hybrid/full form and simplified llm mode emit the same request_logs shape.
+
+    E17 pinned 26 request_logs columns on the full form; usage.py maps
+    input_tokens/output_tokens/time_to_first_token_ms straight through. The M2
+    migration must keep both the column contract and that mapping byte-identical.
+    """
+    e17_t2c_columns = {
+        "id",
+        "started_at",
+        "completed_at",
+        "duration_ms",
+        "trace_id",
+        "span_id",
+        "http_status",
+        "error",
+        "gen_ai_operation_name",
+        "gen_ai_provider_name",
+        "gen_ai_request_model",
+        "gen_ai_response_model",
+        "input_tokens",
+        "output_tokens",
+        "total_tokens",
+        "cost",
+        "agentgateway_user",
+        "agentgateway_group",
+        "user_agent_name",
+        "has_payload",
+        "attributes_json",
+        "cache_read_input_tokens",
+        "cache_creation_input_tokens",
+        "reasoning_tokens",
+        "time_to_first_token_ms",
+        "time_per_output_token_ms",
+    }
+    assert EXPECTED_REQUEST_LOG_COLUMNS == e17_t2c_columns
+
+    temp_dir = _make_dir()
+    try:
+        db_path = temp_dir / "ag.db"
+        _create_request_logs_db(db_path, [])
+        connection = sqlite3.connect(db_path)
+        try:
+            connection.execute(
+                "INSERT INTO request_logs (id, started_at, http_status, "
+                "gen_ai_request_model, gen_ai_response_model, gen_ai_provider_name, "
+                "input_tokens, output_tokens, total_tokens, reasoning_tokens, "
+                "time_to_first_token_ms, time_per_output_token_ms) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "evt_t2c",
+                    "2026-11-19T10:00:00Z",
+                    "200",
+                    "nvidia/nemotron-3.5-lightning-30b-a3b",
+                    "nvidia/nemotron-3.5-lightning-30b-a3b",
+                    "openai",
+                    "19",
+                    "32",
+                    "51",
+                    "32",
+                    "1237",
+                    "4.74",
+                ),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        connection = open_readonly(str(db_path))
+        try:
+            page = fetch_events(connection, None)
+        finally:
+            connection.close()
+    finally:
+        _rmtree(temp_dir)
+
+    assert len(page.events) == 1
+    event = page.events[0]
+    assert event.input_tokens == 19
+    assert event.output_tokens == 32
+    assert event.total_tokens == 51
+    assert event.time_to_first_token_ms == 1237
+    assert event.public_model == "nvidia/nemotron-3.5-lightning-30b-a3b"
+
+
 def test_usage_cursor_is_incremental_and_idempotent(config_dir: Path) -> None:
     db_path = config_dir / "ag.db"
     _create_request_logs_db(

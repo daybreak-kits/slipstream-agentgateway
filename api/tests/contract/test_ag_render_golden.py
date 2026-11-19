@@ -17,6 +17,7 @@ from l02_domain.ir import (
     GatewayIR,
     GuardSpec,
     HeaderRule,
+    HealthPolicySpec,
     LimitsSpec,
     McpPolicySpec,
     McpSpec,
@@ -26,6 +27,7 @@ from l02_domain.ir import (
     PromptGuardSpec,
     PublicModelSpec,
     RegexRuleSpec,
+    RetryPolicySpec,
     RewriteCondition,
     TargetSpec,
     TimeoutPolicySpec,
@@ -153,6 +155,17 @@ def golden_ir() -> GatewayIR:
                 ),
             ),
             timeout=TimeoutPolicySpec(request_timeout="60s", backend_request_timeout="30s"),
+            # ADR-024 M2: retry is a route-level policy; 4xx codes require the
+            # paired health expression + eviction (E16/E17 4xx triple).
+            retry=RetryPolicySpec(
+                attempts=2,
+                codes=(429, 500, 502, 503),
+                backoff="100ms",
+            ),
+            health=HealthPolicySpec(
+                unhealthy_expression="response.code >= 400",
+                consecutive_failures=1,
+            ),
             # ADR-021 full mode: the golden fixture pins the payload-logging
             # blocks so --validate-only keeps accepting them across upgrades.
             access_log=AccessLogSpec(database_url="ag-data.db", llm="full"),
@@ -182,10 +195,23 @@ def test_rendered_config_matches_the_golden_fixture():
 def test_golden_contract_has_the_ag_1_7_sections():
     content = FIXTURE.read_text(encoding="utf-8")
     for key in (
+        "gateways:",
+        "default:",
+        "port: 3600",
+        "llm:",
+        "gateways: default",
         "providers:",
         "models:",
         "virtualModels:",
         "policies:",
+        "tls:",
+        "hostname:",
+        "health:",
+        "unhealthyExpression:",
+        "eviction:",
+        "consecutiveFailures: 1",
+        "retry:",
+        "attempts: 2",
         "apiKey:",
         "localRateLimit:",
         "timeout:",

@@ -1,17 +1,31 @@
 """Render GatewayIR into an agentgateway 1.7 config (no files written here).
 
+ADR-024 M2: the client-facing surface migrates to the full-form gateway shape,
+but model-name routing STAYS on llm.virtualModels. Reason (proved by the M2
+probes + pinned 1.7 source): full-form routes only match path/method/query/
+header/host - there is no request-body/model match, and one route maps to one
+AI backend. Slipstream serves ONE base URL (/v1/chat/completions) and selects
+the public model from the JSON body, so a pure routes/backends[].ai layout
+would collapse every public model into one backend and break the contract.
+
 Shapes verified against the pinned 1.7 binary with --validate-only:
 - llm.providers[] is a SEQUENCE of {name, provider, params, defaults}; a map
   keyed by provider id is rejected ("invalid type: map, expected a sequence").
 - llm.models[] is a SEQUENCE of {name, provider: {reference}, visibility,
   params: {model}, ...}; internal visibility keeps direct upstream names 404.
+- gateways.<name>.port + llm.gateways: <name> supersede the deprecated
+  llm.port; the implicit LLM route is namespace internal, name "llm:request".
+- Per-model tls.hostname is emitted for https upstreams; per-model health
+  {unhealthyExpression, eviction} carries the 4xx marks (E16/E17).
 - llm.virtualModels[] routes public names to llm.models[] names.
 - llm.policies carries apiKey/localRateLimit/transformations/cors/timeout/
-  guardrails; localRateLimit is a SEQUENCE of rate rules.
+  guardrails (retry is NOT accepted there); localRateLimit is a SEQUENCE.
+- retry is a TOP-LEVEL policies[] entry: {name, target: {route: {name:
+  llm:request, namespace: internal}}, phase: route, policy: {retry}}.
 - MCP is a TOP-LEVEL mcp section (targets + policies), never inside llm.
 
 Capability matrix: anything agentgateway 1.7 cannot express raises ValueError
-instead of being silently dropped (retry, remoteRateLimit, modelAliases,
+instead of being silently dropped (remoteRateLimit, modelAliases,
 maxBufferSize, model-level conditional/response-body transforms, unsupported
 MCP). Per-user prepaid balances are NOT rendered as buckets: 1.7 allows only
 one maxTokens per rule (E12), so the control-plane ledger stays authoritative.
@@ -21,6 +35,8 @@ user rows; no implicit response.code condition is injected into user body rules.
 """
 
 from __future__ import annotations
+
+from urllib.parse import urlsplit
 
 from l02_domain.ir import (
     CorsPolicySpec,
@@ -48,11 +64,23 @@ BALANCE_NOTE = (
     "Per-user prepaid balances are NOT rendered as buckets - AG 1.7 has one "
     "maxTokens per rule (E12), so the control-plane ledger is authoritative"
 )
-AUTH_NOTE = "client auth failures return plain-text 401 'authentication failed' (E4)"
+AUTH_NOTE = (
+    "client auth failures return plain-text 401 'authentication failed' (E4); "
+    "every provider MUST carry its own apiKey file - without it AG forwards the "
+    "client Authorization header to the upstream verbatim (E17 security red line)"
+)
 FAILOVER_NOTE = (
     "failover priority is numeric SMALL first; equal priorities form one group, "
-    "groups are tried in ascending order. failover affects SUBSEQUENT requests "
-    "only, never in-request retries (E1)"
+    "groups are tried in ascending order. Layer switching is P2C/probabilistic "
+    "inside one group and never happens after the first response byte (a failed "
+    "stream is truncated, E14/E17). In-request group switch needs retry + health "
+    "marks (ADR-024)"
+)
+RETRY_NOTE = (
+    "request retry renders as a route-level policies[] entry targeting the "
+    "implicit LLM route (internal/llm:request); llm.policies rejects retry. "
+    "4xx codes only switch layers together with health.eviction, and the switch "
+    "happens on the attempt AFTER the mark (attempts >= 2, E16/E17)"
 )
 TRANSFORMS_NOTE = (
     "request transforms mount on llm.models[].requestTransformation; response "
@@ -202,6 +230,65 @@ def _global_transformations(ir: GatewayIR) -> dict:
     return compiled
 
 
+def _render_health(health) -> dict:
+    """llm.models[].health {unhealthyExpression, eviction} (E16/E17 4xx triple)."""
+    if not health.unhealthy_expression:
+        raise ValueError(
+            "policies.health 缺少 unhealthyExpression：AG 只配 eviction 不会驱逐"
+            "（E16/E17 4xx 三件套）"
+        )
+    eviction: dict = {"consecutiveFailures": health.consecutive_failures}
+    if health.duration:
+        eviction["duration"] = health.duration
+    if health.restore_health:
+        eviction["restoreHealth"] = health.restore_health
+    return {"unhealthyExpression": health.unhealthy_expression, "eviction": eviction}
+
+
+def _render_model_tls(upstream) -> dict | None:
+    """https upstreams render llm.models[].tls.hostname (E17 TLS finding).
+
+    The pinned 1.7 TLS dial needs the SNI/verification hostname explicitly;
+    full-form used backendTLS.hostname, the hybrid model surface uses tls.
+    """
+    parts = urlsplit(upstream.base_url)
+    if parts.scheme != "https":
+        return None
+    if not parts.hostname:
+        raise ValueError(
+            f"上游 {upstream.id} base_url 缺少 host，无法渲染 tls.hostname: "
+            f"{upstream.base_url!r}"
+        )
+    return {"hostname": parts.hostname}
+
+
+def _render_route_retry(ir: GatewayIR) -> list[dict]:
+    """Route-level retry policy for the implicit LLM route.
+
+    AG 1.7 rejects llm.policies.retry; the pinned binary accepts retry on the
+    route that serves /v1/chat/completions. Route identity from the request log:
+    gateway default/default, listener default, route internal/llm:request.
+    """
+    retry = ir.policies.retry
+    if retry is None:
+        return []
+    body: dict = {"attempts": retry.attempts, "codes": list(retry.codes)}
+    if retry.backoff:
+        body["backoff"] = retry.backoff
+    if retry.precondition:
+        body["precondition"] = retry.precondition
+    if retry.condition:
+        body["condition"] = retry.condition
+    return [
+        {
+            "name": {"name": "gateway-retry", "namespace": "default"},
+            "target": {"route": {"name": "llm:request", "namespace": "internal"}},
+            "phase": "route",
+            "policy": {"retry": body},
+        }
+    ]
+
+
 def _render_provider(upstream) -> dict:
     provider_name = PROVIDER_BY_API_STYLE.get(upstream.api_style)
     if provider_name is None:
@@ -218,13 +305,18 @@ def _render_provider(upstream) -> dict:
     return entry
 
 
-def _render_model(model, upstream, default_deletes: tuple[str, ...]) -> dict:
+def _render_model(model, upstream, default_deletes: tuple[str, ...], health) -> dict:
     entry: dict = {
         "name": model.id,
         "provider": {"reference": model.upstream_id},
         "visibility": model.visibility,
         "params": {"model": model.upstream_model_name},
     }
+    tls = _render_model_tls(upstream)
+    if tls is not None:
+        entry["tls"] = tls
+    if health is not None:
+        entry["health"] = _render_health(health)
     if model.display_name:
         raise ValueError(
             f"AG 1.7 的 llm.models[] 没有 displayName 字段（--validate-only: unknown field）；"
@@ -406,8 +498,18 @@ def _render_access_log(ir: GatewayIR) -> tuple[dict, dict]:
 
 
 def render_config(ir: GatewayIR, llm_port: int) -> dict:
-    """Full config.yaml body: llm section plus optional top-level mcp."""
-    config: dict = {"llm": {"port": llm_port}}
+    """Full config.yaml body for the ADR-024 hybrid shape.
+
+    Client-facing surface: gateways.default.port + llm.gateways (full-form
+    gateway shape). Model routing/public names stay on llm.models/virtualModels
+    (full-form routes cannot match the request-body model field). Retry is a
+    route-level policies[] entry; health/TLS ride on each llm.models[] entry.
+    mcp stays top-level; access log keeps config.logging + frontendPolicies.
+    """
+    config: dict = {
+        "gateways": {"default": {"port": llm_port}},
+        "llm": {"gateways": "default"},
+    }
     providers: list[dict] = []
     upstream_by_id = {}
     for upstream in ir.upstreams:
@@ -419,7 +521,9 @@ def render_config(ir: GatewayIR, llm_port: int) -> dict:
         if upstream is None:
             raise ValueError(f"上游模型 {model.id} 指向未渲染的上游 {model.upstream_id}")
         default_deletes = ir.policies.transforms_defaults.default_response_header_deletes
-        models.append(_render_model(model, upstream, default_deletes))
+        models.append(
+            _render_model(model, upstream, default_deletes, ir.policies.health)
+        )
     if ir.model_aliases:
         raise ValueError(
             "AG 1.7 没有 modelAliases 配置面；请删除模型别名或改用 llm.virtualModels"
@@ -457,11 +561,6 @@ def render_config(ir: GatewayIR, llm_port: int) -> dict:
     transformations = _global_transformations(ir)
     if transformations:
         policies["transformations"] = transformations
-    if ir.policies.retry is not None:
-        raise ValueError(
-            "AG 1.7 的 llm.policies 拒绝 retry（unknown field）：该能力未验证，"
-            "请关闭请求级重试（能力矩阵 policies.retry=false）"
-        )
     if ir.policies.remote_rate_limit is not None:
         raise ValueError(
             "AG 1.7 的 llm.policies 没有 remoteRateLimit 的安全配置面："
@@ -472,6 +571,10 @@ def render_config(ir: GatewayIR, llm_port: int) -> dict:
     config["llm"]["virtualModels"] = virtual_models
     if policies:
         config["llm"]["policies"] = policies
+
+    route_policies = _render_route_retry(ir)
+    if route_policies:
+        config["policies"] = route_policies
 
     mcp = _render_mcp(ir.mcp)
     if mcp is not None:
@@ -502,6 +605,13 @@ def render_comments(ir: GatewayIR) -> list[str]:
         FAILOVER_NOTE,
         f"transforms: {TRANSFORMS_NOTE}",
     ]
+    if ir.policies.retry is not None:
+        comments.append(f"retry: {RETRY_NOTE}")
+    if ir.policies.health is not None:
+        comments.append(
+            "health: every model renders unhealthyExpression + eviction; "
+            "expression-only health breaks eviction (E16/E17)"
+        )
     for upstream in ir.upstreams:
         if upstream.transforms is not None:
             comments.append(f"transforms present on upstream {upstream.id}")

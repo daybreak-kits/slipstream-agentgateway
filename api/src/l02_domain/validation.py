@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 from l02_domain.ir import (
     API_KEY_MODES,
@@ -65,6 +66,23 @@ def validate_gateway_ir(ir: GatewayIR) -> ValidationResult:
 
     upstream_set = set(upstream_ids)
     model_set = set(model_ids)
+    for upstream in ir.upstreams:
+        # E17 安全红线：without a per-provider credential AG forwards the
+        # client's Authorization header to the upstream verbatim.
+        if not upstream.key_file:
+            errors.append(
+                f"上游 {upstream.id} 缺少 key_file：AG 会把客户端 Authorization "
+                "透传上游（E17 安全红线）"
+            )
+        # Hybrid render surface (ADR-024 M2): the dial address is llm.params.baseUrl,
+        # so it must be an absolute http(s) URL whose host can feed tls.hostname.
+        parts = urlsplit(upstream.base_url)
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            errors.append(
+                f"上游 {upstream.id} base_url 不是合法的绝对 http(s) URL: "
+                f"{upstream.base_url!r}（AG 1.7 llm.params.baseUrl；https 上游渲染 "
+                "llm.models[].tls.hostname）"
+            )
     for model in ir.models:
         if model.upstream_id not in upstream_set:
             errors.append(f"上游模型 {model.id} 指向不存在的上游 {model.upstream_id}")
@@ -201,6 +219,37 @@ def _validate_policies(ir: GatewayIR, errors: list[str]) -> None:
         for code in retry.codes:
             if not isinstance(code, int) or not 100 <= code <= 599:
                 errors.append(f"policies.retry.codes 含非法状态码: {code!r}")
+        # ADR-024 mandatory pairing: E16/E17 show that retry codes containing a
+        # 4xx only reach the next priority layer when health marks + eviction are
+        # rendered together (codes alone keep retrying the same backend).
+        if any(400 <= code <= 499 for code in retry.codes) and policies.health is None:
+            errors.append(
+                "policies.retry.codes 含 4xx 时必须同时配置 policies.health"
+                "（unhealthyExpression + eviction.consecutiveFailures）："
+                "E16/E17 证实仅靠 retry codes 不会换组"
+            )
+    if policies.health is not None:
+        health = policies.health
+        if not health.unhealthy_expression:
+            errors.append(
+                "policies.health.unhealthyExpression 不能为空（如 response.code >= 400）"
+            )
+        if (
+            not isinstance(health.consecutive_failures, int)
+            or isinstance(health.consecutive_failures, bool)
+            or health.consecutive_failures < 1
+        ):
+            errors.append(
+                "policies.health.eviction.consecutiveFailures 必须为 >= 1 的整数："
+                "E16/E17 证实仅配置表达式而不驱逐会让 4xx 永不离开主层"
+            )
+        if health.duration and not _DURATION_RE.match(health.duration):
+            errors.append(
+                f"policies.health.eviction.duration 不是合法时长: {health.duration!r}"
+                "（如 60s/5m）"
+            )
+        if health.restore_health < 0:
+            errors.append("policies.health.eviction.restoreHealth 不能为负")
     if policies.remote_rate_limit is not None and not policies.remote_rate_limit.domain:
         errors.append("policies.remote_rate_limit.domain 不能为空")
     if policies.data_plane_cors is not None:
