@@ -415,3 +415,15 @@
 9. 接口两维正交（R3-5）：协议风格（openai_chat / openai_responses / anthropic_messages / gemini + 自动探测依次试）× 接口类型（chat / embedding / rerank / image / video / audio / **systemone（AG 内置协议，E14b 实测）** / custom 自填路径透传）；常见接口面以 OpenRouter 为参考。
 
 **后果**：导航收敛后的页数与路由数在 FRONTEND-PLAN 收口时更新；连接密钥表需加 name / last_used_at 列与删除端点。
+
+## ADR-024 渲染层迁移混合形态（gateway 面 + 内部路由 retry）
+
+- 状态：已定（2026-11-19 用户裁决；推翻 ADR-014/015 的简化 llm 模式选型；M2 落地修订为混合形态）
+
+**背景**：简化模式无法表达请求内重试（E13：llm 面 retry 字段 validate 拒收）与 4xx 驱逐策略；用户裁定产品语义要求「主目标失败（400-599 可配置）→ 同请求内切同层 → 再切下一层 → 全败才报错」。E16 实证完整形态下 route 层 retry 真实作用于 LLM 流量（主 5xx+codes → 同请求切组，4/4 客户端 200）；E17 钉死三未测区（鉴权/流式+retry/token 列形状）。
+
+**决策（M2 落地修订：混合形态）**：纯完整形态不可行——AG 1.7 路由仅匹配 path/method/query/header/host，读不到请求体里的 model；一个 route 只对应一个 AI 后端；AI 组无 weight。全走完整形态会让所有公开模型共用同一路径、body 不可区分，被塌缩成同一个后端（各模型的 failover 链/健康策略全部丢失）。故落地为**混合形态**：保留 `llm.models/virtualModels` 做模型路由与 failover/weighted/conditional 语义（组=同 priority 层沿用），网关面迁移 `gateways`+`llm.gateways`，请求内 retry 以顶层 `policies[]` 挂内部路由 `internal/llm:request`（E17-T3 真实上游 3/3 切备实证）。强制项（validate 拒绝违反）：每上游 key_file 必填（堵客户端 Authorization 透传上游）；baseUrl 必须绝对 http(s)；https 上游渲染 models[].tls.hostname；retry.codes 含 4xx 必须成对 health.unhealthyExpression+eviction.consecutiveFailures≥1（渲染层再兜底）。已知边界不变：首字节后不切备；request_logs 1 请求 1 行（路由链可视化不回归）；同层组内 P2C 概率性不能当保证。
+
+**理由**：三重证据（E13 拒收 / E14 简化模式零重试 / E16 完整形态可实现）+ E17 三未测区全绿；适配层架构（ADR-001）使改动封在 l02 IR 加字段 + l03 重写，上层无感。
+
+**后果**：M3 开放 /admin/policies 的 retry/health 配置面与 UI → M4 回归；usage.py 列映射不变（E17-T2-c 实测）；AG panic（outlierdetection SystemTime overflow，OR :free 429 触发）上报上游跟踪；ADR-014 简化模式选型相关条目由本 ADR 取代。
