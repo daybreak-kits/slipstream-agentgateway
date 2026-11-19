@@ -349,11 +349,11 @@ check("metric-icons：统一 icon/tone 映射覆盖指标条全部指标", () =>
   includesAll(text, ['tone: "primary"', 'tone: "success"', 'tone: "warning"', 'tone: "danger"', 'tone: "info"'], "tone 语义色");
 });
 
-check("指标条：grid gap-3 + 2/3/6 列响应式（≥1440 六列）", () => {
+check("指标条：grid gap-3 + 2/3/4/6 列响应式（xl 起六列，八卡 6+2 两行）", () => {
   includesAll(
     read("src/components/dashboard/metric-cards.tsx"),
-    ["grid-cols-2", "gap-3", "lg:grid-cols-3", "min-[1440px]:grid-cols-6"],
-    "六卡指标条",
+    ["grid-cols-2", "gap-3", "sm:grid-cols-3", "lg:grid-cols-4", "xl:grid-cols-6"],
+    "八卡指标条",
   );
   for (const file of [
     "src/components/billing/cost-panel.tsx",

@@ -16,7 +16,7 @@ import { useReportsFlow, useReportsLatency, useReportsTimeseries } from "@/compo
 import { TimeRangePicker, type TimeWindow } from "@/components/time-range-picker";
 
 /**
- * 看板 v3（F1 重构）：区间选择器 → 六卡 → 趋势（柱形/面积/分流）→ 延迟分位 → 热力图。
+ * 看板 v3（F1 重构）：区间选择器 → 八卡 → 趋势（柱形/面积/分流）→ 延迟分位 → 热力图。
  * 区间状态 {kind:"range",value} | {kind:"custom",fromMs,toMs} 归 TimeRangePicker 所有，
  * 进全部报表 queryKey；keepPreviousData + AbortController 保证切换平滑、连点不排队。
  * ?tab= 写 URL 与旧系统一致；桶边界与币种全部来自接口，前端不自算。

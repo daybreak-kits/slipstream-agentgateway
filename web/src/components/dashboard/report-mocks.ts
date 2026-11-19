@@ -208,13 +208,23 @@ export function mockTimeseries(
       : { bucket_start_ms: slot.startMs, label: slot.label, total, values };
   });
 
+  const activeMinutesTotal = Math.min(windowMinutes, Math.max(1, Math.round(requestTotal / 11)));
   const totals: ReportTotals = {
     requests: requestTotal,
     input_tokens: cacheSplit.input,
     output_tokens: cacheSplit.output,
     tokens: tokenTotal,
     error_count: Math.round(requestTotal * 0.021),
-    active_minutes: Math.min(windowMinutes, Math.max(1, Math.round(requestTotal / 11))),
+    active_minutes: activeMinutesTotal,
+    // 单分钟峰值（GLOSSARY §5 最高峰）：取均值的 1.8–3 倍，mock 形状合理即可
+    peak_rpm: Math.max(
+      1,
+      Math.round((requestTotal / Math.max(1, activeMinutesTotal)) * (1.8 + rand() * 1.2)),
+    ),
+    peak_tpm: Math.max(
+      1,
+      Math.round((tokenTotal / Math.max(1, activeMinutesTotal)) * (1.8 + rand() * 1.2)),
+    ),
     cache_read_tokens: cacheSplit.cacheRead,
     cache_write_tokens: cacheSplit.cacheWrite,
     cost_micro: costTotal,

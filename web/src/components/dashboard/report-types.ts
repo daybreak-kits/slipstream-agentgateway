@@ -113,7 +113,7 @@ export interface ReportsOverview {
   estimate_note: string;
 }
 
-/** 金额字段按权限「键不存在」，缓存词元待后端 H 合入前为 undefined——全部可选。 */
+/** 金额字段按权限「键不存在」，缓存词元与分钟峰值待后端合入前为 undefined——全部可选。 */
 export interface ReportTotals {
   requests: number;
   input_tokens: number;
@@ -121,6 +121,9 @@ export interface ReportTotals {
   tokens: number;
   error_count?: number;
   active_minutes?: number;
+  /** 窗口内单分钟峰值（GLOSSARY §5 「最高峰」）：最忙一分钟的请求数 / 词元数；缺位降级「—」。 */
+  peak_rpm?: number;
+  peak_tpm?: number;
   cache_read_tokens?: number;
   cache_write_tokens?: number;
   cost_micro?: number;
