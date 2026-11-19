@@ -1,0 +1,102 @@
+{
+  "config": {
+    "adminAddr": "127.0.0.1:3921",
+    "statsAddr": "127.0.0.1:3922",
+    "readinessAddr": "127.0.0.1:3923",
+    "database": {
+      "url": "sqlite://data.db"
+    },
+    "storage": {
+      "mode": "file"
+    },
+    "session": {
+      "key": "3a5dde678b895d76e244397deac58c4eac0199d751ee0c168e4ef022d62e9c2e"
+    }
+  },
+  "llm": {
+    "port": 3692,
+    "providers": [
+      {
+        "name": "e15-s3-proxy",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:52824/v1",
+          "apiKey": {
+            "file": "<key-file:see bin-e14 sibling temp dir, gitignored>"
+          }
+        }
+      },
+      {
+        "name": "e15-s3-direct",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "https://openrouter.ai/api/v1",
+          "apiKey": {
+            "file": "<key-file:see bin-e14 sibling temp dir, gitignored>"
+          }
+        }
+      }
+    ],
+    "models": [
+      {
+        "name": "e15-s3-proxy-model",
+        "visibility": "internal",
+        "provider": {
+          "reference": "e15-s3-proxy"
+        },
+        "params": {
+          "model": "nvidia/nemotron-3.5-lightning-30b-a3b"
+        }
+      },
+      {
+        "name": "e15-s3-direct-model",
+        "visibility": "internal",
+        "provider": {
+          "reference": "e15-s3-direct"
+        },
+        "params": {
+          "model": "nvidia/nemotron-3.5-lightning:free"
+        }
+      }
+    ],
+    "virtualModels": [
+      {
+        "name": "vm-e15-s3",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "e15-s3-proxy-model",
+                "priority": 1
+              },
+              {
+                "model": "e15-s3-direct-model",
+                "priority": 2
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "policies": {
+      "apiKey": {
+        "mode": "strict",
+        "keys": [
+          {
+            "key": "sk-ss-lab-client-0001",
+            "metadata": {
+              "name": "lab-client"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "frontendPolicies": {
+    "accessLog": {
+      "database": {
+        "llm": "full"
+      }
+    }
+  }
+}

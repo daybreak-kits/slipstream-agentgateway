@@ -1,6 +1,6 @@
 # P0 · agentgateway 隔离实例行为验证（task-162）
 
-状态：已完成 E1–E13（E9–E11 为第二轮追加；E12 额度/localRateLimit、E13 retry、E9 追加 CEL 字符串函数为第三轮；E14 状态码矩阵/route 层 retry/非 chat 透传为第四轮）。实验脚本与原始日志见 slipstream/ops/experiments/ag-lab/ 与 evidence/。
+状态：已完成 E1–E15（E9–E11 为第二轮追加；E12 额度/localRateLimit、E13 retry、E9 追加 CEL 字符串函数为第三轮；E14 状态码矩阵/route 层 retry/非 chat 透传为第四轮；E15 真实上游复验请求内重试/故障转移/流式中杀为第五轮）。实验脚本与原始日志见 slipstream/ops/experiments/ag-lab/ 与 evidence/。
 
 执行环境：Windows 单机、agentgateway v1.7.0 官方二进制（git 26f5aebe99a36a037fe54f8080a608aca5547e15、rust 1.99.0、x86_64-pc-windows-msvc；该构建 --version 打印 "True"，版本号以 release/schema 为准）。E1–E13 期间复用 C:/Users/microsoft/agentgateway/ 内的二进制（只读）；该目录已不存在，E14 起改用从 GitHub releases 重新下载的同一构建（sha256 909b93dc…ed3c 与官方 .sha256 一致），存放于 ops/experiments/ag-lab/bin-e14/，lab.py 按 $AG_EXE → bin-e14 → 旧路径 的顺序解析。隔离端口：llm 3692 / admin 3921 / stats 3922 / readiness 3923；E14 另用纯 HTTP 网关端口 3694；自建 mock 上游 8099。全程未访问生产端口 3691 / 19004–19006。
 
@@ -12,6 +12,7 @@
     python e12_ratelimit_retry.py   # E12/E13/E9 追加：本地限流、retry 可见性、CEL 字符串函数
     python e12_followups.py         # E12 追加：metadata 拍平、reload 桶保留、30k 桶淘汰探测
     python e14_retry_status.py      # E14：状态码矩阵、route 层 retry、非 chat 端点透传
+    python e15_real_upstream.py     # E15：真实上游（.env.e15）S1–S5，密钥写 .e15-tmp/*.key 并以 apiKey.file 引用
 
 ## 结论速览
 
@@ -31,6 +32,7 @@
 | E12 | localRateLimit 是单实例内存令牌桶：key 可用 apiKey.metadata.user_id（也可用拍平写法 apiKey.user_id）；同 user_id 共享桶；type=tokens 按 prompt+completion 总量扣；tokensPerFill=0 不补充、持续 429；改 maxTokens 热加载会把桶容量改为新 max（充值可行）；重启清零；30k 个桶未见淘汰。 |
 | E13 | v1.7.0 的 LLM 配置面不接受 retry：llm.policies 与 llm.models 配 retry 均 validate exit=1（unknown field），retry 只存在于 routes/backends 的 FilterOrPolicy；v1 不能靠配 retry 拿到请求级故障转移。 |
 | E14 | 状态码语义：上游 4xx/429/499 一律原样透传且不触发健康驱逐；任意 5xx（含 505/520/599）原样透传但 p1 立即被降级（影响后续请求）；连接拒绝=503 + 驱逐；AG 无默认上游超时。route 层 retry 被接受且真的产生请求内重试（同后端、attempts+1 次上游命中），但完全不作用于 LLM 监听器。非 chat 端点：/v1/embeddings、/v1/images/generations 透传（前者改写模型名并记 tokens，后者不改写）；/v1/systemone 不透传（AG 按 SystemOne 协议解析，缺字段直接 400）。 |
+| E15 | 真实上游（NVIDIA/OpenRouter）复验 E14：401/404 原样透传且 0 次请求内切换；流式中途断连客户端拿到截断 SSE、不切备 target（request_logs 记 200 + "response body failed"）；weighted 3:1 两批 18:2 与 15:5（抽样噪声内）；route 层 retry 在纯 HTTP 路由命中 3 次/请求，同一配置 LLM 面 5 请求仅 5 次上游命中——**E14 结论一致，不推翻**。 |
 
 ## E1 · 同层失败是否在请求内切 target（最关键）
 
@@ -388,6 +390,44 @@ maxTokens=2、tokensPerFill=0、fillInterval=1h、type=requests：前 2 个请�
 - request_logs 只记 LLM 协议流量；普通代理路由（3694）不进表——用 AG 做纯 HTTP 代理的可观测性要走访问日志而非 request_logs。
 - 上游 200 但 body 非法 → AG 502 UpstreamFailure：上游兼容性测试（阶段 B）要包含「200 + 非 OpenAI 结构 body」的用例。
 
+## E15 · 真实上游复验：请求内重试 / 故障转移 / 流式中杀
+
+目的：E14 用 mock 上游测得「LLM 面请求内零重试、零切换」，用户不接受 mock 结论，要求用**真实上游**（部分故意报错、部分正常）复验同一批行为，确认 E14 结论是否成立。
+
+环境：三个真实上游（凭据只从 ops/experiments/ag-lab/.env.e15 读取，该文件 gitignored）。SENSENOVA（sensenova-6.8-flash-lite）、NVIDIA（nvidia/nemotron-3.5-lightning-30b-a3b）、OpenRouter（nvidia/nemotron-3.5-lightning:free，仅用 :free 模型）。密钥写入临时目录 .e15-tmp/*.key（.gitignore 已加 ops/experiments/ag-lab/.e15-tmp/），配置里用 `params.apiKey: {file: ...}` 引用，证据/配置/日志一律不含明文密钥。实验期间 SenseNova 触发账号级限流（所有请求 429），故健康对照与备 target 改用 NVIDIA + OpenRouter；SenseNova 的限流本身是环境约束，不是 AG 行为。
+
+做法（脚本 e15_real_upstream.py，每场景独立起停 AG）：
+
+1. S1 错误 key 主目标：主 target=NVIDIA + 故意写错的 key（真实 401），备 target=OpenRouter；5 次 chat。
+2. S2 编造模型名：主 target=NVIDIA + 不存在的 model（真实 404），备 target=OpenRouter；5 次 chat。
+3. S3 流中终止：本地 TCP 代理（明文 HTTP 入、TLS 转发到真实 NVIDIA、收到首个响应分片后杀连接）做主 target，OpenRouter 直连做备 target；5 次流式请求。
+4. S4 全健康负载分摊：OpenRouter 与 NVIDIA 同 virtualModel 用 `routing.weighted` 3:1，20 次 × 2 批。
+5. S5 请求内重试复核：S1 配置 + 纯 HTTP 网关（3694）route 层 retry（attempts=2, codes=[401,404,429,500,502,503], backoff=100ms）；LLM 主 target 经**计数代理**（kills=0）转发到真实 NVIDIA，直接数上游命中次数。
+
+原始证据：evidence/E15-S1-bad-key-primary.json.md、evidence/E15-S2-fabricated-model.json.md、evidence/E15-S3-stream-kill.json.md、evidence/E15-S4-weighted-3-1.json.md、evidence/E15-S5-retry-recheck.json.md，及对应 evidence/cfg-E15-*.yaml、evidence/ag-E15-*.log。二进制：bin-e14/agentgateway.exe（v1.7.0，sha256 909b93dc…ed3c）。
+
+观察：
+
+- S1：5/5 客户端拿到 **401**（NVIDIA 原文 `{"status":401,"title":"Unauthorized",...}`）；5 次全部只打主 target，备 target（OpenRouter）命中 **0**；request_logs 5 行，http_status=401、error=NULL、gen_ai_request_model=nvidia/nemotron-3.5-lightning-30b-a3b。→ 401 原样透传、请求内不切换。
+- S2：5/5 客户端拿到 **404**（NVIDIA 原文 `404 page not found`）；备 target 命中 0；request_logs 5 行，model=e15-fabricated-model-xyz。→ 404 原样透传、不切换。
+- S3：5/5 流式请求都只收到 **1 个 SSE 分片后连接中断**（chunks=1、done=false、客户端无异常对象，流自然结束）；代理 5 次全部触发 kill；备 target（OpenRouter）**0 命中**；request_logs 5 行均为 http_status=200、model=nvidia/nemotron-3.5-lightning-30b-a3b、error=`response body failed: error reading a body from connection`。→ **流式一旦吐出首片就不可切换**，客户端拿到截断的 SSE，不会续到备 target。
+- S4：第 1 批 20 次 200（OpenRouter 18 : NVIDIA 2）；第 2 批 20 次 200（OpenRouter 15 : NVIDIA 5，恰好 3:1）；合计 33:7 ≈ 4.7:1，配置为 3:1。两批各自的偏差都在 n=20 的抽样噪声内（第 2 批正好是 3:1），未见 AG 违反权重；小样本下方差较大，若 v1 要严格比例需加大样本或改用 round-robin。
+- S5：route 层 retry 在纯 HTTP 路由上真实生效——401、404 每个客户端请求上游命中 **3 次**（原始 + 2 次重试），客户端最终拿到上游码；同一配置下 LLM 面 5 个客户端请求只产生 **5 次上游命中**（计数代理直接计数），客户端拿到 401，request_logs 5 行。→ **route 层 retry 完全不作用于 LLM 监听器**，与 E14 一致。耗时也佐证：S5 的 5 次 LLM 请求 duration 401–562ms，与无 retry 的 S1（131–389ms）同量级；若真重试 2 次，应多出约 2×上游往返 + 200ms backoff。
+- request_logs（全场景）：严格 1 请求 1 行（S1/S2/S5 各 5 行、S3 5 行、S4 每批 20 行）；trace_id / span_id 全部为空（未配 tracing）；gen_ai_provider_name 恒为 openai；透传的 4xx 行 error=NULL；只有 AG 自生错误（S3 的 response body failed）才填 error。
+
+一致性判定（E15 真实上游 vs E14 mock）：
+
+- **一致**。E14 的四条核心结论在真实上游下全部复现：① LLM 请求内不切换 target（S1 401、S2 404、S3 流中断均为 0 次切换）；② route 层 retry 只作用于纯 HTTP 路由、不作用于 LLM 监听器（S5：plain 3 次命中 vs LLM 5 请求 5 次命中）；③ request_logs 1 请求 1 行、trace_id 不填充、只记 LLM 流量；④ 上游 4xx 原样透传（S1 401、S2 404 客户端可见）。
+- E15 新增的观测（E14 未覆盖）：**流式响应中途断连时，AG 不会切到备 target**，客户端拿到截断的 SSE；request_logs 记为 http_status=200 + error="response body failed: error reading a body from connection"。这与「非请求内重试」是同一语义的流式版本。
+- 未发现任何与 E14 矛盾的行为，因此**不推翻**「请求内零重试」结论；E14 的 mock 结论在真实上游下成立。
+
+对设计的影响：
+
+- 「LLM 面请求内不重试/不切换」已由 mock（E14）+ 真实上游（E15）双重验证，v1 控制面若需要请求级重试必须自己做，不能依赖 AG。
+- 流式一旦开始吐字即不可切换：v1 的「失败转移」只能作用于尚未产生首字节（或首字节前）的请求；已经开始的 SSE 只能中断并让客户端重试。
+- 纯 HTTP 路由的 route 层 retry 可用，但 LLM 流量走的是内部路由 internal/llm:request，套不上；v1 若统一网关，需区分两类流量。
+- request_logs 对「上游已断但 HTTP 头已回 200」的流式失败会记 200 + error，账本/告警不能只看 http_status，要同时看 error 列。
+
 ## 对 v1 设计的影响汇总
 
 1. 路由语义：priority 分层严格；同层随机（约 1/3:2/3 偏置）；失败不请求内重试，只影响后续选路。GLOSSARY/ADR-003 需补「非请求内重试」。
@@ -403,6 +443,7 @@ maxTokens=2、tokensPerFill=0、fillInterval=1h、type=requests：前 2 个请�
 11. retry（E13）：v1.7.0 的 LLM 配置面不接受 retry（llm.policies/llm.models 均 validate 拒绝），不能配置请求内重试；文档里的 retry 属于非 LLM 路由/后端层。
 12. CEL 字符串函数（E9 追加）：regexReplace / regexReplaceAll / upperAscii / lowerAscii / replace / trim 均可用，改写能力不需要置灰。
 13. 状态码与 retry（E14）：上游 4xx/429/499 透传不驱逐、5xx（含 505/520/599）透传后降级、连接拒绝 503+驱逐、无默认上游超时；请求内切换在任何码下都是 0 次。route 层 retry 真实产生请求内重试（同后端）但绝不作用于 LLM 监听器；request_logs 1 请求 1 行、trace_id 不填充、只记 LLM 流量。/v1/embeddings、/v1/images/generations 可透传（前者改写模型名、后者不改写、后者不记 tokens），/v1/systemone 是内置协议路径会被解析拦截（缺字段 400）。
+14. 真实上游复验（E15）：NVIDIA/OpenRouter 真实 401/404 原样透传、0 次请求内切换；流式中途断连不切备 target（客户端拿截断 SSE，request_logs 记 200 + error）；weighted 3:1 实测 18:2 与 15:5（n=20 抽样噪声内）；route 层 retry 纯 HTTP 3 次/请求 vs LLM 5 请求 5 次命中——E14 结论在真实上游下成立。
 
 ## 与 Lead 第二轮决策的交叉
 
@@ -426,6 +467,7 @@ maxTokens=2、tokensPerFill=0、fillInterval=1h、type=requests：前 2 个请�
 - localRateLimit 的桶上限/LRU 触发点不可观测：30k 个桶未见淘汰，/metrics 无 rate-limit 桶指标；若 v1 依赖淘汰行为需读源码或用极端基数压测。
 - E13 只证明了 LLM 配置面不能配 retry；route/backend 级 retry 已由 E14 实测：route 层产生请求内重试（同后端）但不作用于 LLM 流量；backend 层无 retry 字段。仍未测：route 层多后端时 retry 是否换后端、precondition/condition 对流式的作用（不属于 v1 LLM 方案）。
 - E14 遗留：上游挂起仅观察到 30s（客户端断开终止），AG 是否存在更长默认上游超时未测；llm.policies.timeout 配置行为未验证。images 端点不记 tokens，意味着 images 类流量的预算/账本（E10/E6 链路）在 AG 侧无用量数据。/v1/systemone 只测了「非法 body 被 400」；构造合法 SystemOne 请求会得到什么（代理到上游还是继续拦截）未测。E14a 中 code-200 的 502 由 mock 的 error 形状 body 触发，属于有意构造的兼容性用例，不是环境故障。
+- E15 遗留：SenseNova 在实验期间触发账号级限流（429），未能作为健康对照；若需三上游交叉，建议错峰或换 key 重跑。weighted 3:1 两批 18:2 / 15:5，小样本方差大，若 v1 要严格比例需加大样本。S3 的「流中断」用本地代理模拟，未覆盖真实上游 TLS 层断连（语义应相同，但真实网络抖动形态更多）。E15 只测了 401/404 两类错误码，5xx 与连接拒绝的真实上游行为仍沿用 E14 的 mock 结论。
 
 ## 原始证据索引
 
@@ -437,5 +479,6 @@ maxTokens=2、tokensPerFill=0、fillInterval=1h、type=requests：前 2 个请�
 - CEL：evidence/cel-variables.md、evidence/cel-functions.md、evidence/cel.json
 - E12/E13/E9 追加脚本：slipstream/ops/experiments/ag-lab/e12_ratelimit_retry.py、e12_followups.py、probe_metrics.py；证据 evidence/E12-local-rate-limit-and-retry.json.md、evidence/E12-followups.json.md、evidence/cfg-e12-*.yaml、evidence/cfg-e13-*.yaml、evidence/ag-e12-*.log、evidence/ag-e9-cel-strings.log
 - E14 脚本：slipstream/ops/experiments/ag-lab/e14_retry_status.py；证据 evidence/E14a-status-matrix.json.md、evidence/E14a-route-retry-layer.json.md、evidence/E14b-nonchat-passthrough.json.md、evidence/cfg-e14-retry-layer.yaml、evidence/ag-e14-a.log、evidence/ag-e14-b.log、evidence/ag-e14-nonchat.log；二进制 ops/experiments/ag-lab/bin-e14/agentgateway.exe（v1.7.0，sha256 与官方 release .sha256 一致）
+- E15 脚本：slipstream/ops/experiments/ag-lab/e15_real_upstream.py（凭据读 .env.e15，key 写 .e15-tmp/*.key 并以 apiKey.file 引用；含 KillProxy 流中杀代理与计数代理）；证据 evidence/E15-S1-bad-key-primary.json.md、evidence/E15-S2-fabricated-model.json.md、evidence/E15-S3-stream-kill.json.md、evidence/E15-S4-weighted-3-1.json.md、evidence/E15-S5-retry-recheck.json.md、evidence/cfg-E15-*.yaml、evidence/ag-E15-*.log
 - mock 上游新增 usage 变体：模型名含 usage-p100 时返回 prompt=100/completion=0，含 usage-c100 时返回 prompt=0/completion=100（mock_upstream.py 的 _usage_for）；响应头 x-ratelimit-* 与 429 证据见 E12 两组 JSON。
 - mock 上游 E14 新增端点：模型名 code-<N> 返回状态码 N、code-timeout-<s> 挂起、POST /plain/<spec>（纯数字恒定码、seq-<N>-200 首败后 200、slow-<ms>）、任意前缀 /embeddings、/images/generations、/systemone 返回合法 JSON（mock_upstream.py do_POST）。
