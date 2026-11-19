@@ -296,7 +296,8 @@ def timeseries(
     totals always carries every key (shape stable across metric combinations);
     token口径: input_tokens is the cache-folded figure (input = net + cache), so
     net input derives as input_tokens - cache_read_tokens - cache_write_tokens
-    (GLOSSARY §5); the cache sums share the same window and filters.
+    (GLOSSARY §5); the cache sums share the same window and filters. totals also
+    carries the single-minute peaks peak_rpm/peak_tpm (GLOSSARY §5 「最高峰」).
     """
     series = _parse_metrics(metrics, metric)
     for name in series:

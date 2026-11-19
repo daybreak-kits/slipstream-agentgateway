@@ -23,7 +23,10 @@ pre-ADR Python algorithm over the same fixtures to pin the semantics:
   excluded from the sum (contributes 0) and listed in fx_missing;
 * error_count counts http_status != 200 (the billing definition of a failed
   request, billing.md §6); active_minutes counts distinct LOCAL minutes that
-  contain at least one event, failures included.
+  contain at least one event, failures included;
+* peak_rpm / peak_tpm are the busiest single LOCAL minute's request count and
+  token sum (GLOSSARY §5 「最高峰」): MAX over the per-minute GROUP BY, collapsed
+  inside one SQL statement on the same minute key as active_minutes.
 
 Cost/spend fields are never gated here - the routes run the finished payload
 through the money-visibility middleware so a caller without billing:cost gets
@@ -710,6 +713,28 @@ def build_timeseries(
         ),
         params,
     ).one()
+    # Single-minute peaks (GLOSSARY §5 「最高峰」): MAX over the per-minute GROUP
+    # BY collapsed inside SQL (ADR-022 - no minute rows reach Python), on the
+    # same LOCAL minute key as active_minutes. peak_tpm sums the same token
+    # figure as the totals.tokens column (folded input + output).
+    peak_row = session.execute(
+        text(
+            f"SELECT COALESCE(("
+            f" SELECT MAX(per_minute.minute_requests) FROM ("
+            f"  SELECT COUNT(*) AS minute_requests FROM gateway_usage_events e"
+            f"  WHERE e.started_at_ms >= :from_ms AND e.started_at_ms < :to_ms"
+            f"  GROUP BY ({local_expr}) / {_MINUTE_MS}"
+            f" ) AS per_minute), 0),"
+            f" COALESCE(("
+            f" SELECT MAX(per_minute.minute_tokens) FROM ("
+            f"  SELECT COALESCE(SUM(e.input_tokens + e.output_tokens), 0) AS minute_tokens"
+            f"  FROM gateway_usage_events e"
+            f"  WHERE e.started_at_ms >= :from_ms AND e.started_at_ms < :to_ms"
+            f"  GROUP BY ({local_expr}) / {_MINUTE_MS}"
+            f" ) AS per_minute), 0)"
+        ),
+        params,
+    ).one()
 
     # bucket_groups[bucket_position][member] = per-field sums; member_agg folds across buckets.
     position_keys = _key_of_position(starts, bucket, tz)
@@ -821,7 +846,8 @@ def build_timeseries(
         # the payload shape stays stable; cache sums share the window/filter of
         # input_tokens, which is the cache-folded figure (input = net + cache,
         # net input = input_tokens - cache_read_tokens - cache_write_tokens,
-        # GLOSSARY §5).
+        # GLOSSARY §5). peak_rpm/peak_tpm are the busiest LOCAL minute's
+        # request/token totals (GLOSSARY §5 「最高峰」), 0 on an empty window.
         "totals": {
             "requests": int(totals_row[0]),
             "input_tokens": int(totals_row[1]),
@@ -833,6 +859,8 @@ def build_timeseries(
             "charge_micro": int(totals_row[7]),
             "error_count": int(totals_row[8]),
             "active_minutes": int(totals_row[9]),
+            "peak_rpm": int(peak_row[0]),
+            "peak_tpm": int(peak_row[1]),
         },
         "metric_total": total_metric,
         "folded_members": len(folded),

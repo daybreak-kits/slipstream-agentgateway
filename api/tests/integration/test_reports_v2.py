@@ -529,6 +529,53 @@ def test_timeseries_totals_carry_error_count_and_active_minutes(
     assert body["totals"]["requests"] == 2
 
 
+def test_timeseries_totals_carry_minute_peaks(client, engine_and_sessionmaker, fixed_now):
+    """peak_rpm/peak_tpm = busiest single LOCAL minute (GLOSSARY §5 「最高峰」).
+
+    Distribution: minute AT-2min holds ten small requests (request peak);
+    minute AT-1min holds one huge request (token peak) - each MAX must pick
+    its own minute, not the busiest-by-the-other-metric one.
+    """
+    _, factory = engine_and_sessionmaker
+    burst = [
+        {
+            "event_id": f"evt_peak_{index}",
+            "at_ms": AT - 2 * 60_000,
+            "input_tokens": 100,
+            "output_tokens": 50,
+        }
+        for index in range(10)
+    ]
+    _seed(
+        factory,
+        [
+            *burst,
+            {
+                "event_id": "evt_peak_heavy",
+                "at_ms": AT - 60_000,
+                "input_tokens": 10_000,
+                "output_tokens": 5_000,
+            },
+        ],
+    )
+
+    body = client.get("/admin/reports/timeseries?range=7d&bucket=day&metric=requests").json()
+    assert body["totals"]["peak_rpm"] == 10  # ten requests share one local minute
+    assert body["totals"]["peak_tpm"] == 15_000  # the huge minute, not the busy one
+    # peaks share the window/aggregation of the legacy totals keys
+    assert body["totals"]["requests"] == 11
+    assert body["totals"]["tokens"] == 16_500
+    assert body["totals"]["active_minutes"] == 2
+
+    # a window without events reports 0 peaks (MAX over an empty GROUP BY)
+    empty = client.get(
+        "/admin/reports/timeseries?range=7d&bucket=day&metric=requests"
+        "&from_ms=1577836800000&to_ms=1577923200000"
+    ).json()
+    assert empty["totals"]["peak_rpm"] == 0
+    assert empty["totals"]["peak_tpm"] == 0
+
+
 def test_cache_token_totals_in_overview_and_timeseries(
     client, engine_and_sessionmaker, fixed_now
 ):

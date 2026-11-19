@@ -986,10 +986,13 @@ def _strip_new_fields(payload: dict) -> dict:
     payload.pop("metrics", None)
     payload["totals"].pop("error_count", None)
     payload["totals"].pop("active_minutes", None)
-    # cache token sums postdate the legacy replay; the SQL path pins them in
-    # test_reports_v2 instead (hand-computed seed values).
+    # cache token sums and the single-minute peaks postdate the legacy replay;
+    # the SQL path pins them in test_reports_v2 and
+    # test_new_fields_match_direct_computation instead (hand-computed seed values).
     payload["totals"].pop("cache_read_tokens", None)
     payload["totals"].pop("cache_write_tokens", None)
+    payload["totals"].pop("peak_rpm", None)
+    payload["totals"].pop("peak_tpm", None)
     return payload
 
 
@@ -1171,7 +1174,7 @@ def test_overview_matches_legacy(seeded):
 
 
 def test_new_fields_match_direct_computation(seeded):
-    """error_count / active_minutes pinned against plain Python over the window."""
+    """error_count / active_minutes / minute peaks pinned against plain Python."""
     _engine, factory = seeded
     from_ms, to_ms = _window("7d")
     with factory() as session:
@@ -1197,8 +1200,23 @@ def test_new_fields_match_direct_computation(seeded):
         stats = aggregates.overview_stats(session, from_ms=from_ms, to_ms=to_ms)
     expected_errors = sum(1 for r in rows if r.http_status != 200)
     expected_minutes = len({r.started_at_ms // 60_000 for r in rows})
+    # per-LOCAL-minute sums; Asia/Shanghai has a whole-minute offset so the
+    # epoch-minute key equals the SQL local-minute key (same shortcut the
+    # active_minutes check below has always used)
+    minute_requests: dict[int, int] = {}
+    minute_tokens: dict[int, int] = {}
+    for row in rows:
+        key = row.started_at_ms // 60_000
+        minute_requests[key] = minute_requests.get(key, 0) + 1
+        minute_tokens[key] = minute_tokens.get(key, 0) + (row.input_tokens or 0) + (
+            row.output_tokens or 0
+        )
+    expected_peak_rpm = max(minute_requests.values(), default=0)
+    expected_peak_tpm = max(minute_tokens.values(), default=0)
     assert sql["totals"]["error_count"] == expected_errors > 0
     assert sql["totals"]["active_minutes"] == expected_minutes
+    assert sql["totals"]["peak_rpm"] == expected_peak_rpm > 0
+    assert sql["totals"]["peak_tpm"] == expected_peak_tpm > 0
     assert stats["error_count"] == expected_errors
     assert stats["active_minutes"] == expected_minutes
 
