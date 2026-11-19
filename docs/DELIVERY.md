@@ -75,3 +75,40 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 2. **旧库迁移**：旧库 16 表按新模型（vendors/upstreams/upstream_keys/upstream_models/public_models/model_targets/api_keys/users）用脚本录入；priority 语义用 `migrate_priority_v2.py` 一次性翻转。
 3. **趋势窗口化**：补 24h/小时桶与看板时间窗联动。
 4. **（可选）** 把控制面迁到 `\\wsl.localhost\Ubuntu-26.04\home\microsoft\slipstream` 运行，Windows 侧只留数据面。
+
+## 6. 三期交付段（2026-11-19，重构收口）
+
+三期 = 病根修复（W1）+ 全站页面重构（W2–W5）+ 清理与浏览器验收（W6），已合入本地 `main`（未 push）。路由收口为 **26 条 = 16 功能页 + 登录 + 404 + 8 旧入口重定向页**；侧栏 4 组、**15 个一级入口 + 运营设置 3 个二级分区 = 18 个导航项**（清单唯一来源 `web/src/routes.ts` → `ops/checks/routes.json`）。逐批变更见 `docs/CHANGELOG-phase2.md` 后续提交与 `docs/FRONTEND-PLAN.md` 各工位「已完成」标注。
+
+### 6.1 功能摘要
+
+| 批次 | 内容 |
+|---|---|
+| W1 病根修复 | 用量补延迟三字段 + 连接密钥 last_used_at 批量前推；报表六接口 SQL 化（分位/时区/fx）；timeseries 多指标；overview 增 error_count/active_minutes/缓存两列；延迟四分位；日志排序 + 词元 + user 双匹配 + status:4xx；api-contract 全面重对齐 |
+| W2 看板 + 日志 | 看板六卡新口径（请求/词元/费用/成本毛利/延迟/RPM·TPM）、区间 7 预设 + 自定义、热力图行虚拟化（30d+ 行内滚动）；日志筛选/排序/列显隐/详情抽屉（正文需开关） |
+| W3 上游 + 模型 + 价目 | 上游渠道列表 + 整页编辑器（连接与模型/路由与映射/请求与响应/其他设置四 Tab）；模型管理双 Tab 行内可用性 + 批量操作 + 列显隐；价目管理成本/倍率可编辑 + JSON 导出/导入（ADR-020） |
+| W4 密钥 + 用户 + 角色 | 连接密钥（掩码常驻 + 审计化 reveal + 一次性明文弹窗 + 签发入口）；用户管理 API 用户/控制台账号两 Tab（ADR-019）；角色管理权限矩阵（41 权限键） |
+| W5 策略 + 审计 + 配置 + 设置 | 网关策略三 Tab 合并页（流量策略/护栏/MCP，validate→保存→apply→版本留档）；审计；配置版本；用户设置/运营设置；登录/404 |
+| W6 清理 + 验收 | 后端：conftest 临时目录进程隔离、契约补录（缓存词元/上游改名可选/可用性窗口跳读）；前端：ENDPOINTS 归并、死代码删除、mock 补桩、术语 error 档；浏览器：26 路由/32 URL 逐页四查 + 七流程端到端 |
+
+### 6.2 门禁结果（2026-11-19 全绿）
+
+- 后端：`python -m pytest` **578 passed / EXIT=0**（含 test_availability 时钟冻结修复）；`ruff check src tests` All checks passed；import-lint 通过。
+- 前端六门禁：`tsc --noEmit` 0；`eslint src` 0；`vite build` 成功；`check:bundle` PASS（首包 gzip **202.7 KB**、**70** 个 JS chunk）；`check-ui-foundation` **37/37**；`terminology_audit --strict` **error 0 · warn 0**（旧词 封禁/对外模型/客户端密钥 已清零）。
+- 浏览器验收：`node ops/checks/w6_acceptance.mjs`（Playwright + msedge headless，3700 同源托管）→ **PASS 39 / FAIL 0**：26 条路由展开 32 URL 逐页四查（首屏/空态/错误态/交互）+ flow1 建上游→模型→公开模型→下发、flow2 建用户→签发密钥→复制 toast、flow3 日志筛选/排序/列显隐/详情、flow4 看板连点、flow5 价目导出导入回环、flow6 危险三档 + 周期冷却窗口启用、flow7 强制 500 降级；证据 `ops/checks/.logs/acceptance/w6-20261119-105143/report.md`（不入库）。
+- 验收中发现并修复的真 bug：①Dialog 内 Select/Dropdown 被遮罩拦截点击（`--z-popover` 40→60，弹层浮在 modal 之上）；②启用/解除冷却前端先删周期规则导致窗口跳过失效（删除 clearPeriodicCooldowns，语义归后端）；③连接密钥签发 body 缺 `user_id` 必填字段；④test_availability 五个窗口用例在 UTC 02:00-04:00 运行时机钟依赖偶发失败（冻结服务时钟于用例窗口内）。
+
+### 6.3 部署注意（生产必读）
+
+- **必须覆盖 `SLIPSTREAM_ADMIN_USERNAME` / `SLIPSTREAM_ADMIN_PASSWORD`**：默认 `admin / admin12345` 仅演示数据（seed_demo）使用；生产首次启动前必须设置，否则控制台入口是公开弱口令。
+- 控制台会话绝对过期 12h（无滑动续期）；生产置 `SLIPSTREAM_COOKIE_SECURE=1` 并置于 TLS 之后，管理台与 API 必须同主机名。
+- 单端口：先 `cd web && npm run build` 再启动控制面 3700（spa.py 同源托管 `web/dist`，深链回退 index.html）。
+
+### 6.4 三期已知边界
+
+1. **AG 1.7 请求内零重试**：LLM 配置面不接受 retry 策略（validate 拒绝），策略页 retry 必须为 null。
+2. **image 类型上游模型不记词元**：无法计费，模型管理行内提示「AG 不记词元」。
+3. **请求/响应正文日志默认不落库**：运营设置需开 `ag_access_log_llm=full` 才记录（metadata 默认）。
+4. **日志接口类型 join 上限 200 条**：模型/上游/用户/密钥名称回填最多 join 200 行，超出部分显示 id。
+5. **热力图 30 天以上档位行内滚动**：行虚拟化（30d+ 行内滚），非整页展开。
+6. **审计时间筛选未做**：审计其余筛选（动作/操作者/对象）可用，时间范围筛选待后续。
