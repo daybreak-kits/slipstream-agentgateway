@@ -9,7 +9,9 @@ pre-ADR Python algorithm over the same fixtures to pin the semantics:
 
 * latency quantiles are nearest-rank (ceil(p/100*n)) over *paired* samples
   (TTFT > 0 and TOTAL > 0), and below MIN_PERCENTILE_SAMPLES every value is
-  None rather than a misleading 0;
+  None rather than a misleading 0; the W4-F ``all`` block replays the same
+  nearest-rank read over every window event with no pairing filter (p50/p75/p95
+  only) so the log page can anchor semantic colour on the full calibre;
 * ranges are today/24h/7d/30d/365d and bucket boundaries follow the report
   timezone from app_settings.timezone (default Asia/Shanghai). SQLite strftime
   cannot apply IANA rules, so the SQL groups on integer keys of LOCAL wall
@@ -451,8 +453,30 @@ def overview_stats(session: Session, *, from_ms: int, to_ms: int) -> dict:
     }
 
 
+# Nearest-rank quantile sets per block kind: the paired blocks keep the legacy
+# p99 read, while the W4-F all-sample block only carries the p50/p75/p95 anchors
+# the semantic colour needs (DESIGN-AUDIT §11).
+_PAIRED_FRACTIONS: tuple[tuple[str, float], ...] = (
+    ("p50_ms", 0.50),
+    ("p75_ms", 0.75),
+    ("p95_ms", 0.95),
+    ("p99_ms", 0.99),
+)
+_ALL_FRACTIONS: tuple[tuple[str, float], ...] = (
+    ("p50_ms", 0.50),
+    ("p75_ms", 0.75),
+    ("p95_ms", 0.95),
+)
+
+
 def _latency_block_sql(
-    session: Session, where: str, params: dict, column: str, *, min_samples: int
+    session: Session,
+    where: str,
+    params: dict,
+    column: str,
+    *,
+    min_samples: int,
+    fractions: tuple[tuple[str, float], ...] = _PAIRED_FRACTIONS,
 ) -> dict:
     """Nearest-rank quantiles over the ranked column via OFFSET position reads."""
     count = session.execute(
@@ -460,12 +484,7 @@ def _latency_block_sql(
     ).scalar_one()
     sufficient = count >= min_samples
     block: dict = {"samples": int(count)}
-    for name, fraction in (
-        ("p50_ms", 0.50),
-        ("p75_ms", 0.75),
-        ("p95_ms", 0.95),
-        ("p99_ms", 0.99),
-    ):
+    for name, fraction in fractions:
         offset = _nearest_rank_offset(fraction, count) if sufficient else None
         value = (
             _position_value(session, column, where, params, offset) if offset is not None else None
@@ -477,32 +496,67 @@ def _latency_block_sql(
 def latency_report(
     session: Session, *, from_ms: int, to_ms: int, min_samples: int = MIN_PERCENTILE_SAMPLES
 ) -> dict:
-    """TTFT/TOTAL quantiles over one paired sample set (non-streaming excluded).
+    """TTFT/TOTAL quantiles in two calibres: the legacy paired set and W4-F all.
 
-    A sample is paired when ttft > 0 AND duration > 0. Below min_samples every
-    quantile is None and paired_samples tells the caller how many there were.
+    ``ttft``/``total`` are the paired blocks: a sample enters only when
+    ttft > 0 AND duration > 0, so non-streaming requests (ttft = 0) never
+    contaminate them; p50/p75/p95/p99 nearest-rank. ``all`` is the same window
+    with NO pairing filter - every event feeds both columns, which is the
+    calibre the log page's semantic colour anchors on (a non-streaming row has
+    a real total duration even though its ttft is 0, so excluding it would
+    skew the tone anchors); it carries p50/p75/p95 only. Each block applies the
+    min_samples rule independently, and below it every quantile of that block
+    is None rather than a misleading 0.
     """
     ensure_report_indexes(session)
     params: dict = {}
     if int(to_ms or 0) > 0:
         params = {"from_ms": max(int(from_ms or 0), 0), "to_ms": int(to_ms)}
-        where = (
-            "e.started_at_ms >= :from_ms AND e.started_at_ms < :to_ms"
-            " AND e.time_to_first_token_ms > 0 AND e.duration_ms > 0"
-        )
+        window = "e.started_at_ms >= :from_ms AND e.started_at_ms < :to_ms"
+        paired_where = window + " AND e.time_to_first_token_ms > 0 AND e.duration_ms > 0"
     else:
-        where = "e.time_to_first_token_ms > 0 AND e.duration_ms > 0"
+        # to_ms=0 keeps the legacy all-time calibre (0=全时段): no started_at
+        # clause at all, only the pairing filter on the paired block.
+        window = "1=1"
+        paired_where = "e.time_to_first_token_ms > 0 AND e.duration_ms > 0"
     paired_samples = int(
-        session.execute(text(f"SELECT COUNT(*) FROM gateway_usage_events e WHERE {where}"), params)
-        .scalar_one()
+        session.execute(
+            text(f"SELECT COUNT(*) FROM gateway_usage_events e WHERE {paired_where}"), params
+        ).scalar_one()
+    )
+    all_samples = int(
+        session.execute(
+            text(f"SELECT COUNT(*) FROM gateway_usage_events e WHERE {window}"), params
+        ).scalar_one()
     )
     return {
         "paired_samples": paired_samples,
         "min_samples": min_samples,
         "ttft": _latency_block_sql(
-            session, where, params, "time_to_first_token_ms", min_samples=min_samples
+            session, paired_where, params, "time_to_first_token_ms", min_samples=min_samples
         ),
-        "total": _latency_block_sql(session, where, params, "duration_ms", min_samples=min_samples),
+        "total": _latency_block_sql(
+            session, paired_where, params, "duration_ms", min_samples=min_samples
+        ),
+        "all": {
+            "samples": all_samples,
+            "ttft": _latency_block_sql(
+                session,
+                window,
+                params,
+                "time_to_first_token_ms",
+                min_samples=min_samples,
+                fractions=_ALL_FRACTIONS,
+            ),
+            "total": _latency_block_sql(
+                session,
+                window,
+                params,
+                "duration_ms",
+                min_samples=min_samples,
+                fractions=_ALL_FRACTIONS,
+            ),
+        },
     }
 
 

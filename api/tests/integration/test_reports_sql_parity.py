@@ -500,6 +500,10 @@ def _legacy_latency_report(
     ]
     ttft = [first for first, _total in paired]
     totals = [total for _first, total in paired]
+    # W4-F all-sample calibre: every window event, no pairing filter, and only
+    # the p50/p75/p95 tone anchors (no p99 read on this block).
+    every_ttft = [int(event.time_to_first_token_ms or 0) for event in events]
+    every_total = [int(event.duration_ms or 0) for event in events]
 
     def percentile(values: list[int], fraction: float) -> int | None:
         if not values:
@@ -508,20 +512,25 @@ def _legacy_latency_report(
         rank = max(1, math.ceil(fraction * len(ordered)))
         return int(ordered[min(rank, len(ordered)) - 1])
 
-    def block(values: list[int]) -> dict:
+    def block(values: list[int], fractions: tuple[tuple[str, float], ...]) -> dict:
         sufficient = len(values) >= min_samples
-        return {
-            "samples": len(values),
-            "p50_ms": percentile(values, 0.50) if sufficient else None,
-            "p95_ms": percentile(values, 0.95) if sufficient else None,
-            "p99_ms": percentile(values, 0.99) if sufficient else None,
-        }
+        entry: dict = {"samples": len(values)}
+        for name, fraction in fractions:
+            entry[name] = percentile(values, fraction) if sufficient else None
+        return entry
 
+    paired_fractions = (("p50_ms", 0.50), ("p95_ms", 0.95), ("p99_ms", 0.99))
+    all_fractions = (("p50_ms", 0.50), ("p75_ms", 0.75), ("p95_ms", 0.95))
     return {
         "paired_samples": len(paired),
         "min_samples": min_samples,
-        "ttft": block(ttft),
-        "total": block(totals),
+        "ttft": block(ttft, paired_fractions),
+        "total": block(totals, paired_fractions),
+        "all": {
+            "samples": len(every_ttft),
+            "ttft": block(every_ttft, all_fractions),
+            "total": block(every_total, all_fractions),
+        },
     }
 
 

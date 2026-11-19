@@ -5,7 +5,7 @@ money-visibility middleware, so a caller without billing:cost/billing:spend
 gets responses with the keys absent rather than null):
 
 * GET /admin/reports/overview   - legacy flat summary + latency block + error/active minutes
-* GET /admin/reports/latency    - TTFT/TOTAL p50/p75/p95/p99 over paired samples
+* GET /admin/reports/latency    - paired p50/p75/p95/p99 + W4-F all-sample p50/p75/p95
 * GET /admin/reports/timeseries - range/bucket/dimension/metric(s)/topN + members
 * GET /admin/reports/heatmap    - 7d weekday×hour or 30d/365d date×hour matrix
 * GET /admin/reports/flow       - five stages user→key→model→upstream model→upstream
@@ -18,8 +18,11 @@ integer micro in the report currency.
 
 latency/timeseries/heatmap/flow also accept an explicit millisecond window via
 the optional from_ms/to_ms query pair (dashboard 本周/本月/自定义): both given
-overrides the range enum, one alone or an invalid pair is a 422, and neither
-keeps the enum behaviour byte-identical. See _window_override.
+overrides the range enum and one alone or an invalid pair is a 422. For
+timeseries/heatmap/flow neither param keeps the enum behaviour byte-identical;
+latency since W4-F reports the all-time calibre instead (0=全时段, payload
+"range" reads "all") so the log page can omit the window and stay aligned with
+/admin/logs. See _window_override.
 """
 
 from __future__ import annotations
@@ -235,28 +238,35 @@ def trend(
 def latency(
     session: Session = Depends(session_of),
     principal: auth.Principal = Depends(require("reports:read")),
-    range: str = "7d",
+    range: str = "",
     from_ms: int | None = None,
     to_ms: int | None = None,
     tz: str = "",
 ) -> dict:
-    """TTFT and TOTAL p50/p75/p95/p99 over one paired sample set.
+    """TTFT/TOTAL quantiles over one window in two calibres (W4-F).
 
-    A sample is paired when ttft > 0 AND duration > 0 (non-streaming requests
-    never enter latency quantiles). Below five paired samples every quantile is
-    null and paired_samples tells the caller how many it had.
+    ``ttft``/``total`` stay the legacy paired blocks (ttft > 0 AND duration > 0,
+    p50/p75/p95/p99; non-streaming requests never enter); ``all`` is the W4-F
+    addition - the same window with no pairing filter, p50/p75/p95 - which the
+    log page uses to anchor its latency semantic colour (DESIGN-AUDIT §11).
+    Below five samples each calibre nulls its own quantiles independently.
 
-    An explicit from_ms/to_ms pair (epoch ms) overrides the range enum with the
-    given window while the paired-sample rule and nearest-rank quantiles stay
-    exactly the same; payload "range" reads "custom" then. See _window_override.
+    Window resolution: an explicit from_ms/to_ms pair overrides the range enum
+    with payload "range" reading "custom"; exactly one of the pair is still a
+    422; giving neither is now the all-time calibre (0=全时段, payload "range"
+    reads "all") instead of the old 7d enum default, so the log page can omit
+    the window and stay aligned with /admin/logs. An explicit range=... keeps
+    the enum behaviour. See _window_override.
     """
     zone = _timezone(session, tz)
     override = _window_override(from_ms, to_ms)
     if override is not None:
         window_from, window_to, range_key = override[0], override[1], "custom"
-    else:
+    elif range:
         window_from, window_to, _bucket = _range_window(range, now_ms(), zone)
         range_key = range
+    else:
+        window_from, window_to, range_key = 0, 0, "all"
     payload = {
         "range": range_key,
         "from_ms": window_from,
