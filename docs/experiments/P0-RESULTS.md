@@ -482,6 +482,54 @@ maxTokens=2、tokensPerFill=0、fillInterval=1h、type=requests：前 2 个请�
 
 原始证据：evidence/E16-A0-baseline.json.md、evidence/E16-A1-route-retry.json.md（含 401 对照 / 401-in-codes / 429-in-codes 子场景）、evidence/E16-A1-401-health-failover.json.md、evidence/E16-A2-backend-retry.json.md、evidence/E16-A3-group-failover.json.md、evidence/E16-A4-health-4xx.json.md（含 4 组健康矩阵子场景）、evidence/E16-A5-same-group-switch.json.md，及对应 evidence/cfg-E16-*.yaml、evidence/ag-e16-*.log。二进制同 E14/E15（bin-e14/agentgateway.exe，v1.7.0，sha256 909b93dc…ed3c）。
 
+## E17 · 完整形态鉴权通道 / 流式+retry / 真实上游组间 failover 判定
+
+目的：E16 把完整形态（gateways/routes/backends[].ai）的 retry 与组间 failover 钉在 mock 上游，留下三个未测区：① 真实上游鉴权通道（key 如何进入上游、错误 key 是否原样回传）；② 流式与 retry 的交互（首字节前后失败是否切组）及 request_logs token/ttft 列在完整形态下是否照旧；③ 真实上游 + retry 组间 failover 全链（4xx 是否驱动切组）。三区全绿则「简化 llm 模式→完整形态」迁移可全量立项，任一红则记方案受阻点与替代思路。
+
+环境与配置（脚本 e17_common.py 共享 harness + e17_t1_auth.py / e17_t1_supp.py / e17_t2_stream_retry.py / e17_t3_real_failover.py；凭据读 .env.e15，key 值写 .e17-tmp/*.key 以 backendAuth.key.file 引用，全程打码；每个配置先 --validate-only；OpenRouter 仅 :free）：
+
+- T1 鉴权：真实 NVIDIA provider（hostOverride integrate.api.nvidia.com:443 + backendTLS.hostname + pathPrefix /v1 + provider.openAI.model nvidia/nemotron-3.5-lightning-30b-a3b），route 匹配 /v1/chat/completions；鉴权形状 per schema：providers[].policies.backendAuth = {key:{file}} 或 {credentials:[{location:{header:{name,prefix}}, key:{file}}]}。
+- T2 流式+retry：route policies.retry codes=[500] attempts=2 backoff=100ms + 两组 mock（主=直接 500 或经计数代理上报 SSE 后被杀，备=正常 SSE）；客户端流式请求打 AG 3695/v1/chat/completions。
+- T3 真实全链：两个真实 NVIDIA provider 经两个计数 TLS 代理——主=nvidia-bad（错误 key，上游 401）、备=nvidia-good（真实 key）；route retry codes=[401,429,500,502,503] attempts=2 backoff=50ms；s1=仅 codes；s2=+ health.unhealthyExpression="response.code >= 400" + eviction.consecutiveFailures=1；非流式 3 次、流式 3 次，记录客户端结果与两上游命中矩阵。原计划备=OpenRouter :free，当日配额 429 耗尽，改第二 NVIDIA 真实上游替代。
+
+判定表：
+
+| 区域 | 场景 | 判定 | 关键证据 |
+| --- | --- | --- | --- |
+| T1 | backendAuth {key:{file}} 真实 NVIDIA | 成立 | 200；request_logs 1 行 input=17/output=32/total=49/reasoning=32，endpoint integrate.api.nvidia.com:443，duration 806ms |
+| T1 | credentials 自定义 header（同 key） | 成立 | 上游 200；裸 key 无 prefix 即原值，prefix:"Bearer " 即 "Bearer key" |
+| T1 | 错误 key 透传 | 成立 | nvapi 坏 key：AG 403 = 上游直连 403（body 全等）；sk 坏 key：AG 401 = 直连 401（body 全等，"Invalid JWT serialization: Missing dot delimiter(s)"） |
+| T1 | route policies.apiKey strict 客户端鉴权 | 成立（需补 mode 名） | 正确客户端 key→200（上游 1 命中）；错/无 key→401 "authentication failed"；上游只见 provider key。mode:"required" 被 schema 拒收，合法值为 strict/optional/permissive |
+| T1 | TLS/拨号形状坑 | 部分成立 | hostOverride 缺 port validate exit1（"routes[0]: invalid host:port: integrate.api.nvidia.com"）；host:443 无 backendTLS validate 过但运行时上游 400 "plain HTTP request was sent to HTTPS port"；只写 backendTLS 不写 hostname validate 过 |
+| T1 | 未配 backendAuth | 风险 | 客户端 Authorization 被原样转发上游（客户端 key 泄漏给上游）——渲染器必须强制 backendAuth |
+| T2 | a 首字节前主 500→切备 | 成立 | 客户端 chunks=9 done=true ttft 0.38s / dur 0.65s；主 /fail 2 次 + 备 /ok 1 次；无 retry 对照客户端 500、主 1 备 0 |
+| T2 | b 首字节后中断→不切备 | 成立 | 客户端 chunks=1 done=false；代理 1/主 1/备 0；b2 chunked 上游同杀：request_logs error="response body failed: error reading a body from connection" 仍不切 → AG 能感知错误但不 failover，与 E14 一致 |
+| T2 | c request_logs token/ttft 列 | 成立 | 简化 vs 完整：非流式 tokens 5/3/8、ttft/tpot null、dur 2–5ms；流式 tokens 5/3/8、ttft 122.8 vs 123.8ms、tpot 95.3 vs 94.8ms；模型列记上游模型名（非虚拟名） |
+| T3 | s1 仅 retry codes 含 401 | 不成立（不换组） | 非流式 3/3 客户端 401，主 3/备 0；流式 3/3 客户端 401（chunks 0），主 3/备 0；重试全打原组 |
+| T3 | s2 codes+health+eviction | 成立（条件） | 非流式 3/3 200（主/备命中 2/1、1/1、1/1）；流式 3/3 200 完整 SSE 13 chunks（各 1/1，ttft 1191.2/1207.6/1234.1ms）；request_logs 流式行 tokens 19/32/51、tpot 4.45–5.97ms |
+
+观察细节：
+
+- 真实上游鉴权头形状由 policies.backendAuth 决定，而非 provider 的 auth/baseUrl 字段（schema 无此二字段）：{key:{file}} 等价 "Authorization: Bearer <key>"；credentials 形式可自定义 header 名与 prefix。
+- T3 三件套下切换是请求内、确定性的：每个 trial 主命中 1–2 次后切备、备只命中 1 次，客户端拿 200 与真实补全；s1 仅 codes 时 attempts=2 变成 3 次全打主组（4xx 默认不标不健康，与 E16 mock 结论一致）。
+- 流式请求 request_logs 仍 1 请求 1 行；token/ttft 在 failover 后照常从最终上游响应填充；首字节后中断行 http=200、tokens=null（b1 error=null，因为 mock SSE 无 chunked 框架、被杀看起来像正常 EOF；b2 chunked 才暴露 error）。
+- OpenRouter :free 实测 429：{"error":{"message":"Rate limit exceeded: free-models-per-day-high-balance."}}，x-ratelimit-limit 1000 / remaining 0 / reset 1795132800000（≈2026-11-20 08:00 CST）；且 AG v1.7.0 收到 OR 429 后 panic：crates/agentgateway/src/http/outlierdetection.rs:60:30 "overflow when adding duration to SystemTime"（客户端 RemoteDisconnected）——生产接 429 上游前需验证/规避。
+
+结论：
+
+- **T1 成立**（鉴权形状齐全、真实 NVIDIA 200、错误 key 403/401 原样透传、客户端 apiKey 可加）；**T2 成立**（首字节前切组、首字节后不切、token/ttft 列形状不变）；**T3 部分成立/条件成立**（真实上游 4xx 组间 failover 仅在 codes+health+eviction 三件套下发生，且非流式/流式均 200 切备；仅 codes 不换组）。
+- **迁移可行性总裁定：可迁移立项**（三区无硬阻塞）。前置条件：① 4xx 场景渲染层必须同时生成 retry.codes + health.unhealthyExpression + eviction.consecutiveFailures；② provider 必须渲染 backendAuth（否则客户端密钥透传上游）、hostOverride 必须 host:port、TLS 上游必须 backendTLS.hostname；③ 流式中途断连不切备是 AG 固有语义，客户端需处理截断流；④ OpenRouter :free 当日配额 429、不可作生产备源，且 AG 对 429 的 panic 需跟踪；⑤ request_logs 列形状不变，usage.py 的列映射迁移无需改。
+- 与 E16 的关系：E16 的 mock 结论在真实上游与 TLS 代理下复现（s1/s2 与 E16 A1a/A1d 同构）；新增「真实鉴权通道」「流式交互」「真实 4xx failover」「OR 429 + AG panic」四条硬证据。
+
+对设计的影响（补 E16 迁移清单）：
+
+- 鉴权渲染：LocalNamedAIProvider.policies.backendAuth = {key:{file: <upstream-key-file>}}（TLS 上游再加 backendTLS.hostname）；route 客户端鉴权 = policies.apiKey {keys:[{key}/{keyHash}], mode: strict|optional|permissive}。
+- retry：仅 route 层；4xx 需要请求内切换时必须 codes 含 4xx + health + eviction 同配（health 只配表达式不配 eviction 会整体失效，E16 A4b）。
+- 流式：retry 只在首字节前有意义；首字节后失败按截断流透传（客户端感知 done=false）。
+- 可观测性：request_logs 列形状与简化模式一致（tokens/ttft/tpot/provider/endpoint/model 名），usage.py 无需改列映射。
+
+原始证据：evidence/E17-T1-validate.json.md、E17-T1-shape.json.md、E17-T1-real.json.md、E17-T1-wrongkey.json.md、E17-T1-wrongkey2.json.md、E17-T1-clientauth.json.md、E17-T1-clientauth2.json.md、E17-T1-dial.json.md、E17-T1-openrouter.json.md；evidence/E17-T2-a.json.md、E17-T2-b.json.md、E17-T2-c.json.md；evidence/E17-T3-s1.json.md、E17-T3-s2.json.md；及 evidence/cfg-E17-*.yaml、evidence/ag-E17-*.log。脚本 e17_common.py（共享 harness）、e17_t1_auth.py、e17_t1_supp.py、e17_t2_stream_retry.py、e17_t3_real_failover.py；凭据读 .env.e15、临时 key 在 .e17-tmp（gitignored，已清理）。二进制同 E14–E16（bin-e14/agentgateway.exe，v1.7.0，sha256 909b93dc…ed3c）。
+
 ## 对 v1 设计的影响汇总
 
 1. 路由语义：priority 分层严格；同层随机（约 1/3:2/3 偏置）；失败不请求内重试，只影响后续选路。GLOSSARY/ADR-003 需补「非请求内重试」。
@@ -499,6 +547,7 @@ maxTokens=2、tokensPerFill=0、fillInterval=1h、type=requests：前 2 个请�
 13. 状态码与 retry（E14）：上游 4xx/429/499 透传不驱逐、5xx（含 505/520/599）透传后降级、连接拒绝 503+驱逐、无默认上游超时；请求内切换在任何码下都是 0 次。route 层 retry 真实产生请求内重试（同后端）但绝不作用于 LLM 监听器；request_logs 1 请求 1 行、trace_id 不填充、只记 LLM 流量。/v1/embeddings、/v1/images/generations 可透传（前者改写模型名、后者不改写、后者不记 tokens），/v1/systemone 是内置协议路径会被解析拦截（缺字段 400）。
 14. 真实上游复验（E15）：NVIDIA/OpenRouter 真实 401/404 原样透传、0 次请求内切换；流式中途断连不切备 target（客户端拿截断 SSE，request_logs 记 200 + error）；weighted 3:1 实测 18:2 与 15:5（n=20 抽样噪声内）；route 层 retry 纯 HTTP 3 次/请求 vs LLM 5 请求 5 次命中——E14 结论在真实上游下成立。
 15. 完整形态（E16）：显式 route + backends[].ai 时 route 层 retry 真正作用于 LLM 流量并实现请求内组间 failover（主 5xx → 重试 → 组2 → 200，4/4）；4xx 需 codes 含 4xx + health.unhealthyExpression + eviction 三件套才请求内切组（单配 codes 时 3 次全打原组）；backend/provider 层无 retry 字段（validate 拒收）；health 必须表达式与 eviction 同配（只配表达式会让驱逐整体失效）；同组内切换是 P2C 概率行为非保证；request_logs 1 请求 1 行不变。→ v1 若保「客户端无感重试」产品语义，渲染层从简化 llm 模式迁完整形态即可，官方能力在 1.7 的完整形态 API 面（gateways/routes/policies.retry + backends[].ai）已具备。
+16. 鉴权通道与迁移可行性（E17）：完整形态真实上游鉴权可用——providers[].policies.backendAuth {key:{file}} 等价 "Authorization: Bearer <key>"，credentials 可自定义 header name/prefix；真实 NVIDIA 200，错误 key 403/401 与直连上游 body 全等透传；route policies.apiKey strict 可做客户端鉴权（上游只见 provider key）。流式+retry：首字节前失败切备并收完整 SSE（9 chunks），首字节后中断不切备（E14 语义在完整形态成立，chunked 上游时 AG 已感知 error 仍不 failover）；request_logs 的 tokens/ttft/tpot 列形状与简化模式完全一致。真实上游 401 组间 failover：仅 retry.codes 不换组（3/3 全打主组），codes+health+eviction 三件套下非流式/流式均 200 切备。→ 简化→完整形态迁移可立项；渲染层强制 backendAuth、host:port + backendTLS.hostname、4xx 三件套；OR :free 当日 429 且有 AG panic（outlierdetection SystemTime overflow）风险需跟踪。
 
 ## 与 Lead 第二轮决策的交叉
 
@@ -524,6 +573,7 @@ maxTokens=2、tokensPerFill=0、fillInterval=1h、type=requests：前 2 个请�
 - E14 遗留：上游挂起仅观察到 30s（客户端断开终止），AG 是否存在更长默认上游超时未测；llm.policies.timeout 配置行为未验证。images 端点不记 tokens，意味着 images 类流量的预算/账本（E10/E6 链路）在 AG 侧无用量数据。/v1/systemone 只测了「非法 body 被 400」；构造合法 SystemOne 请求会得到什么（代理到上游还是继续拦截）未测。E14a 中 code-200 的 502 由 mock 的 error 形状 body 触发，属于有意构造的兼容性用例，不是环境故障。
 - E15 遗留：SenseNova 在实验期间触发账号级限流（429），未能作为健康对照；若需三上游交叉，建议错峰或换 key 重跑。weighted 3:1 两批 18:2 / 15:5，小样本方差大，若 v1 要严格比例需加大样本。S3 的「流中断」用本地代理模拟，未覆盖真实上游 TLS 层断连（语义应相同，但真实网络抖动形态更多）。E15 只测了 401/404 两类错误码，5xx 与连接拒绝的真实上游行为仍沿用 E14 的 mock 结论。
 - E16 遗留：① 完整形态的鉴权（route/listener 层 FilterOrPolicy.apiKey）未实测——简化模式是 llm.policies.apiKey，迁移需另测；② 流式 + retry 未测（retry.precondition 默认对流式跳过 buffering，语义需单独验证）；③ 同组内切换是 P2C 概率行为（A5 一次 3 连打失败 provider 返回 500），要确定性同层 failover 的机制未深入；④ 完整形态未用真实上游复验（mock 结论，按 E14/E15 交叉验证原则，如上线需真实上游补一轮）；⑤ hostOverride 拨号机制只对 plain-HTTP 上游验证，TLS/HBONE 隧道未测。
+- E17 遗留与风险：OpenRouter :free 当日 429（free-models-per-day，reset≈2026-11-20 08:00 CST）导致 T3 备源改用第二 NVIDIA key，OR 真实链路未完成，需配额恢复后补测或换其它上游；AG v1.7.0 收到 OR 429 后 panic（crates/agentgateway/src/http/outlierdetection.rs:60:30 SystemTime overflow），客户端断连，接「会返回 429 的上游」前需验证/上报；未配 backendAuth 时客户端 Authorization 原样转发上游（渲染器必须强制）；host:443 无 backendTLS 能过 validate 但运行时上游 400，控制面需自校验；流式中途断连 request_logs 记 http 200（b1 error=null / b2 chunked error="response body failed..."）、tokens null，账本需按 done=false 处理；同组内确定性 failover 仍未测（沿用 E16 A5 概率结论）。
 
 ## 原始证据索引
 
@@ -537,5 +587,6 @@ maxTokens=2、tokensPerFill=0、fillInterval=1h、type=requests：前 2 个请�
 - E14 脚本：slipstream/ops/experiments/ag-lab/e14_retry_status.py；证据 evidence/E14a-status-matrix.json.md、evidence/E14a-route-retry-layer.json.md、evidence/E14b-nonchat-passthrough.json.md、evidence/cfg-e14-retry-layer.yaml、evidence/ag-e14-a.log、evidence/ag-e14-b.log、evidence/ag-e14-nonchat.log；二进制 ops/experiments/ag-lab/bin-e14/agentgateway.exe（v1.7.0，sha256 与官方 release .sha256 一致）
 - E15 脚本：slipstream/ops/experiments/ag-lab/e15_real_upstream.py（凭据读 .env.e15，key 写 .e15-tmp/*.key 并以 apiKey.file 引用；含 KillProxy 流中杀代理与计数代理）；证据 evidence/E15-S1-bad-key-primary.json.md、evidence/E15-S2-fabricated-model.json.md、evidence/E15-S3-stream-kill.json.md、evidence/E15-S4-weighted-3-1.json.md、evidence/E15-S5-retry-recheck.json.md、evidence/cfg-E15-*.yaml、evidence/ag-E15-*.log
 - E16 脚本：slipstream/ops/experiments/ag-lab/e16_full_form.py（完整形态 gateways/routes/backends[].ai，mock 上游，hostOverride 拨号 + pathPrefix 分计数）；证据 evidence/E16-A0-baseline.json.md、evidence/E16-A1-route-retry.json.md、evidence/E16-A1-401-health-failover.json.md、evidence/E16-A2-backend-retry.json.md、evidence/E16-A3-group-failover.json.md、evidence/E16-A4-health-4xx.json.md、evidence/E16-A5-same-group-switch.json.md、evidence/cfg-E16-*.yaml、evidence/ag-e16-*.log
+- E17 脚本：slipstream/ops/experiments/ag-lab/e17_common.py（共享 harness：配置构造、validate/start/stop、mock、计数/Kill 代理、request_logs 导出、密钥打码）+ e17_t1_auth.py、e17_t1_supp.py、e17_t2_stream_retry.py、e17_t3_real_failover.py；证据 evidence/E17-T1-*.json.md（9 个）、evidence/E17-T2-{a,b,c}.json.md、evidence/E17-T3-s{1,2}.json.md、evidence/cfg-E17-*.yaml、evidence/ag-E17-*.log；凭据读 .env.e15，临时 key 在 .e17-tmp（gitignored，已清理）。
 - mock 上游新增 usage 变体：模型名含 usage-p100 时返回 prompt=100/completion=0，含 usage-c100 时返回 prompt=0/completion=100（mock_upstream.py 的 _usage_for）；响应头 x-ratelimit-* 与 429 证据见 E12 两组 JSON。
 - mock 上游 E14 新增端点：模型名 code-<N> 返回状态码 N、code-timeout-<s> 挂起、POST /plain/<spec>（纯数字恒定码、seq-<N>-200 首败后 200、slow-<ms>）、任意前缀 /embeddings、/images/generations、/systemone 返回合法 JSON（mock_upstream.py do_POST）。

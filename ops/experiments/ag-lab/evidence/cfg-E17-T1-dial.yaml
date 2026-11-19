@@ -1,0 +1,70 @@
+{
+  "config": {
+    "adminAddr": "127.0.0.1:3921",
+    "statsAddr": "127.0.0.1:3922",
+    "readinessAddr": "127.0.0.1:3923",
+    "database": {
+      "url": "sqlite://data.db"
+    },
+    "storage": {
+      "mode": "file"
+    },
+    "session": {
+      "key": "3a5dde678b895d76e244397deac58c4eac0199d751ee0c168e4ef022d62e9c2e"
+    }
+  },
+  "gateways": {
+    "gw-t1": {
+      "port": 3692,
+      "bindAddress": "127.0.0.1"
+    }
+  },
+  "routes": [
+    {
+      "name": "ai-t1",
+      "gateways": "gw-t1",
+      "matches": [
+        {
+          "path": {
+            "pathPrefix": "/v1/chat/completions"
+          }
+        }
+      ],
+      "backends": [
+        {
+          "ai": {
+            "groups": [
+              {
+                "providers": [
+                  {
+                    "name": "nvidia",
+                    "hostOverride": "integrate.api.nvidia.com:443",
+                    "provider": {
+                      "openAI": {
+                        "model": "nvidia/nemotron-3.5-lightning-30b-a3b"
+                      }
+                    },
+                    "policies": {
+                      "backendAuth": {
+                        "key": {
+                          "file": "<gitignored-key-file>"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "frontendPolicies": {
+    "accessLog": {
+      "database": {
+        "llm": "full"
+      }
+    }
+  }
+}
