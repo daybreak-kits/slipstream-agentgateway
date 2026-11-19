@@ -22,7 +22,7 @@
    - storageKey 未传且存在可隐列时 `console.warn` 一次（防静默丢列设置）。
 4. `models/table.tsx`、`components/pricing/table.tsx`：
    - `ModelColumn.className`（及 PriceTable 等价物）改为**头身同用**（同时上 th 与 td），`headerClassName` 保留为覆盖通道；滚动高度公式与 DataTable 一致。
-5. 新建 `web/src/lib/icons.ts`：动作动词 → lucide 图标单一来源（编辑=Pencil、删除=Trash2、关闭=Ban、启用=Play、测试连接=PlugZap、刷新=RefreshCw、复制=Copy、详情/查看=Eye、添加=Plus、冷却=Snowflake、周期=CalendarClock、轮换=RefreshCw、重命名=Pencil、重置=KeyRound、充值=Wallet、流水=Receipt、撤销=Undo2、恢复默认=RotateCcw、保存=Save、导入=Upload、选择文件=FolderOpen、试运行=FlaskConical、下发=Rocket、原始JSON=FileJson、全局搜索=Search）。图标+短词按钮模式，纯图标按钮必须带 title/aria-label。
+5. 新建 `web/src/lib/icons.ts`：动作动词 → lucide 图标单一来源（编辑=Pencil、删除=Trash2、关闭=Ban、启用=Play、测试连接=PlugZap、刷新=RefreshCw、复制=Copy、详情/查看=Eye、添加=Plus、冷却=Snowflake、周期=CalendarClock、重命名=Pencil、重置=KeyRound、充值=Wallet、流水=Receipt、撤销=Undo2、恢复默认=RotateCcw、保存=Save、导入=Upload、选择文件=FolderOpen、试运行=FlaskConical、下发=Rocket、原始JSON=FileJson、全局搜索=Search）。图标+短词按钮模式，纯图标按钮必须带 title/aria-label。注意：不设「轮换」映射——主密钥概念已废除（ADR-026），keys-panel 的轮换/设为主密钥入口归 D 波移除，本票不碰 keys-panel。
 
 ### 页面接入（本票只做这四页，其余页面归 A2 扫尾票）
 - `pages/logs.tsx`：详情按钮加 Eye；重置加 RotateCcw；空态清除筛选加 X。

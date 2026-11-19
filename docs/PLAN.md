@@ -104,8 +104,8 @@ slipstream/
 | 分类 | 表 | 关键点 |
 |---|---|---|
 | 主数据 | `vendors` | 厂商：名称、备注 |
-|  | `upstreams` | 一个可调用接入点：`code`（`{vendor_slug}-{NN}`，从 01 起、删除不复用）、vendor_id、base_url、api_style、`api_key_enc`（**主密钥镜像**）、enabled |
-|  | `upstream_keys` | 上游密钥组：label、密文、suffix、is_primary。**每上游最多 20 把**；主密钥同步回 `upstreams.api_key_enc`；至少保留一把，删除最后一把返回 409 |
+|  | `upstreams` | 一个可调用接入点：`code`（`{vendor_slug}-{NN}`，从 01 起、删除不复用）、vendor_id、base_url、api_style、`api_key_enc`（~~主密钥镜像~~；ADR-026 已废镜像，本列随 D 波退役）、enabled |
+|  | `upstream_keys` | 上游密钥组：label、密文、suffix、~~is_primary~~。**每上游最多 20 把**；ADR-026 已废除主密钥与镜像，每把密钥平权展开为独立 AG 上游；至少保留一把，删除最后一把返回 409 |
 |  | `upstream_probes` | 连通测试/发现模型的追加记录：kind、status、http_status、latency_ms、model_count、tested_at_ms |
 |  | `upstream_models` | 上游模型：upstream_id、name、model_type、价格（input/output/cache_read/cache_write，每百万 token） |
 |  | `public_models` | 对外模型：name（唯一）、enabled、备注 |
@@ -172,7 +172,7 @@ slipstream/
 | D-05 | 同层不加权 | 同 priority 由数据面按健康+延迟选路 |
 | D-06 | 密钥明文落盘 | 靠 ACL 保护；上游密钥加密存库、渲染时写文件 |
 | D-07 | 客户端密钥格式 | `sk-` + N 字符，N ∈ {1,2,4,8,16,32,64}，默认 64；字符集 A-Za-z0-9._- |
-| D-08 | 上游密钥模型（二期 ticket 09 取代单密钥） | 每上游一个密钥组，最多 20 把；主密钥镜像到 `upstreams.api_key_enc`；多接入点仍可建多个上游记录 |
+| D-08 | 上游密钥模型（二期 ticket 09 取代单密钥） | 每上游一个密钥组，最多 20 把；~~主密钥镜像到 `upstreams.api_key_enc`~~（ADR-026 修订：镜像废除、密钥平权展开）；多接入点仍可建多个上游记录 |
 | D-09 | 权限模型（二期 ticket 03 取代四档角色） | 三角色 admin/agent/user + 管理员自建角色；权限按 41 个 resource:action 键校验；角色是 `admin_roles` 行，不再写死四档 |
 | D-10 | 改写必须支持 | 请求/响应 × 头/体，全部走 `llm.policies.transformations`（CEL） |
 | D-11 | PublicModel 即别名 | 不存在自动暴露的上游模型名；别名 d 指向上游模型 a 后，对外只有 d |

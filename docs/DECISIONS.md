@@ -446,7 +446,7 @@
 
 **背景**：控制面此前把「一个上游=一把生效密钥」焊死（provider 名=upstream.id、数据面只吃镜像主密钥、备用密钥是死库存）。用户裁定：用户给一个上游添加 ABC 3 把密钥，适配层就应展开成 3 个 AG 上游（每把一个 key_file），用户视角仍是一个上游。审计确认：AG/validate/渲染层对「同 baseUrl 多 provider、各挂不同 key_file」已支持且在生产配置跑通（zai-01/02/03 同 baseUrl 3 provider）；焊死点仅在 provider 命名、llm.models 引用与镜像逻辑三处。
 
-**决策**：① 密钥平权——每把密钥渲染为独立 provider（名 `{upstream_id}#{key_seq}`），路由参与为**同层平权分流**（AG P2C，坏密钥由健康驱逐淘汰；Q2a）。② 删除 is_primary 与镜像：`upstreams.api_key_enc` 退役（迁移清空）、`set_primary`/`rotate` 端点与「主密钥」UI 全部移除。③ 测试连接改**逐把测**，结果落在密钥行（失效标红）；获取上游模型用任一成功密钥。④ 冷却/关闭仍挂逻辑上游整体（作用于全部密钥 provider）。⑤ 展开语义（同名模型跨 provider 的 failover/分流）以 E18 实验钉死后合入；渲染/validate/契约/golden 同步更新。
+**决策**：⑥（2026-11-20 补）空上游非法重申——创建必须至少一把密钥（后端 UpstreamCreate.api_key min_length=1 早已强制、前端 canSave 同门），密钥组至少保留一把（删空 409）；据此「匿名尝试」探测分支为死路径，随本 ADR 一并移除。① 密钥平权——每把密钥渲染为独立 provider（名 `{upstream_id}#{key_seq}`），路由参与为**同层平权分流**（AG P2C，坏密钥由健康驱逐淘汰；Q2a）。② 删除 is_primary 与镜像：`upstreams.api_key_enc` 退役（迁移清空）、`set_primary`/`rotate` 端点与「主密钥」UI 全部移除。③ 测试连接改**逐把测**，结果落在密钥行（失效标红）；获取上游模型用任一成功密钥。④ 冷却/关闭仍挂逻辑上游整体（作用于全部密钥 provider）。⑤ 展开语义（同名模型跨 provider 的 failover/分流）以 E18 实验钉死后合入；渲染/validate/契约/golden 同步更新。
 
 **理由**：多账号密钥的价值就是分流与互备，锁死一把让其余 19 把成为摆设；AG 原生多 provider 使改动封在适配层（ADR-001），上层无感。
 
