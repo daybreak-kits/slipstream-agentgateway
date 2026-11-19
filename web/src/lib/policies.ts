@@ -42,6 +42,15 @@ export interface PolicyConfig {
     precondition: string;
     condition: string;
   } | null;
+  health: HealthConfig | null;
+}
+
+/** ADR-024 per-model health marks + eviction (llm.models[].health). */
+export interface HealthConfig {
+  unhealthy_expression: string;
+  consecutive_failures: number;
+  duration: string;
+  restore_health: number;
 }
 
 export interface PolicyCounts {
@@ -76,11 +85,21 @@ export interface PoliciesResponse {
       response_idle_timeout: string;
     } | null;
     guardrails: { streaming: string; request: number; response: number };
-    retry: null;
+    retry: {
+      attempts: number;
+      codes: number[];
+      backoff: string;
+    } | null;
+    health: {
+      unhealthy_expression: string;
+      consecutive_failures: number;
+      duration: string;
+      restore_health: number;
+    } | null;
   };
   counts: PolicyCounts;
   capabilities: Record<
-    "cors" | "api_key" | "local_rate_limit" | "timeout" | "transformations" | "retry" | "guardrails_regex" | "guardrails_webhook",
+    "cors" | "api_key" | "local_rate_limit" | "timeout" | "transformations" | "retry" | "health" | "guardrails_regex" | "guardrails_webhook",
     CapabilityInfo
   >;
   notes: Record<string, string>;

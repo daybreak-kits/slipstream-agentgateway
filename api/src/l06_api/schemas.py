@@ -573,16 +573,48 @@ class TransformationsConfig(BaseModel):
     protected_request_headers: list[str] = Field(default_factory=list)
 
 
+#: agentgateway humantime subset shared with policies.timeout/health durations.
+_DURATION_PATTERN = r"^[1-9][0-9]*(ms|s|m|h)$"
+
+
 class RetryConfig(BaseModel):
-    """AG 1.7 rejects llm.policies.retry; kept so the API can refuse explicitly."""
+    """ADR-024 route-level retry for the implicit LLM route (internal/llm:request).
+
+    agentgateway 1.7 rejects retry inside llm.policies; the renderer emits it as
+    a top-level policies[] entry. attempts counts retries after the first try
+    (E16: attempts=2 => 3 total upstream attempts), and inter-group failover only
+    materialises on the attempt AFTER the primary is marked unhealthy, so
+    attempts >= 2 is required in practice.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    attempts: int = Field(default=1, ge=0)
-    backoff: str = ""
-    codes: list[int] = Field(default_factory=lambda: [502, 503, 504])
+    attempts: int = Field(default=2, ge=1, le=10)
+    codes: list[int] = Field(
+        default_factory=lambda: [502, 503, 504], min_length=1, max_length=64
+    )
+    # 400-599 range is enforced by validate_gateway_ir (line-level details.errors);
+    # a ValueError raised inside a pydantic validator is not JSON serialisable in
+    # the RequestValidationError handler, so bounds stay in the domain layer.
+    backoff: str = Field(default="200ms", pattern=_DURATION_PATTERN)
     precondition: str = ""
     condition: str = ""
+
+
+class HealthConfig(BaseModel):
+    """ADR-024 per-model health marks + eviction (llm.models[].health).
+
+    E16/E17: the unhealthy expression alone leaves a 4xx primary in rotation;
+    eviction.consecutive_failures is what lets the next priority layer take over.
+    Validation pairs this block with 4xx retry codes.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    unhealthy_expression: str = Field(min_length=1, max_length=512)
+    consecutive_failures: int = Field(default=3, ge=1, le=100)
+    duration: str = ""
+    restore_health: int = Field(default=0, ge=0)
 
 
 class PolicyConfig(BaseModel):
@@ -598,6 +630,7 @@ class PolicyConfig(BaseModel):
         default_factory=TransformationsConfig
     )
     retry: RetryConfig | None = None
+    health: HealthConfig | None = None
 
 
 class PolicyConfigIn(BaseModel):

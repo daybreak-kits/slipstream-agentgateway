@@ -24,11 +24,18 @@ def test_policies_get_exposes_editable_config_and_capabilities(client):
     assert body["config"]["cors"]["enabled"] is False
     assert body["config"]["api_key"] == {"enabled": True, "mode": "strict"}
     assert body["config"]["retry"] is None
+    assert body["config"]["health"] is None
     assert body["defaults"]["transformations"]["default_response_header_deletes"] == [
         "server",
         "x-powered-by",
     ]
-    assert body["capabilities"]["retry"]["supported"] is False
+    # M3 (ADR-024): retry renders as top-level route policy -> management surface
+    # reopens; health marks + eviction are per-model configurable.
+    assert body["capabilities"]["retry"]["supported"] is True
+    assert body["capabilities"]["health"]["supported"] is True
+    # Default-off semantic: absent blocks mean the current behavior.
+    assert body["effective"]["retry"] is None
+    assert body["effective"]["health"] is None
     assert body["capabilities"]["guardrails_webhook"]["supported"] is True
     assert body["effective"]["key_auth"]["enabled"] is True
     assert body["counts"]["upstreams"] == 0
@@ -65,12 +72,51 @@ def test_put_policies_persists_and_previews_effective_data_plane(client):
     assert again["config"] == body["config"]
 
 
-def test_put_policies_rejects_retry_explicitly(client):
-    response = client.put("/admin/policies", json=_policy_body(retry={"attempts": 3}))
-    assert response.status_code == 422
+def test_put_policies_accepts_retry_with_health_pair(client):
+    response = client.put(
+        "/admin/policies",
+        json=_policy_body(
+            retry={"attempts": 2, "codes": [429, 500, 502, 503], "backoff": "100ms"},
+            health={
+                "unhealthy_expression": "response.code >= 400",
+                "consecutive_failures": 1,
+                "duration": "60s",
+                "restore_health": 0,
+            },
+        ),
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["config"]["retry"]["attempts"] == 2
+    assert body["config"]["retry"]["codes"] == [429, 500, 502, 503]
+    assert body["config"]["health"]["consecutive_failures"] == 1
+    assert body["effective"]["retry"] == {
+        "attempts": 2,
+        "codes": [429, 500, 502, 503],
+        "backoff": "100ms",
+    }
+    assert body["effective"]["health"]["unhealthy_expression"] == "response.code >= 400"
+    assert client.get("/admin/policies").json()["config"] == body["config"]
+
+
+def test_put_policies_rejects_4xx_retry_without_health(client):
+    """ADR-024 pairing rule: 4xx codes alone never switch layers (E16/E17)."""
+    response = client.put(
+        "/admin/policies", json=_policy_body(retry={"attempts": 2, "codes": [401, 500]})
+    )
+    assert response.status_code == 422, response.text
     body = response.json()
     assert body["code"] == "VALIDATION_ERROR"
-    assert any("retry" in error for error in body["details"]["errors"])
+    errors = body["details"]["errors"]
+    assert any("4xx" in error and "health" in error for error in errors), errors
+
+
+def test_put_policies_rejects_out_of_range_retry_codes(client):
+    response = client.put(
+        "/admin/policies", json=_policy_body(retry={"attempts": 2, "codes": [302, 500]})
+    )
+    assert response.status_code == 422
+    assert "retry" in response.text
 
 
 def test_put_policies_rejects_invalid_timeout(client):
@@ -273,6 +319,11 @@ def test_saved_config_flows_into_the_next_apply_revision(
         json=_policy_body(
             timeout={"request_timeout": "60s"},
             local_rate_limit={"requests_per_minute": 120},
+            retry={"attempts": 2, "codes": [429, 500, 502, 503], "backoff": "100ms"},
+            health={
+                "unhealthy_expression": "response.code >= 400",
+                "consecutive_failures": 1,
+            },
         ),
     )
     client.put(
@@ -310,6 +361,11 @@ def test_saved_config_flows_into_the_next_apply_revision(
 
     assert "requestTimeout: 60s" in artifact
     assert "localRateLimit:" in artifact
+    # M3 render confirmation (ADR-024, E16/E17): retry is a TOP-LEVEL policies[]
+    # entry targeting the implicit LLM route, and health is per rendered model.
+    assert "internal/llm:request" in artifact
+    assert "consecutiveFailures: 1" in artifact
+    assert "unhealthyExpression:" in artifact
     assert "guardrails:" in artifact
     assert "builtin: ssn" in artifact
     assert "mcp:" in artifact

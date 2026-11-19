@@ -196,7 +196,6 @@ export const ENDPOINTS = {
   costEntries: "/admin/cost/entries",
   chargeEntries: "/admin/charge/entries",
   pricesUpstream: "/admin/prices/upstream",
-  pricesCharge: "/admin/prices/charge",
   pricesExport: "/admin/prices/export",
   pricesImport: "/admin/prices/import",
   // ticket 05：公开模型价格是派生只读值；账本带成本/花费/毛利（按字段权限裁剪）

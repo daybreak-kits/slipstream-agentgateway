@@ -101,7 +101,10 @@ def test_guardrails_follow_the_adapter_capabilities():
     assert guardrails.adapter == "agentgateway"
     assert any(item.key == "routing.priority_failover" for item in guardrails.items)
     assert any(item.key == "mcp.targets" and item.supported for item in guardrails.items)
-    assert any(item.key == "policies.retry" and not item.supported for item in guardrails.items)
+    # M3 (ADR-024): retry/health reopen with the management surface; the matrix
+    # records how they render (route-level retry, per-model health).
+    assert any(item.key == "policies.retry" and item.supported for item in guardrails.items)
+    assert any(item.key == "policies.health" and item.supported for item in guardrails.items)
     assert all(isinstance(item.verified, bool) for item in guardrails.items)
 
 

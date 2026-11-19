@@ -11,6 +11,7 @@ import {
   countDirtyGuardrails,
   countDirtyMcp,
   countDirtyPolicies,
+  policyDraftProblem,
   type McpDraftDocument,
 } from "@/components/governance/gateway-policies/helpers";
 import { ErrorState, PageToolbar } from "@/components/governance/panel";
@@ -89,6 +90,8 @@ export function GatewayPoliciesPage() {
   );
   const dirtyTotal = dirtyPolicies + dirtyGuardrails + dirtyMcp;
   const busy = validating || saving;
+  // ADR-024 成对规则的前端门禁：4xx codes + 不完整健康组时禁止校验/保存。
+  const policyProblem = policyDraftProblem(policyDraft);
 
   const clearDrafts = () => {
     setPolicyDraft(null);
@@ -144,6 +147,14 @@ export function GatewayPoliciesPage() {
   };
 
   const saveAll = async () => {
+    if (policyDraft !== null) {
+      const problem = policyDraftProblem(policyDraft);
+      if (problem !== null) {
+        setSaveError(problem);
+        toast.error("流量策略未通过前端成对校验", { description: problem });
+        return;
+      }
+    }
     setSaving(true);
     setSaveError(null);
     const savedTabs: string[] = [];
@@ -225,15 +236,31 @@ export function GatewayPoliciesPage() {
         </span>
         {canWrite && (
           <div className="ml-auto flex items-center gap-1.5">
-            <Button variant="outline" size="sm" onClick={() => void validateAll()} disabled={dirtyTotal === 0 || busy}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void validateAll()}
+              disabled={dirtyTotal === 0 || busy || policyProblem !== null}
+            >
               {validating ? "校验中…" : "试运行校验"}
             </Button>
-            <Button variant="primary" size="sm" onClick={() => void saveAll()} disabled={dirtyTotal === 0 || busy}>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => void saveAll()}
+              disabled={dirtyTotal === 0 || busy || policyProblem !== null}
+            >
               {saving ? "保存并下发中…" : "保存并下发"}
             </Button>
           </div>
         )}
       </PageToolbar>
+
+      {policyProblem !== null && (
+        <div className="rounded-md border border-warning bg-warning-soft px-2.5 py-1.5 text-2xs text-warning-text">
+          流量策略暂不能保存：{policyProblem}
+        </div>
+      )}
 
       {saveError !== null && (
         <div className="rounded-md border border-danger bg-danger-soft px-2.5 py-1.5 text-2xs text-danger-text">

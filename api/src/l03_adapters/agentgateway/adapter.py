@@ -33,10 +33,10 @@ def validate_agentgateway_ir(ir: GatewayIR) -> ValidationResult:
     base = validate_gateway_ir(ir)
     errors = list(base.errors)
     warnings = list(base.warnings)
-    if ir.policies.retry is not None:
-        errors.append(
-            "AG 1.7 的 llm.policies 不支持 retry（--validate-only: unknown field 'retry'）；"
-            "请关闭请求级重试（能力矩阵 policies.retry=false）"
+    if ir.policies.retry is not None and ir.policies.retry.attempts < 2:
+        warnings.append(
+            "policies.retry.attempts=1 只会在同一后端重试一次；E16/E17 证实跨层 failover "
+            "发生在驱逐标记后的下一次尝试，建议 attempts >= 2"
         )
     if ir.policies.remote_rate_limit is not None:
         errors.append(
@@ -241,9 +241,18 @@ class AgentgatewayAdapter:
                 ),
                 Capability(
                     "policies.retry",
-                    False,
-                    "",
-                    "1.7 二进制拒绝 llm.policies.retry（unknown field）；retry 仅路由层",
+                    True,
+                    "1.7.0",
+                    "渲染为顶层 policies[]（target route internal/llm:request）；"
+                    "llm.policies 仍拒绝 retry（E16/E17）",
+                    verified=True,
+                ),
+                Capability(
+                    "policies.health",
+                    True,
+                    "1.7.0",
+                    "逐模型 llm.models[].health（unhealthyExpression + eviction）；"
+                    "retry codes 含 4xx 时必须成对（E16/E17）",
                     verified=True,
                 ),
                 Capability(
@@ -292,14 +301,13 @@ class AgentgatewayAdapter:
                     "config.hot_reload", True, "1.7.0", "热加载；在飞影响待 P0-R2", verified=False
                 ),
                 Capability("usage.read_events", True, "1.7.0", "SQLite 只读增量", verified=False),
-                # Simplified mode: these are backends-level only and NOT
-                # configurable - the UI renders the default-behavior note.
                 Capability(
                     "health.eviction_params",
-                    False,
-                    "",
-                    "健康驱逐参数不可配（简化模式，仅默认行为说明）",
-                    verified=False,
+                    True,
+                    "1.7.0",
+                    "llm.models[].health: unhealthyExpression + eviction"
+                    "（consecutiveFailures/duration/restoreHealth），M2 渲染已接通",
+                    verified=True,
                 ),
                 Capability(
                     "backends.session_affinity",
@@ -310,10 +318,11 @@ class AgentgatewayAdapter:
                 ),
                 Capability(
                     "health.fine_policies",
-                    False,
-                    "",
-                    "精细健康策略仅 backends 层级，简化模式不可配",
-                    verified=False,
+                    True,
+                    "1.7.0",
+                    "按模型渲染 health；expression 必须与 eviction 成对，"
+                    "4xx 还需与 retry codes 成对（ADR-024/E16/E17）",
+                    verified=True,
                 ),
             ),
         )

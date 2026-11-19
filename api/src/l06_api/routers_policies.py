@@ -58,7 +58,15 @@ NOTES = {
     "api_key": "enabled=false 表示数据面匿名放行（不渲染 llm.policies.apiKey），密钥仍保留在台账",
     "rate_limit": "请求级限流为全局规则；预付费余额由控制面账本执行，不渲染逐用户桶（E12）",
     "timeout": "humantime 字符串（如 60s/500ms）；留空表示不渲染该字段",
-    "retry": "AG 1.7 的 llm.policies 拒绝 retry（unknown field）；非 null 会被后端 422 拒绝",
+    "retry": (
+        "请求内重试渲染为顶层 policies[]（target route internal/llm:request），"
+        "attempts 为首次之后的尝试次数（>=2 才能跨层 failover）；"
+        "codes 含 4xx 时必须同时配置 health（unhealthy_expression + consecutive_failures）"
+    ),
+    "health": (
+        "逐模型健康标记与驱逐（llm.models[].health）；"
+        "表达式单独配置不会驱逐主层（E16/E17），必须带 consecutive_failures >= 1"
+    ),
     "transformations": "默认响应头删除按 ADR-010 追加在用户规则之后；保护头仅控制面记录",
     "guardrails_webhook": "webhook 护栏仅 reject/audit，target 只能是 host（无路径），不支持 scope",
     "mcp_http": "pinned AG 1.7 拒绝 http 变体；只支持 sse/stdio，http 会在保存时被 422 拒绝",

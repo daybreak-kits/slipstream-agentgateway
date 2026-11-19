@@ -24,6 +24,7 @@ from l02_domain.ir import (
     GatewayIR,
     GuardrailsSpec,
     GuardSpec,
+    HealthPolicySpec,
     LimitsSpec,
     McpPolicySpec,
     McpSpec,
@@ -69,6 +70,7 @@ DEFAULT_POLICY_CONFIG: dict = {
         ),
     },
     "retry": None,
+    "health": None,
 }
 
 DEFAULT_GUARDRAIL_CONFIG: dict = {
@@ -197,6 +199,7 @@ def policies_spec_from_config(config: dict) -> PoliciesSpec:
         data_plane_cors=_cors_spec(cors) if cors.get("enabled") else None,
         timeout=TimeoutPolicySpec(*timeout_values) if any(timeout_values) else None,
         retry=_retry_spec(config.get("retry")),
+        health=_health_spec(config.get("health")),
     )
 
 
@@ -206,11 +209,28 @@ def _retry_spec(raw: object) -> RetryPolicySpec | None:
     if not isinstance(raw, dict):
         return RetryPolicySpec()
     return RetryPolicySpec(
-        attempts=int(raw.get("attempts", 1)),
+        attempts=int(raw.get("attempts", 2)),
         backoff=str(raw.get("backoff") or ""),
         codes=tuple(int(code) for code in raw.get("codes") or (502, 503, 504)),
         precondition=str(raw.get("precondition") or ""),
         condition=str(raw.get("condition") or ""),
+    )
+
+
+def _health_spec(raw: object) -> HealthPolicySpec | None:
+    """ADR-024: llm.models[].health -> unhealthyExpression + eviction block."""
+    if not raw:
+        return None
+    if not isinstance(raw, dict):
+        return None
+    expression = str(raw.get("unhealthy_expression") or "").strip()
+    if not expression:
+        return None
+    return HealthPolicySpec(
+        unhealthy_expression=expression,
+        consecutive_failures=int(raw.get("consecutive_failures", 1)),
+        duration=str(raw.get("duration") or ""),
+        restore_health=float(raw.get("restore_health") or 0),
     )
 
 
@@ -361,6 +381,7 @@ def policy_capabilities(adapter: DataPlaneAdapter | None) -> dict:
         "timeout": capability(adapter, "policies.timeout"),
         "transformations": capability(adapter, "policies.transformations.conditional"),
         "retry": capability(adapter, "policies.retry"),
+        "health": capability(adapter, "policies.health"),
         "guardrails_regex": capability(adapter, "policies.guardrails.regex"),
         "guardrails_webhook": capability(adapter, "policies.guardrails.webhook"),
     }
@@ -429,7 +450,25 @@ def policy_effective(config: dict) -> dict:
             "request": len(spec.guardrails.request) if spec.guardrails else 0,
             "response": len(spec.guardrails.response) if spec.guardrails else 0,
         },
-        "retry": None,
+        "retry": (
+            {
+                "attempts": spec.retry.attempts,
+                "codes": list(spec.retry.codes),
+                "backoff": spec.retry.backoff,
+            }
+            if spec.retry
+            else None
+        ),
+        "health": (
+            {
+                "unhealthy_expression": spec.health.unhealthy_expression,
+                "consecutive_failures": spec.health.consecutive_failures,
+                "duration": spec.health.duration,
+                "restore_health": spec.health.restore_health,
+            }
+            if spec.health
+            else None
+        ),
     }
 
 

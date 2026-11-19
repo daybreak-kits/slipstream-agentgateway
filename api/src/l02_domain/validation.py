@@ -213,19 +213,34 @@ def _validate_policies(ir: GatewayIR, errors: list[str]) -> None:
         if (
             not isinstance(retry.attempts, int)
             or isinstance(retry.attempts, bool)
-            or retry.attempts < 0
+            or not 1 <= retry.attempts <= 10
         ):
-            errors.append(f"policies.retry.attempts 必须为 >= 0 的整数，得到 {retry.attempts!r}")
-        for code in retry.codes:
-            if not isinstance(code, int) or not 100 <= code <= 599:
-                errors.append(f"policies.retry.codes 含非法状态码: {code!r}")
+            errors.append(
+                f"policies.retry.attempts 必须为 1-10 的整数，得到 {retry.attempts!r}"
+                "（E16：attempts=2 即最多 3 次上游尝试；跨层切换发生在驱逐标记后的下一次尝试）"
+            )
+        if not retry.codes:
+            errors.append("policies.retry.codes 不能为空（如 [429, 500, 502, 503]）")
+        illegal_codes = [
+            code
+            for code in retry.codes
+            if not isinstance(code, int) or isinstance(code, bool) or not 400 <= code <= 599
+        ]
+        if illegal_codes:
+            errors.append(f"policies.retry.codes 含非法状态码: {illegal_codes!r}（仅允许 400-599）")
+        if retry.backoff and not _DURATION_RE.match(retry.backoff):
+            errors.append(
+                f"policies.retry.backoff 不是合法时长: {retry.backoff!r}（如 100ms/1s）"
+            )
         # ADR-024 mandatory pairing: E16/E17 show that retry codes containing a
         # 4xx only reach the next priority layer when health marks + eviction are
         # rendered together (codes alone keep retrying the same backend).
-        if any(400 <= code <= 499 for code in retry.codes) and policies.health is None:
+        four_xx_codes = sorted(set(code for code in retry.codes if 400 <= code <= 499))
+        if four_xx_codes and policies.health is None:
+            labels = ", ".join(str(code) for code in four_xx_codes)
             errors.append(
-                "policies.retry.codes 含 4xx 时必须同时配置 policies.health"
-                "（unhealthyExpression + eviction.consecutiveFailures）："
+                f"policies.retry.codes 含 4xx（{labels}）时必须同时配置 policies.health"
+                "（unhealthy_expression 非空 + consecutive_failures >= 1）："
                 "E16/E17 证实仅靠 retry codes 不会换组"
             )
     if policies.health is not None:

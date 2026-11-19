@@ -105,8 +105,11 @@ def test_describe_is_stable_and_capabilities_unique(adapter: AgentgatewayAdapter
     assert {"routing.priority_failover", "config.hot_reload", "usage.read_events"} <= set(keys)
     # Contract: the matrix is explicit and every row carries a verified flag.
     assert all(isinstance(capability.verified, bool) for capability in first.capabilities)
-    assert {"mcp.targets", "policies.retry", "llm.modelAliases"} <= set(keys)
-    assert next(c for c in first.capabilities if c.key == "policies.retry").supported is False
+    assert {"mcp.targets", "policies.retry", "policies.health", "llm.modelAliases"} <= set(keys)
+    # M3 (ADR-024): retry renders as a top-level route policy, so the management
+    # surface reopens; health marks + eviction are configurable per model.
+    assert next(c for c in first.capabilities if c.key == "policies.retry").supported is True
+    assert next(c for c in first.capabilities if c.key == "policies.health").supported is True
 
 
 def test_validate_accepts_good_ir_and_rejects_illegal_ir(

@@ -396,6 +396,48 @@ def test_https_models_render_tls_hostname_and_policy_health():
     assert "tls" not in render_config(http_ir, 3600)["llm"]["models"][0]
 
 
+def test_e17_triple_retry_health_fragment_matches_the_pinned_evidence():
+    """M3 pin: the hybrid fragment measured by E17-T3-s2 stays stable.
+
+    Evidence: ops/experiments/ag-lab/evidence/cfg-E17-T3-s2.yaml (route-level
+    retry codes 401/429/500/502/503, attempts 2, backoff 50ms) and
+    E17-T3-s2.json.md (llm.models[].health expression + eviction=1), where the
+    real NVIDIA 401 primary failed over to the backup on stream and non-stream.
+    """
+    ir = _ir(
+        policies=PoliciesSpec(
+            retry=RetryPolicySpec(
+                attempts=2, codes=(401, 429, 500, 502, 503), backoff="50ms"
+            ),
+            health=HealthPolicySpec(
+                unhealthy_expression="response.code >= 400",
+                consecutive_failures=1,
+                duration="60s",
+                restore_health=2,
+            ),
+        )
+    )
+    cfg = render_config(ir, 3600)
+    policy = cfg["policies"][0]
+    assert policy["target"] == {"route": {"name": "llm:request", "namespace": "internal"}}
+    assert policy["phase"] == "route"
+    assert policy["policy"]["retry"] == {
+        "attempts": 2,
+        "codes": [401, 429, 500, 502, 503],
+        "backoff": "50ms",
+    }
+    assert "retry" not in cfg["llm"]["policies"]
+    for model in cfg["llm"]["models"]:
+        assert model["health"] == {
+            "unhealthyExpression": "response.code >= 400",
+            "eviction": {
+                "consecutiveFailures": 1,
+                "duration": "60s",
+                "restoreHealth": 2,
+            },
+        }
+
+
 def test_validation_requires_key_file_and_absolute_base_url():
     ir = _ir(
         upstreams=(
@@ -440,6 +482,21 @@ def test_validation_rejects_health_expression_without_eviction():
     assert not result.ok
     assert any("unhealthyExpression" in e for e in result.errors)
     assert any("consecutiveFailures" in e for e in result.errors)
+
+
+def test_validation_rejects_illegal_retry_bounds():
+    """M3 bounds: attempts 1-10, non-empty 400-599 codes, humantime backoff."""
+    empty_codes = _ir(policies=PoliciesSpec(retry=RetryPolicySpec(attempts=2, codes=())))
+    result = validate_gateway_ir(empty_codes)
+    assert not result.ok and any("codes" in error for error in result.errors)
+    bad_attempts = _ir(policies=PoliciesSpec(retry=RetryPolicySpec(attempts=0, codes=(500,))))
+    result = validate_gateway_ir(bad_attempts)
+    assert not result.ok and any("attempts" in error for error in result.errors)
+    bad_backoff = _ir(
+        policies=PoliciesSpec(retry=RetryPolicySpec(attempts=2, codes=(500,), backoff="soon"))
+    )
+    result = validate_gateway_ir(bad_backoff)
+    assert not result.ok and any("backoff" in error for error in result.errors)
 
 
 def test_model_aliases_raise_instead_of_being_dropped():
@@ -491,13 +548,8 @@ def test_model_level_conditional_or_response_body_transform_raises():
         render_config(ir, 3600)
 
 
-def test_adapter_validate_rejects_retry_and_warns_max_buffer():
-    """Scope: the capability matrix reopens with the M3 API surface.
-
-    M2 already renders and pair-checks retry/health (tests above); adapter.validate
-    keeps refusing policy-level retry so the existing /admin/policies contract and
-    capability flags are unchanged until M3.
-    """
+def test_adapter_validate_accepts_route_retry_and_warns_max_buffer():
+    """M3: route-level retry/health are supported; attempts=1 gets an E16 warning."""
     adapter = AgentgatewayAdapter(config_dir="unused")
     ir = _ir(
         policies=PoliciesSpec(
@@ -507,8 +559,14 @@ def test_adapter_validate_rejects_retry_and_warns_max_buffer():
             ),
         )
     )
-    rejected = adapter.validate(ir)
-    assert not rejected.ok and any("retry" in e for e in rejected.errors)
+    accepted = adapter.validate(ir)
+    assert accepted.ok, accepted.errors
+    # E16: inter-group failover only happens after the eviction mark, i.e. on the
+    # attempt after the first retry - attempts=1 cannot switch layers.
+    sparse = _ir(policies=PoliciesSpec(retry=RetryPolicySpec(attempts=1, codes=(500,))))
+    warned = adapter.validate(sparse)
+    assert warned.ok, warned.errors
+    assert any("attempts" in warning for warning in warned.warnings)
     big = _ir(
         upstreams=(
             UpstreamSpec(

@@ -3,7 +3,13 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { CapabilityBadge, Chips, DirtyHint, Fact, Field } from "./shared";
-import { describeError } from "./helpers";
+import {
+  BACKOFF_OPTIONS,
+  HEALTH_EXPRESSION_PRESETS,
+  RETRY_CODE_PRESETS,
+  describeError,
+  policyDraftProblem,
+} from "./helpers";
 import { RawJsonEditor } from "@/components/governance/raw-json-editor";
 import { PageToolbar, SectionCard } from "@/components/governance/panel";
 import { Badge } from "@/components/ui/badge";
@@ -51,6 +57,7 @@ export function PoliciesTab({ data, draft, onDraftChange, canWrite, dirtyCount }
   const config = data.config;
   const caps = data.capabilities;
   const editing = draft !== null;
+  const draftProblem = policyDraftProblem(draft);
 
   const startEdit = () => {
     onDraftChange(structuredClone(config));
@@ -315,37 +322,221 @@ export function PoliciesTab({ data, draft, onDraftChange, canWrite, dirtyCount }
           </SectionCard>
 
           <SectionCard
-            title="请求级重试"
+            title="请求内重试与健康驱逐"
             description={data.notes.retry}
-            actions={
-              <Badge tone={caps.retry.supported ? "success" : "warning"}>
-                {caps.retry.supported ? "支持" : "AG 1.7 不支持请求内重试"}
-              </Badge>
-            }
+            actions={<CapabilityBadge capability={caps.retry} />}
           >
-            <div className="space-y-2">
-              <p className="text-2xs text-body">
-                {caps.retry.supported
-                  ? "AG 1.7 接受 llm.policies.retry，可编辑。"
-                  : "AG 1.7 不支持请求内重试：pinned AG 1.7 的 llm.policies 拒绝 retry（unknown field），后端会 422 拒绝；表单不提供编辑，已有值可清空。"}
-              </p>
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <Field
+                  label="启用请求内重试（默认关 = 当前行为）"
+                  hint="渲染为顶层 policies[] 的 route 级 retry（target internal/llm:request），不写入 llm.policies。"
+                >
+                  <Switch
+                    aria-label="启用请求内重试"
+                    checked={draft.retry !== null}
+                    onCheckedChange={(checked) =>
+                      update((next) => {
+                        next.retry = checked
+                          ? { attempts: 2, backoff: "200ms", codes: [500, 502, 503, 504], precondition: "", condition: "" }
+                          : null;
+                      })
+                    }
+                    disabled={!caps.retry.supported}
+                  />
+                </Field>
+                <Field
+                  label="启用健康标记与驱逐（llm.models[].health）"
+                  hint="表达式单独配置不会驱逐主层；E16/E17：必须带 consecutive_failures。"
+                >
+                  <Switch
+                    aria-label="启用健康标记与驱逐"
+                    checked={draft.health !== null}
+                    onCheckedChange={(checked) =>
+                      update((next) => {
+                        next.health = checked
+                          ? { unhealthy_expression: "response.code >= 500", consecutive_failures: 3, duration: "", restore_health: 0 }
+                          : null;
+                      })
+                    }
+                    disabled={!caps.health.supported}
+                  />
+                </Field>
+              </div>
+
               {draft.retry !== null && (
-                <div className="space-y-2 rounded-md border border-warning bg-warning-soft p-2">
-                  <pre className="overflow-x-auto font-mono text-2xs text-warning-text">
-                    {JSON.stringify(draft.retry, null, 2)}
-                  </pre>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => update((next) => { next.retry = null; })}
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <Field
+                    label="attempts（首次之后的尝试次数，1-10）"
+                    hint="E16：attempts=2 即最多 3 次上游尝试；跨层切换发生在驱逐标记后的下一次尝试。"
                   >
-                    清空重试配置
-                  </Button>
+                    <Input
+                      aria-label="attempts"
+                      inputMode="numeric"
+                      value={draft.retry.attempts}
+                      onChange={(event) => update((next) => {
+                        if (next.retry === null) return;
+                        const parsed = Number(event.target.value);
+                        next.retry.attempts =
+                          event.target.value === "" ? next.retry.attempts : Number.isFinite(parsed) ? parsed : next.retry.attempts;
+                      })}
+                      disabled={!caps.retry.supported}
+                    />
+                  </Field>
+                  <Field label="backoff（重试间隔）">
+                    <Select
+                      value={BACKOFF_OPTIONS.includes(draft.retry.backoff as (typeof BACKOFF_OPTIONS)[number]) ? draft.retry.backoff : "custom"}
+                      onValueChange={(value) => update((next) => {
+                        if (next.retry === null || value === "custom") return;
+                        next.retry.backoff = value;
+                      })}
+                      disabled={!caps.retry.supported}
+                    >
+                      <SelectTrigger className="w-40">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {BACKOFF_OPTIONS.map((option) => (
+                          <SelectItem key={option} value={option}>{option}</SelectItem>
+                        ))}
+                        <SelectItem value="custom">自定义…</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field label="backoff 自定义（覆盖下拉值）" hint="humantime，如 150ms / 3s">
+                    <Input
+                      aria-label="backoff 自定义"
+                      value={draft.retry.backoff}
+                      onChange={(event) => update((next) => { if (next.retry === null) return; next.retry.backoff = event.target.value; })}
+                      disabled={!caps.retry.supported}
+                    />
+                  </Field>
                 </div>
               )}
-              {draft.retry === null && (
-                <p className="text-2xs text-faint">当前不渲染重试（保持 null 才能保存）。</p>
+
+              {draft.retry !== null && (
+                <Field
+                  label="重试状态码（400-599 档位勾选）"
+                  hint="返回这些状态码时按 attempts 重试；含 4xx 时必须同时启用健康组，否则不能保存（ADR-024 成对规则）。"
+                >
+                  <div className="flex flex-wrap gap-1">
+                    {RETRY_CODE_PRESETS.map((code) => {
+                      const active = draft.retry !== null && draft.retry.codes.includes(code);
+                      return (
+                        <button
+                          key={code}
+                          type="button"
+                          aria-pressed={active}
+                          onClick={() => update((next) => {
+                            if (next.retry === null) return;
+                            const codes = new Set(next.retry.codes);
+                            if (codes.has(code)) codes.delete(code);
+                            else codes.add(code);
+                            next.retry.codes = [...codes].sort((a, b) => a - b);
+                          })}
+                          className={
+                            "rounded border px-2 py-1 font-mono text-2xs " +
+                            (active
+                              ? "border-primary bg-primary-soft text-primary-text"
+                              : "border-border bg-surface-2 text-faint hover:text-body")
+                          }
+                        >
+                          {code}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </Field>
               )}
+
+              {draft.health !== null && (
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <Field label="unhealthy_expression（预设）" hint="判定上游不健康的表达式。">
+                    <Select
+                      value={
+                        HEALTH_EXPRESSION_PRESETS.includes(draft.health.unhealthy_expression as (typeof HEALTH_EXPRESSION_PRESETS)[number])
+                          ? draft.health.unhealthy_expression
+                          : "custom"
+                      }
+                      onValueChange={(value) => update((next) => {
+                        if (next.health === null || value === "custom") {
+                          if (next.health !== null) next.health.unhealthy_expression = "";
+                          return;
+                        }
+                        next.health.unhealthy_expression = value;
+                      })}
+                      disabled={!caps.health.supported}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="response.code >= 500">response.code &gt;= 500</SelectItem>
+                        <SelectItem value="response.code >= 400">response.code &gt;= 400</SelectItem>
+                        <SelectItem value="custom">自定义…</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field label="表达式（可自定义 CEL）">
+                    <Input
+                      aria-label="unhealthy_expression"
+                      value={draft.health.unhealthy_expression}
+                      onChange={(event) => update((next) => { if (next.health === null) return; next.health.unhealthy_expression = event.target.value; })}
+                      disabled={!caps.health.supported}
+                    />
+                  </Field>
+                  <Field label="consecutive_failures（>=1）" hint="连续失败几次后驱逐；E16/E17：表达式单独配置不会换组。">
+                    <Input
+                      aria-label="consecutive_failures"
+                      inputMode="numeric"
+                      value={draft.health.consecutive_failures}
+                      onChange={(event) => update((next) => {
+                        if (next.health === null) return;
+                        const parsed = Number(event.target.value);
+                        next.health.consecutive_failures =
+                          event.target.value === "" ? next.health.consecutive_failures : Number.isFinite(parsed) ? parsed : next.health.consecutive_failures;
+                      })}
+                      disabled={!caps.health.supported}
+                    />
+                  </Field>
+                  <Field label="duration / restore_health" hint="驱逐时长（可空）与恢复阈值。">
+                    <div className="flex gap-1.5">
+                      <Input
+                        aria-label="health duration"
+                        placeholder="60s"
+                        value={draft.health.duration}
+                        onChange={(event) => update((next) => { if (next.health === null) return; next.health.duration = event.target.value; })}
+                        disabled={!caps.health.supported}
+                      />
+                      <Input
+                        aria-label="restore_health"
+                        inputMode="numeric"
+                        className="w-20"
+                        value={draft.health.restore_health}
+                        onChange={(event) => update((next) => {
+                          if (next.health === null) return;
+                          const parsed = Number(event.target.value);
+                          next.health.restore_health =
+                            event.target.value === "" ? next.health.restore_health : Number.isFinite(parsed) ? parsed : next.health.restore_health;
+                        })}
+                        disabled={!caps.health.supported}
+                      />
+                    </div>
+                  </Field>
+                </div>
+              )}
+
+              {draftProblem !== null && (
+                <p className="rounded-md border border-warning bg-warning-soft px-2.5 py-1.5 text-2xs text-warning-text">
+                  无法保存：{draftProblem}
+                </p>
+              )}
+
+              <ul className="space-y-0.5 text-2xs text-faint">
+                <li>· 同层组内切换为 P2C 概率性，不保证切到指定目标。</li>
+                <li>· 流式响应首字节之后中断不会切换目标，客户端会收到截断流。</li>
+                <li>· 每次请求仍只记一条日志。</li>
+              </ul>
             </div>
           </SectionCard>
         </>
@@ -435,16 +626,30 @@ export function PoliciesTab({ data, draft, onDraftChange, canWrite, dirtyCount }
           </SectionCard>
 
           <SectionCard
-            title="请求级重试"
+            title="请求内重试与健康驱逐"
             description={data.notes.retry}
             actions={<CapabilityBadge capability={caps.retry} />}
           >
-            {config.retry === null ? (
-              <p className="text-2xs text-faint">AG 1.7 不支持请求内重试：不渲染 retry（保持 null）。</p>
+            {config.retry === null && config.health === null ? (
+              <p className="text-2xs text-faint">未启用（默认关闭，保持当前行为：不重试、不做健康驱逐）。</p>
             ) : (
-              <pre className="overflow-x-auto font-mono text-2xs text-danger-text">
-                {JSON.stringify(config.retry, null, 2)}
-              </pre>
+              <div className="space-y-2">
+                <Fact label="请求内重试">
+                  {config.retry === null
+                    ? "未启用"
+                    : "attempts " + config.retry.attempts + " · codes " + config.retry.codes.join("/") + " · backoff " + (config.retry.backoff || "—")}
+                </Fact>
+                <Fact label="健康标记与驱逐">
+                  {config.health === null
+                    ? "未启用"
+                    : config.health.unhealthy_expression + " · 连续 " + config.health.consecutive_failures + " 次 · duration " + (config.health.duration || "—") + " · restore " + config.health.restore_health}
+                </Fact>
+                <ul className="space-y-0.5 text-2xs text-faint">
+                  <li>· 同层组内切换为 P2C 概率性，不保证切到指定目标。</li>
+                  <li>· 流式响应首字节之后中断不会切换目标，客户端会收到截断流。</li>
+                  <li>· 每次请求仍只记一条日志。</li>
+                </ul>
+              </div>
             )}
           </SectionCard>
 

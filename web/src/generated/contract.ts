@@ -103,6 +103,13 @@ export interface HTTPValidationError {
   detail?: ValidationError[];
 }
 
+export interface HealthConfig {
+  unhealthy_expression: string;
+  consecutive_failures?: number;
+  duration?: string;
+  restore_health?: number;
+}
+
 export interface LocalRateLimitConfig {
   requests_per_minute?: number | null;
   tokens_per_minute?: number | null;
@@ -172,6 +179,7 @@ export interface PolicyConfig {
   timeout?: TimeoutConfig;
   transformations?: TransformationsConfig;
   retry?: RetryConfig | null;
+  health?: HealthConfig | null;
 }
 
 export interface PolicyConfigIn {
@@ -229,8 +237,8 @@ export interface RegexRuleIn {
 
 export interface RetryConfig {
   attempts?: number;
-  backoff?: string;
   codes?: number[];
+  backoff?: string;
   precondition?: string;
   condition?: string;
 }
