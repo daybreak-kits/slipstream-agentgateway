@@ -9,6 +9,14 @@ from pathlib import Path
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+#: File name of the agentgateway log SQLite DB inside ag_config_dir. AG resolves the
+#: rendered relative "ag-data.db" URL next to its config file; retention and the
+#: payload API point at the same file.
+DEFAULT_AG_DB_FILENAME = "ag-data.db"
+
+#: Fallback retention window when the operator setting is absent/invalid.
+DEFAULT_LOG_RETENTION_DAYS = 30
+
 
 class Settings(BaseSettings):
     """Control-plane settings; defaults match docs/PLAN.md §3 (control plane on 3700)."""
@@ -84,6 +92,19 @@ class Settings(BaseSettings):
         """
         self.ag_config_dir = str(Path(self.ag_config_dir).expanduser().resolve())
         return self
+
+    @property
+    def ag_log_db_path(self) -> str:
+        """Filesystem path of the data-plane request-log DB.
+
+        Explicit ag_db_path wins; otherwise the AG default file inside the
+        resolved config dir (the file agentgateway creates for the rendered
+        "sqlite:///ag-data.db" URL). Usage ingestion, the payload API and the
+        retention job share this one source.
+        """
+        if self.ag_db_path:
+            return self.ag_db_path
+        return str(Path(self.ag_config_dir) / DEFAULT_AG_DB_FILENAME)
 
 
 @lru_cache

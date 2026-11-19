@@ -351,7 +351,7 @@ def delete_upstream_model(
     upstream_model_id: str,
     session: Session = Depends(session_of),
     principal=Depends(require("upstream_models:write")),
-):
+) -> None:
     crud.delete_upstream_model(session, upstream_model_id, actor=principal.admin_id)
     session.commit()
 
@@ -522,7 +522,7 @@ def delete_public_model(
     public_model_id: str,
     session: Session = Depends(session_of),
     principal=Depends(require("public_models:write")),
-):
+) -> None:
     crud.delete_public_model(session, public_model_id, actor=principal.admin_id)
     session.commit()
 
@@ -639,7 +639,7 @@ def delete_model_target(
     target_id: str,
     session: Session = Depends(session_of),
     principal=Depends(require("model_targets:write")),
-):
+) -> None:
     row = MODEL_TARGET_REPO.get(session, target_id)
     if row is None:
         raise AppError(ErrorCode.NOT_FOUND, f"model target not found: {target_id}")

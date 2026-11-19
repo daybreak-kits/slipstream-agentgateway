@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
-from datetime import UTC
+from datetime import UTC, datetime, timedelta, tzinfo
 from typing import Any
 
 from l01_core.errors import AppError, ErrorCode
@@ -120,17 +120,14 @@ def _started_at_ms(raw: Any) -> int:
 
 
 def datetime_from_iso(text: str) -> float:
-    """Import-light ISO parse to epoch seconds (datetime lives inside the helper)."""
-    from datetime import datetime
-
+    """ISO-8601 parse to epoch seconds; naive timestamps are treated as UTC."""
     parsed = datetime.fromisoformat(text)
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone_utc())
     return parsed.timestamp()
 
 
-def timezone_utc():
-
+def timezone_utc() -> tzinfo:
     return UTC
 
 
@@ -215,3 +212,48 @@ def fetch_request_payload(conn: sqlite3.Connection, event_id: str) -> dict | Non
         "request_prompt_json": row["request_prompt_json"] or "",
         "response_completion_json": row["response_completion_json"] or "",
     }
+
+
+def cleanup_expired_logs(
+    db_path: str, retention_days: int, *, now: datetime | None = None
+) -> dict[str, int]:
+    """ADR-021 retention: delete expired rows from the data-plane request log.
+
+    Only agentgateway's own request_logs / request_log_payloads tables are
+    touched. The control-plane ledger (ledger_entries, gateway_usage_events,
+    charge_entries) lives in a different SQLite database and is deliberately
+    never opened here: money records are not retention data.
+
+    Returns per-table deleted-row counts. A missing DB or missing tables yield
+    zeros, so a fresh install or a metadata-only deployment is a no-op.
+    """
+    counts = {"request_logs": 0, "request_log_payloads": 0}
+    if not db_path or not os.path.exists(db_path):
+        return counts
+    days = max(1, int(retention_days))
+    cutoff_date = ((now or datetime.now(UTC)) - timedelta(days=days)).date().isoformat()
+    conn = sqlite3.connect(db_path)
+    try:
+        tables = {
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        }
+        if "request_logs" not in tables:
+            return counts
+        # Child rows first: request_log_payloads.log_id -> request_logs.id.
+        if "request_log_payloads" in tables:
+            cursor = conn.execute(
+                "DELETE FROM request_log_payloads WHERE log_id IN ("
+                "SELECT id FROM request_logs WHERE substr(started_at, 1, 10) < ?)",
+                (cutoff_date,),
+            )
+            counts["request_log_payloads"] = max(cursor.rowcount, 0)
+        cursor = conn.execute(
+            "DELETE FROM request_logs WHERE substr(started_at, 1, 10) < ?",
+            (cutoff_date,),
+        )
+        counts["request_logs"] = max(cursor.rowcount, 0)
+        conn.commit()
+    finally:
+        conn.close()
+    return counts

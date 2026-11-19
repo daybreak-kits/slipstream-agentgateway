@@ -75,13 +75,15 @@ def test_missing_payload_row_is_404(client, ag_db):
     assert unknown.status_code == 404
 
 
-def test_unconfigured_db_path_is_404(client, monkeypatch):
+def test_missing_default_db_file_is_reported(client, monkeypatch, tmp_path):
+    """Unset SLIPSTREAM_AG_DB_PATH falls back to the AG config-dir default file."""
     monkeypatch.delenv("SLIPSTREAM_AG_DB_PATH", raising=False)
+    monkeypatch.setenv("SLIPSTREAM_AG_CONFIG_DIR", str(tmp_path / "ag-config"))
     reset_settings_cache()
     try:
         response = client.get("/admin/logs/whatever/payload")
-        assert response.status_code == 404
-        assert "SLIPSTREAM_AG_DB_PATH" in response.json()["message"]
+        assert response.status_code == 500
+        assert "数据面请求日志不存在" in response.json()["message"]
     finally:
         reset_settings_cache()
 

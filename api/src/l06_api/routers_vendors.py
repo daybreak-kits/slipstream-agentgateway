@@ -58,7 +58,7 @@ def patch_vendor(
 @router.delete(
     "/{vendor_id}", status_code=204, dependencies=[Depends(require("vendors:write"))]
 )
-def delete_vendor(vendor_id: str, session: Session = Depends(session_of)):
+def delete_vendor(vendor_id: str, session: Session = Depends(session_of)) -> None:
     vendor = VENDOR_REPO.get(session, vendor_id)
     if vendor is None:
         raise AppError(ErrorCode.NOT_FOUND, f"vendor not found: {vendor_id}")

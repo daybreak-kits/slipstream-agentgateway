@@ -28,12 +28,7 @@ def log_payload(
 ) -> dict:
     """Stored prompt/completion bodies for one request log (only when full mode)."""
     settings = get_settings()
-    if not settings.ag_db_path:
-        raise AppError(
-            ErrorCode.NOT_FOUND,
-            "正文日志不可用：未配置数据面日志库（SLIPSTREAM_AG_DB_PATH）",
-        )
-    conn = open_readonly(settings.ag_db_path)
+    conn = open_readonly(settings.ag_log_db_path)
     try:
         payload = fetch_request_payload(conn, event_id)
     finally:

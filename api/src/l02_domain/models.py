@@ -40,6 +40,8 @@ class ModelType(StrEnum):
     AUDIO_TTS = "audio_tts"
     AUDIO_TRANSCRIPTION = "audio_transcription"
     VIDEO = "video"
+    SYSTEMONE = "systemone"  # AG built-in protocol interface (ADR-023 #9, E14b)
+    CUSTOM = "custom"  # operator-supplied path passthrough
 
 
 class AvailabilityKind(StrEnum):

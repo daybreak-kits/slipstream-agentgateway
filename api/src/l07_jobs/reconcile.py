@@ -8,6 +8,8 @@ re-render so the data-plane buckets see corrected balances.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+
 from sqlalchemy.orm import Session, sessionmaker
 
 from l01_core.settings import Settings, get_settings
@@ -39,7 +41,9 @@ async def reconcile_job(session_factory: sessionmaker, settings: Settings | None
         return len(changed)
 
 
-def make_reconcile_job(session_factory: sessionmaker, settings: Settings | None = None):
+def make_reconcile_job(
+    session_factory: sessionmaker, settings: Settings | None = None
+) -> Callable[[], Awaitable[int]]:
     """Coroutine factory registered with the JobRunner."""
     resolved = settings or get_settings()
 

@@ -398,6 +398,7 @@ failover 目标 `priority` 为正整数（升序优先，同值=同层）；weig
 | 方法 | 路径 | 权限 | 说明 |
 | --- | --- | --- | --- |
 | GET/POST | /admin/users | users:read / users:create/update/delete | 用户列表/创建 {name, username?, password?, role?, parent_user_id?, balance_micro?} |
+| GET | /admin/users/tree | users:read | 用户树（按可见范围）：{root_id, root_ids, total, nodes}；nodes 与 /admin/users 行同形并按树深度排序，root_ids 为父节点不在可见范围内的顶层节点（代理用户子树自成森林） |
 | GET | /admin/users/{user_id} | users:read | 详情（余额、消费） |
 | GET | /admin/users/{user_id}/balance/precheck | users:read | 余额前置检查 |
 | POST | /admin/users/{user_id}/balance | users:update（充值/调整/退款） | 充值 {amount_micro, currency, note?} → {ledger_id, balance_after_micro} |

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+
 from sqlalchemy.orm import sessionmaker
 
 from l01_core.settings import Settings, get_settings
@@ -22,7 +24,9 @@ async def pull_job(session_factory: sessionmaker, adapter: DataPlaneAdapter | No
         return added
 
 
-def make_pull_job(session_factory: sessionmaker, settings: Settings | None = None):
+def make_pull_job(
+    session_factory: sessionmaker, settings: Settings | None = None
+) -> Callable[[], Awaitable[int]]:
     """Coroutine factory registered with the JobRunner."""
     resolved = settings or get_settings()
 

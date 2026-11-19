@@ -49,7 +49,7 @@ from l02_domain.ir import (
     sort_targets,
 )
 from l03_adapters.agentgateway.transforms import compile_transforms
-from l03_adapters.spi import make_artifact
+from l03_adapters.spi import Artifact, make_artifact
 from l03_adapters.yaml_dumps import to_yaml
 
 PROVIDER_BY_API_STYLE = {
@@ -587,7 +587,7 @@ def render_config(ir: GatewayIR, llm_port: int) -> dict:
     return config
 
 
-def render_artifact(ir: GatewayIR, llm_port: int | None = None):
+def render_artifact(ir: GatewayIR, llm_port: int | None = None) -> Artifact:
     """Render -> deterministic YAML artifact with constraint header comments."""
     from l01_core.settings import get_settings
 

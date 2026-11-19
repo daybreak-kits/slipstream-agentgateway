@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from l01_core.crypto import SecretBox
 from l01_core.errors import AppError, ErrorCode
-from l01_core.settings import get_settings
+from l01_core.settings import DEFAULT_AG_DB_FILENAME, get_settings
 from l01_core.timeutil import now_ms
 from l02_domain.ir import (
     AccessLogSpec,
@@ -204,24 +204,26 @@ def _key_file_name(config_dir: str, upstream_id: str) -> str:
     return os.path.join(config_dir, "keys", f"{upstream_id}.key")
 
 
-def _access_log_spec(session: Session, settings) -> AccessLogSpec | None:
-    """ADR-021: resolve the payload-logging switch; None renders no logging block.
+def _access_log_spec(session: Session, settings) -> AccessLogSpec:
+    """ADR-021: resolve the payload-logging switch; always renders a log DB source.
 
-    The database URL is the same ag_db_path source usage ingestion reads; with
-    no path configured there is nowhere to log, so the block stays absent.
+    The data-plane log DB is a bootstrap dependency: usage ingestion, the
+    request-log pages and retention all read it, so an unset switch must not
+    leave a fresh install without a data source. Defaults are safe (metadata =
+    no bodies); explicit ag_access_log_llm / ag_db_path win, and bodies are only
+    ever stored when the operator selects full.
     """
     raw = get_setting(session, ACCESS_LOG_LLM_KEY)
-    mode = ""
+    mode = "metadata"
     if raw is not None:
         try:
             value = json.loads(raw)
         except (TypeError, ValueError):
             value = raw
-        if isinstance(value, str):
+        if isinstance(value, str) and value.strip() in ACCESS_LOG_LLM_MODES:
             mode = value.strip()
-    if mode not in ACCESS_LOG_LLM_MODES or not settings.ag_db_path:
-        return None
-    return AccessLogSpec(database_url=settings.ag_db_path, llm=mode)
+    database_url = settings.ag_db_path or DEFAULT_AG_DB_FILENAME
+    return AccessLogSpec(database_url=database_url, llm=mode)
 
 
 def write_key_files(key_files: dict[str, str]) -> list[str]:

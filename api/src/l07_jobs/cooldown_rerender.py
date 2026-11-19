@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+
 from sqlalchemy.orm import Session, sessionmaker
 
 from l01_core.timeutil import now_ms
@@ -44,7 +46,9 @@ async def rerender_job(session_factory: sessionmaker, poll_seconds: float) -> st
         return revision
 
 
-def make_rerender_job(session_factory: sessionmaker, poll_seconds: float):
+def make_rerender_job(
+    session_factory: sessionmaker, poll_seconds: float
+) -> Callable[[], Awaitable[str | None]]:
     async def _job() -> str | None:
         return await rerender_job(session_factory, poll_seconds)
 

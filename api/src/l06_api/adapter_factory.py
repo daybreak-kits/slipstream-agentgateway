@@ -26,7 +26,7 @@ def make_adapter(settings: Settings) -> DataPlaneAdapter:
             "agentgateway",
             config_dir=settings.ag_config_dir,
             filename=settings.ag_config_filename,
-            ag_db_path=settings.ag_db_path,
+            ag_db_path=settings.ag_log_db_path,
             ag_binary=settings.ag_binary,
         )
     return create(settings.data_plane_adapter, config_dir=settings.ag_config_dir)

@@ -84,6 +84,6 @@ def delete_rule(
     rule_id: str,
     session: Session = Depends(session_of),
     principal=Depends(require("availability:write")),
-):
+) -> None:
     availability.delete_rule(session, rule_id)
     session.commit()

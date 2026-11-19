@@ -13,6 +13,7 @@ is None.
 
 from __future__ import annotations
 
+from fastapi import FastAPI
 from sqlalchemy.orm import sessionmaker
 
 from l01_core.settings import get_settings
@@ -25,7 +26,7 @@ def create_app(
     *,
     init_tables: bool = True,
     jobs: bool | None = None,
-):
+) -> FastAPI:
     """The full control plane; `jobs` overrides SLIPSTREAM_JOBS_ENABLED."""
     app = build_api_app(session_factory=session_factory, init_tables=init_tables)
     settings = get_settings()

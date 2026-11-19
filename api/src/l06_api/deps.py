@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 from fastapi import Depends, Request
 from sqlalchemy.orm import Session
@@ -26,7 +26,7 @@ def current_principal(request: Request) -> auth.Principal:
     return principal
 
 
-def require(permission: str):
+def require(permission: str) -> Callable[[], auth.Principal]:
     """Dependency factory enforcing one registered permission key (`resource:action`)."""
 
     def _dep(  # noqa: B008

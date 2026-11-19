@@ -530,6 +530,7 @@ def seed(session, rng: random.Random) -> dict[str, object]:
         ("base_currency", CNY),
         ("timezone", "Asia/Shanghai"),
         ("log_retention_days", 30),
+        ("ag_access_log_llm", "metadata"),
         ("audit_retention_days", 180),
         ("default_tokens_per_minute", 60_000),
         ("default_concurrency", 8),
