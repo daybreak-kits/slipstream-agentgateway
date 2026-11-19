@@ -9,8 +9,7 @@
 |---|---|---|---|
 | 厂商 Vendor | `vendors` | 商业实体：智谱、青岚云、OpenRouter 等 | 不是“上游”：同一厂商可以有多个上游 |
 | 上游渠道 Upstream | `upstreams` | 一个可调用的接入点 = 地址 + 协议风格 + 密钥组 + 改写规则；厂商为**可选**字段，仅作展示分组，不参与路由与协议逻辑 | UI 全站写「上游渠道」，简称「上游」；单独用「渠道」仍禁（2026-11-19 用户裁定） |
-| 上游密钥 UpstreamKey | `upstream_keys` | 上游的一条凭据；每上游最多 20 把，有 label、掩码、主密钥标记 | 旧名“渠道密钥”已废；不再是“一个上游只能一把” |
-| 上游主密钥 PrimaryKey | `upstreams.api_key_enc` | 密钥组里标记 `is_primary` 的那把，镜像到 `upstreams.api_key_enc` 供数据面读取 | 不是第二套密钥；只是同一把密钥的镜像列 |
+| 上游密钥 UpstreamKey | `upstream_keys` | 上游的一条凭据；每上游最多 20 把，有 label、掩码；**每把密钥在适配层展开为一个独立 AG 上游**（ADR-026，平权分流），失效密钥在编辑面板标红 | 旧名“渠道密钥”已废；**“主密钥”概念已废**（2026-11-19 用户裁定）：不再有 is_primary 与镜像列，所有密钥平权 |
 | 上游模型 UpstreamModel | `upstream_models` | 上游 `/models` 返回的原始名，也是真正发给上游的 `model` 字段 | 旧名“上游模型”沿用，但不再叫“渠道模型” |
 | 公开模型 PublicModel | `public_models` | 客户端唯一可写的名字，对应 AG 的 virtualModel；二期 UI/文档统一写“公开模型” | 旧名“调用模型 CallModel”“调用名”“调用串”“对外模型”全部已废（后端表名仍 `public_models`） |
 | 目标 ModelTarget | `model_targets` | 一条“公开模型 → 上游模型”的绑定，带 priority（weighted/conditional 另有 weight/when） | 在公开模型语境下也叫**成员**；旧名“渠道模型行”已废 |
