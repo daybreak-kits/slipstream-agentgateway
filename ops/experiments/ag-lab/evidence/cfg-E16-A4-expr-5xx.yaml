@@ -1,0 +1,80 @@
+{
+  "config": {
+    "adminAddr": "127.0.0.1:3921",
+    "statsAddr": "127.0.0.1:3922",
+    "readinessAddr": "127.0.0.1:3923",
+    "database": {
+      "url": "sqlite://data.db"
+    },
+    "storage": {
+      "mode": "file"
+    }
+  },
+  "gateways": {
+    "gw-e16": {
+      "port": 3692,
+      "bindAddress": "127.0.0.1"
+    }
+  },
+  "routes": [
+    {
+      "name": "ai-e16",
+      "gateways": "gw-e16",
+      "matches": [
+        {
+          "path": {
+            "pathPrefix": "/v1/chat/completions"
+          }
+        }
+      ],
+      "backends": [
+        {
+          "ai": {
+            "groups": [
+              {
+                "providers": [
+                  {
+                    "name": "p-fail",
+                    "hostOverride": "127.0.0.1:8099",
+                    "pathPrefix": "/sc500b",
+                    "provider": {
+                      "openAI": {
+                        "model": "code-500"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "providers": [
+                  {
+                    "name": "p-ok",
+                    "hostOverride": "127.0.0.1:8099",
+                    "pathPrefix": "/ok",
+                    "provider": {
+                      "openAI": {
+                        "model": "model-ok"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "policies": {
+            "health": {
+              "unhealthyExpression": "response.code >= 400"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "frontendPolicies": {
+    "accessLog": {
+      "database": {
+        "llm": "full"
+      }
+    }
+  }
+}

@@ -1,6 +1,6 @@
 # P0 · agentgateway 隔离实例行为验证（task-162）
 
-状态：已完成 E1–E15（E9–E11 为第二轮追加；E12 额度/localRateLimit、E13 retry、E9 追加 CEL 字符串函数为第三轮；E14 状态码矩阵/route 层 retry/非 chat 透传为第四轮；E15 真实上游复验请求内重试/故障转移/流式中杀为第五轮）。实验脚本与原始日志见 slipstream/ops/experiments/ag-lab/ 与 evidence/。
+状态：已完成 E1–E16（E9–E11 为第二轮追加；E12 额度/localRateLimit、E13 retry、E9 追加 CEL 字符串函数为第三轮；E14 状态码矩阵/route 层 retry/非 chat 透传为第四轮；E15 真实上游复验请求内重试/故障转移/流式中杀为第五轮；E16 完整形态 gateways/routes/backends[].ai 请求内 retry/组 failover 判定为第六轮）。实验脚本与原始日志见 slipstream/ops/experiments/ag-lab/ 与 evidence/。
 
 执行环境：Windows 单机、agentgateway v1.7.0 官方二进制（git 26f5aebe99a36a037fe54f8080a608aca5547e15、rust 1.99.0、x86_64-pc-windows-msvc；该构建 --version 打印 "True"，版本号以 release/schema 为准）。E1–E13 期间复用 C:/Users/microsoft/agentgateway/ 内的二进制（只读）；该目录已不存在，E14 起改用从 GitHub releases 重新下载的同一构建（sha256 909b93dc…ed3c 与官方 .sha256 一致），存放于 ops/experiments/ag-lab/bin-e14/，lab.py 按 $AG_EXE → bin-e14 → 旧路径 的顺序解析。隔离端口：llm 3692 / admin 3921 / stats 3922 / readiness 3923；E14 另用纯 HTTP 网关端口 3694；自建 mock 上游 8099。全程未访问生产端口 3691 / 19004–19006。
 
@@ -13,6 +13,7 @@
     python e12_followups.py         # E12 追加：metadata 拍平、reload 桶保留、30k 桶淘汰探测
     python e14_retry_status.py      # E14：状态码矩阵、route 层 retry、非 chat 端点透传
     python e15_real_upstream.py     # E15：真实上游（.env.e15）S1–S5，密钥写 .e15-tmp/*.key 并以 apiKey.file 引用
+    python e16_full_form.py         # E16：完整形态（gateways/routes/backends[].ai）请求内 retry / 组 failover 判定
 
 ## 结论速览
 
@@ -33,6 +34,7 @@
 | E13 | v1.7.0 的 LLM 配置面不接受 retry：llm.policies 与 llm.models 配 retry 均 validate exit=1（unknown field），retry 只存在于 routes/backends 的 FilterOrPolicy；v1 不能靠配 retry 拿到请求级故障转移。 |
 | E14 | 状态码语义：上游 4xx/429/499 一律原样透传且不触发健康驱逐；任意 5xx（含 505/520/599）原样透传但 p1 立即被降级（影响后续请求）；连接拒绝=503 + 驱逐；AG 无默认上游超时。route 层 retry 被接受且真的产生请求内重试（同后端、attempts+1 次上游命中），但完全不作用于 LLM 监听器。非 chat 端点：/v1/embeddings、/v1/images/generations 透传（前者改写模型名并记 tokens，后者不改写）；/v1/systemone 不透传（AG 按 SystemOne 协议解析，缺字段直接 400）。 |
 | E15 | 真实上游（NVIDIA/OpenRouter）复验 E14：401/404 原样透传且 0 次请求内切换；流式中途断连客户端拿到截断 SSE、不切备 target（request_logs 记 200 + "response body failed"）；weighted 3:1 两批 18:2 与 15:5（抽样噪声内）；route 层 retry 在纯 HTTP 路由命中 3 次/请求，同一配置 LLM 面 5 请求仅 5 次上游命中——**E14 结论一致，不推翻**。 |
+| E16 | 完整形态（显式 route + backends[].ai）与简化模式**不同**：route 层 retry 真正作用于 LLM 流量并实现请求内组间 failover（主 5xx → 重试 → 组2 → 客户端 200，4/4）；4xx 要请求内切组需 codes 含 4xx + health.unhealthyExpression + eviction 三件套（单配 retry codes 时 3 次全打原组）；backend/provider 层无 retry 字段（validate 拒收）；同组双 provider 切换概率性（11/12 → 200）；health 只配表达式不配 eviction 会让驱逐整体失效。 |
 
 ## E1 · 同层失败是否在请求内切 target（最关键）
 
@@ -423,10 +425,62 @@ maxTokens=2、tokensPerFill=0、fillInterval=1h、type=requests：前 2 个请�
 
 对设计的影响：
 
-- 「LLM 面请求内不重试/不切换」已由 mock（E14）+ 真实上游（E15）双重验证，v1 控制面若需要请求级重试必须自己做，不能依赖 AG。
+- 「LLM 面请求内不重试/不切换」已由 mock（E14）+ 真实上游（E15）双重验证，v1 控制面若需要请求级重试必须自己做，不能依赖 AG。（该结论限于简化 llm 模式；显式 route + backends[].ai 的完整形态见 E16，route 层 retry 可作用于 AI 路由并实现请求内组间 failover。）
 - 流式一旦开始吐字即不可切换：v1 的「失败转移」只能作用于尚未产生首字节（或首字节前）的请求；已经开始的 SSE 只能中断并让客户端重试。
 - 纯 HTTP 路由的 route 层 retry 可用，但 LLM 流量走的是内部路由 internal/llm:request，套不上；v1 若统一网关，需区分两类流量。
 - request_logs 对「上游已断但 HTTP 头已回 200」的流式失败会记 200 + error，账本/告警不能只看 http_status，要同时看 error 列。
+
+## E16 · 完整形态（gateways/routes/backends[].ai）请求内 retry / 组间 failover 判定
+
+目的：E1/E13/E14/E15 只测过简化模式（llm.providers/models/virtualModels 生成内部路由 internal/llm:request），结论「LLM 面请求内零重试/零切换、route 层 retry 不作用于 LLM 流量」。AG 1.7 的完整形态（gateways/binds + routes + backends[].ai，LocalAIBackend 的 groups 组间 failover + health.unhealthyExpression）从未实测。本实验回答：完整形态下 LLM 格式流量能否请求内重试/跨组 failover，用户心智模型「主目标失败（400-599）→ 同请求内切同层其它目标 → 再切下一组 → 全败才返回错误」是否可实现。
+
+环境与配置（脚本 e16_full_form.py，每场景独立起停 AG；逐请求 /reset → 1 个请求 → 读 mock /stats 计数）：
+
+- 完整形态 = gateways（gw-e16 监听 3692）+ 一条显式 route 匹配 /v1/chat/completions + backends[].ai。
+- AI provider 在 schema 中**没有 baseUrl 字段**（全 schema 仅 llm.params 有 baseUrl）。实测拨号机制：hostOverride 指向上游 host（mock 127.0.0.1:8099）、pathPrefix 区分各组计数器（/sc500、/ok…）、provider.openAI.model 覆盖发送给上游的模型名（code-500 → mock 返 500；model-ok → 200）。
+- 组结构：backends[0].ai.groups = [组1=可控失败 provider, 组2=正常 provider]；同组多 provider 是 P2C 负载均衡，组间是 failover 顺序。
+- 所有配置先 --validate-only（exit=0 才运行）；客户端请求仍打 3692/v1/chat/completions（OpenAI 兼容形状不变）。
+
+判定表（每行 = 该场景多次独立请求的「请求内切换与否」）：
+
+| 场景 | 配置 | 请求内切换 | 客户端结果 | 单请求内主/备命中 |
+| --- | --- | --- | --- | --- |
+| A0 基线 | 无 retry 无 health，主 500 | 不切 | 500 原样透传 | /sc500:1，组2 不命中；次请求起全走组2（5xx 驱逐） |
+| A1a route retry | policies.retry attempts=2 codes=[429,500,502,503]，主 500 | **切（组间）** | **200** | trial1 /sc500:2 + /ok:1；后 /sc500:1 + /ok:1；日志 retry.attempt=2/1 |
+| A1b 401 不在 codes | 同上，主 401 | 不切 | 401 透传 | /sc401:1 |
+| A1c 401/429 在 codes | codes 含 401/429，主 401 或 429 | 重试但不切组 | 401/429 | /sc401c:3、/sc429:3（3 次全打原组） |
+| A1d 完整心智模型 | 401 在 codes + health "response.code >= 400" + eviction.consecutiveFailures=1 | **切（组间）** | **200** | trial1 /sc401d:2 + /ok:1；后 /sc401d:1 + /ok:1 |
+| A2 backend 层 retry | backends[0].policies.retry 或 groups[].providers[].policies.retry | —（schema 拒收） | validate exit=1 "routes[0]: unknown field `retry`" | — |
+| A3 组间 failover | 无 retry（同 A0，6 次） | 不切 | 500 | /sc500:1；次请求起全 /ok |
+| A4a 默认健康 | 主 401，无 health | 不切、不驱逐 | 401 透传 | /sc401:1 ×N（与简化模式一致） |
+| A4b 只配表达式 | health.unhealthyExpression="response.code >= 400"，主 500 | 驱逐整体失效 | 500 | /sc500b:1 ×N（5xx 也不再驱逐） |
+| A4c 表达式+eviction | + eviction.consecutiveFailures=1，主 401 | 4xx 驱逐（影响次请求） | 401 透传（当前请求不切） | /sc401b:1 → 次请求起 /ok |
+| A4d 表达式="true"+eviction | 主 200 | 连 200 也驱逐 | 200 | /ok3:1 → 次请求 /ok |
+| A5 同组双 provider | 组1=[fail,ok] + route retry | 概率性（组内） | 11/12 → 200；1/12 → 500 | 同请求 /sc500+/ok 可见；1 次 3 连 /sc500 |
+
+观察细节：
+
+- **route 层 retry 在完整形态真正作用于 LLM 流量**：A1a 每个客户端请求日志带 retry.attempt=1/2，duration 随调用数线性增加（2 次约 110ms、3 次约 220ms，含 100ms backoff）；request_logs 仍严格 1 客户端请求 = 1 行（重试中间尝试不成行），最终行 http_status=200、error=NULL。
+- **请求内切组由健康标记驱动，不是 retry codes 驱动**：A1a 主 500（5xx 默认标记不健康）→ 重试重选组时移到组2；A1c 主 401/429 即使 codes 含它们，4xx 默认不标记不健康 → 3 次重试全打原组、客户端 401/429；A1d 补齐 health 后 4xx 也能请求内切组。
+- **health 策略的坑**：只要显式写了 health 就必须同时配 eviction，否则驱逐整体失效（A4b：5xx 都不驱逐）；eviction.consecutiveFailures=1 + 表达式后 4xx 驱逐生效（A4c）。驱逐只影响后续请求，当前失败请求仍原样返回。
+- **同组内切换不保证**（A5）：同组 fail/ok 两 provider + retry，12 次中 1 次 3 连打失败 provider 后客户端 500，其余 11 次 200（3 次请求内 /sc500+/ok 同现、8 次直接 /ok）。组内重选是 P2C 概率行为，不能当作确定性 failover。
+- 透传错误行（500/401/429）request_logs error=NULL；gen_ai_request_model 记 provider 覆盖后的上游模型名（code-500 / model-ok）。
+
+结论：
+
+- **用户心智模型在完整形态可实现**：主 5xx 失败 → 同请求内重试并切下一组 → 客户端 200（A1a，4/4）；主 4xx 失败也要请求内切组 → 需 retry.codes 含 4xx + health.unhealthyExpression + eviction 三件套（A1d，4/4）；「同层组内其它目标」是概率性（A5），不能当保证语义。
+- 与 E14/E15 的关系：E14/E15 的「route 层 retry 不作用于 LLM 监听器」仅对 llm 配置生成的内部路由成立；**显式 route + backends[].ai 的完整形态是另一条路径**，retry 真实生效。v1 若要保持「客户端无感重试」产品语义，渲染层需从简化模式迁到完整形态。
+
+对设计的影响（渲染层迁移清单，简述）：
+
+- 配置面：llm.providers/models/virtualModels → gateways + routes + backends[].ai.groups[].providers（LocalNamedAIProvider：name / hostOverride / pathPrefix / provider.openAI.model）。
+- retry：routes[].policies.retry（attempts/codes/backoff），仅 route 层；backend/provider 层无该字段。
+- 健康：backends[].policies.health.unhealthyExpression + eviction（consecutiveFailures/duration/restoreHealth），两者必须同配。
+- 鉴权：简化模式的 llm.policies.apiKey 需迁到 route/listener 层 FilterOrPolicy.apiKey（E16 未实测，见遗留）。
+- 可观测性：request_logs 的 gateway/listener/route 命名变为 default/gw-e16/ai-e16；attributes.endpoint=上游 host；1 客户端请求 1 行不变。
+- 客户端协议面不变：仍 3692/v1/chat/completions OpenAI 兼容形状。
+
+原始证据：evidence/E16-A0-baseline.json.md、evidence/E16-A1-route-retry.json.md（含 401 对照 / 401-in-codes / 429-in-codes 子场景）、evidence/E16-A1-401-health-failover.json.md、evidence/E16-A2-backend-retry.json.md、evidence/E16-A3-group-failover.json.md、evidence/E16-A4-health-4xx.json.md（含 4 组健康矩阵子场景）、evidence/E16-A5-same-group-switch.json.md，及对应 evidence/cfg-E16-*.yaml、evidence/ag-e16-*.log。二进制同 E14/E15（bin-e14/agentgateway.exe，v1.7.0，sha256 909b93dc…ed3c）。
 
 ## 对 v1 设计的影响汇总
 
@@ -444,6 +498,7 @@ maxTokens=2、tokensPerFill=0、fillInterval=1h、type=requests：前 2 个请�
 12. CEL 字符串函数（E9 追加）：regexReplace / regexReplaceAll / upperAscii / lowerAscii / replace / trim 均可用，改写能力不需要置灰。
 13. 状态码与 retry（E14）：上游 4xx/429/499 透传不驱逐、5xx（含 505/520/599）透传后降级、连接拒绝 503+驱逐、无默认上游超时；请求内切换在任何码下都是 0 次。route 层 retry 真实产生请求内重试（同后端）但绝不作用于 LLM 监听器；request_logs 1 请求 1 行、trace_id 不填充、只记 LLM 流量。/v1/embeddings、/v1/images/generations 可透传（前者改写模型名、后者不改写、后者不记 tokens），/v1/systemone 是内置协议路径会被解析拦截（缺字段 400）。
 14. 真实上游复验（E15）：NVIDIA/OpenRouter 真实 401/404 原样透传、0 次请求内切换；流式中途断连不切备 target（客户端拿截断 SSE，request_logs 记 200 + error）；weighted 3:1 实测 18:2 与 15:5（n=20 抽样噪声内）；route 层 retry 纯 HTTP 3 次/请求 vs LLM 5 请求 5 次命中——E14 结论在真实上游下成立。
+15. 完整形态（E16）：显式 route + backends[].ai 时 route 层 retry 真正作用于 LLM 流量并实现请求内组间 failover（主 5xx → 重试 → 组2 → 200，4/4）；4xx 需 codes 含 4xx + health.unhealthyExpression + eviction 三件套才请求内切组（单配 codes 时 3 次全打原组）；backend/provider 层无 retry 字段（validate 拒收）；health 必须表达式与 eviction 同配（只配表达式会让驱逐整体失效）；同组内切换是 P2C 概率行为非保证；request_logs 1 请求 1 行不变。→ v1 若保「客户端无感重试」产品语义，渲染层从简化 llm 模式迁完整形态即可，官方能力在 1.7 的完整形态 API 面（gateways/routes/policies.retry + backends[].ai）已具备。
 
 ## 与 Lead 第二轮决策的交叉
 
@@ -468,6 +523,7 @@ maxTokens=2、tokensPerFill=0、fillInterval=1h、type=requests：前 2 个请�
 - E13 只证明了 LLM 配置面不能配 retry；route/backend 级 retry 已由 E14 实测：route 层产生请求内重试（同后端）但不作用于 LLM 流量；backend 层无 retry 字段。仍未测：route 层多后端时 retry 是否换后端、precondition/condition 对流式的作用（不属于 v1 LLM 方案）。
 - E14 遗留：上游挂起仅观察到 30s（客户端断开终止），AG 是否存在更长默认上游超时未测；llm.policies.timeout 配置行为未验证。images 端点不记 tokens，意味着 images 类流量的预算/账本（E10/E6 链路）在 AG 侧无用量数据。/v1/systemone 只测了「非法 body 被 400」；构造合法 SystemOne 请求会得到什么（代理到上游还是继续拦截）未测。E14a 中 code-200 的 502 由 mock 的 error 形状 body 触发，属于有意构造的兼容性用例，不是环境故障。
 - E15 遗留：SenseNova 在实验期间触发账号级限流（429），未能作为健康对照；若需三上游交叉，建议错峰或换 key 重跑。weighted 3:1 两批 18:2 / 15:5，小样本方差大，若 v1 要严格比例需加大样本。S3 的「流中断」用本地代理模拟，未覆盖真实上游 TLS 层断连（语义应相同，但真实网络抖动形态更多）。E15 只测了 401/404 两类错误码，5xx 与连接拒绝的真实上游行为仍沿用 E14 的 mock 结论。
+- E16 遗留：① 完整形态的鉴权（route/listener 层 FilterOrPolicy.apiKey）未实测——简化模式是 llm.policies.apiKey，迁移需另测；② 流式 + retry 未测（retry.precondition 默认对流式跳过 buffering，语义需单独验证）；③ 同组内切换是 P2C 概率行为（A5 一次 3 连打失败 provider 返回 500），要确定性同层 failover 的机制未深入；④ 完整形态未用真实上游复验（mock 结论，按 E14/E15 交叉验证原则，如上线需真实上游补一轮）；⑤ hostOverride 拨号机制只对 plain-HTTP 上游验证，TLS/HBONE 隧道未测。
 
 ## 原始证据索引
 
@@ -480,5 +536,6 @@ maxTokens=2、tokensPerFill=0、fillInterval=1h、type=requests：前 2 个请�
 - E12/E13/E9 追加脚本：slipstream/ops/experiments/ag-lab/e12_ratelimit_retry.py、e12_followups.py、probe_metrics.py；证据 evidence/E12-local-rate-limit-and-retry.json.md、evidence/E12-followups.json.md、evidence/cfg-e12-*.yaml、evidence/cfg-e13-*.yaml、evidence/ag-e12-*.log、evidence/ag-e9-cel-strings.log
 - E14 脚本：slipstream/ops/experiments/ag-lab/e14_retry_status.py；证据 evidence/E14a-status-matrix.json.md、evidence/E14a-route-retry-layer.json.md、evidence/E14b-nonchat-passthrough.json.md、evidence/cfg-e14-retry-layer.yaml、evidence/ag-e14-a.log、evidence/ag-e14-b.log、evidence/ag-e14-nonchat.log；二进制 ops/experiments/ag-lab/bin-e14/agentgateway.exe（v1.7.0，sha256 与官方 release .sha256 一致）
 - E15 脚本：slipstream/ops/experiments/ag-lab/e15_real_upstream.py（凭据读 .env.e15，key 写 .e15-tmp/*.key 并以 apiKey.file 引用；含 KillProxy 流中杀代理与计数代理）；证据 evidence/E15-S1-bad-key-primary.json.md、evidence/E15-S2-fabricated-model.json.md、evidence/E15-S3-stream-kill.json.md、evidence/E15-S4-weighted-3-1.json.md、evidence/E15-S5-retry-recheck.json.md、evidence/cfg-E15-*.yaml、evidence/ag-E15-*.log
+- E16 脚本：slipstream/ops/experiments/ag-lab/e16_full_form.py（完整形态 gateways/routes/backends[].ai，mock 上游，hostOverride 拨号 + pathPrefix 分计数）；证据 evidence/E16-A0-baseline.json.md、evidence/E16-A1-route-retry.json.md、evidence/E16-A1-401-health-failover.json.md、evidence/E16-A2-backend-retry.json.md、evidence/E16-A3-group-failover.json.md、evidence/E16-A4-health-4xx.json.md、evidence/E16-A5-same-group-switch.json.md、evidence/cfg-E16-*.yaml、evidence/ag-e16-*.log
 - mock 上游新增 usage 变体：模型名含 usage-p100 时返回 prompt=100/completion=0，含 usage-c100 时返回 prompt=0/completion=100（mock_upstream.py 的 _usage_for）；响应头 x-ratelimit-* 与 429 证据见 E12 两组 JSON。
 - mock 上游 E14 新增端点：模型名 code-<N> 返回状态码 N、code-timeout-<s> 挂起、POST /plain/<spec>（纯数字恒定码、seq-<N>-200 首败后 200、slow-<ms>）、任意前缀 /embeddings、/images/generations、/systemone 返回合法 JSON（mock_upstream.py do_POST）。
