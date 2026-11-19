@@ -1,9 +1,15 @@
 import type {
   AdminAccount, ApiKey, AuditLog, AvailabilityRule, ChargePrice, ChargeEntry, ConfigRevision,
-  CostEntry, GuardrailMatrix, McpServersInfo, ModelTarget, MyModelOut, OverviewStats,
-  PolicySnapshot, PublicModel, PublicModelPrice, SettingItem, TransformPreviewResult, UnpricedList, Upstream,
+  CostEntry, ModelTarget, MyModelOut, OverviewStats,
+  PublicModel, PublicModelPrice, SettingItem, TransformPreviewResult, UnpricedList, Upstream,
   UpstreamModel, UpstreamPrice, UpstreamTransforms, UserPreferences, UserTreeNode, Vendor,
 } from "../types";
+// 页面契约类型（gateway-policies 三 Tab / 角色管理）：只做类型引用不产生运行时依赖
+import type {
+  GuardrailConfig, GuardrailsResponse, McpServerConfig, McpServersResponse,
+  PoliciesResponse, PolicyConfig,
+} from "./policies";
+import type { RoleDefinition } from "./roles";
 
 /**
  * Mock 数据开关：只有显式设置 VITE_MOCK=1 才启用（默认关闭，全部走真实 /admin 接口）。
@@ -393,63 +399,223 @@ const auditLogs: AuditLog[] = [
   { id: "al_03", actor: "admin", action: "config.rollback", target: "rev_20261116_01", created_at: "2026-11-16T15:12:44", detail: "热加载确认超时，自动回滚" },
 ];
 
-const policies: PolicySnapshot = {
+// —— 网关策略三文档（ADR-023；契约 docs/api-contract.md §2.6，shape = lib/policies.ts 页面模型） ——
+// 与后端一致：默认值镜像 l05_service/policy_store.py，存储文档可变，保存走 PUT、恢复默认走 DELETE。
+const POLICY_PROTECTED_HEADERS = [
+  "api-key", "authorization", "content-length", "content-type", "cookie",
+  "host", "set-cookie", "x-api-key", "x-request-id",
+];
+
+const DEFAULT_POLICY_CONFIG: PolicyConfig = {
   cors: {
+    enabled: false,
+    allow_origins: [],
+    allow_credentials: false,
+    expose_headers: ["x-request-id"],
+    allow_methods: [],
+    allow_headers: [],
+    max_age: null,
+  },
+  api_key: { enabled: true, mode: "strict" },
+  local_rate_limit: { requests_per_minute: null, tokens_per_minute: null },
+  timeout: { request_timeout: "", backend_request_timeout: "", response_idle_timeout: "" },
+  transformations: {
+    default_response_header_deletes: ["server", "x-powered-by"],
+    protected_request_headers: POLICY_PROTECTED_HEADERS,
+  },
+  retry: null,
+  health: null,
+};
+
+/** 演示存储文档：与默认略有差异（CORS 开 + 超时已配），让只读视图与编辑草稿都有内容可改。 */
+let policyConfig: PolicyConfig = {
+  ...structuredClone(DEFAULT_POLICY_CONFIG),
+  cors: {
+    enabled: true,
     allow_origins: ["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials: false,
-    env_override: "SLIPSTREAM_CORS_ORIGINS (comma separated)",
-    note: "控制面管理 API 的浏览器 CORS；数据面不受此项影响",
+    expose_headers: ["x-request-id"],
+    allow_methods: [],
+    allow_headers: [],
+    max_age: null,
   },
-  key_auth: {
-    scheme: "Authorization: Bearer sk-...",
-    storage: "unsalted sha256(key) key_hash（E11，与 AG 校验逐字节一致）",
-    reveal: "明文仅通过带审计的 reveal 接口可见",
-    failure: "认证失败返回纯文本 401 authentication failed（E4）",
-  },
-  local_rate_limit: {
-    key: "apiKey.user_id",
-    type: "tokens",
-    tokensPerFill: 0,
-    semantics: "预付费：余额即初始词元桶，永不回填；网关重启桶清零，台账才是权威（E10）",
-  },
-  transforms_defaults: {
-    response_header_deletes: ["server", "x-powered-by"],
-    response_body_guard: "用户 body 规则原样生效，不注入 response.code < 400 默认条件（W1）",
-    protected_request_headers: ["api-key", "authorization", "content-length", "content-type", "cookie", "host", "set-cookie", "x-api-key", "x-request-id"],
-    forbidden_body_paths: [],
-    mount: "providers[].policies.transformations，AG 侧确认待 E9",
-  },
-  routing: {
-    modes: ["failover", "weighted", "conditional"],
-    failover: "分层故障转移，仅影响后续请求（E1）；同层由数据面按健康与延迟选择，不保证均匀分配（E7）",
-    weighted: "加权路由，weight 大者优先渲染在前（ADR-014）",
-    conditional: "CEL 条件路由，末位无 when 为兜底（ADR-014）",
-  },
-  counts: { upstreams: 3, upstream_models: 5, public_models: 3, model_targets: 4, api_keys: 3, users: 3 },
+  timeout: { request_timeout: "60s", backend_request_timeout: "55s", response_idle_timeout: "30s" },
+};
+let policyUpdatedAt = Date.parse("2026-11-17T01:05:12");
+
+/** AG 1.7 适配器能力矩阵（l03_adapters/agentgateway/adapter.py describe() 同值）。 */
+const AG_POLICY_CAPABILITIES: PoliciesResponse["capabilities"] = {
+  cors: { supported: true, verified: false, since_version: "1.7.0", note: "数据面 CORS（显式配置才渲染）" },
+  api_key: { supported: true, verified: true, since_version: "1.7.0", note: "keyHash + metadata，mode: strict；enabled=false 时整段不渲染（匿名）" },
+  local_rate_limit: { supported: true, verified: true, since_version: "1.7.0", note: "localRateLimit 是数组；只有全局规则，无逐用户 maxTokens（E12）" },
+  timeout: { supported: true, verified: false, since_version: "1.7.0", note: "request/backend/responseIdle 时长" },
+  transformations: { supported: true, verified: true, since_version: "1.7.0", note: "仅全局 llm.policies.transformations 支持 conditional" },
+  retry: { supported: true, verified: true, since_version: "1.7.0", note: "渲染为顶层 policies[]（target route internal/llm:request）；llm.policies 仍拒绝 retry（E16/E17）" },
+  health: { supported: true, verified: true, since_version: "1.7.0", note: "逐模型 llm.models[].health（unhealthyExpression + eviction）；retry codes 含 4xx 时必须成对（E16/E17）" },
+  guardrails_regex: { supported: true, verified: true, since_version: "1.7.0", note: "llm.policies.guardrails（regex mask/reject/audit + 内置敏感信息规则）" },
+  guardrails_webhook: { supported: true, verified: true, since_version: "1.7.0", note: "webhook 护栏仅 reject/audit，target 只能 host（无路径），不支持 scope" },
 };
 
-const guardrails: GuardrailMatrix = {
-  adapter: "agentgateway",
-  items: [
-    { key: "routing.priority_failover", supported: true, since_version: "1.7.0", note: "分层故障转移", verified: false },
-    { key: "routing.weighted", supported: true, since_version: "1.7.0", note: "加权路由 (ADR-014)", verified: false },
-    { key: "routing.conditional", supported: true, since_version: "1.7.0", note: "条件路由 CEL (ADR-014)", verified: false },
-    { key: "auth.api_key_static", supported: true, since_version: "1.7.0", note: "静态密钥表", verified: false },
-    { key: "observe.request_log", supported: true, since_version: "1.7.0", note: "请求日志落自身 SQLite", verified: false },
-    { key: "config.hot_reload", supported: true, since_version: "1.7.0", note: "热加载；在飞影响待 P0-R2", verified: false },
-    { key: "usage.read_events", supported: true, since_version: "1.7.0", note: "SQLite 只读增量", verified: false },
-    { key: "health.eviction_params", supported: false, since_version: "", note: "健康驱逐参数不可配（简化模式，仅默认行为说明）", verified: false },
-    { key: "backends.session_affinity", supported: false, since_version: "", note: "会话亲和仅 backends 层级，简化模式不可配", verified: false },
-    { key: "health.fine_policies", supported: false, since_version: "", note: "精细健康策略仅 backends 层级，简化模式不可配", verified: false },
+/** 后端 NOTES（routers_policies.py）原文：页级各分区卡的 description。 */
+const POLICY_NOTES: Record<string, string> = {
+  cors: "控制面 CORS 由 SLIPSTREAM_CORS_ORIGINS 决定；此处的 enabled 控制数据面 llm.policies.cors",
+  api_key: "enabled=false 表示数据面匿名放行（不渲染 llm.policies.apiKey），密钥仍保留在台账",
+  rate_limit: "请求级限流为全局规则；预付费余额由控制面账本执行，不渲染逐用户桶（E12）",
+  timeout: "humantime 字符串（如 60s/500ms）；留空表示不渲染该字段",
+  retry: "请求内重试渲染为顶层 policies[]（target route internal/llm:request），attempts 为首次之后的尝试次数（>=2 才能跨层 failover）；codes 含 4xx 时必须同时配置 health（unhealthy_expression + consecutive_failures）",
+  health: "逐模型健康标记与驱逐（llm.models[].health）；表达式单独配置不会驱逐主层（E16/E17），必须带 consecutive_failures >= 1",
+  transformations: "默认响应头删除按 ADR-010 追加在用户规则之后；保护头仅控制面记录",
+  guardrails_webhook: "webhook 护栏仅 reject/audit，target 只能是 host（无路径），不支持 scope",
+  mcp_http: "pinned AG 1.7 拒绝 http 变体；只支持 sse/stdio，http 会在保存时被 422 拒绝",
+};
+
+/** effective 是下发前的可读预览（l05_service/policy_store.py policy_effective 同构）。 */
+function policyEffective(config: PolicyConfig): PoliciesResponse["effective"] {
+  return {
+    cors: {
+      enabled: config.cors.enabled,
+      allow_origins: config.cors.enabled ? [...config.cors.allow_origins] : [],
+      allow_credentials: config.cors.enabled && config.cors.allow_credentials,
+    },
+    key_auth: {
+      enabled: config.api_key.enabled,
+      mode: config.api_key.mode,
+      scheme: "Authorization: Bearer sk-...",
+      storage: "unsalted sha256(key) key_hash（E11）",
+      failure: "认证失败返回纯文本 401 authentication failed（E4）",
+    },
+    local_rate_limit: {
+      key: "apiKey.user_id",
+      type: "tokens",
+      requests_per_minute: config.local_rate_limit.requests_per_minute,
+      tokens_per_minute: config.local_rate_limit.tokens_per_minute,
+      semantics: "预付费：余额即初始词元桶，永不回填；网关重启桶清零，台账才是权威（E10/E12）",
+    },
+    transforms_defaults: {
+      response_header_deletes: [...config.transformations.default_response_header_deletes],
+      protected_request_headers: [...config.transformations.protected_request_headers].sort(),
+      body_editable_paths: "any path, model/stream included (operator owns the risk)",
+    },
+    routing: {
+      modes: ["failover", "weighted", "conditional"],
+      note: "priority 数值小者优先；weighted 按权重比例；conditional 用 CEL 兜底",
+    },
+    timeout:
+      config.timeout.request_timeout || config.timeout.backend_request_timeout || config.timeout.response_idle_timeout
+        ? { ...config.timeout }
+        : null,
+    guardrails: {
+      streaming: guardrailConfig.streaming,
+      request: guardrailConfig.request.length,
+      response: guardrailConfig.response.length,
+    },
+    retry: config.retry ? { attempts: config.retry.attempts, codes: [...config.retry.codes], backoff: config.retry.backoff } : null,
+    health: config.health ? { ...config.health } : null,
+  };
+}
+
+function policyPayload(): PoliciesResponse {
+  return {
+    config: structuredClone(policyConfig),
+    defaults: structuredClone(DEFAULT_POLICY_CONFIG),
+    effective: policyEffective(policyConfig),
+    counts: {
+      upstreams: upstreams.length,
+      public_models: publicModels.length,
+      api_keys_active: clientKeys.filter((k) => k.status === "active").length,
+      users: mockUsers.filter((u) => u.status !== "deleted").length,
+    },
+    capabilities: AG_POLICY_CAPABILITIES,
+    notes: POLICY_NOTES,
+    updated_at_ms: policyUpdatedAt,
+  };
+}
+
+const DEFAULT_GUARDRAIL_CONFIG: GuardrailConfig = { streaming: "Disabled", request: [], response: [] };
+
+let guardrailConfig: GuardrailConfig = {
+  streaming: "Disabled",
+  request: [
+    {
+      kind: "regex",
+      action: "mask",
+      rules: [{ pattern: "", builtin: "ssn" }],
+      scope: ["messages"],
+      rejection_status: 0,
+      rejection_body: "",
+      webhook_target: "",
+      failure_mode: "failClosed",
+    },
   ],
-  note: "supported=false 为路线图说明而非今日可配置；verified=false 表示尚未经数据面实测",
+  response: [],
+};
+let guardrailUpdatedAt = Date.parse("2026-11-17T01:05:12");
+
+/** 完整能力矩阵（护栏 Tab 的「能力矩阵」表格数据，沿用三期矩阵条目）。 */
+const GUARDRAIL_ITEMS = [
+  { key: "routing.priority_failover", supported: true, since_version: "1.7.0", note: "分层故障转移", verified: false },
+  { key: "routing.weighted", supported: true, since_version: "1.7.0", note: "加权路由 (ADR-014)", verified: false },
+  { key: "routing.conditional", supported: true, since_version: "1.7.0", note: "条件路由 CEL (ADR-014)", verified: false },
+  { key: "auth.api_key_static", supported: true, since_version: "1.7.0", note: "静态密钥表", verified: false },
+  { key: "observe.request_log", supported: true, since_version: "1.7.0", note: "请求日志落自身 SQLite", verified: false },
+  { key: "config.hot_reload", supported: true, since_version: "1.7.0", note: "热加载；在飞影响待 P0-R2", verified: false },
+  { key: "usage.read_events", supported: true, since_version: "1.7.0", note: "SQLite 只读增量", verified: false },
+  { key: "health.eviction_params", supported: false, since_version: "", note: "健康驱逐参数不可配（简化模式，仅默认行为说明）", verified: false },
+  { key: "backends.session_affinity", supported: false, since_version: "", note: "会话亲和仅 backends 层级，简化模式不可配", verified: false },
+  { key: "health.fine_policies", supported: false, since_version: "", note: "精细健康策略仅 backends 层级，简化模式不可配", verified: false },
+];
+
+function guardrailPayload(): GuardrailsResponse {
+  return {
+    config: structuredClone(guardrailConfig),
+    defaults: structuredClone(DEFAULT_GUARDRAIL_CONFIG),
+    adapter: "agentgateway",
+    items: GUARDRAIL_ITEMS,
+    capabilities: {
+      regex: AG_POLICY_CAPABILITIES.guardrails_regex,
+      webhook: AG_POLICY_CAPABILITIES.guardrails_webhook,
+    },
+    note: "supported=False 为路线图说明而非今日可配置；verified=False 表示尚未经数据面实测",
+    updated_at_ms: guardrailUpdatedAt,
+  };
+}
+
+/** MCP 文档 {servers, port}；transports 能力按 AG 1.7 实测（sse/stdio 可用，http 拒收）。 */
+let mcpConfig: { servers: McpServerConfig[]; port: number | null } = {
+  servers: [
+    {
+      name: "docs-sse",
+      transport: "sse",
+      host: "https://mcp.example",
+      url: "",
+      port: 443,
+      path: "/sse",
+      cmd: "",
+      args: [],
+      env: {},
+    },
+  ],
+  port: null,
+};
+let mcpUpdatedAt = Date.parse("2026-11-17T01:05:12");
+
+const MCP_TRANSPORT_CAPABILITIES: McpServersResponse["transports"] = {
+  sse: { supported: true, verified: true, since_version: "1.7.0", note: "sse target 使用 host" },
+  stdio: { supported: true, verified: true, since_version: "1.7.0", note: "stdio target: cmd/args/env/clear_env，已 --validate-only 验证" },
+  http: { supported: false, verified: true, since_version: "", note: "pinned 1.7 拒绝 http 变体（no variant of enum LocalMcpTargetSpec）" },
 };
 
-const mcpServers: McpServersInfo = {
-  supported: false,
-  note: "AG v1.7 LLM 配置面不支持 MCP servers；本字段为前端预留，接入需升级数据面",
-  servers: [],
-};
+function mcpPayload(): McpServersResponse {
+  return {
+    servers: structuredClone(mcpConfig.servers),
+    port: mcpConfig.port,
+    defaults: { servers: [], port: null },
+    supported: true,
+    transports: MCP_TRANSPORT_CAPABILITIES,
+    note: "AG 1.7 支持顶层 mcp.targets[] + mcp.policies（sse/stdio；http 被 pinned 1.7 拒绝）；该形态已用 --validate-only 验证，targets 由 MCP 配置生成",
+    updated_at_ms: mcpUpdatedAt,
+  };
+}
 
 const settings: SettingItem[] = [
   { key: "base_currency", value: "CNY", label: "基准币", updated_at: "2026-11-15T09:00:00" },
@@ -577,6 +743,72 @@ const mockUsers: UserTreeNode[] = [
 /** mock 用户序号：创建新用户时递增（id eu_NN）。 */
 let mockUserSeq = mockUsers.length;
 
+// —— 角色管理（ADR-023 #4；契约 docs/api-contract.md：GET/POST/PATCH/DELETE /admin/roles） ——
+// 内存 admin_roles：与 lib/roles.ts 的 RoleDefinition 模型同形；member_count 按 mockUsers 实时计算，
+// 与后端 roles.member_count 同口径（删除有成员的角色会被拒）。
+const MOCK_AGENT_PERMISSIONS = [...MOCK_USER_PERMISSIONS, "users:create", "users:update", "billing:subtree"];
+/** 后端保留键：内置角色 + 历史别名（l05_service/rbac.py RESERVED_ROLE_KEYS）。 */
+const RESERVED_ROLE_KEYS = new Set(["admin", "user", "agent", "owner", "operator", "viewer"]);
+
+const adminRoles: RoleDefinition[] = [
+  {
+    id: "rol_admin",
+    key: "admin",
+    name: "管理用户",
+    description: "拥有全部权限，可维护角色、管理员与所有配置",
+    builtin: true,
+    all_permissions: true,
+    permissions: [...MOCK_ALL_PERMISSIONS],
+    member_count: 0,
+  },
+  {
+    id: "rol_user",
+    key: "user",
+    name: "普通用户",
+    description: "只读查看，可看自己的花费并试用模型",
+    builtin: true,
+    all_permissions: false,
+    permissions: [...MOCK_USER_PERMISSIONS],
+    member_count: 0,
+  },
+  {
+    id: "rol_agent",
+    key: "agent",
+    name: "代理用户",
+    description: "在普通用户基础上可创建下级并查看子树花费",
+    builtin: true,
+    all_permissions: false,
+    permissions: MOCK_AGENT_PERMISSIONS,
+    member_count: 0,
+  },
+  // 自定义角色示例：角色管理页用它演示「编辑/删除」入口（内置角色只有只读的「查看权限」）
+  {
+    id: "rol_custom_viewer",
+    key: "custom_viewer",
+    name: "运营观察员",
+    description: "示例自定义角色：只读权限子集，可编辑或删除",
+    builtin: false,
+    all_permissions: false,
+    permissions: MOCK_USER_PERMISSIONS.slice(0, 12),
+    member_count: 0,
+  },
+];
+
+/** 行内权限排序 + 成员数实时化（后端 role_payload 同构）。 */
+function rolePayload(row: RoleDefinition): RoleDefinition {
+  return {
+    ...row,
+    permissions: [...row.permissions].sort(),
+    member_count: mockUsers.filter((u) => u.status !== "deleted" && u.role === row.key).length,
+  };
+}
+
+function roleFromId(roleId: string): RoleDefinition {
+  const row = adminRoles.find((r) => r.id === roleId);
+  if (!row) throw new Error("角色不存在: " + roleId);
+  return row;
+}
+
 function ledgerFor(userId: string) {
   const base = 1200000000;
   return [
@@ -686,9 +918,6 @@ const routes: Array<[RegExp, unknown]> = [
   [/^\/admin\/unpriced$/, unpricedRows],
   [/^\/admin\/config\/revisions/, configRevisions],
   [/^\/admin\/audit-logs$/, { items: auditLogs, total: auditLogs.length }],
-  [/^\/admin\/policies$/, policies],
-  [/^\/admin\/guardrails$/, guardrails],
-  [/^\/admin\/mcp-servers$/, mcpServers],
   [/^\/admin\/admins$/, adminAccounts],
   [/^\/admin\/users$/, mockUsers],
   [/^\/admin\/settings\/schema$/, settingsSchema],
@@ -863,6 +1092,146 @@ export async function mockRequest<T>(path: string, init?: RequestInit): Promise<
       if (row) row.value = v;
     }
     return { values: body.values ?? {} } as T;
+  }
+  // —— GET /admin/connection（契约 §2.7）：统一连接地址，读 settings 里的 gateway_base_url ——
+  // 空串 = 未配置（前端回退浏览器 host + 3600）；editable 随 mock 会话权限走（真实后端同语义）。
+  if (init?.method === "GET" && routePath === "/admin/connection") {
+    const row = settings.find((item) => item.key === "gateway_base_url");
+    const base = row?.value ?? "";
+    return {
+      base_url: base,
+      configured: base.trim().length > 0,
+      default_port: 3600,
+      endpoints: ["/v1/chat/completions", "/v1/models", "/v1/embeddings"],
+      updated_at: base.trim().length > 0 ? row?.updated_at ?? "" : "",
+      editable: mockSession.permissions.includes("settings:write"),
+    } as T;
+  }
+  // —— 网关策略三文档（契约 §2.6）：GET/PUT/DELETE + validate；保存后由 POST /admin/config/apply 下发 ——
+  if (init?.method === "POST" && (routePath === "/admin/policies/validate" || routePath === "/admin/guardrails/validate" || routePath === "/admin/mcp-servers/validate")) {
+    // mock 演示：文档级 AG 校验始终通过（页面级成对校验已在前端拦截）
+    return { ok: true, errors: [], warnings: [] } as T;
+  }
+  if (init?.method === "GET" && routePath === "/admin/policies") {
+    return policyPayload() as T;
+  }
+  if (init?.method === "PUT" && routePath === "/admin/policies") {
+    const body = JSON.parse(String(init.body ?? "{}")) as { config?: PolicyConfig };
+    if (!body.config) throw new Error("body 必须是 {config}");
+    policyConfig = structuredClone(body.config);
+    policyUpdatedAt = Date.now();
+    return policyPayload() as T;
+  }
+  if (init?.method === "DELETE" && routePath === "/admin/policies") {
+    policyConfig = structuredClone(DEFAULT_POLICY_CONFIG);
+    policyUpdatedAt = 0;
+    return policyPayload() as T;
+  }
+  if (init?.method === "GET" && routePath === "/admin/guardrails") {
+    return guardrailPayload() as T;
+  }
+  if (init?.method === "PUT" && routePath === "/admin/guardrails") {
+    const body = JSON.parse(String(init.body ?? "{}")) as { config?: GuardrailConfig };
+    if (!body.config) throw new Error("body 必须是 {config}");
+    guardrailConfig = structuredClone(body.config);
+    guardrailUpdatedAt = Date.now();
+    return guardrailPayload() as T;
+  }
+  if (init?.method === "DELETE" && routePath === "/admin/guardrails") {
+    guardrailConfig = structuredClone(DEFAULT_GUARDRAIL_CONFIG);
+    guardrailUpdatedAt = 0;
+    return guardrailPayload() as T;
+  }
+  if (init?.method === "GET" && routePath === "/admin/mcp-servers") {
+    return mcpPayload() as T;
+  }
+  if (init?.method === "PUT" && routePath === "/admin/mcp-servers") {
+    const body = JSON.parse(String(init.body ?? "{}")) as { servers?: McpServerConfig[]; port?: number | null };
+    const servers = body.servers ?? [];
+    const names = servers.map((server) => server.name);
+    if (new Set(names).size !== names.length) throw new Error("MCP 服务器名称重复");
+    mcpConfig = { servers: structuredClone(servers), port: body.port ?? null };
+    mcpUpdatedAt = Date.now();
+    return mcpPayload() as T;
+  }
+  // 保存链终点：渲染/校验/下发 → 配置修订留档（config_revisions 列表同步可见）
+  if (init?.method === "POST" && routePath === "/admin/config/apply") {
+    const body = JSON.parse(String(init.body ?? "{}")) as { reason?: string };
+    const revision: ConfigRevision = {
+      id: "cr_" + String(configRevisions.length + 1).padStart(2, "0"),
+      artifact_hash: "h" + Math.random().toString(16).slice(2, 11),
+      adapter_id: "openai-chat",
+      operator: mockSession.username,
+      reason: body.reason ?? "网关策略下发",
+      status: "active",
+      previous_revision_id: configRevisions.find((r) => r.status === "active")?.id ?? null,
+      created_at_ms: Date.now(),
+    };
+    for (const row of configRevisions) {
+      if (row.status === "active") row.status = "superseded";
+    }
+    configRevisions.unshift(revision);
+    return { id: revision.id, status: revision.status, artifact_hash: revision.artifact_hash } as T;
+  }
+  // —— 角色 CRUD（契约：内置角色权限不可改、内置/有成员角色不可删，错误信息与后端同文） ——
+  if (init?.method === "GET" && routePath === "/admin/roles") {
+    return { items: adminRoles.map(rolePayload), total: adminRoles.length } as T;
+  }
+  if (init?.method === "POST" && routePath === "/admin/roles") {
+    const body = JSON.parse(String(init.body ?? "{}")) as {
+      name?: string; description?: string; permissions?: string[]; key?: string;
+    };
+    const name = (body.name ?? "").trim();
+    if (name.length === 0) throw new Error("角色名称不能为空");
+    if (name.length > 64) throw new Error("角色名称过长");
+    if (adminRoles.some((r) => r.name === name)) throw new Error("角色名称已存在: " + name);
+    let key = (body.key ?? "").trim();
+    if (key.length > 0) {
+      if (!/^[a-z][a-z0-9_]{2,31}$/.test(key)) {
+        throw new Error("角色标识须为 3-32 位小写字母/数字/下划线且以字母开头");
+      }
+      if (RESERVED_ROLE_KEYS.has(key) || adminRoles.some((r) => r.key === key)) {
+        throw new Error("角色标识已保留或存在: " + key);
+      }
+    } else {
+      key = "custom_" + Math.random().toString(16).slice(2, 10);
+    }
+    const created: RoleDefinition = {
+      id: "rol_" + Math.random().toString(16).slice(2, 10),
+      key,
+      name,
+      description: (body.description ?? "").trim().slice(0, 255),
+      builtin: false,
+      all_permissions: false,
+      permissions: [...new Set(body.permissions ?? [])],
+      member_count: 0,
+    };
+    adminRoles.push(created);
+    return rolePayload(created) as T;
+  }
+  if (init?.method === "PATCH" && /^\/admin\/roles\/[^/?]+$/.test(routePath)) {
+    const row = roleFromId(routePath.split("/")[3] ?? "");
+    const body = JSON.parse(String(init.body ?? "{}")) as {
+      name?: string; description?: string; permissions?: string[];
+    };
+    if (body.permissions !== undefined && row.builtin) throw new Error("内置角色的权限不可修改（" + row.key + "）");
+    if (body.name !== undefined) {
+      const name = body.name.trim();
+      if (name.length === 0) throw new Error("角色名称不能为空");
+      if (adminRoles.some((r) => r.id !== row.id && r.name === name)) throw new Error("角色名称已存在: " + name);
+      row.name = name;
+    }
+    if (body.description !== undefined) row.description = body.description.trim().slice(0, 255);
+    if (body.permissions !== undefined) row.permissions = [...new Set(body.permissions)];
+    return rolePayload(row) as T;
+  }
+  if (init?.method === "DELETE" && /^\/admin\/roles\/[^/?]+$/.test(routePath)) {
+    const row = roleFromId(routePath.split("/")[3] ?? "");
+    if (row.builtin) throw new Error("内置角色不可删除");
+    const used = rolePayload(row).member_count;
+    if (used > 0) throw new Error("仍有 " + used + " 个用户使用该角色，无法删除");
+    adminRoles.splice(adminRoles.indexOf(row), 1);
+    return { deleted: true } as T;
   }
   if (init?.method === "GET" && /\/admin\/users\/[^/]+\/ledger$/.test(routePath)) {
     const uid = routePath.split("/")[3] ?? "";
