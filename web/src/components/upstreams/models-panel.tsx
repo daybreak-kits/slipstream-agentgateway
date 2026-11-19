@@ -20,6 +20,7 @@ import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api, apiList, ENDPOINTS } from "@/lib/api";
+import { ACTION_ICONS } from "@/lib/icons";
 import { costText, markupText, MODEL_TYPE_OPTIONS, type UpstreamRow } from "./shared";
 import type { ModelParameters, UpstreamModel } from "@/types";
 
@@ -223,7 +224,8 @@ export function UpstreamModelsPanel({ upstream }: { upstream: UpstreamRow }) {
       accessorKey: "enabled",
       header: "状态",
       cell: (c) =>
-        c.row.original.enabled ? <Badge tone="success">启用</Badge> : <Badge tone="neutral">关闭</Badge>,
+        // 「关闭」语义色 warning（DESIGN-AUDIT 四期 §16 / W4-A1）：中性灰不表达「被人为停用」的警示。
+        c.row.original.enabled ? <Badge tone="success">启用</Badge> : <Badge tone="warning">关闭</Badge>,
     },
     {
       id: "probe",
@@ -237,8 +239,11 @@ export function UpstreamModelsPanel({ upstream }: { upstream: UpstreamRow }) {
         const row = c.row.original;
         return (
           <div className="flex flex-wrap gap-1">
-            <Button variant="ghost" size="dense" onClick={() => setDialog({ open: true, initial: row })}>编辑</Button>
+            <Button variant="ghost" size="dense" onClick={() => setDialog({ open: true, initial: row })}>
+              <ACTION_ICONS.edit className="h-3.5 w-3.5" /> 编辑
+            </Button>
             <Button variant="ghost" size="dense" disabled={toggle.isPending} onClick={() => toggle.mutate(row)}>
+              {row.enabled ? <ACTION_ICONS.disable className="h-3.5 w-3.5" /> : <ACTION_ICONS.enable className="h-3.5 w-3.5" />}
               {row.enabled ? "关闭" : "启用"}
             </Button>
             <Button
@@ -249,7 +254,7 @@ export function UpstreamModelsPanel({ upstream }: { upstream: UpstreamRow }) {
               title={(row.target_count ?? 0) > 0 ? "被公开模型成员引用，先移除成员再删除" : undefined}
               onClick={() => setDeleting(row)}
             >
-              删除
+              <ACTION_ICONS.delete className="h-3.5 w-3.5" /> 删除
             </Button>
           </div>
         );

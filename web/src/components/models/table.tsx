@@ -22,9 +22,9 @@ export interface ModelColumn<T> {
   label: string;
   header?: ReactNode;
   cell: (row: T) => ReactNode;
-  /** 追加到 td 的类（对齐/字号）；行高紧凑由表格统一收紧到 py-1.5。 */
+  /** 追加到 td 与 th 的类（对齐镜像，DESIGN-AUDIT 四期 §2：数值列 text-right tnum 头身同用）；行高紧凑由表格统一收紧到 py-1.5。 */
   className?: string;
-  /** 追加到 th 的类（宽度/对齐）。 */
+  /** 仅追加到 th 的覆盖通道（宽度/对齐覆写）。 */
   headerClassName?: string;
   hideable?: boolean;
 }
@@ -173,14 +173,19 @@ export function ModelsTable<T>({
           </DropdownMenu>
         </div>
       </div>
-      <TableWrap className="max-h-[65vh] overflow-y-auto rounded-lg border border-border bg-surface">
+      {/* 表体内部滚动（DESIGN-AUDIT 四期 §3/§9）：高度公式与 DataTable 一致（17rem 起步 + min-h-80 兜底）。 */}
+      <TableWrap className="max-h-[calc(100dvh-17rem)] min-h-80 overflow-y-auto rounded-lg border border-border bg-surface">
         <Table>
           <THead>
             <tr>
               {visibleColumns.map((col) => (
                 <TH
                   key={col.key}
-                  className={cn("sticky top-0 z-[var(--z-sticky)] bg-surface-2", col.headerClassName)}
+                  className={cn(
+                    "sticky top-0 z-[var(--z-sticky)] bg-surface-2",
+                    col.className,
+                    col.headerClassName,
+                  )}
                 >
                   {col.header ?? col.label}
                 </TH>

@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus } from "lucide-react";
+import type { ColumnDef } from "@tanstack/react-table";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
+import { DataTable } from "@/components/data-table";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,13 +19,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { Empty } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
-import { PAGE_SIZE_OPTIONS, Pagination } from "@/components/ui/pagination";
+import { PAGE_SIZE_OPTIONS } from "@/components/ui/pagination";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableWrap, TD, TH, THead, TR } from "@/components/ui/table";
 import { api, apiList, ENDPOINTS } from "@/lib/api";
+import { ACTION_ICONS } from "@/lib/icons";
 import { formatDateTime, useTimezone } from "@/lib/time";
 import { usePermissions } from "@/lib/permissions";
 import { API_STYLE_LABELS, probeStatusView, type ProbeResultView, type UpstreamRow } from "@/components/upstreams/shared";
@@ -213,6 +212,152 @@ export function UpstreamsPage() {
 
   const openEditor = (row: UpstreamRow) => navigate("/upstreams/" + row.id);
 
+  // 「无数据 / 无匹配」双空态：由筛选结果决定文案与 CTA（保持迁移前行为）。
+  const noMatch = allItems.length > 0 && rows.length === 0;
+
+  /** DataTable 列定义：对齐镜像走 meta.className（头身同用）；操作列冻结走 sticky right-0（四期 §2）。 */
+  const columns: ColumnDef<UpstreamRow, unknown>[] = [
+    {
+      id: "select",
+      enableSorting: false,
+      meta: { hideable: false },
+      header: () => (
+        <Checkbox
+          checked={allSelected ? true : someSelected ? "indeterminate" : false}
+          onCheckedChange={() => toggleAll()}
+          aria-label="全选当前页"
+        />
+      ),
+      cell: ({ row }) => (
+        // 阻止冒泡到行点击（整行进入编辑），勾选框只管选择。
+        <span className="block" onClick={(event) => event.stopPropagation()}>
+          <Checkbox
+            checked={selected.has(row.original.id)}
+            onCheckedChange={() => toggleRow(row.original.id)}
+            aria-label={"选择 " + row.original.name}
+          />
+        </span>
+      ),
+    },
+    {
+      id: "name",
+      accessorKey: "name",
+      header: "名称",
+      enableSorting: false,
+      cell: ({ row }) => {
+        const item = row.original;
+        return (
+          <div>
+            <div className="flex items-center gap-2">
+              <Link
+                to={"/upstreams/" + item.id}
+                className="font-medium text-primary-text hover:underline"
+                onClick={(event) => event.stopPropagation()}
+              >
+                {item.name}
+              </Link>
+              {!item.enabled ? <Badge tone="warning">已关闭</Badge> : null}
+            </div>
+            <div className="text-2xs text-faint">{vendorName(item.vendor_id)}</div>
+          </div>
+        );
+      },
+    },
+    {
+      id: "type",
+      accessorKey: "api_style",
+      header: "类型",
+      enableSorting: false,
+      cell: ({ row }) => (
+        <Badge tone="info">{API_STYLE_LABELS[row.original.api_style] ?? row.original.api_style}</Badge>
+      ),
+    },
+    {
+      id: "keyCount",
+      accessorKey: "key_count",
+      header: "密钥数",
+      enableSorting: false,
+      meta: { className: "text-right" },
+      cell: ({ row }) => <span className="tnum text-2sm">{row.original.key_count ?? 0}</span>,
+    },
+    {
+      id: "modelCount",
+      accessorKey: "model_count",
+      header: "模型数",
+      enableSorting: false,
+      meta: { className: "text-right" },
+      cell: ({ row }) => <span className="tnum text-2sm">{row.original.model_count ?? 0}</span>,
+    },
+    {
+      id: "probe",
+      header: "最近探测",
+      enableSorting: false,
+      cell: ({ row }) => {
+        const probe = row.original.last_probe;
+        if (!probe) return <span className="text-faint">—</span>;
+        const probeStatus = probeStatusView(probe.status);
+        return (
+          <div>
+            <div className="flex items-center gap-2">
+              <Badge tone={probeStatus.tone}>{probeStatus.label}</Badge>
+              <span className="tnum text-2xs text-body">{probe.latency_ms} ms</span>
+            </div>
+            <div className="tnum text-2xs text-faint">{formatDateTime(probe.tested_at_ms, timezone)}</div>
+          </div>
+        );
+      },
+    },
+    {
+      id: "actions",
+      header: "操作",
+      enableSorting: false,
+      meta: {
+        hideable: false,
+        // 操作列 = 最后一列 + 水平冻结（DESIGN-AUDIT 四期 §2）：sticky right-0 + 不透明底色 + 分割阴影。
+        className: "sticky right-0 bg-surface shadow-[inset_1px_0_0_var(--border)]",
+        thClassName: "bg-surface-2",
+      },
+      cell: ({ row }) => {
+        const item = row.original;
+        // 阻止冒泡到行点击：按钮动作不触发整行进入编辑。
+        return (
+          <div className="flex flex-wrap gap-1" onClick={(event) => event.stopPropagation()}>
+            <Button
+              variant="ghost"
+              size="dense"
+              disabled={toggle.isPending || !canWrite}
+              onClick={() => toggle.mutate(item)}
+            >
+              {item.enabled ? <ACTION_ICONS.disable className="h-3.5 w-3.5" /> : <ACTION_ICONS.enable className="h-3.5 w-3.5" />}
+              {item.enabled ? "关闭" : "启用"}
+            </Button>
+            <Button
+              variant="ghost"
+              size="dense"
+              disabled={test.isPending || !canWrite}
+              onClick={() => test.mutate(item)}
+            >
+              <ACTION_ICONS.testConnection className="h-3.5 w-3.5" />
+              {test.isPending && test.variables?.id === item.id ? "测试中…" : "测试连接"}
+            </Button>
+            <Button variant="ghost" size="dense" onClick={() => openEditor(item)}>
+              <ACTION_ICONS.edit className="h-3.5 w-3.5" /> 编辑
+            </Button>
+            <Button
+              variant="ghost"
+              size="dense"
+              className="text-danger-text"
+              disabled={!canWrite}
+              onClick={() => setDeleting(item)}
+            >
+              <ACTION_ICONS.delete className="h-3.5 w-3.5" /> 删除
+            </Button>
+          </div>
+        );
+      },
+    },
+  ];
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -238,178 +383,58 @@ export function UpstreamsPage() {
             <>
               <span className="text-2xs text-faint">已选 <span className="tnum font-medium text-title">{selected.size}</span></span>
               <Button variant="outline" size="sm" disabled={batch.isPending || !canWrite} onClick={() => batch.mutate({ ids: Array.from(selected), action: "enable" })}>
-                批量启用
+                <ACTION_ICONS.enable className="h-3.5 w-3.5" /> 批量启用
               </Button>
               <Button variant="outline" size="sm" disabled={batch.isPending || !canWrite} onClick={() => batch.mutate({ ids: Array.from(selected), action: "disable" })}>
-                批量关闭
+                <ACTION_ICONS.disable className="h-3.5 w-3.5" /> 批量关闭
               </Button>
               <Button variant="ghost" size="sm" className="text-danger-text" disabled={batch.isPending || !canWrite} onClick={() => setBatchDelete(true)}>
-                批量删除
+                <ACTION_ICONS.delete className="h-3.5 w-3.5" /> 批量删除
               </Button>
               <Button variant="ghost" size="sm" disabled={batch.isPending} onClick={() => setSelected(new Set())}>
-                清除选择
+                <ACTION_ICONS.clear className="h-3.5 w-3.5" /> 清除选择
               </Button>
             </>
           ) : null}
           <Button size="sm" disabled={!canWrite} onClick={() => navigate("/upstreams/new")}>
-            <Plus className="h-3.5 w-3.5" /> 新建上游渠道
+            <ACTION_ICONS.add className="h-3.5 w-3.5" /> 新建上游渠道
           </Button>
         </div>
       </div>
 
-      <TableWrap className="rounded-lg border border-border bg-surface">
-        <Table>
-          <THead>
-            <tr>
-              <TH className="w-10">
-                <Checkbox
-                  checked={allSelected ? true : someSelected ? "indeterminate" : false}
-                  onCheckedChange={() => toggleAll()}
-                  aria-label="全选当前页"
-                />
-              </TH>
-              <TH>名称</TH>
-              <TH>类型</TH>
-              <TH className="text-right">密钥数</TH>
-              <TH className="text-right">模型数</TH>
-              <TH>最近探测</TH>
-              <TH>操作</TH>
-            </tr>
-          </THead>
-          <tbody data-testid="upstream-table-body">
-            {q.isPending ? (
-              Array.from({ length: 5 }, (_, index) => (
-                <TR key={index}>
-                  {["w-10", "", "", "text-right", "text-right", "", ""].map((cell, cellIndex) => (
-                    <TD key={cellIndex} className={cell}>
-                      <Skeleton className="h-4 w-full max-w-32" />
-                    </TD>
-                  ))}
-                </TR>
-              ))
-            ) : q.isError ? (
-              <tr>
-                <td colSpan={7}>
-                  <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
-                    <p className="text-sm text-danger-text">加载失败：{(q.error as Error).message}</p>
-                    <Button variant="outline" size="sm" onClick={() => void q.refetch()}>重试</Button>
-                  </div>
-                </td>
-              </tr>
-            ) : allItems.length === 0 ? (
-              <tr>
-                <td colSpan={7}>
-                  <Empty
-                    title="暂无上游渠道"
-                    description="先建一个上游渠道：填连接地址、选协议风格（推荐自动探测）、登记第一把密钥。"
-                    action={canWrite ? (
-                      <Button size="sm" onClick={() => navigate("/upstreams/new")}>新建上游渠道</Button>
-                    ) : undefined}
-                  />
-                </td>
-              </tr>
-            ) : pagedRows.length === 0 ? (
-              <tr>
-                <td colSpan={7}>
-                  <Empty
-                    title="没有匹配的上游渠道"
-                    description="换个关键词，或清除筛选条件重试。"
-                    action={<Button variant="outline" size="sm" onClick={clearFilters}>清除筛选</Button>}
-                  />
-                </td>
-              </tr>
-            ) : (
-              pagedRows.map((row) => {
-                const probe = row.last_probe;
-                const probeStatus = probeStatusView(probe?.status);
-                return (
-                  <TR key={row.id} className="cursor-pointer transition-colors hover:bg-surface-2" onClick={() => openEditor(row)}>
-                    <TD onClick={(event) => event.stopPropagation()}>
-                      <Checkbox
-                        checked={selected.has(row.id)}
-                        onCheckedChange={() => toggleRow(row.id)}
-                        aria-label={"选择 " + row.name}
-                      />
-                    </TD>
-                    <TD onClick={(event) => event.stopPropagation()}>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <Link
-                            to={"/upstreams/" + row.id}
-                            className="font-medium text-primary-text hover:underline"
-                            onClick={(event) => event.stopPropagation()}
-                          >
-                            {row.name}
-                          </Link>
-                          {!row.enabled ? <Badge tone="neutral">已关闭</Badge> : null}
-                        </div>
-                        <div className="text-2xs text-faint">{vendorName(row.vendor_id)}</div>
-                      </div>
-                    </TD>
-                    <TD>
-                      <Badge tone="info">{API_STYLE_LABELS[row.api_style] ?? row.api_style}</Badge>
-                    </TD>
-                    <TD className="text-right"><span className="tnum text-2sm">{row.key_count ?? 0}</span></TD>
-                    <TD className="text-right"><span className="tnum text-2sm">{row.model_count ?? 0}</span></TD>
-                    <TD>
-                      {probe ? (
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <Badge tone={probeStatus.tone}>{probeStatus.label}</Badge>
-                            <span className="tnum text-2xs text-body">{probe.latency_ms} ms</span>
-                          </div>
-                          <div className="tnum text-2xs text-faint">{formatDateTime(probe.tested_at_ms, timezone)}</div>
-                        </div>
-                      ) : (
-                        <span className="text-faint">—</span>
-                      )}
-                    </TD>
-                    <TD onClick={(event) => event.stopPropagation()}>
-                      <div className="flex flex-wrap gap-1">
-                        <Button
-                          variant="ghost"
-                          size="dense"
-                          disabled={toggle.isPending || !canWrite}
-                          onClick={() => toggle.mutate(row)}
-                        >
-                          {row.enabled ? "关闭" : "启用"}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="dense"
-                          disabled={test.isPending || !canWrite}
-                          title={test.isPending && test.variables?.id === row.id ? "测试中…" : undefined}
-                          onClick={() => test.mutate(row)}
-                        >
-                          {test.isPending && test.variables?.id === row.id ? "测试中…" : "测试连接"}
-                        </Button>
-                        <Button variant="ghost" size="dense" onClick={() => openEditor(row)}>编辑</Button>
-                        <Button
-                          variant="ghost"
-                          size="dense"
-                          className="text-danger-text"
-                          disabled={!canWrite}
-                          onClick={() => setDeleting(row)}
-                        >
-                          删除
-                        </Button>
-                      </div>
-                    </TD>
-                  </TR>
-                );
-              })
-            )}
-          </tbody>
-        </Table>
-      </TableWrap>
-
-      <Pagination
-        page={currentPage}
-        pageSize={pageSize}
-        total={rows.length}
-        onPageChange={setPage}
-        onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
-        className="rounded-lg border border-border bg-surface"
+      {/* 裸表迁移到 DataTable（W4-A1）：列设置 + 持久化 + 内部滚动；分页/筛选行为保持不变 ——
+          页面自持 search/status 筛选与 page/pageSize 状态，经 server 分页模式只下发当前页。 */}
+      <DataTable
+        columns={columns}
+        data={pagedRows}
+        loading={q.isPending}
+        error={q.isError ? (q.error as Error).message : null}
+        onRetry={() => void q.refetch()}
+        emptyText={noMatch ? "没有匹配的上游渠道" : "暂无上游渠道"}
+        emptyDescription={
+          noMatch
+            ? "换个关键词，或清除筛选条件重试。"
+            : "先建一个上游渠道：填连接地址、选协议风格（推荐自动探测）、登记第一把密钥。"
+        }
+        emptyAction={
+          noMatch ? (
+            <Button variant="outline" size="sm" onClick={clearFilters}>清除筛选</Button>
+          ) : canWrite ? (
+            <Button size="sm" onClick={() => navigate("/upstreams/new")}>
+              <ACTION_ICONS.add className="h-3.5 w-3.5" /> 新建上游渠道
+            </Button>
+          ) : undefined
+        }
+        onRowClick={openEditor}
+        storageKey="slipstream.cols.upstreams"
+        paging={{
+          mode: "server",
+          offset: (currentPage - 1) * pageSize,
+          pageSize,
+          total: rows.length,
+          onOffsetChange: (offset) => setPage(Math.floor(offset / pageSize) + 1),
+          onPageSizeChange: (size) => setPageSize(size),
+        }}
       />
 
       <ConfirmDialog

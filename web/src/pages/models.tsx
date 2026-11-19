@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useSearchParams } from "react-router-dom";
-import { Copy } from "lucide-react";
 
 import { CooldownDialog, Field, PeriodicCooldownDialog } from "@/components/models/cooldown-dialogs";
 import {
@@ -26,6 +25,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs } from "@/components/ui/tabs";
 import { api, apiList, ENDPOINTS } from "@/lib/api";
 import { fmtCny, formatCount, fmtInt } from "@/lib/format";
+import { ACTION_ICONS } from "@/lib/icons";
 import { usePermissions } from "@/lib/permissions";
 import { SELECT_ALL_VALUE } from "@/lib/select-sentinels";
 import type {
@@ -685,19 +685,31 @@ function UpstreamTab() {
       headerClassName: "min-w-64",
       cell: (row: UpstreamModel) => (
         <div className="flex flex-wrap gap-1">
-          <Button variant="ghost" size="sm" onClick={() => setDialog({ open: true, initial: row })}>编辑</Button>
+          <Button variant="ghost" size="sm" onClick={() => setDialog({ open: true, initial: row })}>
+            <ACTION_ICONS.edit className="h-3.5 w-3.5" /> 编辑
+          </Button>
           {row.enabled ? (
-            <Button variant="ghost" size="sm" onClick={() => availability.mutate({ id: row.id, action: "disable" })}>关闭</Button>
+            <Button variant="ghost" size="sm" onClick={() => availability.mutate({ id: row.id, action: "disable" })}>
+              <ACTION_ICONS.disable className="h-3.5 w-3.5" /> 关闭
+            </Button>
           ) : (
-            <Button variant="ghost" size="sm" onClick={() => availability.mutate({ id: row.id, action: "enable" })}>启用</Button>
+            <Button variant="ghost" size="sm" onClick={() => availability.mutate({ id: row.id, action: "enable" })}>
+              <ACTION_ICONS.enable className="h-3.5 w-3.5" /> 启用
+            </Button>
           )}
           {isCooling(row) ? (
-            <Button variant="ghost" size="sm" onClick={() => availability.mutate({ id: row.id, action: "release" })}>解除冷却</Button>
+            <Button variant="ghost" size="sm" onClick={() => availability.mutate({ id: row.id, action: "release" })}>
+              <ACTION_ICONS.releaseCooldown className="h-3.5 w-3.5" /> 解除冷却
+            </Button>
           ) : (
-            <Button variant="ghost" size="sm" onClick={() => setCooldownFor(row)}>冷却</Button>
+            <Button variant="ghost" size="sm" onClick={() => setCooldownFor(row)}>
+              <ACTION_ICONS.cooldown className="h-3.5 w-3.5" /> 冷却
+            </Button>
           )}
           {canAvailability ? (
-            <Button variant="ghost" size="sm" onClick={() => setPeriodicFor({ id: row.id, title: "周期冷却 · " + row.name })}>周期</Button>
+            <Button variant="ghost" size="sm" onClick={() => setPeriodicFor({ id: row.id, title: "周期冷却 · " + row.name })}>
+              <ACTION_ICONS.periodic className="h-3.5 w-3.5" /> 周期
+            </Button>
           ) : null}
           <Button
             variant="ghost"
@@ -707,7 +719,7 @@ function UpstreamTab() {
             title={(row.target_count ?? 0) > 0 ? "被公开模型引用，先移除成员再删除" : undefined}
             onClick={() => setDeleting(row)}
           >
-            删除
+            <ACTION_ICONS.delete className="h-3.5 w-3.5" /> 删除
           </Button>
         </div>
       ),
@@ -723,13 +735,23 @@ function UpstreamTab() {
   const toolbarEnd = canWrite && selected.size > 0 ? (
     <>
       <span className="text-2xs text-faint">已选 <span className="tnum font-medium text-title">{selected.size}</span></span>
-      <Button variant="outline" size="sm" disabled={batch.isPending} onClick={() => runBatch("enable")}>批量启用</Button>
-      <Button variant="outline" size="sm" disabled={batch.isPending} onClick={() => runBatch("disable")}>批量关闭</Button>
+      <Button variant="outline" size="sm" disabled={batch.isPending} onClick={() => runBatch("enable")}>
+        <ACTION_ICONS.enable className="h-3.5 w-3.5" /> 批量启用
+      </Button>
+      <Button variant="outline" size="sm" disabled={batch.isPending} onClick={() => runBatch("disable")}>
+        <ACTION_ICONS.disable className="h-3.5 w-3.5" /> 批量关闭
+      </Button>
       {canCost ? (
-        <Button variant="outline" size="sm" onClick={() => setBatchPrice(true)}>批量改价</Button>
+        <Button variant="outline" size="sm" onClick={() => setBatchPrice(true)}>
+          <ACTION_ICONS.batchPrice className="h-3.5 w-3.5" /> 批量改价
+        </Button>
       ) : null}
-      <Button variant="ghost" size="sm" className="text-danger-text" disabled={batch.isPending} onClick={() => setBatchDelete(true)}>批量删除</Button>
-      <Button variant="ghost" size="sm" disabled={batch.isPending} onClick={() => setSelected(new Set())}>清除选择</Button>
+      <Button variant="ghost" size="sm" className="text-danger-text" disabled={batch.isPending} onClick={() => setBatchDelete(true)}>
+        <ACTION_ICONS.delete className="h-3.5 w-3.5" /> 批量删除
+      </Button>
+      <Button variant="ghost" size="sm" disabled={batch.isPending} onClick={() => setSelected(new Set())}>
+        <ACTION_ICONS.clear className="h-3.5 w-3.5" /> 清除选择
+      </Button>
     </>
   ) : null;
 
@@ -902,7 +924,7 @@ function MemberEditor({
             setPick("");
           }}
         >
-          添加成员
+          <ACTION_ICONS.add className="h-3.5 w-3.5" /> 添加成员
         </Button>
         <span className="text-2xs text-faint">priority 数值小优先；weighted 用 weight 整数比例。</span>
       </div>
@@ -915,7 +937,9 @@ function MemberEditor({
               <Input className="col-span-2" inputMode="numeric" placeholder="priority" value={member.priority} onChange={(e) => update(index, { priority: e.target.value })} />
               <Input className="col-span-2" inputMode="numeric" placeholder="weight" value={member.weight} disabled={mode !== "weighted"} onChange={(e) => update(index, { weight: e.target.value })} />
               <Input className="col-span-3" placeholder="when 条件" value={member.when} disabled={mode !== "conditional"} onChange={(e) => update(index, { when: e.target.value })} />
-              <Button variant="ghost" size="sm" className="col-span-1 text-danger-text" onClick={() => onChange(members.filter((_, i) => i !== index))}>移除</Button>
+              <Button variant="ghost" size="sm" className="col-span-1 text-danger-text" onClick={() => onChange(members.filter((_, i) => i !== index))}>
+                <ACTION_ICONS.clear className="h-3.5 w-3.5" /> 移除
+              </Button>
             </div>
           );
         })}
@@ -1212,6 +1236,8 @@ function PublicTab() {
     {
       key: "members",
       label: "成员",
+      // 数值列右对齐（对齐镜像：className 头身同用，DESIGN-AUDIT 四期 §2）。
+      className: "text-right tnum",
       cell: (row) => {
         const targets = row.targets ?? [];
         const names = targets.slice(0, 3).map((t) => t.upstream_model_name || t.upstream_model_id).filter((name) => Boolean(name));
@@ -1251,24 +1277,40 @@ function PublicTab() {
             title="复制公开名"
             onClick={() => void copyText(row.name)}
           >
-            <Copy className="h-3.5 w-3.5" />
+            <ACTION_ICONS.copy className="h-3.5 w-3.5" />
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => setMembersFor(row)}>成员</Button>
-          <Button variant="ghost" size="sm" onClick={() => setDialog({ open: true, initial: row })}>编辑</Button>
+          <Button variant="ghost" size="sm" onClick={() => setMembersFor(row)}>
+            <ACTION_ICONS.members className="h-3.5 w-3.5" /> 成员
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setDialog({ open: true, initial: row })}>
+            <ACTION_ICONS.edit className="h-3.5 w-3.5" /> 编辑
+          </Button>
           {row.enabled ? (
-            <Button variant="ghost" size="sm" onClick={() => availability.mutate({ id: row.id, action: "disable" })}>关闭</Button>
+            <Button variant="ghost" size="sm" onClick={() => availability.mutate({ id: row.id, action: "disable" })}>
+              <ACTION_ICONS.disable className="h-3.5 w-3.5" /> 关闭
+            </Button>
           ) : (
-            <Button variant="ghost" size="sm" onClick={() => availability.mutate({ id: row.id, action: "enable" })}>启用</Button>
+            <Button variant="ghost" size="sm" onClick={() => availability.mutate({ id: row.id, action: "enable" })}>
+              <ACTION_ICONS.enable className="h-3.5 w-3.5" /> 启用
+            </Button>
           )}
           {isCooling(row) ? (
-            <Button variant="ghost" size="sm" onClick={() => availability.mutate({ id: row.id, action: "release" })}>解除冷却</Button>
+            <Button variant="ghost" size="sm" onClick={() => availability.mutate({ id: row.id, action: "release" })}>
+              <ACTION_ICONS.releaseCooldown className="h-3.5 w-3.5" /> 解除冷却
+            </Button>
           ) : (
-            <Button variant="ghost" size="sm" onClick={() => setCooldownFor(row)}>冷却</Button>
+            <Button variant="ghost" size="sm" onClick={() => setCooldownFor(row)}>
+              <ACTION_ICONS.cooldown className="h-3.5 w-3.5" /> 冷却
+            </Button>
           )}
           {canAvailability ? (
-            <Button variant="ghost" size="sm" onClick={() => setPeriodicFor({ id: row.id, title: "周期冷却 · " + row.name })}>周期</Button>
+            <Button variant="ghost" size="sm" onClick={() => setPeriodicFor({ id: row.id, title: "周期冷却 · " + row.name })}>
+              <ACTION_ICONS.periodic className="h-3.5 w-3.5" /> 周期
+            </Button>
           ) : null}
-          <Button variant="ghost" size="sm" className="text-danger-text" onClick={() => setDeleting(row)}>删除</Button>
+          <Button variant="ghost" size="sm" className="text-danger-text" onClick={() => setDeleting(row)}>
+            <ACTION_ICONS.delete className="h-3.5 w-3.5" /> 删除
+          </Button>
         </div>
       ),
     } as ModelColumn<PublicModel>] : []),
@@ -1283,10 +1325,18 @@ function PublicTab() {
   const toolbarEnd = canWrite && selected.size > 0 ? (
     <>
       <span className="text-2xs text-faint">已选 <span className="tnum font-medium text-title">{selected.size}</span></span>
-      <Button variant="outline" size="sm" disabled={batch.isPending} onClick={() => runBatch("enable")}>批量启用</Button>
-      <Button variant="outline" size="sm" disabled={batch.isPending} onClick={() => runBatch("disable")}>批量关闭</Button>
-      <Button variant="ghost" size="sm" className="text-danger-text" disabled={batch.isPending} onClick={() => setBatchDelete(true)}>批量删除</Button>
-      <Button variant="ghost" size="sm" disabled={batch.isPending} onClick={() => setSelected(new Set())}>清除选择</Button>
+      <Button variant="outline" size="sm" disabled={batch.isPending} onClick={() => runBatch("enable")}>
+        <ACTION_ICONS.enable className="h-3.5 w-3.5" /> 批量启用
+      </Button>
+      <Button variant="outline" size="sm" disabled={batch.isPending} onClick={() => runBatch("disable")}>
+        <ACTION_ICONS.disable className="h-3.5 w-3.5" /> 批量关闭
+      </Button>
+      <Button variant="ghost" size="sm" className="text-danger-text" disabled={batch.isPending} onClick={() => setBatchDelete(true)}>
+        <ACTION_ICONS.delete className="h-3.5 w-3.5" /> 批量删除
+      </Button>
+      <Button variant="ghost" size="sm" disabled={batch.isPending} onClick={() => setSelected(new Set())}>
+        <ACTION_ICONS.clear className="h-3.5 w-3.5" /> 清除选择
+      </Button>
     </>
   ) : null;
 

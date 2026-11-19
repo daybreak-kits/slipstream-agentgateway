@@ -52,9 +52,9 @@ export interface PriceColumn<T> {
   label: string;
   header?: ReactNode;
   cell: (row: T) => ReactNode;
-  /** 追加到 td 的类（右对齐/tnum 等）；行高紧凑由表格统一收紧到 py-1.5。 */
+  /** 追加到 td 与 th 的类（对齐镜像，DESIGN-AUDIT 四期 §2：数值列 text-right tnum 头身同用）；行高紧凑由表格统一收紧到 py-1.5。 */
   className?: string;
-  /** 追加到 th 的类（对齐/宽度）。 */
+  /** 仅追加到 th 的覆盖通道（对齐/宽度覆写）。 */
   headerClassName?: string;
   hideable?: boolean;
   /** 可排序列（DESIGN-AUDIT §2）：点击表头循环 升 → 降 → 取消。 */
@@ -197,7 +197,8 @@ export function PriceTable<T>({
           </DropdownMenu>
         </div>
       </div>
-      <TableWrap className="max-h-[65vh] overflow-y-auto rounded-lg border border-border bg-surface">
+      {/* 表体内部滚动（DESIGN-AUDIT 四期 §3/§9）：高度公式与 DataTable 一致（17rem 起步 + min-h-80 兜底）。 */}
+      <TableWrap className="max-h-[calc(100dvh-17rem)] min-h-80 overflow-y-auto rounded-lg border border-border bg-surface">
         <Table>
           <THead>
             <tr>
@@ -208,6 +209,7 @@ export function PriceTable<T>({
                   className={cn(
                     "sticky top-0 z-[var(--z-sticky)] bg-surface-2",
                     col.sortable && col.sortValue && "cursor-pointer hover:text-body",
+                    col.className,
                     col.headerClassName,
                   )}
                 >

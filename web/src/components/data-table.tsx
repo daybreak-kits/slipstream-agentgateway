@@ -1,10 +1,11 @@
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   flexRender, getCoreRowModel, getFilteredRowModel, getPaginationRowModel,
   getSortedRowModel, useReactTable, type ColumnDef, type SortingState,
 } from "@tanstack/react-table";
 import { ArrowDown, ArrowUp, Settings2 } from "lucide-react";
 
+import { ACTION_ICONS } from "@/lib/icons";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem,
@@ -25,22 +26,42 @@ const EMPTY_ROWS: never[] = [];
 /** 单元格/表头渲染函数。 */
 type CellRenderer = (context: unknown) => ReactNode;
 
+/** 与 TanStack 列 id 同口径解析列定义 id（table-core createColumn）：
+ * 显式 id 优先，其次 accessorKey（"." 置换为 "_"），再次字符串表头；accessorFn 无 id 会被 TanStack 拒绝。 */
+function columnDefId(def: unknown, index: number): string {
+  const d = def as { id?: unknown; accessorKey?: unknown; header?: unknown };
+  if (typeof d.id === "string" && d.id.length > 0) return d.id;
+  if (typeof d.accessorKey === "string" && d.accessorKey.length > 0) {
+    return typeof String.prototype.replaceAll === "function"
+      ? d.accessorKey.replaceAll(".", "_")
+      : d.accessorKey.replace(/\./g, "_");
+  }
+  if (typeof d.header === "string" && d.header.length > 0) return d.header;
+  return String(index);
+}
+
 /** 列定义里的 cell/header 通常是页面里新建的行内箭头函数：每次渲染身份都变。
  * flexRender 会把函数当作组件类型渲染，函数身份一变 React 就卸载并重建整个单元格子树——
  * 单元格里的输入框会在每次输入时被替换（价目管理的成本单价输入框因此每敲一个字符就丢焦点，
- * 没法连续输入）。这里按「用途 + 列位置」缓存稳定的包装组件，内部始终调用最新的列定义，
- * 从而让 React 只更新内容、不重建 DOM。 */
+ * 没法连续输入）。这里按「用途 + 列 id」缓存稳定的包装组件，内部始终调用最新的列定义，
+ * 从而让 React 只更新内容、不重建 DOM。
+ * 缓存键与查找都用列 id，不用可见列下标：column.getIndex() 取的是可见列下标，
+ * 隐藏列后其后所有列的下标整体前移，按下标取列定义会让这些列渲染到别的列的内容
+ * （W4-A1 冒烟实测：隐藏「最近探测」后操作列整列渲染成探测列）。 */
 function stableColumnRenderer(
   cache: Map<string, CellRenderer>,
   latestColumns: { current: unknown[] },
   kind: "header" | "cell",
-  index: number,
+  columnId: string,
 ): CellRenderer {
-  const cacheKey = kind + ":" + index;
+  const cacheKey = kind + ":" + columnId;
   const cached = cache.get(cacheKey);
   if (cached) return cached;
   const renderer: CellRenderer = (context) => {
-    const column = latestColumns.current[index] as Record<string, unknown> | undefined;
+    const index = latestColumns.current.findIndex(
+      (def, i) => columnDefId(def, i) === columnId,
+    );
+    const column = index >= 0 ? (latestColumns.current[index] as Record<string, unknown> | undefined) : undefined;
     const render = column ? column[kind] : undefined;
     if (typeof render === "function") return (render as CellRenderer)(context);
     return (render as ReactNode) ?? null;
@@ -82,6 +103,18 @@ export type DataTablePaging =
       onPageSizeChange: (pageSize: number) => void;
     };
 
+/** 列定义 meta 契约：对齐/冻结类头身同用 + th 覆盖通道 + 列设置菜单信息（DESIGN-AUDIT 四期 §2/§6）。 */
+export interface DataTableMeta {
+  /** 同时上 th 与 td：数值列对齐（text-right tnum）、操作列冻结（sticky right-0 + 不透明底色 + 分割阴影）。 */
+  className?: string;
+  /** 仅上 th 的覆盖通道（如冻结列表头底色需跟随表头行而非表体行）。 */
+  thClassName?: string;
+  /** 列设置菜单的展示名（表头为函数/自定义节点时用它补充）。 */
+  label?: string;
+  /** false = 不进列设置菜单（勾选列等固定列）。 */
+  hideable?: boolean;
+}
+
 interface DataTableProps<T> {
   columns: ColumnDef<T, unknown>[];
   data: T[] | undefined;
@@ -91,9 +124,13 @@ interface DataTableProps<T> {
   /** 错误态重试回调；配合 error 使用 */
   onRetry?: () => void;
   emptyText?: string;
+  /** 空态补充说明；区分「无数据 / 无匹配」双空态文案时配合 emptyText 使用 */
+  emptyDescription?: string;
   /** 空态主操作（CTA），如「新建上游」 */
   emptyAction?: ReactNode;
   filterPlaceholder?: string;
+  /** 行点击回调（如上游列表整行进入编辑）；传入后行加 cursor-pointer */
+  onRowClick?: (row: T) => void;
   /** 初始每页条数，档位来自后端（默认 50）；仅 client 模式生效 */
   pageSize?: (typeof PAGE_SIZE_OPTIONS)[number];
   /** 不传等价于 `{mode:"client"}`，保持既有页面行为不变 */
@@ -106,8 +143,8 @@ interface DataTableProps<T> {
 
 /** 全站统一的表格封装：排序 / 全局筛选 / 分页 / 空态 / 加载骨架。 */
 export function DataTable<T>({
-  columns, data, loading = false, error, onRetry, emptyText = "暂无数据", emptyAction, filterPlaceholder,
-  pageSize = 50, paging, storageKey, columnLabels,
+  columns, data, loading = false, error, onRetry, emptyText = "暂无数据", emptyDescription, emptyAction,
+  filterPlaceholder, onRowClick, pageSize = 50, paging, storageKey, columnLabels,
 }: DataTableProps<T>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = useState("");
@@ -123,8 +160,8 @@ export function DataTable<T>({
   const latestColumnsRef = useRef<ColumnDef<T, unknown>[]>(columns);
   latestColumnsRef.current = columns;
   const renderersRef = useRef(new Map<string, CellRenderer>());
-  const renderHeader = (index: number) => stableColumnRenderer(renderersRef.current, latestColumnsRef, "header", index);
-  const renderCell = (index: number) => stableColumnRenderer(renderersRef.current, latestColumnsRef, "cell", index);
+  const renderHeader = (columnId: string) => stableColumnRenderer(renderersRef.current, latestColumnsRef, "header", columnId);
+  const renderCell = (columnId: string) => stableColumnRenderer(renderersRef.current, latestColumnsRef, "cell", columnId);
 
   const serverPageIndex = serverPaging
     ? Math.floor(serverPaging.offset / Math.max(1, serverPaging.pageSize))
@@ -156,14 +193,15 @@ export function DataTable<T>({
     initialState: serverPaging ? undefined : { pagination: { pageSize } },
   });
 
-  // 列设置菜单的可隐藏列：排除操作列（id=actions）与 meta.hideable=false 的列；
+  // 列设置菜单的可隐藏列：取全部叶子列（含已隐藏的，否则隐藏列会从菜单消失、勾不回来），
+  // 排除操作列（id=actions）与 meta.hideable=false 的列；
   // 表头为函数时用 meta.label / columnLabels 补展示名，都没有则不进菜单。
+  // 注意与 storageKey 解耦：可隐列是否存在只看列定义本身，菜单是否渲染、是否告警才看 storageKey。
   const hideableColumns = useMemo(() => {
-    if (!storageKey) return [] as Array<{ id: string; label: string }>;
     const result: Array<{ id: string; label: string }> = [];
-    for (const column of table.getVisibleLeafColumns()) {
+    for (const column of table.getAllLeafColumns()) {
       if (column.id === "actions") continue;
-      const meta = column.columnDef.meta as { label?: string; hideable?: boolean } | undefined;
+      const meta = column.columnDef.meta as DataTableMeta | undefined;
       if (meta?.hideable === false) continue;
       const header = column.columnDef.header;
       const label =
@@ -173,7 +211,19 @@ export function DataTable<T>({
       if (label) result.push({ id: column.id, label });
     }
     return result;
-  }, [storageKey, columnLabels, table]);
+  }, [columnLabels, table]);
+
+  // 列设置强制（DESIGN-AUDIT 四期 §10）：有可隐藏列却不给 storageKey，勾选状态会静默不持久化。
+  // 不直接禁用，只在本实例首个命中时 console.warn 一次，提醒接入页补 key（A2 扫尾票清零）。
+  const warnedNoStorageKey = useRef(false);
+  useEffect(() => {
+    if (storageKey === undefined && hideableColumns.length > 0 && !warnedNoStorageKey.current) {
+      warnedNoStorageKey.current = true;
+      console.warn(
+        '[DataTable] 该表格存在可隐藏列但未传 storageKey：列设置不会持久化（刷新即丢）。请传 storageKey="slipstream.cols.<page>"。',
+      );
+    }
+  }, [storageKey, hideableColumns]);
 
   const toggleColumn = (id: string) => {
     setHiddenCols((prev) => {
@@ -189,7 +239,8 @@ export function DataTable<T>({
 
   return (
     <div className="space-y-2">
-      {(filterPlaceholder !== undefined && serverPaging === undefined) || hideableColumns.length > 0 ? (
+      {(filterPlaceholder !== undefined && serverPaging === undefined) ||
+      (storageKey !== undefined && hideableColumns.length > 0) ? (
         <div className="flex flex-wrap items-center gap-2">
           {filterPlaceholder !== undefined && serverPaging === undefined ? (
             <Input
@@ -199,7 +250,7 @@ export function DataTable<T>({
               className="max-w-64"
             />
           ) : null}
-          {hideableColumns.length > 0 ? (
+          {storageKey !== undefined && hideableColumns.length > 0 ? (
             <div className="ml-auto">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -227,7 +278,9 @@ export function DataTable<T>({
           ) : null}
         </div>
       ) : null}
-      <TableWrap className="rounded-lg border border-border bg-surface">
+      {/* 表体内部滚动（DESIGN-AUDIT 四期 §3/§9）：滚动区高度自适应视口（起步公式 17rem，配 min-h-80 兜底），
+          表头在该容器内吸顶；筛选行、工具行、分页条都在滚动区外常驻。 */}
+      <TableWrap className="max-h-[calc(100dvh-17rem)] min-h-80 overflow-y-auto rounded-lg border border-border bg-surface">
         <Table>
           <THead>
             {table.getHeaderGroups().map((hg) => (
@@ -235,17 +288,20 @@ export function DataTable<T>({
                 {hg.headers.map((header) => {
                   const canSort = header.column.getCanSort();
                   const dir = header.column.getIsSorted();
+                  const meta = header.column.columnDef.meta as DataTableMeta | undefined;
                   return (
                     <TH
                       key={header.id}
                       onClick={canSort ? header.column.getToggleSortingHandler() : undefined}
                       className={cn(
+                        "sticky top-0 z-[var(--z-sticky)] bg-surface-2",
                         canSort && "cursor-pointer hover:text-body",
-                        (header.column.columnDef.meta as { className?: string } | undefined)?.className,
+                        meta?.className,
+                        meta?.thClassName,
                       )}
                     >
                       <span className="inline-flex items-center gap-1">
-                        {flexRender(renderHeader(header.column.getIndex()), header.getContext())}
+                        {flexRender(renderHeader(header.column.id), header.getContext())}
                         {dir === "asc" && <ArrowUp className="h-3 w-3" />}
                         {dir === "desc" && <ArrowDown className="h-3 w-3" />}
                       </span>
@@ -262,7 +318,7 @@ export function DataTable<T>({
                   {table.getVisibleLeafColumns().map((col) => (
                     <TD
                       key={col.id}
-                      className={(col.columnDef.meta as { className?: string } | undefined)?.className}
+                      className={(col.columnDef.meta as DataTableMeta | undefined)?.className}
                     >
                       <Skeleton className="h-4 w-full max-w-40" />
                     </TD>
@@ -276,7 +332,7 @@ export function DataTable<T>({
                     <p className="text-sm text-danger-text">加载失败：{error}</p>
                     {onRetry && (
                       <Button variant="outline" size="sm" onClick={onRetry}>
-                        重试
+                        <ACTION_ICONS.refresh className="h-3.5 w-3.5" /> 重试
                       </Button>
                     )}
                   </div>
@@ -285,18 +341,22 @@ export function DataTable<T>({
             ) : table.getRowModel().rows.length === 0 ? (
               <tr>
                 <td colSpan={table.getVisibleLeafColumns().length}>
-                  <Empty text={emptyText} action={emptyAction} />
+                  <Empty text={emptyText} description={emptyDescription} action={emptyAction} />
                 </td>
               </tr>
             ) : (
               table.getRowModel().rows.map((row) => (
-                <TR key={row.id}>
+                <TR
+                  key={row.id}
+                  className={onRowClick ? "cursor-pointer" : undefined}
+                  onClick={onRowClick ? () => onRowClick(row.original) : undefined}
+                >
                   {row.getVisibleCells().map((cell) => (
                     <TD
                       key={cell.id}
-                      className={(cell.column.columnDef.meta as { className?: string } | undefined)?.className}
+                      className={(cell.column.columnDef.meta as DataTableMeta | undefined)?.className}
                     >
-                      {flexRender(renderCell(cell.column.getIndex()), cell.getContext())}
+                      {flexRender(renderCell(cell.column.id), cell.getContext())}
                     </TD>
                   ))}
                 </TR>

@@ -121,7 +121,10 @@ export function Pagination({
       aria-label="分页"
       data-slot="pagination"
       className={cn(
-        "flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-border px-4 py-3",
+        // relative 是实现红线（DESIGN-AUDIT §4）：sr-only 状态段是 position:absolute，
+        // 父级不带 relative 时包含块逃逸到根元素，长页面会把 html scrollHeight 顶到内容底部，
+        // 整个窗口变成可滚动且滚下去全是空白。
+        "relative flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-border px-4 py-3",
         className,
       )}
     >

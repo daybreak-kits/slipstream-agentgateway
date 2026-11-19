@@ -46,6 +46,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Spinner } from "@/components/ui/spinner";
 import { api, apiList, ENDPOINTS } from "@/lib/api";
 import { fmtInt, fmtMoney6, fmtPct, fmtSeconds } from "@/lib/format";
+import { ACTION_ICONS } from "@/lib/icons";
 import { usePermissions } from "@/lib/permissions";
 import { SELECT_ALL_VALUE } from "@/lib/select-sentinels";
 import { formatDateTime, useTimezone, type TimezoneMode } from "@/lib/time";
@@ -305,6 +306,7 @@ export function LogsPage() {
           />
           <QuerySyntaxHelp />
           <Button type="button" variant="ghost" onClick={reset}>
+            <ACTION_ICONS.restore className="h-3.5 w-3.5" />
             重置
           </Button>
           <Button type="submit" variant="primary">
@@ -348,6 +350,7 @@ export function LogsPage() {
             description="换个时间范围，或清除筛选查看全部记录。"
             action={
               <Button variant="outline" size="sm" onClick={reset}>
+                <ACTION_ICONS.clear className="h-3.5 w-3.5" />
                 清除筛选
               </Button>
             }
@@ -581,6 +584,7 @@ function buildLogColumns(spec: LogColumnSpec): ColumnDef<LogRow, unknown>[] {
           aria-label={"查看 " + row.original.event_id + " 详情"}
           onClick={() => onOpen(row.original)}
         >
+          <ACTION_ICONS.view className="h-3.5 w-3.5" />
           详情
         </Button>
       ),

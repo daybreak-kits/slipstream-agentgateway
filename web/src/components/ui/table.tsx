@@ -17,6 +17,8 @@ export function THead({ className, ...rest }: HTMLAttributes<HTMLTableSectionEle
 export function TH({ className, ...rest }: ThHTMLAttributes<HTMLTableCellElement>) {
   return (
     <th
+      // 对齐镜像（DESIGN-AUDIT 四期 §2）：默认 text-left；列定义传 text-right / text-center
+      // 等对齐类时经 cn（tailwind-merge）覆盖默认值，供「头身同用」的列定义保证表头与表体同侧对齐。
       className={cn("h-9 select-none px-3 text-left text-2xs font-medium text-faint", className)}
       {...rest}
     />
