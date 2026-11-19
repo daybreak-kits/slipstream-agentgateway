@@ -439,3 +439,15 @@
 **理由**：归属错位会让运营在公开模型上误设冷却（实际生效的是成员引用的上游模型），语义混乱；合并入口减少认知负担；AG 数据面健康/驱逐本来就作用在上游后端一侧，语义自洽。
 
 **后果**：models.tsx 公开模型表移除冷却/周期按钮及其弹窗；上游模型冷却 UI 重做为双模式弹窗；后端 availability API 不变（仍按 upstream_model_id 挂规则）；GLOSSARY §3 已同步。
+
+## ADR-026 多密钥平权：每把上游密钥展开为一个独立 AG 上游
+
+- 状态：已定（2026-11-19 用户裁决；废除「主密钥」概念，推翻 upstream_keys.is_primary + upstreams.api_key_enc 镜像机制）
+
+**背景**：控制面此前把「一个上游=一把生效密钥」焊死（provider 名=upstream.id、数据面只吃镜像主密钥、备用密钥是死库存）。用户裁定：用户给一个上游添加 ABC 3 把密钥，适配层就应展开成 3 个 AG 上游（每把一个 key_file），用户视角仍是一个上游。审计确认：AG/validate/渲染层对「同 baseUrl 多 provider、各挂不同 key_file」已支持且在生产配置跑通（zai-01/02/03 同 baseUrl 3 provider）；焊死点仅在 provider 命名、llm.models 引用与镜像逻辑三处。
+
+**决策**：① 密钥平权——每把密钥渲染为独立 provider（名 `{upstream_id}#{key_seq}`），路由参与为**同层平权分流**（AG P2C，坏密钥由健康驱逐淘汰；Q2a）。② 删除 is_primary 与镜像：`upstreams.api_key_enc` 退役（迁移清空）、`set_primary`/`rotate` 端点与「主密钥」UI 全部移除。③ 测试连接改**逐把测**，结果落在密钥行（失效标红）；获取上游模型用任一成功密钥。④ 冷却/关闭仍挂逻辑上游整体（作用于全部密钥 provider）。⑤ 展开语义（同名模型跨 provider 的 failover/分流）以 E18 实验钉死后合入；渲染/validate/契约/golden 同步更新。
+
+**理由**：多账号密钥的价值就是分流与互备，锁死一把让其余 19 把成为摆设；AG 原生多 provider 使改动封在适配层（ADR-001），上层无感。
+
+**后果**：upstream_ops.py 重写密钥 CRUD（去 mirror/rotate/set_primary）；rendering/render.py 加密钥维度展开；contract.ts 重生成（UpstreamKey 形状变化）；keys-panel UI 重做（失效标红+批量删除+去主密钥标记）；迁移脚本清空 api_key_enc；E18 实验先行。
