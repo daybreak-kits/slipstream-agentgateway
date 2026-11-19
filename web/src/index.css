@@ -216,8 +216,10 @@
   /* z-index 五档（旧标准另有两档：表格吸顶列 5、全局搜索 60） */
   --z-sticky: 10;
   --z-topbar: 30;
-  --z-popover: 40;
   --z-modal: 50;
+  /* 弹层（Select/Dropdown/Popover/Tooltip）必须浮在 Dialog 之上：对话框内的
+     下拉若低于 modal 遮罩会被遮罩拦截点击（W6 验收实测），故高于 modal、低于 toast。 */
+  --z-popover: 60;
   --z-toast: 70;
 
   /* shadcn 别名层（.dark 同元素覆盖自动跟随） */

@@ -136,9 +136,9 @@ check("index.css：图表 16 槽色板（浅色 + 深色独立亮度集）", () 
   }
 });
 
-check("index.css：z-index 五档（sticky/topbar/popover/modal/toast）", () => {
+check("index.css：z-index 五档（sticky/topbar/popover/modal/toast；popover 高于 modal：Dialog 内下拉需浮在遮罩上，W6 验收修复）", () => {
   const css = read("src/index.css");
-  includesAll(css, ["--z-sticky: 10;", "--z-topbar: 30;", "--z-popover: 40;", "--z-modal: 50;", "--z-toast: 70;"], "z-index");
+  includesAll(css, ["--z-sticky: 10;", "--z-topbar: 30;", "--z-modal: 50;", "--z-popover: 60;", "--z-toast: 70;"], "z-index");
 });
 
 check("index.css：动效 fade-up / fade-in（keyframes 在 @theme 内）", () => {

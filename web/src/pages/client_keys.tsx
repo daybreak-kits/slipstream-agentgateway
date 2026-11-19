@@ -9,6 +9,9 @@ import { DataTable } from "@/components/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fmtMs } from "@/components/governance/format";
 import { OneTimeSecretDialog } from "@/components/users/one-time-secret-dialog";
 import { ENDPOINTS, api } from "@/lib/api";
@@ -37,10 +40,38 @@ export function ClientKeysPage() {
   const [deleteTarget, setDeleteTarget] = useState<ApiKey | null>(null);
   /** rotate 返回的新明文：仅弹窗存活期可见，关闭即不再持有 */
   const [rotatedSecret, setRotatedSecret] = useState<string | null>(null);
+  /** 签发（W6 流程 2 补口）：选用户 + 可选名称 → 明文一次性弹窗 */
+  const [issueOpen, setIssueOpen] = useState(false);
+  const [issuedSecret, setIssuedSecret] = useState<string | null>(null);
+  const [issueUserId, setIssueUserId] = useState("");
+  const [issueName, setIssueName] = useState("");
+
+  const usersQ = useQuery({
+    queryKey: ["admin-users-lite"],
+    queryFn: () => api.get<Array<{ id: string; name: string; status: string }>>(ENDPOINTS.users + "?page_size=200&offset=0"),
+    enabled: canWrite,
+  });
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: KEYS_QUERY_KEY });
   };
+
+  const issue = useMutation({
+    mutationFn: (vars: { userId: string; name: string }) =>
+      // ApiKeyIssue.user_id 必填（后端按 body 内 user_id 归属），路径 user_id 仅供路由
+      api.post<{ id: string; key: string; mask: string }>(
+        ENDPOINTS.users + "/" + vars.userId + "/api-keys",
+        { user_id: vars.userId, ...(vars.name.trim() ? { name: vars.name.trim() } : {}) },
+      ),
+    onSuccess: (result) => {
+      setIssueOpen(false);
+      setIssueUserId("");
+      setIssueName("");
+      setIssuedSecret(result.key);
+      invalidate();
+    },
+    onError: (error: Error) => toast.error("签发密钥失败", { description: error.message }),
+  });
 
   const setStatus = useMutation({
     mutationFn: (vars: { keyId: string; status: "active" | "disabled" }) =>
@@ -174,6 +205,13 @@ export function ClientKeysPage() {
         密钥只显示掩码；点行内复制图标会经审计化接口取回明文并写入剪贴板（留审计记录属预期行为）。
         每用户最多 50 把；余额耗尽后请求返回 429，充值在用户管理页进行。
       </p>
+      {canWrite && (
+        <div className="flex items-center justify-end">
+          <Button variant="primary" size="sm" onClick={() => setIssueOpen(true)}>
+            新建密钥
+          </Button>
+        </div>
+      )}
       <DataTable
         columns={columns}
         data={qKeys.data}
@@ -182,6 +220,63 @@ export function ClientKeysPage() {
         onRetry={() => void qKeys.refetch()}
         emptyText="还没有连接密钥"
         filterPlaceholder="筛选名称 / 掩码"
+      />
+
+      <Dialog open={issueOpen} onOpenChange={(next) => { if (!next) setIssueOpen(false); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>新建连接密钥</DialogTitle>
+            <DialogDescription>
+              为所选用户签发一把 sk- 连接密钥；明文只在创建后展示一次，请立即复制保存。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <label className="text-2sm text-title" htmlFor="issue-user">用户</label>
+              <Select value={issueUserId} onValueChange={setIssueUserId}>
+                <SelectTrigger id="issue-user" className="w-full">
+                  <SelectValue placeholder="选择用户" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(usersQ.data ?? []).map((user) => (
+                    <SelectItem key={user.id} value={user.id}>
+                      {user.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-2sm text-title" htmlFor="issue-name">名称（可选）</label>
+              <Input
+                id="issue-name"
+                value={issueName}
+                onChange={(event) => setIssueName(event.target.value)}
+                placeholder="默认 密钥 N"
+                maxLength={255}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIssueOpen(false)} disabled={issue.isPending}>
+              取消
+            </Button>
+            <Button
+              onClick={() => issue.mutate({ userId: issueUserId, name: issueName })}
+              disabled={issue.isPending || !issueUserId}
+            >
+              {issue.isPending ? "签发中…" : "签发密钥"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <OneTimeSecretDialog
+        open={issuedSecret !== null}
+        title="连接密钥已签发"
+        description="此明文仅显示一次，关闭后不再展示；请立即复制保存。"
+        secret={issuedSecret ?? ""}
+        onClose={() => setIssuedSecret(null)}
       />
 
       <RenameKeyDialog

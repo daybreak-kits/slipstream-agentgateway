@@ -72,7 +72,7 @@ const DEFAULT_PARAMETERS: ModelParameters = {
 
 /** 周期冷却窗口语义增强（窗口期内启用=仅跳过当前窗口）待后端合入；本页文案按现行为描述。 */
 const ENABLE_SEMANTICS_NOTE =
-  "启用为本次启用：当前版本启用会同时解除该行的周期冷却规则；「窗口期内启用仅跳过当前窗口」的语义增强合入后自动生效。";
+  "启用为本次启用：解除该行托管冷却；若周期规则正处于窗口期，本次启用仅跳过当前窗口，后续窗口照常冷却（GLOSSARY §3）。";
 
 async function copyText(text: string): Promise<void> {
   try {

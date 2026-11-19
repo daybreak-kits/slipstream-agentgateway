@@ -102,21 +102,6 @@ async function fetchAvailabilityRules(): Promise<AvailabilityRule[]> {
   return api.get<AvailabilityRule[]>(ENDPOINTS.availabilityRules + "?page_size=" + RULE_PAGE_SIZE);
 }
 
-/** 解除/启用前先删掉这一行的周期冷却规则；单次冷却由行接口自己清掉。 */
-async function clearPeriodicCooldowns(scope: string, ids: string[]): Promise<void> {
-  if (ids.length === 0) return;
-  try {
-    const wanted = new Set(ids);
-    const rules = await fetchAvailabilityRules();
-    const targets = rules.filter(
-      (rule) => rule.scope === scope && rule.kind === "cooldown" && rule.recurrence !== "once" && wanted.has(rule.scope_id),
-    );
-    await Promise.all(targets.map((rule) => api.del<void>(ENDPOINTS.availabilityRule(rule.id))));
-  } catch {
-    // 只读/无 availability 权限的账号：主操作照常执行，周期规则留给有权限的账号清理。
-  }
-}
-
 /**
  * 把「冷却原因」补写进行级冷却对应的托管规则（后端为 rule_row_* 前缀的确定性 id）。
  * 行接口本身没有 note 字段；写失败不影响已生效的冷却，只提示。
@@ -209,22 +194,23 @@ export function useAvailabilityMutation(kind: "upstream" | "public") {
   return useMutation({
     mutationFn: async (vars: { id: string; action: AvailabilityAction; cooldown_until_ms?: number; note?: string }) => {
       const path = kind === "upstream" ? ENDPOINTS.upstreamModelUpdate(vars.id) : ENDPOINTS.publicModelUpdate(vars.id);
-      if (vars.action === "enable" || vars.action === "release") {
-        await clearPeriodicCooldowns(scopeOf(kind), [vars.id]);
-      }
       const body: Record<string, unknown> = {};
       if (vars.action === "enable") body.enabled = true;
       else if (vars.action === "disable") body.enabled = false;
       else if (vars.action === "cooldown") body.cooldown_until_ms = vars.cooldown_until_ms ?? 0;
       else body.cooldown_until_ms = 0;
-      await api.patch(path, body);
+      // 启用响应带 window_skip（工单 G）：窗口期内启用=仅跳过当前窗口，提示语由后端给出。
+      const result = await api.patch<{ window_skip?: { message: string } | null }>(path, body);
       // 原因补写进规则表；失败只提示，不影响冷却本身。
       if (vars.action === "cooldown" && vars.note && vars.note.trim() !== "") {
         await writeCooldownNote(scopeOf(kind), vars.id, vars.note);
       }
+      return result;
     },
-    onSuccess: (_data, vars) => {
-      toast.success(AVAIL_LABEL[vars.action]);
+    onSuccess: (result, vars) => {
+      const skipMessage = result?.window_skip?.message;
+      if (skipMessage) toast.success(AVAIL_LABEL[vars.action], { description: skipMessage });
+      else toast.success(AVAIL_LABEL[vars.action]);
       void qc.invalidateQueries({ queryKey: [listKey] });
       if (vars.action === "enable" || vars.action === "release") {
         void qc.invalidateQueries({ queryKey: ["availability-rules"] });
@@ -241,9 +227,6 @@ export function useBatchMutation(kind: "upstream" | "public") {
   const title = kind === "upstream" ? "批量操作上游模型" : "批量操作公开模型";
   return useMutation({
     mutationFn: async (vars: { ids: string[]; action: "enable" | "disable" | "delete" }) => {
-      if (vars.action === "enable") {
-        await clearPeriodicCooldowns(scopeOf(kind), vars.ids);
-      }
       return api.patch<ModelBatchResult>(path, { ids: vars.ids, action: vars.action });
     },
     onSuccess: (result, vars) => {

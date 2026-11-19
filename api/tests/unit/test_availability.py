@@ -317,6 +317,17 @@ def test_rules_changed_since_covers_once_expiry_and_window_boundaries(
 # window only; the rule stays and later windows cool again.
 
 
+@pytest.fixture
+def frozen_service_clock(monkeypatch):
+    """期限投影（create_rule/sync_cooldown_projection）默认用真实时钟；本组用例
+    在固定的 2026-03-02 时刻上推演，若真实时钟恰落在 02:00-04:00 窗口内
+    （UTC），投影会写入"今天 04:00"而在注入时刻被误读为遗留冷却——把服务时钟
+    冻结在用例自己的窗口内，行为与运行墙钟无关（此前 UTC 白天跑绿、窗口内跑红）。"""
+    import l05_service.availability as availability_module
+
+    monkeypatch.setattr(availability_module, "utc_now_ms", lambda: _at(2, 3, 0))
+
+
 def _daily_rule(session, scope_id: str) -> AvailabilityRuleORM:
     create_rule(
         session,
@@ -343,6 +354,7 @@ def _enable(session, scope_id: str, moment: int) -> dict | None:
 
 def test_enable_inside_window_skips_only_the_current_window(
     engine_and_sessionmaker,
+    frozen_service_clock,
 ) -> None:
     engine, factory = engine_and_sessionmaker
     ids = seed_channel(engine, factory)
@@ -376,6 +388,7 @@ def test_enable_inside_window_skips_only_the_current_window(
 
 def test_enable_outside_window_clears_closed_without_skip(
     engine_and_sessionmaker,
+    frozen_service_clock,
 ) -> None:
     engine, factory = engine_and_sessionmaker
     ids = seed_channel(engine, factory)
@@ -399,6 +412,7 @@ def test_enable_outside_window_clears_closed_without_skip(
 
 def test_enable_releases_managed_cooldown_and_skips_window(
     engine_and_sessionmaker,
+    frozen_service_clock,
 ) -> None:
     engine, factory = engine_and_sessionmaker
     ids = seed_channel(engine, factory)
@@ -424,7 +438,7 @@ def test_enable_releases_managed_cooldown_and_skips_window(
         assert view.state is AvailabilityState.NORMAL
 
 
-def test_release_clears_the_window_skip(engine_and_sessionmaker) -> None:
+def test_release_clears_the_window_skip(engine_and_sessionmaker, frozen_service_clock) -> None:
     engine, factory = engine_and_sessionmaker
     ids = seed_channel(engine, factory)
     with factory() as session:
@@ -446,7 +460,9 @@ def test_release_clears_the_window_skip(engine_and_sessionmaker) -> None:
         assert view.window_skip_until_ms == 0
 
 
-def test_reapplying_the_rule_clears_the_window_skip(engine_and_sessionmaker) -> None:
+def test_reapplying_the_rule_clears_the_window_skip(
+    engine_and_sessionmaker, frozen_service_clock
+) -> None:
     engine, factory = engine_and_sessionmaker
     ids = seed_channel(engine, factory)
     with factory() as session:
