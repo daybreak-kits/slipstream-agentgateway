@@ -103,12 +103,13 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 - **必须覆盖 `ADMIN_USERNAME` / `ADMIN_PASSWORD`**（ADR-019 引导，无 `SLIPSTREAM_` 前缀）：默认 `admin / admin` 仅本地演示；生产首次启动前必须设置，否则控制台入口是公开弱口令。`seed_demo` 的演示账号密码另由 `SLIPSTREAM_DEMO_ADMIN_PASSWORD` 控制（默认 `admin12345`）。
 - 控制台会话绝对过期 12h（无滑动续期）；生产置 `SLIPSTREAM_COOKIE_SECURE=1` 并置于 TLS 之后，管理台与 API 必须同主机名。
 - 单端口：先 `cd web && npm run build` 再启动控制面 3700（spa.py 同源托管 `web/dist`，深链回退 index.html）。
+- **后台任务随 app 启动**（`l07_jobs`，进程内 `JobRunner`）：增量用量拉取 / 冷却到期重渲染 / 账本对账三项，默认间隔 `SLIPSTREAM_JOBS_INTERVAL_SECONDS=60`。**启动命令用组合根入口**：`cd api && uvicorn server:create_app --factory --port 3700`（ADR-010 禁止 l06 import l07，接线在 `api/src/server.py` 组合层完成；`l06_api.app:create_app --factory` 仍可用但不带任务）。置 `SLIPSTREAM_JOBS_ENABLED=0` 可整体停用（例如任务改由独立 worker 跑：在 worker 入口里调用 `l07_jobs.wiring.build_runner(session_factory).run_forever()`）。多副本部署时只应有一个进程开启任务，否则同一游标被重复拉取（幂等，但浪费）。
 
 ### 6.4 三期已知边界
 
 1. **AG 1.7 请求内零重试**：LLM 配置面不接受 retry 策略（validate 拒绝），策略页 retry 必须为 null。
 2. **image 类型上游模型不记词元**：无法计费，模型管理行内提示「AG 不记词元」。
 3. **请求/响应正文日志默认不落库**：运营设置需开 `ag_access_log_llm=full` 才记录（metadata 默认）。
-4. **日志接口类型 join 上限 200 条**：模型/上游/用户/密钥名称回填最多 join 200 行，超出部分显示 id。
+4. **日志接口类型 join 为前端实现，upstream-models 列表 200 条分页上限**：模型列表接口本身分页上限 200 条；请求日志的名称回填由前端按页内 id 自行 join。
 5. **热力图 30 天以上档位行内滚动**：行虚拟化（30d+ 行内滚），非整页展开。
 6. **审计时间筛选未做**：审计其余筛选（动作/操作者/对象）可用，时间范围筛选待后续。

@@ -181,6 +181,9 @@ def engine_and_sessionmaker():
     )
     init_db(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False, future=True)
+    # The operations timezone stays at the app default (Asia/Shanghai, same as
+    # the reports). Availability tests that assert fixed window instants pin
+    # timezone to UTC per-module via _pin_utc().
     # Hold the dir lock across the test so concurrent sessions cannot sweep it.
     with _hold_dir_lock(Path(ag_dir)):
         yield engine, factory
@@ -236,6 +239,8 @@ seed_login_session = new_session_token
 
 
 def _app_client(factory) -> TestClient:
+    # jobs=False: background tasks must never race a test's own DB writes; the
+    # job wiring has its own test that turns them on explicitly.
     app = create_app(session_factory=factory, init_tables=False)
     return TestClient(app, raise_server_exceptions=True)
 

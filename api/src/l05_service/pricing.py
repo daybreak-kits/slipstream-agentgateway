@@ -86,6 +86,17 @@ def validate_markup(value: object) -> Decimal:
     return parsed.quantize(_MARKUP_QUANTUM, rounding=ROUND_HALF_UP)
 
 
+def round_half_up_micro(value: int, denominator: int = 1_000_000) -> int:
+    """Integer half-up division by 1M, the one rounding rule for micro amounts.
+
+    Used where a micro numerator is built outside `cost_micro` (the cache-price
+    term of a cost entry); the model-row path rounds inside `cost_micro`.
+    """
+    if value >= 0:
+        return (value + denominator // 2) // denominator
+    return -((-value + denominator // 2) // denominator)
+
+
 def cost_micro(
     input_tokens: int,
     output_tokens: int,

@@ -1,9 +1,11 @@
-"""Price books and billing reports (ADR-011 / docs/contracts/billing.md).
+"""Price books and billing reports (ADR-011 / ADR-020 / billing.md).
 
-Two independent books - upstream_prices (what we pay vendors) and charge_prices
-(what users pay us) - each versioned by append-only rows; a price change creates
-a new version and never rewrites history. Amounts are integer micro units;
-missing prices produce status=unpriced with a NULL amount (never a silent 0).
+The model rows own cost and markup (ADR-020). What is left of the upstream price
+book is the cache channel: cache_read / cache_write are not columns of a model
+row, so those two items are still versioned here - append-only, a price change
+creates a new version and never rewrites history. The charge book (charge_prices)
+is retired: spend is cost x the model row's markup. Amounts are integer micro
+units; missing prices produce status=unpriced with a NULL amount (never a silent 0).
 """
 
 from __future__ import annotations
@@ -17,13 +19,12 @@ from l01_core.settings import get_settings
 from l01_core.timeutil import now_ms
 from l04_repo.orm import (
     ChargeEntryORM,
-    ChargePriceORM,
     CostEntryORM,
     FxSnapshotORM,
     UpstreamPriceORM,
 )
 from l05_service import money
-from l05_service.money import CHARGE_MODES, MICRO, PRICE_ITEMS
+from l05_service.money import MICRO, PRICE_ITEMS
 
 
 def create_upstream_price(
@@ -36,12 +37,22 @@ def create_upstream_price(
     currency: str,
     effective_from_ms: int | None = None,
 ) -> UpstreamPriceORM:
-    """Append a new upstream price version; version = max(existing) + 1 per scope."""
+    """Append a new upstream price version; version = max(existing) + 1 per scope.
+
+    Only the cache items remain writable (ADR-020); input / output / request
+    prices are rejected because billing never reads them again.
+    """
     if item not in PRICE_ITEMS:
         raise AppError(
             ErrorCode.VALIDATION_ERROR,
             f"unknown price item: {item}",
             details={"item": item, "known": list(PRICE_ITEMS)},
+        )
+    if item not in ("cache_read", "cache_write"):
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR,
+            "ADR-020: cost lives on the upstream model row; this book only holds cache prices",
+            details={"item": item, "known": ["cache_read", "cache_write"]},
         )
     if unit_price_micro < 0:
         raise AppError(ErrorCode.VALIDATION_ERROR, "unit_price_micro must be >= 0")
@@ -70,55 +81,6 @@ def create_upstream_price(
     return row
 
 
-def create_charge_price(
-    session: Session,
-    *,
-    public_model_id: str,
-    item: str,
-    mode: str,
-    value: int,
-    currency: str,
-    effective_from_ms: int | None = None,
-) -> ChargePriceORM:
-    """Append a new charge price version (markup ratio or fixed micro unit price)."""
-    if item not in PRICE_ITEMS:
-        raise AppError(
-            ErrorCode.VALIDATION_ERROR,
-            f"unknown price item: {item}",
-            details={"item": item, "known": list(PRICE_ITEMS)},
-        )
-    if mode not in CHARGE_MODES:
-        raise AppError(
-            ErrorCode.VALIDATION_ERROR,
-            f"unknown charge mode: {mode}",
-            details={"mode": mode, "known": list(CHARGE_MODES)},
-        )
-    if value < 0:
-        raise AppError(ErrorCode.VALIDATION_ERROR, "charge price value must be >= 0")
-    latest = session.scalars(
-        select(ChargePriceORM)
-        .where(
-            ChargePriceORM.public_model_id == public_model_id,
-            ChargePriceORM.item == item,
-        )
-        .order_by(ChargePriceORM.version.desc())
-    ).first()
-    row = ChargePriceORM(
-        id=new_id("cpr"),
-        public_model_id=public_model_id,
-        item=item,
-        mode=mode,
-        value=value,
-        currency=currency,
-        effective_from_ms=effective_from_ms if effective_from_ms is not None else now_ms(),
-        version=(latest.version + 1) if latest else 1,
-        created_at_ms=now_ms(),
-    )
-    session.add(row)
-    session.flush()
-    return row
-
-
 def effective_upstream_price(
     session: Session, vendor_id: str, upstream_model: str, item: str, at_ms: int
 ) -> UpstreamPriceORM | None:
@@ -135,52 +97,19 @@ def effective_upstream_price(
     ).first()
 
 
-def effective_charge_price(
-    session: Session, public_model_id: str, item: str, at_ms: int
-) -> ChargePriceORM | None:
-    """Latest charge version effective at `at_ms`."""
-    return session.scalars(
-        select(ChargePriceORM)
-        .where(
-            ChargePriceORM.public_model_id == public_model_id,
-            ChargePriceORM.item == item,
-            ChargePriceORM.effective_from_ms <= at_ms,
-        )
-        .order_by(ChargePriceORM.effective_from_ms.desc(), ChargePriceORM.version.desc())
-    ).first()
-
-
 def cost_micro_from_prices(
     tokens_by_item: dict[str, int], prices: dict[str, UpstreamPriceORM], per_request_items: int
 ) -> int | None:
-    """Integer micro cost for one request; None signals an unpriced item.
+    """Integer micro cost for the cache items of one request; None when unpriced.
 
     Per-item numerators (tokens x micro-per-1M) are summed exactly and rounded
-    ONCE per request entry (billing.md §5.5). per_request_items counts request
-    fees (item=request scales by call, not by token).
+    ONCE (billing.md §5.5); this covers only what the book still holds (ADR-020
+    cache exception) - input/output come from the model row.
     """
     numerator = money.cost_numerator(tokens_by_item, prices, per_request_items)
     if numerator is None:
         return None
     return money.round_micro(numerator, MICRO)
-
-
-def charge_micro_from_cost(
-    cost_numerator: int,
-    charge_prices: dict[str, ChargePriceORM],
-    tokens_by_item: dict[str, int],
-    per_request_items: int,
-) -> int | None:
-    """Integer micro charge: markup applies the ratio to cost; fixed mirrors cost math.
-
-    markup: value is a ratio in ten-thousandths over the exact cost numerator,
-    rounded once (12000 = 1.2x). fixed: unit prices per item like the cost book.
-    Mixing fixed items with a markup request price is a validation error.
-    Returns None when any needed price is missing (unpriced).
-    """
-    return money.charge_from_cost_numerator(
-        cost_numerator, charge_prices, tokens_by_item, per_request_items
-    )
 
 
 def unpriced_lists(session: Session) -> dict[str, list[dict]]:

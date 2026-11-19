@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
-
 from tests.conftest import _app_client, make_admin, new_session_token, seed_channel
 
 from l01_core.timeutil import now_ms
 from l04_repo.orm import (
     ChargeEntryORM,
+    ChargePriceORM,
     CostEntryORM,
     GatewayUsageEventORM,
 )
-from l05_service import prices
 from l06_api.deps import SESSION_COOKIE
 
 
@@ -89,9 +87,9 @@ def test_public_model_price_is_derived_and_read_only(client, engine_and_sessionm
     assert flagship["available"] is True
     # Read-only means no write verb is exposed on this derived view.
     assert client.post("/admin/prices/public-models", json={}).status_code == 405
-    # Nothing was persisted in the downstream book by reading the average.
+    # Nothing was persisted by reading the average (the downstream book is retired).
     with factory() as session:
-        assert session.query(prices.ChargePriceORM).count() == 0
+        assert session.query(ChargePriceORM).count() == 0
 
 
 def test_billing_ledger_has_cost_spend_margin_and_field_permissions(
@@ -153,7 +151,11 @@ def test_billing_ledger_has_cost_spend_margin_and_field_permissions(
 
 
 def test_cost_book_write_requires_billing_cost(client, engine_and_sessionmaker):
-    """写成本账同样要 billing:cost：只有 upstream_models:write 的自定义角色被拒。"""
+    """写成本账同样要 billing:cost：只有 upstream_models:write 的自定义角色被拒。
+
+    The PATCH route already had the gate; the CREATE route (same cost/markup
+    payload) now carries it too (P2 symmetric write permission).
+    """
     engine, factory = engine_and_sessionmaker
     seed_channel(engine, factory)
     created = client.post(
@@ -170,6 +172,16 @@ def test_cost_book_write_requires_billing_cost(client, engine_and_sessionmaker):
     browser.cookies.set(SESSION_COOKIE, new_session_token(factory, operator))
     denied = browser.patch("/admin/upstream-models/umdl_test", json={"markup": "1.2"})
     assert denied.status_code == 403
+    denied_create = browser.post(
+        "/admin/upstream-models",
+        json={
+            "upstream_id": "ups_test",
+            "name": "glm-6",
+            "model_type": "chat",
+            "cost_input_per_1m": "2.5",
+        },
+    )
+    assert denied_create.status_code == 403
     rows = browser.get("/admin/upstream-models").json()
     assert rows[0]["name"] == "glm-5.3"
     assert "markup" not in rows[0]
@@ -200,25 +212,132 @@ def test_editing_price_book_updates_the_derived_public_price(client, engine_and_
     assert third["available"] is True
 
 
-def test_legacy_markup_book_matches_model_markup_calibre(engine_and_sessionmaker):
-    """口径对齐：legacy 12000 万分比 == Decimal 1.2, same cost -> same spend."""
-    cost_micro = 800
-    cost_numerator = 800 * 1_000_000  # micro -> token numerator at 1M tokens
-    legacy = prices.charge_micro_from_cost(
-        cost_numerator,
-        {
-            "request": prices.ChargePriceORM(
-                public_model_id="p",
-                item="request",
-                mode="markup",
-                value=12_000,
-                currency="CNY",
-            )
+def test_ui_priced_model_bills_from_model_row_with_empty_price_books(
+    client, engine_and_sessionmaker
+):
+    """ADR-020 end to end: UI model + price, empty price books, ingest -> bill.
+
+    The two versioned books hold nothing (not even cache rows), so a correct
+    cost and charge can only come from the model row: input/output cost and the
+    markup are its columns, and the user is debited once.
+    """
+    from l02_domain.models import UsageEvent
+    from l04_repo.orm import ChargePriceORM, UpstreamPriceORM, UserORM
+    from l05_service import usage_ingest
+
+    engine, factory = engine_and_sessionmaker
+    seed = seed_channel(engine, factory)
+    now = now_ms()
+
+    # UI path: create the model with its cost fields (no markup sent). A fresh
+    # name keeps the resolver off the unpriced seed row of the same name.
+    created = client.post(
+        "/admin/upstream-models",
+        json={
+            "upstream_id": seed["upstream_id"],
+            "name": "glm-5.3-air",
+            "model_type": "chat",
+            "cost_input_per_1m": "2.5",
+            "cost_output_per_1m": "10",
         },
-        {"input": 0, "output": 0},
-        per_request_items=0,
     )
-    model_level = __import__("l05_service.pricing", fromlist=["spend_micro"]).spend_micro(
-        cost_micro, Decimal("1.2")
+    assert created.status_code == 201, created.text
+    # A model row created without a markup bills at the 1.2 house rate.
+    assert created.json()["markup"] == "1.2000"
+    model_id = created.json()["id"]
+
+    # Empty price books: nothing to read but the cache channel, which stays empty.
+    with factory() as session:
+        assert session.query(UpstreamPriceORM).count() == 0
+        assert session.query(ChargePriceORM).count() == 0
+
+        event = UsageEvent(
+            event_id="evt_ui_priced",
+            started_at_ms=now,
+            http_status=200,
+            public_model="flagship",
+            upstream_model="glm-5.3-air",
+            provider=seed["upstream_id"],
+            api_key_id=seed["key_id"],
+            input_tokens=1000,
+            output_tokens=2000,
+            total_tokens=3000,
+        )
+        assert usage_ingest.ingest_usage_events(session, [event]) == 1
+        usage_ingest.process_billing(session)
+        session.commit()
+
+        cost = session.query(CostEntryORM).filter_by(gateway_event_id="evt_ui_priced").one()
+        charge = (
+            session.query(ChargeEntryORM).filter_by(gateway_event_id="evt_ui_priced").one()
+        )
+        assert cost.amount_micro == 22_500  # 1000 x 2.5 + 2000 x 10
+        assert cost.status == "ok"
+        assert cost.upstream_model_id == model_id
+        # 22_500 x 1.2 = 27_000, rounded once at the micro boundary.
+        assert charge.amount_micro == 27_000
+        assert charge.status == "ok"
+        assert charge.price_version_id == model_id
+        assert session.get(UserORM, seed["user_id"]).balance_micro == 50_000_000 - 27_000
+
+
+def test_unpriced_cache_costs_nothing_but_input_output_still_bill(
+    client, engine_and_sessionmaker
+):
+    """ADR-020 cache exception: cache tokens follow the book price; absent = 0.
+
+    With cache prices missing the cache tokens cost nothing (unpriced-cache),
+    while input/output still bill from the model row. A cache_read row shows the
+    book channel is still read for exactly those two items.
+    """
+    from l02_domain.models import UsageEvent
+    from l04_repo.orm import UpstreamPriceORM
+    from l05_service import usage_ingest
+
+    engine, factory = engine_and_sessionmaker
+    seed = seed_channel(engine, factory)
+    now = now_ms()
+    client.patch(
+        "/admin/upstream-models/umdl_test",
+        json={"cost_input_per_1m": "2.5", "cost_output_per_1m": "10", "markup": "1.2"},
     )
-    assert legacy == model_level == 960
+    with factory() as session:
+        session.add(
+            UpstreamPriceORM(
+                id="upr_cache",
+                vendor_id=seed["vendor_id"],
+                upstream_model="glm-5.3",
+                item="cache_read",
+                unit_price_micro=1_000_000,
+                currency="CNY",
+                effective_from_ms=0,
+                version=1,
+                created_at_ms=now,
+            )
+        )
+        session.commit()
+
+        event = UsageEvent(
+            event_id="evt_cache",
+            started_at_ms=now,
+            http_status=200,
+            public_model="flagship",
+            upstream_model="glm-5.3",
+            provider=seed["upstream_id"],
+            api_key_id=seed["key_id"],
+            input_tokens=1000,
+            output_tokens=2000,
+            total_tokens=3000,
+            cache_read_tokens=500,
+        )
+        usage_ingest.ingest_usage_events(session, [event])
+        usage_ingest.process_billing(session)
+        session.commit()
+
+        cost = session.query(CostEntryORM).filter_by(gateway_event_id="evt_cache").one()
+        charge = (
+            session.query(ChargeEntryORM).filter_by(gateway_event_id="evt_cache").one()
+        )
+        # input 1000 x 2.5 + output 2000 x 10 + cache_read 500 x 1.0 = 23_000.
+        assert cost.amount_micro == 23_000
+        assert charge.amount_micro == 27_600  # 23_000 x 1.2

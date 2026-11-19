@@ -41,15 +41,6 @@ export interface BalanceTopup {
   note?: string;
 }
 
-export interface ChargePriceCreate {
-  public_model_id: string;
-  item: string;
-  mode: string;
-  value: number;
-  currency?: string;
-  effective_from_ms?: number | null;
-}
-
 export interface ConfigRevisionOut {
   id: string;
   artifact_hash: string;

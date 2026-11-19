@@ -69,7 +69,8 @@ def test_export_shape_and_seed_values(client, engine_and_sessionmaker):
             "model_type": "chat",
             "cost_input_per_1m": None,  # seed model is unpriced
             "cost_output_per_1m": None,
-            "markup": "1.0000",
+            # ADR-020: a model row with no markup configured bills at 1.2.
+            "markup": "1.2000",
         }
     ]
 

@@ -66,9 +66,11 @@ class Settings(BaseSettings):
     report_currency: str = "CNY"
     bucket_micro_per_token: int = 1000
 
-    # Background job cadence (seconds).
-    usage_poll_seconds: float = 30.0
-    rerender_poll_seconds: float = 30.0
+    # Background job cadence (seconds). The app starts one JobRunner in-process
+    # with these intervals; SLIPSTREAM_JOBS_ENABLED=0 disables it entirely (tests
+    # and any deployment that runs the jobs as a separate worker).
+    jobs_enabled: bool = True
+    job_interval_seconds: float = 60.0
 
     @model_validator(mode="after")
     def _resolve_config_dir(self) -> Settings:

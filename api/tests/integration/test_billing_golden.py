@@ -1,82 +1,45 @@
-"""Golden rule: event -> cost/charge entries -> daily read models use one number."""
+"""Golden rule: event -> cost/charge entries -> daily read models use one number.
+
+ADR-020 pricing: the model row owns cost and markup; only the cache items still
+live on the price book, so this test seeds no book row at all (unpriced cache).
+"""
 
 from __future__ import annotations
+
+from decimal import Decimal
 
 from tests.conftest import seed_channel
 
 from l02_domain.models import UsageEvent
 from l04_repo.orm import (
     ChargeEntryORM,
-    ChargePriceORM,
     CostDailyORM,
     CostEntryORM,
     LedgerEntryORM,
-    UpstreamPriceORM,
+    UpstreamModelORM,
     UserDailyORM,
     UserORM,
 )
-from l05_service import money, usage_ingest
+from l05_service import usage_ingest
 
 
 def _seed_prices(factory, seed: dict, now: int) -> None:
+    """Model-row cost (CNY/1M) + markup; both price books stay empty on purpose."""
     with factory() as session:
-        session.add_all(
-            [
-                UpstreamPriceORM(
-                    id="upr_in",
-                    vendor_id=seed["vendor_id"],
-                    upstream_model="glm-5.3",
-                    item="input",
-                    unit_price_micro=2_500_000,
-                    currency="CNY",
-                    effective_from_ms=0,
-                    version=1,
-                    created_at_ms=now,
-                ),
-                UpstreamPriceORM(
-                    id="upr_out",
-                    vendor_id=seed["vendor_id"],
-                    upstream_model="glm-5.3",
-                    item="output",
-                    unit_price_micro=10_000_000,
-                    currency="CNY",
-                    effective_from_ms=0,
-                    version=1,
-                    created_at_ms=now,
-                ),
-                ChargePriceORM(
-                    id="cpr_markup",
-                    public_model_id=seed["public_id"],
-                    item="request",
-                    mode="markup",
-                    value=12_000,
-                    currency="CNY",
-                    effective_from_ms=0,
-                    version=1,
-                    created_at_ms=now,
-                ),
-            ]
-        )
+        model = session.get(UpstreamModelORM, seed["upstream_model_id"])
+        model.cost_input_per_1m = Decimal("2.5")
+        model.cost_output_per_1m = Decimal("10")
+        model.markup = Decimal("1.2")
         session.commit()
 
 
 def test_one_event_prices_cost_once_and_writes_consistent_rows(
-    engine_and_sessionmaker, monkeypatch
+    engine_and_sessionmaker,
 ) -> None:
     _, factory = engine_and_sessionmaker
     seed = seed_channel(engine_and_sessionmaker[0], factory)
     now = 1_800_000_000_000
     _seed_prices(factory, seed, now)
-
-    calls = 0
-    original = money.cost_numerator
-
-    def counting(*args, **kwargs):
-        nonlocal calls
-        calls += 1
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(money, "cost_numerator", counting)
 
     event = UsageEvent(
         event_id="evt_golden",
@@ -97,14 +60,13 @@ def test_one_event_prices_cost_once_and_writes_consistent_rows(
 
         cost = session.query(CostEntryORM).filter_by(gateway_event_id="evt_golden").one()
         charge = session.query(ChargeEntryORM).filter_by(gateway_event_id="evt_golden").one()
-        # 22_500 micro cost x 1.2 markup = 27_000 micro charge, rounded once each.
+        # 1000 x 2.5 + 2000 x 10 = 22_500 micro cost; x 1.2 markup = 27_000 charge.
         assert cost.amount_micro == 22_500
         assert cost.status == "ok"
         assert charge.amount_micro == 27_000
         assert charge.status == "ok"
         assert result["cost_entries"] == 1
         assert result["charge_entries"] == 1
-        assert calls == 1, "the markup book must reuse the cost pass, not re-price"
 
         user = session.get(UserORM, seed["user_id"])
         assert user.balance_micro == 50_000_000 - 27_000
@@ -119,6 +81,8 @@ def test_one_event_prices_cost_once_and_writes_consistent_rows(
         assert cost_daily.amount_micro == 22_500
 
         # Re-pricing is idempotent and still produces the same two numbers.
+        ledger_before = session.query(LedgerEntryORM).count()
+        balance_before = session.get(UserORM, seed["user_id"]).balance_micro
         usage_ingest.process_billing(session, recompute_event_ids=["evt_golden"])
         session.commit()
         assert session.query(CostEntryORM).count() == 1
@@ -127,3 +91,7 @@ def test_one_event_prices_cost_once_and_writes_consistent_rows(
             session.query(CostEntryORM).one().amount_micro,
             session.query(ChargeEntryORM).one().amount_micro,
         ) == (22_500, 27_000)
+        # The charge was replaced, not stacked: same ledger row count, and the
+        # balance was debited exactly once for the event.
+        assert session.query(LedgerEntryORM).count() == ledger_before
+        assert session.get(UserORM, seed["user_id"]).balance_micro == balance_before

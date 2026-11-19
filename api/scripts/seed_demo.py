@@ -157,6 +157,10 @@ USERS = [
     ("压测环境", 50_000_000, [50_000_000], "D", "user"),
 ]
 
+# Cache items are the one price still held by the book (ADR-020): 0.5 CNY / 1M
+# cache tokens, same for every model, because a model row has no cache column.
+CACHE_PRICE_MICRO = 500_000
+
 # per-model upstream prices in micro CNY per 1M tokens: (input, output)
 UPSTREAM_PRICES = {
     "glm-5.3": (2_000_000, 8_000_000),
@@ -369,6 +373,8 @@ def seed(session, rng: random.Random) -> dict[str, object]:
             assert first == initial_micro
 
     # ---------------- price books ----------------
+    # ADR-020: cost + markup live on the model row (written above); the only rows
+    # left in upstream_prices are the cache prices, which the model row cannot hold.
     effective = now - 30 * DAY_MS
     for index, models in UPSTREAM_MODELS.items():
         upstream = index_to_upstream[index]
@@ -376,24 +382,12 @@ def seed(session, rng: random.Random) -> dict[str, object]:
         for model_name, _model_type, priced in models:
             if not priced:
                 continue
-            input_micro, output_micro = UPSTREAM_PRICES[model_name]
-            for item, unit in (("input", input_micro), ("output", output_micro)):
+            for item in ("cache_read", "cache_write"):
                 prices.create_upstream_price(
                     session, vendor_id=vendor.id, upstream_model=model_name,
-                    item=item, unit_price_micro=unit, currency=CNY,
+                    item=item, unit_price_micro=CACHE_PRICE_MICRO, currency=CNY,
                     effective_from_ms=effective,
                 )
-
-    for public_name, _mode, _note, _rows in PUBLIC_MODELS:
-        prices.create_charge_price(
-            session,
-            public_model_id=public_models[public_name].id,
-            item="request",
-            mode="markup",
-            value=12_000,  # 1.2x over cost
-            currency=CNY,
-            effective_from_ms=effective,
-        )
     prices.put_fx_snapshot(session, currency=USD, rate_micro=7_250_000, source="seed")
 
     # ---------------- 7 days of usage ----------------

@@ -116,7 +116,9 @@ class UpstreamModelORM(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     cost_input_per_1m: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
     cost_output_per_1m: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
-    markup: Mapped[Decimal] = mapped_column(Numeric(10, 4), default=Decimal("1.0000"))
+    # ADR-020: spend = cost x markup, so the markup IS the price. A row created
+    # without one bills at the 1.2 house rate, not at cost (no margin).
+    markup: Mapped[Decimal] = mapped_column(Numeric(10, 4), default=Decimal("1.2000"))
     # Ticket 10: the old channel-model metadata the console edits (类型来源 + 参数)
     # plus row-level availability. cooldown_until_ms == 0 means "no cooldown"; a
     # non-zero deadline self-heals on read, mirroring the old banned_until column.

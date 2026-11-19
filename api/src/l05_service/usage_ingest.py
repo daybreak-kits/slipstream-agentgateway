@@ -1,14 +1,15 @@
-"""Usage ingestion and the billing pipeline (ADR-005/010/011, billing.md §3).
+"""Usage ingestion and the billing pipeline (ADR-005/010/011/020, billing.md §3).
 
 Flow: AG request_logs -> gateway_usage_events (immutable facts, idempotent by
-event_id) -> cost_entries (vendor price book) + charge_entries (downstream price
-book) -> ledger charge deduction + user balance -> cost_daily / user_daily.
-Cache tokens fold into input for BOTH books (lead's conservative rule until
-stage B verifies the AG cache columns); every report must carry the estimate
-note. Failed requests (http_status != 200) get a cost entry with amount 0 -
-token counts preserved (the vendor may still bill; month-end reconciliation
-decides) - and NO charge entry: only successful requests bill the user.
-Unpriced rows keep amount NULL (never a silent 0) and surface in /admin/unpriced.
+event_id) -> cost_entries (model-row cost book, ADR-020) + charge_entries (cost
+x model-row markup) -> ledger charge deduction + user balance ->
+cost_daily / user_daily. Cache tokens fold into input for BOTH books (lead's
+conservative rule until stage B verifies the AG cache columns); every report
+must carry the estimate note. Failed requests (http_status != 200) get a cost
+entry with amount 0 - token counts preserved (the vendor may still bill;
+month-end reconciliation decides) - and NO charge entry: only successful
+requests bill the user. Unpriced rows keep amount NULL (never a silent 0) and
+surface in /admin/unpriced.
 """
 
 from __future__ import annotations
@@ -24,20 +25,19 @@ from l01_core.timeutil import now_ms
 from l02_domain.models import UsageEvent
 from l04_repo.orm import (
     ChargeEntryORM,
-    ChargePriceORM,
     CostDailyORM,
     CostEntryORM,
     GatewayUsageEventORM,
+    LedgerEntryORM,
     PublicModelORM,
     UpstreamModelORM,
     UpstreamORM,
-    UpstreamPriceORM,
     UserDailyORM,
     UserORM,
 )
-from l05_service import money
+from l05_service import pricing
 from l05_service.balances import deduct_for_charge
-from l05_service.prices import effective_charge_price, effective_upstream_price
+from l05_service.prices import effective_upstream_price
 
 _DAY_MS = 86_400_000
 _MISSING = object()
@@ -185,7 +185,14 @@ def process_billing(session: Session, *, recompute_event_ids: list[str] | None =
 
 
 def _drop_entries(session: Session, event_ids: list[str]) -> int:
-    """Remove entries (and charge ledger rows) for re-pricing; returns count."""
+    """Remove entries and the ledger rows they own; returns how many entries went.
+
+    Re-pricing replaces an entry, so the charge ledger row that moved the user
+    balance must go with it - otherwise the new entry deducts a second time and
+    the ledger keeps a movement whose entry no longer exists. Deleting the row
+    (rather than writing a reversing one) keeps the book to exactly one movement
+    per entry and leaves no offsetting pair to reconcile.
+    """
     dropped = 0
     for event_id in event_ids:
         cost = session.scalars(
@@ -198,6 +205,18 @@ def _drop_entries(session: Session, event_ids: list[str]) -> int:
             select(ChargeEntryORM).where(ChargeEntryORM.gateway_event_id == event_id)
         ).first()
         if charge is not None:
+            for ledger in session.scalars(
+                select(LedgerEntryORM).where(
+                    LedgerEntryORM.kind == "charge",
+                    LedgerEntryORM.ref_id == charge.id,
+                )
+            ).all():
+                # Give the balance back before the row disappears; the rebuilt
+                # charge deducts its own (new) amount below.
+                user = session.get(UserORM, ledger.user_id)
+                if user is not None:
+                    user.balance_micro -= ledger.delta_micro
+                session.delete(ledger)
             session.delete(charge)
             dropped += 1
     session.flush()
@@ -207,7 +226,7 @@ def _drop_entries(session: Session, event_ids: list[str]) -> int:
 def _resolve_cost_target(
     session: Session, row: GatewayUsageEventORM
 ) -> tuple[str | None, str | None, str | None]:
-    """(vendor_id, our upstream model id, upstream model name) for one event.
+    """(vendor_id, our upstream model row id, upstream model name) for one event.
 
     gen_ai_response_model names the actual upstream model; when several of our
     upstreams expose the same model name the event's provider is preferred,
@@ -225,6 +244,9 @@ def _resolve_cost_target(
     chosen = None
     for candidate in candidates:
         upstream = upstreams.get(candidate.upstream_id)
+        # Only an existing, enabled upstream counts. vendor_id may be NULL (ADR-023
+        # upstreams without a vendor): the model row still prices the event, the
+        # empty vendor_id only means no cache-price lookup can match.
         if upstream is None or not upstream.enabled:
             continue
         if row.provider and row.provider == candidate.upstream_id:
@@ -238,10 +260,61 @@ def _resolve_cost_target(
     return vendor_id, chosen.id, name
 
 
+def _price_version_ref(session: Session, vendor_id: str | None, model_name: str) -> str:
+    """price_version snapshot for the ledger: the model row id (ADR-020 authority).
+
+    Falls back to the newest cache-price row id, which is the only channel left
+    on the legacy book, so a cost entry always carries a traceable snapshot.
+    """
+    if vendor_id and model_name:
+        price = effective_upstream_price(session, vendor_id, model_name, "cache_read", 0)
+        if price is None:
+            price = effective_upstream_price(session, vendor_id, model_name, "cache_write", 0)
+        if price is not None:
+            return price.id
+    return ""
+
+
+def _cache_numerator(
+    session: Session,
+    vendor_id: str | None,
+    model_name: str,
+    row: GatewayUsageEventORM,
+    at_ms: int,
+) -> int:
+    """Micro-per-1M x tokens for the two cache items, or 0 when unpriced.
+
+    ADR-020 exception: cache prices are NOT columns of the model row, so they
+    are the one item still read from the upstream_prices book (item cache_read
+    / cache_write). A missing cache price is "unpriced cache" - those tokens
+    cost nothing here, exactly as the old book behaved for a cache item with no
+    row, while input/output are still billed.
+    """
+    numerator = 0
+    for item, tokens in (
+        ("cache_read", row.cache_read_tokens),
+        ("cache_write", row.cache_write_tokens),
+    ):
+        if not tokens:
+            continue
+        price = effective_upstream_price(session, vendor_id or "", model_name, item, at_ms)
+        if price is not None:
+            # micro-per-1M x tokens; rounded half-up at the micro boundary (the
+            # same rule the model-row path uses) so the caller can add it to that
+            # micro amount without a second rounding (billing.md 5.5).
+            numerator += pricing.round_half_up_micro(int(tokens) * int(price.unit_price_micro))
+    return numerator
+
+
 def _build_cost_entry(
     session: Session, row: GatewayUsageEventORM
 ) -> tuple[CostEntryORM, int | None]:
-    """One cost entry per event plus its exact numerator (None when unpriced)."""
+    """One cost entry per event plus its exact numerator (None when unpriced).
+
+    Priced from the model row (ADR-020): cost_input_per_1m / cost_output_per_1m,
+    rounded once at the micro boundary. Cache tokens add their book price on top
+    (the cache-price exception; see _cache_numerator).
+    """
     vendor_id, model_id, model_name = _resolve_cost_target(session, row)
     input_tokens = row.input_tokens + row.cache_read_tokens + row.cache_write_tokens
     base = dict(
@@ -269,39 +342,45 @@ def _build_cost_entry(
         session.flush()
         return entry, 0
     at_ms = row.started_at_ms or now_ms()
-    if vendor_id is None or model_name is None:
+    if model_name is None or model_id is None:
         entry = CostEntryORM(
             amount_micro=None, currency="", price_version_id="", status="unpriced", **base
         )
         session.add(entry)
         session.flush()
         return entry, None
-    prices: dict[str, UpstreamPriceORM] = {}
-    for item in ("input", "output", "cache_read", "cache_write", "request"):
-        price = effective_upstream_price(session, vendor_id, model_name, item, at_ms)
-        if price is not None:
-            prices[item] = price
-    numerator = money.cost_numerator(
-        {"input": input_tokens, "output": row.output_tokens}, prices, 1
+    model = session.get(UpstreamModelORM, model_id)
+    if model is None:
+        entry = CostEntryORM(
+            amount_micro=None, currency="", price_version_id="", status="unpriced", **base
+        )
+        session.add(entry)
+        session.flush()
+        return entry, None
+    numerator = pricing.cost_micro(
+        row.input_tokens,
+        row.output_tokens,
+        model.cost_input_per_1m,
+        model.cost_output_per_1m,
     )
-    amount = None if numerator is None else money.round_micro(numerator, money.MICRO)
-    if amount is None:
+    if numerator is None:
         entry = CostEntryORM(
-            amount_micro=None,
-            currency=prices.get("input").currency if prices else "",
-            price_version_id="",
-            status="unpriced",
-            **base,
+            amount_micro=None, currency="", price_version_id="", status="unpriced", **base
         )
-    else:
-        version = prices.get("input") or prices.get("output") or next(iter(prices.values()))
-        entry = CostEntryORM(
-            amount_micro=amount,
-            currency=version.currency,
-            price_version_id=version.id,
-            status="ok",
-            **base,
-        )
+        session.add(entry)
+        session.flush()
+        return entry, None
+    numerator += _cache_numerator(session, vendor_id, model_name, row, at_ms)
+    version = _price_version_ref(session, vendor_id, model_name)
+    entry = CostEntryORM(
+        # pricing.cost_micro already rounds to the integer micro boundary; the
+        # cache term is micro-per-1M x tokens, so the sum needs no second rounding.
+        amount_micro=numerator,
+        currency="CNY",
+        price_version_id=version,
+        status="ok",
+        **base,
+    )
     session.add(entry)
     session.flush()
     return entry, numerator
@@ -345,31 +424,21 @@ def _build_charge_entry(
     entry = ChargeEntryORM(
         amount_micro=None, currency="", price_version_id="", status="unpriced", **base
     )
-    at_ms = row.started_at_ms or now_ms()
-    if public is not None:
-        prices: dict[str, ChargePriceORM] = {}
-        for item in ("input", "output", "request"):
-            price = effective_charge_price(session, public.id, item, at_ms)
-            if price is not None:
-                prices[item] = price
-        numerator = (
-            _cost_numerator(session, row, at_ms)
-            if cost_numerator is _MISSING
-            else cost_numerator
-        )
-        if numerator is not None and prices:
-            amount = money.charge_from_cost_numerator(
-                int(numerator),
-                prices,
-                {"input": input_tokens, "output": row.output_tokens},
-                1,
-            )
-            if amount is not None:
-                version = prices.get("request") or next(iter(prices.values()))
-                entry.amount_micro = amount
-                entry.currency = version.currency
-                entry.price_version_id = version.id
-                entry.status = "free" if amount == 0 else "ok"
+    numerator = (
+        _cost_numerator(session, row)
+        if cost_numerator is _MISSING
+        else cost_numerator
+    )
+    model = _cost_model(session, row)
+    if numerator is not None and model is not None:
+        # ADR-020: spend = cost x the model row's own markup; there is no
+        # separately maintained charge price (charge_prices is retired).
+        amount = pricing.spend_micro(int(numerator), model.markup)
+        if amount is not None:
+            entry.amount_micro = amount
+            entry.currency = "CNY"
+            entry.price_version_id = model.id
+            entry.status = "free" if amount == 0 else "ok"
     session.add(entry)
     session.flush()
     if entry.amount_micro is not None and entry.status == "ok" and user is not None:
@@ -383,20 +452,31 @@ def _build_charge_entry(
     return entry
 
 
-def _cost_numerator(session: Session, row: GatewayUsageEventORM, at_ms: int) -> int | None:
-    """Exact pre-rounding cost numerator (tokens x micro-per-1M), or None if unpriced."""
-    vendor_id, _model_id, model_name = _resolve_cost_target(session, row)
-    if vendor_id is None or model_name is None:
+def _cost_model(session: Session, row: GatewayUsageEventORM) -> UpstreamModelORM | None:
+    """The upstream model row that prices this event (ADR-020 single source)."""
+    _vendor_id, model_id, _name = _resolve_cost_target(session, row)
+    return session.get(UpstreamModelORM, model_id) if model_id else None
+
+
+def _cost_numerator(session: Session, row: GatewayUsageEventORM) -> int | None:
+    """Exact pre-rounding cost numerator (tokens x micro-per-1M), or None if unpriced.
+
+    Mirrors _build_cost_entry's arithmetic so a charge rebuilt without its cost
+    entry in the same pass prices identically (cache items included).
+    """
+    vendor_id, model_id, model_name = _resolve_cost_target(session, row)
+    if model_name is None or model_id is None:
         return None
-    prices: dict[str, UpstreamPriceORM] = {}
-    for item in ("input", "output"):
-        price = effective_upstream_price(session, vendor_id, model_name, item, at_ms)
-        if price is not None:
-            prices[item] = price
-    input_tokens = row.input_tokens + row.cache_read_tokens + row.cache_write_tokens
-    return money.cost_numerator(
-        {"input": input_tokens, "output": row.output_tokens}, prices, 1
+    model = session.get(UpstreamModelORM, model_id)
+    if model is None:
+        return None
+    at_ms = row.started_at_ms or now_ms()
+    numerator = pricing.cost_micro(
+        row.input_tokens, row.output_tokens, model.cost_input_per_1m, model.cost_output_per_1m
     )
+    if numerator is None:
+        return None
+    return numerator + _cache_numerator(session, vendor_id, model_name, row, at_ms)
 
 
 def refresh_cost_daily(session: Session, day: str | None = None) -> str:

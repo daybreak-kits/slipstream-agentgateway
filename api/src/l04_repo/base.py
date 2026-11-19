@@ -55,6 +55,24 @@ def init_db(engine: Engine) -> None:
     Base.metadata.create_all(engine)
     _ensure_additive_columns(engine)
     _ensure_username_index(engine)
+    _ensure_model_markup_default(engine)
+
+
+def _ensure_model_markup_default(engine: Engine) -> None:
+    """ADR-020: a model row with no markup configured bills at the 1.2 house rate.
+
+    The column is NOT NULL, so a row that predates the markup default landed on
+    1.0 (spend = cost, no margin). Existing databases keep their rows; the ones
+    still sitting on the old default move to 1.2 once, in place.
+    """
+    from sqlalchemy import inspect, text
+
+    if not inspect(engine).has_table("upstream_models"):
+        return
+    with engine.begin() as connection:
+        connection.execute(
+            text("UPDATE upstream_models SET markup = 1.2 WHERE markup = 1.0")
+        )
 
 
 def _ensure_username_index(engine: Engine) -> None:

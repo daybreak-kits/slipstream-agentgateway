@@ -257,15 +257,6 @@ class UpstreamPriceCreate(BaseModel):
     effective_from_ms: int | None = None
 
 
-class ChargePriceCreate(BaseModel):
-    public_model_id: str
-    item: str = Field(pattern=r"^(input|output|cache_read|cache_write|request)$")
-    mode: str = Field(pattern=r"^(markup|fixed)$")
-    value: int = Field(ge=0)
-    currency: str = Field(default="CNY", min_length=1, max_length=8)
-    effective_from_ms: int | None = None
-
-
 class FxPut(BaseModel):
     currency: str = Field(min_length=1, max_length=8)
     rate_micro: int = Field(gt=0)

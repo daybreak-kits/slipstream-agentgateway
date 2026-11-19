@@ -1,8 +1,9 @@
-"""Billing routes (ADR-011): price books, pending-price lists, margin, fx.
+"""Billing routes (ADR-011/020): price books, pending-price lists, margin, fx.
 
-Price writes require billing:write (admin+owner only); every role can read.
-Unpriced rows keep NULL amounts - the recompute endpoint re-prices after the
-operator fills missing prices, without ever duplicating usage events.
+Cost prices live on the upstream model rows (ADR-020), so the only price book
+left here is upstream_prices - today just the cache items. Unpriced rows keep
+NULL amounts - the recompute endpoint re-prices after the operator fills missing
+prices, without ever duplicating usage events.
 """
 
 from __future__ import annotations
@@ -15,14 +16,13 @@ from sqlalchemy.orm import Session
 
 from l04_repo.orm import (
     ChargeEntryORM,
-    ChargePriceORM,
     CostEntryORM,
     FxSnapshotORM,
     UpstreamPriceORM,
 )
 from l05_service import auth, prices, pricing, usage_ingest
 from l06_api.deps import page_params, require, session_of
-from l06_api.schemas import ChargePriceCreate, FxPut, RecomputeIn, UpstreamPriceCreate
+from l06_api.schemas import FxPut, RecomputeIn, UpstreamPriceCreate
 
 router = APIRouter(tags=["billing"])
 
@@ -63,49 +63,6 @@ def create_upstream_price(
         upstream_model=payload.upstream_model,
         item=payload.item,
         unit_price_micro=payload.unit_price_micro,
-        currency=payload.currency,
-        effective_from_ms=payload.effective_from_ms,
-    )
-    session.commit()
-    return {"id": row.id, "version": row.version}
-
-
-@router.get("/admin/prices/charge", dependencies=[Depends(require("prices:read"))])
-def list_charge_prices(
-    session: Session = Depends(session_of), page_size: int = 50, offset: int = 0
-) -> list[dict]:
-    limit, off = page_params(page_size, offset)
-    rows = session.scalars(select(ChargePriceORM).offset(off).limit(limit)).all()
-    return [
-        {
-            "id": row.id,
-            "public_model_id": row.public_model_id,
-            "item": row.item,
-            "mode": row.mode,
-            "value": row.value,
-            "currency": row.currency,
-            "effective_from_ms": row.effective_from_ms,
-            "version": row.version,
-        }
-        for row in rows
-    ]
-
-
-@router.post(
-    "/admin/prices/charge",
-    status_code=201,
-    dependencies=[Depends(require("prices:write"))],
-)
-def create_charge_price(
-    payload: ChargePriceCreate, session: Session = Depends(session_of)
-) -> dict:
-    """markup: value=万分比 (12000 = 1.2x of cost); fixed: value=micro unit price."""
-    row = prices.create_charge_price(
-        session,
-        public_model_id=payload.public_model_id,
-        item=payload.item,
-        mode=payload.mode,
-        value=payload.value,
         currency=payload.currency,
         effective_from_ms=payload.effective_from_ms,
     )

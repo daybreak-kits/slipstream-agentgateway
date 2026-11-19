@@ -372,11 +372,11 @@
 
 **背景**：价格数据现存三处——`upstream_models` 行内 cost/markup 列（现行计费读这里）、`upstream_prices`/`charge_prices` 版本化表（ADR-011 设计）、`charge_prices` 的 markup 行（seed 写入）。三处并存导致展示与计费口径分裂。
 
-**决策**：进价与倍率的**现行权威 = 模型行字段**（`cost_input_per_1m` / `cost_output_per_1m` / `markup`）；花费 = 成本 × 倍率；公开模型售价 = 成员加权只读派生，**不存在独立维护的对外价**。`charge_prices` 的 markup 行退役；`upstream_prices`/`charge_prices` 降级为历史快照与 JSON 导入导出载体，不再被计费读取。账本 `price_version` 快照在结算时从模型行取值留档，改价不重算历史。
+**决策**：进价与倍率的**现行权威 = 模型行字段**（`cost_input_per_1m` / `cost_output_per_1m` / `markup`）；花费 = 成本 × 倍率；公开模型售价 = 成员加权只读派生，**不存在独立维护的对外价**。`charge_prices` 整书退役（读写在计费链路上全部删除）；`upstream_prices` 降级为历史快照与 JSON 导入导出载体，不再被计费读取——**唯一例外是缓存价**：cache_read / cache_write 不是模型行的列，仍从 `upstream_prices` 读当前价（item=cache_read / cache_write），取不到按 unpriced-cache 处理（缓存词元不计价，入/出仍照计）。账本 `price_version` 快照在结算时从模型行取值留档，改价不重算历史。
 
-**理由**：三处一真二假不如一处真；ADR-017 已定 成本×倍率=花费，本次把存储口径收敛到同一处。
+**理由**：三处一真二假不如一处真；ADR-017 已定 成本×倍率=花费，本次把存储口径收敛到同一处。缓存价留在书上是因为它没有可收敛的落点——模型行加两列会把「价格单源」变成两处。
 
-**后果**：价目页 = 进价 + 倍率编辑 + 只读派生售价；JSON 导入导出覆盖进价与倍率，导入即改模型行；seed 不再写 markup 行。
+**后果**：价目页 = 进价 + 倍率编辑 + 只读派生售价；JSON 导入导出覆盖进价与倍率，导入即改模型行；seed 只写缓存价两行（不再写 markup 行）；缓存价仍走 `/admin/prices/upstream`，但该端点只收 cache_read / cache_write。
 
 ## ADR-021 请求/响应正文日志：全局开关、默认关
 
