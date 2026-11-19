@@ -100,7 +100,7 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 
 ### 6.3 部署注意（生产必读）
 
-- **必须覆盖 `SLIPSTREAM_ADMIN_USERNAME` / `SLIPSTREAM_ADMIN_PASSWORD`**：默认 `admin / admin12345` 仅演示数据（seed_demo）使用；生产首次启动前必须设置，否则控制台入口是公开弱口令。
+- **必须覆盖 `ADMIN_USERNAME` / `ADMIN_PASSWORD`**（ADR-019 引导，无 `SLIPSTREAM_` 前缀）：默认 `admin / admin` 仅本地演示；生产首次启动前必须设置，否则控制台入口是公开弱口令。`seed_demo` 的演示账号密码另由 `SLIPSTREAM_DEMO_ADMIN_PASSWORD` 控制（默认 `admin12345`）。
 - 控制台会话绝对过期 12h（无滑动续期）；生产置 `SLIPSTREAM_COOKIE_SECURE=1` 并置于 TLS 之后，管理台与 API 必须同主机名。
 - 单端口：先 `cd web && npm run build` 再启动控制面 3700（spa.py 同源托管 `web/dist`，深链回退 index.html）。
 

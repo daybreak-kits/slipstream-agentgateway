@@ -41,3 +41,34 @@ def test_absolute_config_dir_is_kept() -> None:
         assert Path(get_settings().ag_config_dir) == Path(absolute)
     finally:
         _restore(previous)
+
+
+_ADMIN_KEYS = (
+    "ADMIN_USERNAME",
+    "ADMIN_PASSWORD",
+    "SLIPSTREAM_ADMIN_USERNAME",
+    "SLIPSTREAM_ADMIN_PASSWORD",
+)
+
+
+def test_bootstrap_admin_env_has_no_slipstream_prefix() -> None:
+    """ADR-019 引导：ADMIN_USERNAME/ADMIN_PASSWORD 去前缀，旧 SLIPSTREAM_ 名不再生效。"""
+    previous = {key: os.environ.get(key) for key in _ADMIN_KEYS}
+    try:
+        os.environ.update(
+            ADMIN_USERNAME="root",
+            ADMIN_PASSWORD="s3cret",
+            SLIPSTREAM_ADMIN_USERNAME="ignored",
+            SLIPSTREAM_ADMIN_PASSWORD="ignored",
+        )
+        reset_settings_cache()
+        settings = get_settings()
+        assert settings.admin_username == "root"
+        assert settings.admin_password == "s3cret"
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        reset_settings_cache()

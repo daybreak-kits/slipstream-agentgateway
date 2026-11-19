@@ -1,11 +1,12 @@
-"""Application settings (pydantic-settings); every knob is an SLIPSTREAM_* env var."""
+"""Application settings (pydantic-settings); every knob is an SLIPSTREAM_* env var
+except the bootstrap admin pair (ADMIN_USERNAME / ADMIN_PASSWORD)."""
 
 from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -49,9 +50,11 @@ class Settings(BaseSettings):
     # ONLY while no admin-role user with a password exists; afterwards the
     # account lives in the database and these values are never consulted again.
     # The defaults keep the local demo working (previously hardcoded in seed);
-    # real deployments MUST override SLIPSTREAM_ADMIN_PASSWORD.
-    admin_username: str = "admin"
-    admin_password: str = "admin12345"
+    # real deployments MUST override ADMIN_PASSWORD. These two are the only
+    # un-prefixed knobs (validation_alias bypasses env_prefix): a single
+    # account/password pair needs no SLIPSTREAM_ namespace.
+    admin_username: str = Field(default="admin", validation_alias="ADMIN_USERNAME")
+    admin_password: str = Field(default="admin", validation_alias="ADMIN_PASSWORD")
 
     # Client keys: sk- + N chars; canonical lengths use uppercase A-Z0-9._-.
     client_key_prefix: str = "sk-"

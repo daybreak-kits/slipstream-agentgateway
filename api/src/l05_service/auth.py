@@ -353,9 +353,9 @@ def ensure_bootstrap_admin(session: Session) -> bool:
     settings = get_settings()
     username = settings.admin_username.strip()
     if not username:
-        raise AppError(ErrorCode.VALIDATION_ERROR, "SLIPSTREAM_ADMIN_USERNAME 不能为空")
+        raise AppError(ErrorCode.VALIDATION_ERROR, "ADMIN_USERNAME 不能为空")
     if not settings.admin_password:
-        raise AppError(ErrorCode.VALIDATION_ERROR, "SLIPSTREAM_ADMIN_PASSWORD 不能为空")
+        raise AppError(ErrorCode.VALIDATION_ERROR, "ADMIN_PASSWORD 不能为空")
     taken = session.scalars(
         select(UserORM.username).where(UserORM.username == username)
     ).first()
