@@ -1,0 +1,231 @@
+# ===== before request =====
+# HELP agentgateway_config_synchronized Whether the last configuration load/reload was successful or not, being synchronized with the on-disk configuration.
+# TYPE agentgateway_config_synchronized gauge
+agentgateway_config_synchronized 1
+# HELP agentgateway_tokio_global_queue_depth number of tasks currently scheduled in the runtime’s global queue
+# TYPE agentgateway_tokio_global_queue_depth gauge
+agentgateway_tokio_global_queue_depth 0
+# HELP agentgateway_tokio_num_alive_tasks number of currently alive tasks in the runtime
+# TYPE agentgateway_tokio_num_alive_tasks gauge
+agentgateway_tokio_num_alive_tasks 3
+# HELP agentgateway_tokio_num_workers number of worker threads used by the runtime
+# TYPE agentgateway_tokio_num_workers gauge
+agentgateway_tokio_num_workers 16
+# HELP agentgateway_build Agentgateway build information.
+# TYPE agentgateway_build info
+agentgateway_build_info{tag="True"} 1
+# HELP agentgateway_substrate_request_parking_active Number of requests waiting for a Substrate actor to become routable.
+# TYPE agentgateway_substrate_request_parking_active gauge
+agentgateway_substrate_request_parking_active 0
+# HELP agentgateway_downstream_connections The total number of downstream connections established.
+# TYPE agentgateway_downstream_connections counter
+agentgateway_downstream_connections_total{bind="bind/3692",gateway="unknown",listener="unknown",protocol="http"} 1
+# HELP agentgateway_downstream_connections_shed Total downstream connections closed by the active connection limit.
+# TYPE agentgateway_downstream_connections_shed counter
+agentgateway_downstream_connections_shed_total{bind="bind/3692"} 0
+# HELP agentgateway_requests_shed Total downstream requests rejected by the in-flight request limit.
+# TYPE agentgateway_requests_shed counter
+agentgateway_requests_shed_total{bind="bind/3692"} 0
+# HELP agentgateway_downstream_received_bytes Total TCP bytes received per connection labels.
+# TYPE agentgateway_downstream_received_bytes counter
+# UNIT agentgateway_downstream_received_bytes bytes
+agentgateway_downstream_received_bytes_total{bind="bind/3692",gateway="unknown",listener="unknown",protocol="http"} 0
+# HELP agentgateway_downstream_sent_bytes Total TCP bytes transmitted per connection labels.
+# TYPE agentgateway_downstream_sent_bytes counter
+# UNIT agentgateway_downstream_sent_bytes bytes
+agentgateway_downstream_sent_bytes_total{bind="bind/3692",gateway="unknown",listener="unknown",protocol="http"} 0
+# EOF
+
+# ===== after request =====
+# HELP agentgateway_config_synchronized Whether the last configuration load/reload was successful or not, being synchronized with the on-disk configuration.
+# TYPE agentgateway_config_synchronized gauge
+agentgateway_config_synchronized 1
+# HELP agentgateway_tokio_global_queue_depth number of tasks currently scheduled in the runtime’s global queue
+# TYPE agentgateway_tokio_global_queue_depth gauge
+agentgateway_tokio_global_queue_depth 0
+# HELP agentgateway_tokio_num_alive_tasks number of currently alive tasks in the runtime
+# TYPE agentgateway_tokio_num_alive_tasks gauge
+agentgateway_tokio_num_alive_tasks 4
+# HELP agentgateway_tokio_num_workers number of worker threads used by the runtime
+# TYPE agentgateway_tokio_num_workers gauge
+agentgateway_tokio_num_workers 16
+# HELP agentgateway_build Agentgateway build information.
+# TYPE agentgateway_build info
+agentgateway_build_info{tag="True"} 1
+# HELP agentgateway_gen_ai_client_token_usage Number of tokens used per request.
+# TYPE agentgateway_gen_ai_client_token_usage histogram
+agentgateway_gen_ai_client_token_usage_sum{gen_ai_token_type="output",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 3.0
+agentgateway_gen_ai_client_token_usage_count{gen_ai_token_type="output",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_client_token_usage_bucket{le="1.0",gen_ai_token_type="output",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 0
+agentgateway_gen_ai_client_token_usage_bucket{le="4.0",gen_ai_token_type="output",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_client_token_usage_bucket{le="16.0",gen_ai_token_type="output",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_client_token_usage_bucket{le="64.0",gen_ai_token_type="output",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_client_token_usage_bucket{le="256.0",gen_ai_token_type="output",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_client_token_usage_bucket{le="1024.0",gen_ai_token_type="output",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_client_token_usage_bucket{le="4096.0",gen_ai_token_type="output",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_client_token_usage_bucket{le="16384.0",gen_ai_token_type="output",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_client_token_usage_bucket{le="65536.0",gen_ai_token_type="output",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_client_token_usage_bucket{le="262144.0",gen_ai_token_type="output",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_client_token_usage_bucket{le="1048576.0",gen_ai_token_type="output",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_client_token_usage_bucket{le="4194304.0",gen_ai_token_type="output",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_client_token_usage_bucket{le="16777216.0",gen_ai_token_type="output",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_client_token_usage_bucket{le="67108864.0",gen_ai_token_type="output",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_client_token_usage_bucket{le="+Inf",gen_ai_token_type="output",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_client_token_usage_sum{gen_ai_token_type="input",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 5.0
+agentgateway_gen_ai_client_token_usage_count{gen_ai_token_type="input",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_client_token_usage_bucket{le="1.0",gen_ai_token_type="input",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 0
+agentgateway_gen_ai_client_token_usage_bucket{le="4.0",gen_ai_token_type="input",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 0
+agentgateway_gen_ai_client_token_usage_bucket{le="16.0",gen_ai_token_type="input",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_client_token_usage_bucket{le="64.0",gen_ai_token_type="input",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_client_token_usage_bucket{le="256.0",gen_ai_token_type="input",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_client_token_usage_bucket{le="1024.0",gen_ai_token_type="input",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_client_token_usage_bucket{le="4096.0",gen_ai_token_type="input",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_client_token_usage_bucket{le="16384.0",gen_ai_token_type="input",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_client_token_usage_bucket{le="65536.0",gen_ai_token_type="input",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_client_token_usage_bucket{le="262144.0",gen_ai_token_type="input",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_client_token_usage_bucket{le="1048576.0",gen_ai_token_type="input",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_client_token_usage_bucket{le="4194304.0",gen_ai_token_type="input",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_client_token_usage_bucket{le="16777216.0",gen_ai_token_type="input",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_client_token_usage_bucket{le="67108864.0",gen_ai_token_type="input",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_client_token_usage_bucket{le="+Inf",gen_ai_token_type="input",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+# HELP agentgateway_gen_ai_server_request_duration Duration of a generative AI request in seconds; failed operations have error_type="_OTHER" and successful operations omit the label.
+# TYPE agentgateway_gen_ai_server_request_duration histogram
+agentgateway_gen_ai_server_request_duration_sum{gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 0.2163475
+agentgateway_gen_ai_server_request_duration_count{gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_server_request_duration_bucket{le="0.01",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 0
+agentgateway_gen_ai_server_request_duration_bucket{le="0.02",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 0
+agentgateway_gen_ai_server_request_duration_bucket{le="0.04",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 0
+agentgateway_gen_ai_server_request_duration_bucket{le="0.08",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 0
+agentgateway_gen_ai_server_request_duration_bucket{le="0.16",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 0
+agentgateway_gen_ai_server_request_duration_bucket{le="0.32",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_server_request_duration_bucket{le="0.64",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_server_request_duration_bucket{le="1.28",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_server_request_duration_bucket{le="2.56",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_server_request_duration_bucket{le="5.12",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_server_request_duration_bucket{le="10.24",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_server_request_duration_bucket{le="20.48",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_server_request_duration_bucket{le="40.96",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_server_request_duration_bucket{le="81.92",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_gen_ai_server_request_duration_bucket{le="+Inf",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+# HELP agentgateway_substrate_request_parking_active Number of requests waiting for a Substrate actor to become routable.
+# TYPE agentgateway_substrate_request_parking_active gauge
+agentgateway_substrate_request_parking_active 0
+# HELP agentgateway_requests The total number of HTTP requests sent.
+# TYPE agentgateway_requests counter
+agentgateway_requests_total{backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",protocol="llm",method="POST",status="200",reason="Upstream",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+# HELP agentgateway_cost_catalog_lookups Total number of model cost catalog lookups by resolution status.
+# TYPE agentgateway_cost_catalog_lookups counter
+agentgateway_cost_catalog_lookups_total{status="Missing",gen_ai_operation_name="chat",gen_ai_system="openai",gen_ai_request_model="mock-model",gen_ai_response_model="mock-ok",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+# HELP agentgateway_downstream_connections The total number of downstream connections established.
+# TYPE agentgateway_downstream_connections counter
+agentgateway_downstream_connections_total{bind="bind/3692",gateway="unknown",listener="unknown",protocol="http"} 2
+# HELP agentgateway_downstream_connections_shed Total downstream connections closed by the active connection limit.
+# TYPE agentgateway_downstream_connections_shed counter
+agentgateway_downstream_connections_shed_total{bind="bind/3692"} 0
+# HELP agentgateway_requests_shed Total downstream requests rejected by the in-flight request limit.
+# TYPE agentgateway_requests_shed counter
+agentgateway_requests_shed_total{bind="bind/3692"} 0
+# HELP agentgateway_response_bytes Total HTTP response bytes received.
+# TYPE agentgateway_response_bytes counter
+# UNIT agentgateway_response_bytes bytes
+agentgateway_response_bytes_total{backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",protocol="llm",method="POST",status="200",reason="Upstream",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 256
+# HELP agentgateway_request_duration_seconds Duration of HTTP requests (seconds).
+# TYPE agentgateway_request_duration_seconds histogram
+# UNIT agentgateway_request_duration_seconds seconds
+agentgateway_request_duration_seconds_sum{backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",protocol="llm",method="POST",status="200",reason="Upstream",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 0.2163475
+agentgateway_request_duration_seconds_count{backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",protocol="llm",method="POST",status="200",reason="Upstream",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_request_duration_seconds_bucket{le="0.001",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",protocol="llm",method="POST",status="200",reason="Upstream",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 0
+agentgateway_request_duration_seconds_bucket{le="0.005",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",protocol="llm",method="POST",status="200",reason="Upstream",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 0
+agentgateway_request_duration_seconds_bucket{le="0.01",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",protocol="llm",method="POST",status="200",reason="Upstream",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 0
+agentgateway_request_duration_seconds_bucket{le="0.025",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",protocol="llm",method="POST",status="200",reason="Upstream",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 0
+agentgateway_request_duration_seconds_bucket{le="0.05",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",protocol="llm",method="POST",status="200",reason="Upstream",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 0
+agentgateway_request_duration_seconds_bucket{le="0.1",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",protocol="llm",method="POST",status="200",reason="Upstream",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 0
+agentgateway_request_duration_seconds_bucket{le="0.25",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",protocol="llm",method="POST",status="200",reason="Upstream",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_request_duration_seconds_bucket{le="0.5",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",protocol="llm",method="POST",status="200",reason="Upstream",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_request_duration_seconds_bucket{le="1.0",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",protocol="llm",method="POST",status="200",reason="Upstream",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_request_duration_seconds_bucket{le="2.5",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",protocol="llm",method="POST",status="200",reason="Upstream",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_request_duration_seconds_bucket{le="5.0",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",protocol="llm",method="POST",status="200",reason="Upstream",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_request_duration_seconds_bucket{le="10.0",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",protocol="llm",method="POST",status="200",reason="Upstream",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_request_duration_seconds_bucket{le="30.0",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",protocol="llm",method="POST",status="200",reason="Upstream",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_request_duration_seconds_bucket{le="80.0",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",protocol="llm",method="POST",status="200",reason="Upstream",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_request_duration_seconds_bucket{le="+Inf",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",protocol="llm",method="POST",status="200",reason="Upstream",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+# HELP agentgateway_request_processing_seconds Duration from receiving an HTTP request to sending the primary outbound call (seconds).
+# TYPE agentgateway_request_processing_seconds histogram
+# UNIT agentgateway_request_processing_seconds seconds
+agentgateway_request_processing_seconds_sum{backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 0.0009076
+agentgateway_request_processing_seconds_count{backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_request_processing_seconds_bucket{le="0.00005",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 0
+agentgateway_request_processing_seconds_bucket{le="0.0001",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 0
+agentgateway_request_processing_seconds_bucket{le="0.00025",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 0
+agentgateway_request_processing_seconds_bucket{le="0.0005",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 0
+agentgateway_request_processing_seconds_bucket{le="0.001",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_request_processing_seconds_bucket{le="0.0025",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_request_processing_seconds_bucket{le="0.005",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_request_processing_seconds_bucket{le="0.01",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_request_processing_seconds_bucket{le="0.05",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_request_processing_seconds_bucket{le="0.25",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_request_processing_seconds_bucket{le="+Inf",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+# HELP agentgateway_response_processing_seconds Duration from receiving the primary outbound response to sending the HTTP response (seconds).
+# TYPE agentgateway_response_processing_seconds histogram
+# UNIT agentgateway_response_processing_seconds seconds
+agentgateway_response_processing_seconds_sum{backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 0.0002054
+agentgateway_response_processing_seconds_count{backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_response_processing_seconds_bucket{le="0.00005",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 0
+agentgateway_response_processing_seconds_bucket{le="0.0001",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 0
+agentgateway_response_processing_seconds_bucket{le="0.00025",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_response_processing_seconds_bucket{le="0.0005",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_response_processing_seconds_bucket{le="0.001",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_response_processing_seconds_bucket{le="0.0025",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_response_processing_seconds_bucket{le="0.005",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_response_processing_seconds_bucket{le="0.01",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_response_processing_seconds_bucket{le="0.05",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_response_processing_seconds_bucket{le="0.25",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+agentgateway_response_processing_seconds_bucket{le="+Inf",backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 1
+# HELP agentgateway_downstream_received_bytes Total TCP bytes received per connection labels.
+# TYPE agentgateway_downstream_received_bytes counter
+# UNIT agentgateway_downstream_received_bytes bytes
+agentgateway_downstream_received_bytes_total{bind="bind/3692",gateway="unknown",listener="unknown",protocol="http"} 327
+# HELP agentgateway_downstream_sent_bytes Total TCP bytes transmitted per connection labels.
+# TYPE agentgateway_downstream_sent_bytes counter
+# UNIT agentgateway_downstream_sent_bytes bytes
+agentgateway_downstream_sent_bytes_total{bind="bind/3692",gateway="unknown",listener="unknown",protocol="http"} 421
+# HELP agentgateway_upstream_connect_duration_seconds Duration to establish upstream connection (seconds).
+# TYPE agentgateway_upstream_connect_duration_seconds histogram
+# UNIT agentgateway_upstream_connect_duration_seconds seconds
+agentgateway_upstream_connect_duration_seconds_sum{transport="plaintext"} 0.0018683000000000003
+agentgateway_upstream_connect_duration_seconds_count{transport="plaintext"} 4
+agentgateway_upstream_connect_duration_seconds_bucket{le="0.0005",transport="plaintext"} 2
+agentgateway_upstream_connect_duration_seconds_bucket{le="0.0015",transport="plaintext"} 4
+agentgateway_upstream_connect_duration_seconds_bucket{le="0.0043",transport="plaintext"} 4
+agentgateway_upstream_connect_duration_seconds_bucket{le="0.0126",transport="plaintext"} 4
+agentgateway_upstream_connect_duration_seconds_bucket{le="0.0368",transport="plaintext"} 4
+agentgateway_upstream_connect_duration_seconds_bucket{le="0.108",transport="plaintext"} 4
+agentgateway_upstream_connect_duration_seconds_bucket{le="0.316",transport="plaintext"} 4
+agentgateway_upstream_connect_duration_seconds_bucket{le="0.924",transport="plaintext"} 4
+agentgateway_upstream_connect_duration_seconds_bucket{le="2.71",transport="plaintext"} 4
+agentgateway_upstream_connect_duration_seconds_bucket{le="8.0",transport="plaintext"} 4
+agentgateway_upstream_connect_duration_seconds_bucket{le="+Inf",transport="plaintext"} 4
+# HELP agentgateway_upstream_call_duration_seconds Duration of outbound calls made by agentgateway (seconds).
+# TYPE agentgateway_upstream_call_duration_seconds histogram
+# UNIT agentgateway_upstream_call_duration_seconds seconds
+agentgateway_upstream_call_duration_seconds_sum{kind="Primary",subtype="Llm"} 0.0034916
+agentgateway_upstream_call_duration_seconds_count{kind="Primary",subtype="Llm"} 3
+agentgateway_upstream_call_duration_seconds_bucket{le="0.001",kind="Primary",subtype="Llm"} 1
+agentgateway_upstream_call_duration_seconds_bucket{le="0.005",kind="Primary",subtype="Llm"} 3
+agentgateway_upstream_call_duration_seconds_bucket{le="0.01",kind="Primary",subtype="Llm"} 3
+agentgateway_upstream_call_duration_seconds_bucket{le="0.025",kind="Primary",subtype="Llm"} 3
+agentgateway_upstream_call_duration_seconds_bucket{le="0.05",kind="Primary",subtype="Llm"} 3
+agentgateway_upstream_call_duration_seconds_bucket{le="0.1",kind="Primary",subtype="Llm"} 3
+agentgateway_upstream_call_duration_seconds_bucket{le="0.25",kind="Primary",subtype="Llm"} 3
+agentgateway_upstream_call_duration_seconds_bucket{le="0.5",kind="Primary",subtype="Llm"} 3
+agentgateway_upstream_call_duration_seconds_bucket{le="1.0",kind="Primary",subtype="Llm"} 3
+agentgateway_upstream_call_duration_seconds_bucket{le="2.5",kind="Primary",subtype="Llm"} 3
+agentgateway_upstream_call_duration_seconds_bucket{le="5.0",kind="Primary",subtype="Llm"} 3
+agentgateway_upstream_call_duration_seconds_bucket{le="10.0",kind="Primary",subtype="Llm"} 3
+agentgateway_upstream_call_duration_seconds_bucket{le="30.0",kind="Primary",subtype="Llm"} 3
+agentgateway_upstream_call_duration_seconds_bucket{le="80.0",kind="Primary",subtype="Llm"} 3
+agentgateway_upstream_call_duration_seconds_bucket{le="+Inf",kind="Primary",subtype="Llm"} 3
+# HELP agentgateway_retries The total number of request retries.
+# TYPE agentgateway_retries counter
+agentgateway_retries_total{backend="/gateway/gw-e19t1/default/ai-e19t1/backend0",protocol="llm",method="POST",status="200",reason="Upstream",bind="bind/3692",gateway="default/default",listener="gw-e19t1",route="default/ai-e19t1",route_rule="unknown"} 2
+# EOF

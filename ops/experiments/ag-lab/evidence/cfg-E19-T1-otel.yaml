@@ -1,0 +1,92 @@
+{
+  "config": {
+    "adminAddr": "127.0.0.1:3921",
+    "statsAddr": "127.0.0.1:3922",
+    "readinessAddr": "127.0.0.1:3923",
+    "database": {
+      "url": "sqlite://data.db"
+    },
+    "storage": {
+      "mode": "file"
+    },
+    "session": {
+      "key": "3a5dde678b895d76e244397deac58c4eac0199d751ee0c168e4ef022d62e9c2e"
+    }
+  },
+  "gateways": {
+    "gw-e19t1": {
+      "port": 3692,
+      "bindAddress": "127.0.0.1"
+    }
+  },
+  "routes": [
+    {
+      "name": "ai-e19t1",
+      "gateways": "gw-e19t1",
+      "matches": [
+        {
+          "path": {
+            "pathPrefix": "/v1/chat/completions"
+          }
+        }
+      ],
+      "backends": [
+        {
+          "ai": {
+            "groups": [
+              {
+                "providers": [
+                  {
+                    "name": "primary",
+                    "hostOverride": "127.0.0.1:64100",
+                    "provider": {
+                      "openAI": {
+                        "model": "mock-model"
+                      }
+                    },
+                    "pathPrefix": "/fail500"
+                  }
+                ]
+              },
+              {
+                "providers": [
+                  {
+                    "name": "backup",
+                    "hostOverride": "127.0.0.1:64100",
+                    "provider": {
+                      "openAI": {
+                        "model": "mock-model"
+                      }
+                    },
+                    "pathPrefix": "/ok"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "policies": {
+        "retry": {
+          "attempts": 2,
+          "codes": [
+            500
+          ],
+          "backoff": "100ms"
+        }
+      }
+    }
+  ],
+  "frontendPolicies": {
+    "accessLog": {
+      "database": {
+        "llm": "full"
+      }
+    },
+    "tracing": {
+      "host": "127.0.0.1:4318",
+      "protocol": "http",
+      "randomSampling": "true"
+    }
+  }
+}

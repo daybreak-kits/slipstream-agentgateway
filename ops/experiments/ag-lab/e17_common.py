@@ -201,13 +201,19 @@ def health_policy(expression="response.code >= 400", consecutive_failures=1) -> 
 
 # ------------------------------------------------------------------ harness
 class Harness:
+    # evidence naming knobs; experiment-specific harnesses override these only
+    tmp_root = TMPROOT
+    log_prefix = "ag-E17-"
+    evid_prefix = "E17-"
+    cfg_prefix = "cfg-E17-"
+
     def __init__(self, name, tag, port=3692, admin=(3921, 3922, 3923), gw=None):
         self.name = name
         self.tag = tag
         self.port = port
         self.admin_port, self.stats_port, self.ready_port = admin
         self.gw = gw or ("gw-" + name)
-        self.workdir = TMPROOT / name
+        self.workdir = self.tmp_root / name
         self.workdir.mkdir(parents=True, exist_ok=True)
         self.run_cfg = self.workdir / "run-config.yaml"
         self.proc = None
@@ -231,7 +237,7 @@ class Harness:
         for f in self.workdir.glob("data.db*"):
             f.unlink(missing_ok=True)
         self.write_cfg(cfg)
-        self.log = EVID / ("ag-E17-" + tag + ".log")
+        self.log = EVID / (self.log_prefix + tag + ".log")
         self.log.write_text("", encoding="utf-8")
         self.proc = subprocess.Popen([str(AG), "-f", str(self.run_cfg)],
                                      cwd=str(self.workdir),
@@ -373,7 +379,7 @@ class Harness:
             cfg_text = json.dumps(safe_cfg, indent=2, ensure_ascii=False)
             if has_secret(cfg_text):
                 raise RuntimeError("REFUSING to write cfg: real key would leak")
-            cfg_path = EVID / ("cfg-E17-" + tag + ".yaml")
+            cfg_path = EVID / (self.cfg_prefix + tag + ".yaml")
             cfg_path.write_text(cfg_text + "\n", encoding="utf-8")
             payload["config"] = {"evidence_file": cfg_path.name,
                                  "note": "backendAuth key {file: ...} -> gitignored "
@@ -382,7 +388,7 @@ class Harness:
         text = json.dumps(safe, indent=2, ensure_ascii=False, default=str)
         if has_secret(text):
             raise RuntimeError("REFUSING to write evidence: real key would leak")
-        (EVID / ("E17-" + tag + ".json.md")).write_text(text + "\n", encoding="utf-8")
+        (EVID / (self.evid_prefix + tag + ".json.md")).write_text(text + "\n", encoding="utf-8")
 
 
 def _strip_key_files(obj):

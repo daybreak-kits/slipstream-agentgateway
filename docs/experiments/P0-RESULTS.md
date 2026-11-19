@@ -596,6 +596,53 @@ T4 平权声明复核（#k1/#k2/#k3 + vm 同层三 target，同 baseUrl 异 key_
 
 原始证据：evidence/E18-T1-validate.json.md、E18-T2-direct.json.md、E18-T2-vm.json.md、E18-T1b-kn2.json.md、E18-T1b-kn2-faithful.json.md、E18-T3-s1-samegroup.json.md、E18-T3-s2-crossup.json.md、E18-T4-kn3.json.md；配置 evidence/cfg-E18-*.yaml（13 个，key file 路径脱敏为占位符）；mock 命中日志 evidence/mock-E18-*.jsonl；AG 运行日志 evidence/ag-E18-*.log（gitignored）。脚本 e18_multikey_probe.py（自备端口/哑密钥/不读 .env.e15）；运行期工作区 .e18-tmp（gitignored）。二进制同 E14–E17（bin-e14/agentgateway.exe，v1.7.0，sha256 909b93dc…ed3c）。
 
+## E19 · 遥测能力盘点（路由链可视化数据的最后裁决）
+
+目的：路由链可视化此前被砍（E14：request_logs 26 列无 attempt、49 请求 49 行；E16/E17：完整形态重试/切组真实存在但 request_logs 仍 1 请求 1 行）。用户资料指出：网关内部重试/切换可经 OpenTelemetry Traces（每次上游调用一个 span）、Prometheus 指标（重试/错误计数）、访问日志字段定制、debug 日志级别观测；资料中的 agctl、K8s 端口转发疑来自其他部署形态。本实验在 pinned 1.7.0 **standalone 二进制**上逐项实测：能力是否存在、能否拿到「每次上游尝试的上游身份/状态码/尝试序号」，不凭文档推断。
+
+环境与配置（脚本 e19_telemetry.py + otel_capture.py——裸 HTTP OTLP 接收器 + 无依赖 protobuf 解码；全程 mock 上游（e17_common.MockServer，pathPrefix /fail500=500、/ok=200），无真实凭据，未触 .env.e15；自备端口 gateway 3697 / admin 3931–3933 / OTLP 捕获 4318(traces)·4319(logs)；每场景独立起停 AG、独立 data.db，配置先 --validate-only）。流量口径同 E17-T2-a：完整形态 gateways+routes+backends[].ai + route policies.retry {attempts:2, codes:[500], backoff:100ms}，1 个客户端请求 = 3 次上游命中（主 /fail500 ×2 + 备 /ok ×1，客户端 200）。
+
+裁决表（能力 × 是否存在 × 能否拿到每次尝试详情）：
+
+| 能力 | 是否存在（pinned 1.7.0 standalone） | 能否拿到每次尝试详情 | 证据 |
+| --- | --- | --- | --- |
+| OTel Traces（OTLP 导出） | **存在**。挂载点=frontendPolicies.tracing {host/protocol/path/randomSampling…}（validate exit=0）；**顶层 `tracing` 键被拒收**（"unknown field \`tracing\`"——schema-config.json 的顶层 tracing/logging/metrics 属 xds 控制面根，非 standalone 文件根） | **能**。1 请求 4 span：1 个 server 根 span + **每次上游尝试 1 个 client span**。根 span 属性：gateway/listener/route/endpoint/http.response.status_code=200/protocol=llm/gen_ai.*（model/provider/usage）/retry.attempt=2/duration=216ms/server.port；client span 属性：agentgateway.outbound.kind=Primary、subtype=Llm、http.path=/fail500 或 /ok/chat/completions（上游身份）、http.status=500/500/200（各次状态码）、error.type="500"、OTel status=ERROR。尝试序号无显式属性，按 start 时间排序复原（与 mock 命中序一致）。**request_logs 行的 trace_id/span_id 在启用 tracing 后填充，span_id==根 span id → DB↔span 树可 join** | E19-T1-otel.json.md、cfg-E19-T1-otel.yaml、ag-E19-t1.log |
+| Prometheus 指标 | **存在**。stats 端口 /metrics 共 22 个 agentgateway_* HELP 族 | 部分。agentgateway_retries_total{backend,protocol,method,status=最终码,reason,bind,gateway,listener,route,route_rule}=2、agentgateway_requests_total、agentgateway_upstream_call_duration_seconds{kind,subtype} count=3、agentgateway_upstream_connect_duration_seconds{transport}——「重试率/上游调用量」宏观面板可做；但**所有标签不含上游 endpoint/provider**，且**无 eviction/outlier 计数器** → 无法按上游拆分 | E19-T2-metrics.json.md、E19-metrics-full.txt |
+| stdout 访问日志（info 级） | 存在（默认就有）。request 行含 retry.attempt=2；启用 tracing 后含 trace.id/span.id | 否（只有 attempt 总数；无每次尝试的上游与状态码） | ag-E19-t1.log、ag-E19-t4-control.log |
+| 访问日志字段定制（CEL add） | **部分存在**。frontendPolicies.accessLog.add 可配置，简单表达式（如 `'abc'`）进 stdout 行尾（`agw.e19.static="abc"`）；但**所有引用 upstreamCalls[] 的表达式（size()/map/join）被静默丢弃**（stdout、preset=otel、OTLP log record 三处均不出现，AG 日志无任何 CEL 报错）——E9 提取的 CEL 变量表宣称支持，1.7.0 实测不可用。OTLP 日志导出（accessLog.otlp {host, protocol:http} → 本地 /v1/logs）可用，但父级 add 不随 OTLP 生效，**需 otlp.fields.add** 才进 log record（'abc' 字段实测出现） | 否。add 属请求级字段；upstreamCalls 不可用 → 访问日志拿不到每次尝试 | E19-T3-accesslog-fields.json.md（A–F 六变体） |
+| request_logs（SQLite）schema | **固定 26 列**。accessLog.add 前后 PRAGMA table_info 无变化，add 字段不进 attributes_json | 否（26 列无 attempt/上游维度，维持 E14 结论）。启用 tracing 后 trace_id/span_id 填充是唯一增量（可与 span 树 join） | E19-T3-accesslog-fields.json.md 变体 A、E19-T1-otel.json.md |
+| debug/trace 日志 | **存在（RUST_LOG env）**。CLI 无日志 flag；standalone 配置根无 logging.level 键（顶层 `logging` 拒收同 tracing）。RUST_LOG=debug：2 请求 90 行；trace：335 行 | 部分。debug 有显式序号与原因：`proxy::httpproxy attempt 0/2|1/2|2/2`、`attempting another retry, last result was false Ok(500) backoff=Some(100ms)`、`response not retry-able`；trace 有 `types::loadbalancer unevict key=primary`（provider 名出现）；但事件行**不含上游 endpoint** → 日志仍拼不出「每次尝试打谁」 | E19-T4-debug-log.json.md、ag-E19-t4-debug.log、ag-E19-t4-trace.log |
+| agctl 子命令 | **不存在**。--help 仅 import/migrate/help；二进制 423,523 条字符串 agctl 出现 0 次 | — | E19-T5-agctl.json.md |
+
+观察细节：
+
+- T1 span 树原样结构：root(server "POST /v1/chat/completions/*") → children=3 个 client("POST")，时间序 attempt1=/fail500 500（error.type="500"，OTel status=ERROR，dur 1.13ms）→ attempt2=/fail500 500（1.72ms）→ attempt3=/ok 200（1.27ms，无 error.type、无 status）；与 mock 命中矩阵（/fail500:2 + /ok:1）完全一致。root 属性含完整 gen_ai.*（request/response model、usage tokens）与 retry.attempt=2，即「单请求明细卡」所需字段在根 span 层已齐。
+- randomSampling 默认 false：不显式配 `"randomSampling": "true"` 时无 span（采样开关决定无 traceparent 请求是否建 span）。
+- T2 计数器形状：retries_total/requests_total 均按最终响应打标签（status="200"），一次「3 次上游、2 次重试」的请求只 +1 requests_total、+2 retries_total；gen_ai_server_request_duration 仅 failed 操作带 error_type（本 mock 场景未出现 _OTHER——上游 5xx 原样透传、不合成错误响应）。
+- T3 六变体矩阵：A legacy+add→stdout 无自定义字段（upstreamCalls 表达式被丢）；B preset=otel+add→OTel 行无自定义字段；C add+otlp→log record 无自定义字段；D trivial CEL→`agw.e19.static="abc"` 进 stdout（accessLog.add 机制本身工作）；E otlp.fields.add→'abc' 进 OTLP log record（otlp 通道要显式 otlp.fields）；F 逐项拆解→static=True、count/targets/codes（全部引用 upstreamCalls）=False。request_logs 26 列与 attributes_json 内容在 A 变体前后无任何变化。
+- T4 摘录（RUST_LOG=debug，2 个请求）：request.id=1 出现 attempt 0/2 → another retry(Ok(500), backoff=100ms) → attempt 1/2 → another retry → attempt 2/2；request.id=2（主已被上轮 500 驱逐）attempt 0/2 后直接 `response not retry-able`——debug 日志能复原「重试了几次、为什么停」；trace 级才有 types::loadbalancer unevict key=primary。
+- 顺带发现（环境备注，不影响结论）：二进制内嵌 JSON schema 含非法转义（`\'`，上游生成缺陷）；schema-config.json（RawConfig，xds 控制面根）与二进制内嵌 schema（standalone 文件根）是两个不同根——检索能力时必须以 --validate-only 实测为准。
+
+结论（三选一）：
+
+**路由链可视化选 (a)：可经 OTel Traces 实现；其余途径只够宏观面板（b 的子集），访问日志/DB 路线出局。** pinned 1.7.0 standalone 唯一的「每次上游尝试」事实源是 OTel span 树（每次尝试 1 个 client span，含上游身份 pathPrefix、http.status、error.type、时间序），且 request_logs 行 trace_id/span_id 随 tracing 填充，可与根 span join 拿 tokens/成本/用户维度。架构草案：
+
+1. AG 渲染层加 `frontendPolicies.tracing {host: <控制面收集器>, protocol: "http", randomSampling: "true"}`（默认 path /v1/traces，AG 侧无需 SDK）；
+2. 控制面进程内驻留轻量 OTLP/HTTP 接收器（otel_capture.py 已验证：收 /v1/traces protobuf + 极简 wire-format 解码即可，标准库 ~400 行，无第三方依赖）；
+3. 摄取规则：client span（agentgateway.outbound.subtype=Llm）按 start 时间排序得 attempt 1..N；上游名=http.path 前缀（pathPrefix 即 provider 身份）→ 写「request trace_id ↔ attempts[]」明细（target/status/error/duration）；根 span trace_id 与 request_logs.trace_id join 拿 tokens/成本/用户；
+4. 展示链路：详情页 1 请求 = 1 条链（根节点 + N 个尝试节点：上游名/状态码/耗时/error.type）；宏观看板用 agentgateway_retries_total / agentgateway_requests_total / gen_ai_server_request_duration（T2），无需 span。
+
+对设计的影响：
+
+- 立项 (a) 的前置：控制面需常驻 OTLP 接收器 + span 明细存储；渲染层必须显式 randomSampling:true（默认 false 无 span）；每请求 ≥4 span，量大后启用 TracingConfig.filter（KEEP 语义）或采样。
+- (b) 的最小可用集（若不做路由链）：agentgateway_retries_total（route/gateway/最终码维度）、agentgateway_requests_total、agentgateway_upstream_call_duration_seconds（全局调用量）；无 eviction 计数器、无按上游拆分。
+- 访问日志/request_logs 路线在 1.7.0 正式出局（upstreamCalls 实测不可用 + 26 列固定）；若升级 AG 后 upstreamCalls 可用，可重评。
+- agctl 不存在：用户资料中的 agctl 流程不适用 standalone 形态；管理面走 admin 端口/UI。
+- 日志级别开关只有 RUST_LOG env（无 CLI flag、无配置键）；生产若开 debug 排障，重试事件可读但行数放大（90 行/2 请求）。
+- 本实验全程 mock 500/200，未触 E17 的 OR 429 panic 路径。
+
+原始证据：evidence/E19-T1-otel.json.md、E19-T2-metrics.json.md、E19-T3-accesslog-fields.json.md、E19-T4-debug-log.json.md、E19-T5-agctl.json.md、E19-metrics-full.txt；配置 evidence/cfg-E19-T1-otel.yaml、cfg-E19-T4-debug-log.yaml（T3 各变体配置内嵌于证据 JSON 的 variants[].config）；AG 运行日志 evidence/ag-E19-t1.log、ag-E19-t1b.log、ag-E19-t3a…t3f.log、ag-E19-t4-control/debug/trace.log。脚本 e19_telemetry.py（五探针编排，复用 e17_common Harness/MockServer——Harness 证据命名前缀参数化为类属性、E19 子类仅覆写前缀）+ otel_capture.py（OTLP 裸接收 + 无依赖 protobuf 解码，traces/logs 双布局）。二进制同 E14–E17（bin-e14/agentgateway.exe，v1.7.0，sha256 909b93dc…ed3c）。
+
 ## 对 v1 设计的影响汇总
 
 1. 路由语义：priority 分层严格；同层随机（约 1/3:2/3 偏置）；失败不请求内重试，只影响后续选路。GLOSSARY/ADR-003 需补「非请求内重试」。
