@@ -48,10 +48,12 @@ def test_app_registers_the_runner_when_jobs_enabled(engine_and_sessionmaker):
         "cooldown_rerender",
         "reconcile",
         "log_cleanup",
+        "models_dev_sync",
     }
-    # Three jobs share the configured interval; retention cleanup runs daily.
+    # Three jobs share the configured interval; the two daily jobs run daily.
     intervals = {name: interval for name, (_f, interval) in runner._jobs.items()}
     assert intervals.pop("log_cleanup") == 86_400.0
+    assert intervals.pop("models_dev_sync") == 86_400.0
     assert set(intervals.values()) == {60.0}
 
 
@@ -71,13 +73,16 @@ def test_jobs_setting_switch_disables_the_runner(engine_and_sessionmaker):
 
 
 def test_one_tick_runs_every_job_without_touching_balances(
-    engine_and_sessionmaker, tmp_path
+    engine_and_sessionmaker, tmp_path, monkeypatch
 ):
     """Smoke: a full tick is safe on a clean DB - the reconcile keeps balances put."""
     import asyncio
 
     from l01_core.timeutil import now_ms
-    from l05_service import balances
+    from l05_service import balances, models_dev
+
+    # Hermetic: the models.dev job must never reach the network from a test.
+    monkeypatch.setattr(models_dev, "fetch_snapshot", lambda *a, **k: {})
 
     _, factory = engine_and_sessionmaker
     with factory() as session:

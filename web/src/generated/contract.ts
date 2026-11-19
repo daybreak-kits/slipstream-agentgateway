@@ -5,6 +5,30 @@
 export const PAGE_SIZE_TIERS = [25, 50, 100, 200] as const;
 export type PageSizeTier = (typeof PAGE_SIZE_TIERS)[number];
 
+export interface AdoptModelsDevBatchResult {
+  refreshed: boolean;
+  snapshot?: Record<string, unknown>;
+  total: number;
+  matched: number;
+  filled_models: number;
+  filled_keys: number;
+  no_match: number;
+  items: AdoptModelsDevResult[];
+}
+
+export interface AdoptModelsDevResult {
+  id: string;
+  name: string;
+  matched: boolean;
+  status: string;
+  provider?: string;
+  model?: string;
+  refreshed?: boolean;
+  results?: Record<string, unknown>;
+  filled?: string[];
+  params_source?: string;
+}
+
 export interface ApiKeyConfig {
   enabled?: boolean;
   mode?: string;
@@ -156,6 +180,25 @@ export interface ModelTargetUpdate {
   weight?: number | null;
   when?: string | null;
   enabled?: boolean | null;
+}
+
+export interface MyModelOut {
+  name: string;
+  model_type: string;
+  parameters: MyModelParameters;
+  sources: string[];
+}
+
+export interface MyModelParameters {
+  max_input_tokens: number;
+  max_output_tokens: number;
+  reasoning_level: string;
+  input_types: string[];
+  output_types: string[];
+  tool_call: boolean;
+  reasoning: boolean;
+  attachment: boolean;
+  structured_output: boolean;
 }
 
 export interface PlaygroundMessage {

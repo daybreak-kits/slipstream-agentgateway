@@ -80,6 +80,12 @@ class Settings(BaseSettings):
     jobs_enabled: bool = True
     job_interval_seconds: float = 60.0
 
+    # W4-H models.dev snapshot source. The URL is a knob so a mirror can be
+    # pointed at without a code change; the adopt pass degrades to the last
+    # stored snapshot whenever the fetch fails.
+    models_dev_url: str = "https://models.dev/api.json"
+    models_dev_timeout_seconds: float = 30.0
+
     @model_validator(mode="after")
     def _resolve_config_dir(self) -> Settings:
         """把数据面配置目录归一化为绝对路径。

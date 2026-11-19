@@ -135,6 +135,12 @@ class UpstreamModelORM(Base):
     # enabled == False is a manual, long-term 关闭.
     model_type_source: Mapped[str] = mapped_column(String(16), default="default")
     parameters_json: Mapped[str] = mapped_column(Text, default="")
+    # W4-H: where the current parameters came from ("manual" = human entry in
+    # the console, "models.dev" = the last adopt-modelsdev pass filled >= 1
+    # blank key). A later manual PATCH that actually changes the block flips it
+    # back to manual; adopt never overwrites a value the user typed, so the
+    # badge only ever claims what the console really last wrote.
+    params_source: Mapped[str] = mapped_column(String(16), default="manual")
     cooldown_until_ms: Mapped[int] = mapped_column(BigInteger, default=0)
     created_at_ms: Mapped[int] = mapped_column(BigInteger, default=0)
 
@@ -489,6 +495,26 @@ class AdminSessionORM(Base):
     last_seen_at_ms: Mapped[int] = mapped_column(BigInteger, default=0)
     user_agent: Mapped[str] = mapped_column(String(255), default="")
     client_ip: Mapped[str] = mapped_column(String(64), default="")
+
+
+class ModelDevSnapshotORM(Base):
+    """W4-H: local cache of one models.dev provider/model row (snapshot, not history).
+
+    params_json / pricing_json keep the models.dev payload AS RECEIVED (limit,
+    modalities, capability flags; cost input/output per 1M USD) so a later
+    re-adopt can recompute conversions without refetching. The composite PK
+    (provider, model) is the upstream models.dev identity; adoption matches an
+    upstream_models row by its name against the model key (exact first, then
+    case-insensitive, never fuzzy).
+    """
+
+    __tablename__ = "model_dev_snapshots"
+
+    provider: Mapped[str] = mapped_column(String(128), primary_key=True)
+    model: Mapped[str] = mapped_column(String(255), primary_key=True)
+    params_json: Mapped[str] = mapped_column(Text, default="{}")
+    pricing_json: Mapped[str] = mapped_column(Text, default="{}")
+    fetched_at_ms: Mapped[int] = mapped_column(BigInteger, default=0, index=True)
 
 
 class AppSettingORM(Base):

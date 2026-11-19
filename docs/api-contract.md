@@ -388,6 +388,19 @@ AG 1.7 拒绝（`mcp.transport.http=false`），保存即 422。渲染到顶层 
 | PATCH | /admin/upstream-models/batch | upstream_models:write | body `{ids:[...], action:"enable"\|"disable"\|"delete"}` → `{changed:[id], missing:[id], action}` |
 | PATCH | /admin/public-models/batch | public_models:write | 同上 |
 | PATCH | /admin/model-targets/batch | model_targets:write | 同上 |
+| POST | /admin/upstream-models/{id}/adopt-modelsdev | upstream_models:write | **从 models.dev 兑入单条**（W4-H）：先尽力刷新快照（失败降级用库内 `model_dev_snapshots`），按模型名匹配（精确优先，大小写不敏感且唯一才回退；不做模糊猜测），**只填空键**（0/False/默认单模态/NULL 进价视为空，手改永不覆盖）→ `AdoptModelsDevResult {id, name, matched, status, provider, model, refreshed, results{键→filled\|skipped-manual\|skipped-no-fx\|no-match}, filled[], params_source}` |
+| POST | /admin/upstream-models/adopt-modelsdev | upstream_models:write | **同步 models.dev（批量）**（W4-H）：全部上游模型一次兑入，返回 `{refreshed, snapshot{providers,models,fetched_at_ms}, total, matched, filled_models, filled_keys, no_match, items[]}`；控制台「同步 models.dev」按钮与每日 job（`models_dev_sync`，SLIPSTREAM_JOBS_ENABLED=0 可停）共用同一服务 |
+
+W4-H 兑入语义：
+
+- 参数来源徽章：upstream-models 列表/创建/PATCH 出参新增 `params_source`（`manual`=人工录入 / `models.dev`=最近一次兑入填过空键；PATCH 真改参数块会翻回 manual，无操作保存不翻）。
+- models.dev 价格是 USD/1M，进价账本是 CNY/1M：兑入按 `fx_snapshots` 最新 USD 汇率换算，无汇率时成本键报 `skipped-no-fx` 不填（参数照填）。
+- 每日 job：`l07_jobs/models_dev_sync.py`（24h）拉快照+自动兑入，失败保留旧快照并记 warning。
+
+### 3.3.1 用户侧模型参数（W4-H）
+| 方法 | 路径 | 权限 | 说明 |
+| --- | --- | --- | --- |
+| GET | /admin/my/models | 仅登录会话 | 登录用户可查**所有启用中的公开模型**的参数合集：`[{name, model_type, parameters{9 键规范块}, sources[]}]`，成员按 priority 升序合并（首个启用成员打底，后者只填空键）。**不含任何成本/倍率/价格键**；演练场参数面板与「我的」页消费 |
 
 批量语义：`changed` 是实际处理到的 id，`missing` 是不存在的 id（不报错、不中断），整批一次提交。
 

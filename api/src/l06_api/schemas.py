@@ -719,3 +719,59 @@ class McpConfig(BaseModel):
     servers: list[McpServerIn] = Field(default_factory=list)
     port: int | None = Field(default=None, ge=1, le=65535)
 
+
+
+# ---------------------------------------------------------------- W4-H models.dev
+
+
+class AdoptModelsDevResult(BaseModel):
+    """One upstream model's 兑入 outcome: per-key filled/skipped-manual/no-match."""
+
+    id: str
+    name: str
+    matched: bool
+    status: str
+    provider: str = ""
+    model: str = ""
+    refreshed: bool = False
+    results: dict[str, str] = Field(default_factory=dict)
+    filled: list[str] = Field(default_factory=list)
+    params_source: str = ""
+
+
+class AdoptModelsDevBatchResult(BaseModel):
+    """Batch (toolbar 同步) summary; `snapshot` carries refresh counts when the
+    live fetch succeeded and {} when it degraded to the stored snapshot."""
+
+    refreshed: bool
+    snapshot: dict[str, int] = Field(default_factory=dict)
+    total: int
+    matched: int
+    filled_models: int
+    filled_keys: int
+    no_match: int
+    items: list[AdoptModelsDevResult]
+
+
+class MyModelParameters(BaseModel):
+    """The canonical capability block (same shape as upstream models' parameters);
+    no cost/markup key ever appears here (user-facing endpoint)."""
+
+    max_input_tokens: int
+    max_output_tokens: int
+    reasoning_level: str
+    input_types: list[str]
+    output_types: list[str]
+    tool_call: bool
+    reasoning: bool
+    attachment: bool
+    structured_output: bool
+
+
+class MyModelOut(BaseModel):
+    """GET /admin/my/models item: one enabled public model's merged parameters."""
+
+    name: str
+    model_type: str
+    parameters: MyModelParameters
+    sources: list[str]

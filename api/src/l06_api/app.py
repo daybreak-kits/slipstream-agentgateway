@@ -27,6 +27,7 @@ from l06_api.routers_health import router as health_router
 from l06_api.routers_log_payload import router as log_payload_router
 from l06_api.routers_meta import router as meta_router
 from l06_api.routers_models import router as models_router
+from l06_api.routers_my_models import router as my_models_router
 from l06_api.routers_ops import router as ops_router
 from l06_api.routers_policies import router as policies_router
 from l06_api.routers_pricing_io import router as pricing_io_router
@@ -43,6 +44,7 @@ ALL_ROUTERS = (
     vendors_router,
     upstreams_router,
     models_router,
+    my_models_router,
     apikeys_router,
     availability_router,
     usage_router,

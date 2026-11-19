@@ -16,12 +16,17 @@ accident (spec :104-105).
 
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from l01_core.errors import AppError, ErrorCode
+from l01_core.ids import new_id
+from l01_core.timeutil import now_ms
 from l04_repo.orm import (
+    AuditLogORM,
     ModelTargetORM,
     PublicModelORM,
     UpstreamModelORM,
@@ -33,7 +38,7 @@ from l04_repo.repository import (
     PUBLIC_MODEL_REPO,
     UPSTREAM_MODEL_REPO,
 )
-from l05_service import crud, pricing
+from l05_service import crud, models_dev, pricing
 from l05_service.availability import (
     SCOPE_PUBLIC_MODEL,
     SCOPE_UPSTREAM_MODEL,
@@ -51,6 +56,8 @@ from l05_service.model_params import (
 )
 from l06_api.deps import page_params, require, session_of
 from l06_api.schemas import (
+    AdoptModelsDevBatchResult,
+    AdoptModelsDevResult,
     ModelBulk,
     ModelTargetCreate,
     ModelTargetUpdate,
@@ -62,6 +69,20 @@ from l06_api.schemas import (
 )
 
 router = APIRouter(tags=["models"])
+
+
+def _audit_adopt(session: Session, *, actor: str, entity_id: str, detail: str) -> None:
+    session.add(
+        AuditLogORM(
+            id=new_id("aud"),
+            actor=actor,
+            action="adopt_modelsdev",
+            entity_type="upstream_model",
+            entity_id=entity_id,
+            detail_json=detail,
+            created_at_ms=now_ms(),
+        )
+    )
 
 
 def _um_body(
@@ -82,6 +103,8 @@ def _um_body(
         "model_type": row.model_type,
         "model_type_source": row.model_type_source or "default",
         "parameters": decode_parameters(row.parameters_json),
+        # W4-H: where the parameter block last came from ("manual" / "models.dev").
+        "params_source": row.params_source or "manual",
         "enabled": row.enabled,
         "cooldown_until_ms": state.cooldown_until_ms,
         "availability": state.as_dict(),
@@ -300,7 +323,12 @@ def update_upstream_model(
             raise AppError(ErrorCode.VALIDATION_ERROR, "model_type_source 不能为空")
         row.model_type_source = validate_type_source(payload.model_type_source)
     if "parameters" in provided:
-        row.parameters_json = canonical_parameters(payload.parameters)
+        canonical = canonical_parameters(payload.parameters)
+        if canonical != row.parameters_json:
+            # W4-H: a manual edit that actually changes the block reclaims the
+            # source badge; a no-op save keeps it.
+            row.parameters_json = canonical
+            row.params_source = "manual"
     window_skip = None
     if "enabled" in provided:
         if payload.enabled is None:
@@ -354,6 +382,73 @@ def delete_upstream_model(
 ) -> None:
     crud.delete_upstream_model(session, upstream_model_id, actor=principal.admin_id)
     session.commit()
+
+
+# ----------------------------------------------------- W4-H models.dev adoption
+
+
+@router.post(
+    "/admin/upstream-models/adopt-modelsdev",
+    response_model=AdoptModelsDevBatchResult,
+)
+def adopt_modelsdev_batch(
+    session: Session = Depends(session_of),
+    principal=Depends(require("upstream_models:write")),
+) -> dict:
+    """Sync models.dev for EVERY upstream model: refresh the snapshot (best
+    effort), then fill blank parameter/cost keys row by row (只填空，手改不覆盖).
+
+    Declared before the parametrized routes so "adopt-modelsdev" is never
+    captured as an id.
+    """
+    result = models_dev.adopt_all(session, actor=principal.admin_id)
+    _audit_adopt(
+        session,
+        actor=principal.username or principal.admin_id,
+        entity_id="batch",
+        detail=json.dumps(
+            {
+                "refreshed": result["refreshed"],
+                "filled_models": result["filled_models"],
+                "filled_keys": result["filled_keys"],
+                "no_match": result["no_match"],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+    )
+    session.commit()
+    return result
+
+
+@router.post(
+    "/admin/upstream-models/{upstream_model_id}/adopt-modelsdev",
+    response_model=AdoptModelsDevResult,
+)
+def adopt_modelsdev_one(
+    upstream_model_id: str,
+    session: Session = Depends(session_of),
+    principal=Depends(require("upstream_models:write")),
+) -> dict:
+    """Fill ONE upstream model's blank keys from models.dev (编辑弹窗按钮)."""
+    row = UPSTREAM_MODEL_REPO.get(session, upstream_model_id)
+    if row is None:
+        raise AppError(
+            ErrorCode.NOT_FOUND, f"upstream model not found: {upstream_model_id}"
+        )
+    result = models_dev.adopt_model(session, row)
+    _audit_adopt(
+        session,
+        actor=principal.username or principal.admin_id,
+        entity_id=row.id,
+        detail=json.dumps(
+            {"matched": result["matched"], "filled": result["filled"]},
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+    )
+    session.commit()
+    return result
 
 
 # ------------------------------------------------------------------ public models
