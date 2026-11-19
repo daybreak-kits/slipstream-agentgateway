@@ -26,7 +26,6 @@ from l02_domain.ir import (
     AccessLogSpec,
     ClientKeySpec,
     GatewayIR,
-    PoliciesSpec,
     PublicModelSpec,
     TargetSpec,
     UpstreamModelSpec,

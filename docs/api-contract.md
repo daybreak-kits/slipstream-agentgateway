@@ -339,7 +339,7 @@ AG 1.7 拒绝（`mcp.transport.http=false`），保存即 422。渲染到顶层 
 | GET | /admin/upstreams | upstreams:read | 列表；每项含 `has_api_key`、`key_count`、`model_count`、`last_probe` |
 | POST | /admin/upstreams | upstreams:write | body {vendor_id?, name?, base_url, api_style, api_key, transforms?, max_buffer_bytes?}；命名规则见下 |
 | GET | /admin/upstreams/{upstream_id} | upstreams:read | 详情（含密钥数、模型数、最近探测、`api_style_source`） |
-| PATCH | /admin/upstreams/{upstream_id} | upstreams:write | 可改 base_url/api_style/enabled；api_style 同创建一样接受 `auto`，落库前解析为具体风格 |
+| PATCH | /admin/upstreams/{upstream_id} | upstreams:write | 可改 name/base_url/api_style/enabled；`name` 可选（缺省或空白=不改名，显式改名重名 422）；api_style 同创建一样接受 `auto`，落库前解析为具体风格 |
 | DELETE | /admin/upstreams/{upstream_id} | upstreams:write | 被 `model_targets` 引用时 409，不级联 |
 | GET | /admin/upstreams/{id}/keys | upstreams:read | `{items, limit: 20}`；只回 masked/key_suffix，不回明文 |
 | POST | /admin/upstreams/{id}/keys | upstreams:write | {label, api_key, set_primary?}；重复密钥 409；超过 20 把 409 |
@@ -434,6 +434,11 @@ AES-GCM 密文 + sk-...abcd 掩码。
   `[start,end)`，允许跨零点；跨零点时 weekly 的 `days` / monthly 的 `days_of_month` 按窗口开始日计算）。
 - 模型行内的 `enabled` / `cooldown_until_ms` 仍是兼容接口：写入落到确定性的 `rule_row_<hash>`
   托管一次性规则，`cooldown_until_ms` 只是规则表的投影；读取以 `availability.state` 为准（ADR-004）。
+- 模型行可用性视图（`availability` 对象，工单 G）为 `{state, cooldown_until_ms, window_skip_until_ms}`：
+  `window_skip_until_ms` > 0 表示「启用」动作把周期规则的**当前窗口**跳过一次（一次性例外截止时刻，
+  窗口期行可正常使用）；规则本身保留，下一窗口照常冷却。批量启用返回 `window_skipped:[{id, rule_ids,
+  skip_until_ms, message}]`（无跳过则为空数组），单条启用 PATCH/POST 在行体顶层返回 `window_skip:
+  {rule_ids, skip_until_ms, message}`（无跳过为 null）。解除冷却（cooldown_until_ms=0）会连带清除窗口例外。
 
 渲染时封禁/冷却目标会被剔除（E3 实测：AG 健康状态不跨重启持久，所以必须控制面持久化并剔除）。
 
@@ -469,10 +474,10 @@ AES-GCM 密文 + sk-...abcd 掩码。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | /admin/reports/overview | requests, **error_count, active_minutes**, input_tokens, output_tokens, charge_micro, cost_micro, margin_micro, currency, fx_missing:[string], money_scope:"converted"\|"report_currency_only", latency_p50_ms, latency_p95_ms, ttft_p50_ms, latency:{paired_samples, min_samples, ttft:{samples, p50_ms, p75_ms, p95_ms, p99_ms}, total:{...}}, estimate_note。**金额与请求计数同窗口**（from_ms/to_ms 同时作用于事件与 cost/charge；省略=全时段）；currency 恒为报表币种；金额单位 micro；有外币缺汇率时该币种不计入总额并出现在 fx_missing；money_scope=converted 表示已按汇率折算，report_currency_only 表示存在 fx_missing、金额仅含本位币账本（margin 侧此时总额为 null） |
+| GET | /admin/reports/overview | requests, **error_count, active_minutes**, input_tokens, output_tokens, **cache_read_tokens, cache_write_tokens**, charge_micro, cost_micro, margin_micro, currency, fx_missing:[string], money_scope:"converted"\|"report_currency_only", latency_p50_ms, latency_p95_ms, ttft_p50_ms, latency:{paired_samples, min_samples, ttft:{samples, p50_ms, p75_ms, p95_ms, p99_ms}, total:{...}}, estimate_note。缓存两列（工单 H）为窗口内原始缓存词元合计，与 input_tokens 同过滤、不并入 input 折算口径；**金额与请求计数同窗口**（from_ms/to_ms 同时作用于事件与 cost/charge；省略=全时段）；currency 恒为报表币种；金额单位 micro；有外币缺汇率时该币种不计入总额并出现在 fx_missing；money_scope=converted 表示已按汇率折算，report_currency_only 表示存在 fx_missing、金额仅含本位币账本（margin 侧此时总额为 null） |
 | GET | /admin/reports/trend?metric=&range=7d\|30d\|90d | {metric, range, points:[{day, metric, value}], estimate_note}；metric ∈ requests/input_tokens/output_tokens/cost_micro/charge_micro |
 | GET | /admin/reports/latency?range=7d&tz= | {range, from_ms, to_ms, timezone, paired_samples, min_samples, ttft:{samples, p50_ms, p75_ms, p95_ms, p99_ms}, total:{...}, estimate_note}。样本为**配对样本**（ttft>0 且 duration>0，非流式请求不进分位）；配对样本 <5 时全部分位为 null，只有 samples 计数 |
-| GET | /admin/reports/timeseries?range=7d&bucket=auto&dimension=combo&metric=&metrics=&top_n=10&tz= | {range, bucket, dimension, metric, metrics:[...], from_ms, to_ms, timezone, currency, points:[{bucket_start_ms, label, total, values}], members:[{id, label, total, share, requests, tokens, cost_micro, charge_micro, totals?}], totals:{requests, input_tokens, output_tokens, tokens, cost_micro, charge_micro, error_count, active_minutes}, metric_total, folded_members, fx_missing, estimate_note}。dimension ∈ combo/upstream/channel（综合模型/上游模型/上游渠道）；**`metrics=cost_micro,charge_micro` 逗号多指标一次返回**：points[].values 变为 {member_id:{<metric>:value}}，members 增 `totals:{<metric>:total}`；单数 `metric` 向后兼容（values 为 {member_id:value} 平面结构）；top_n 1..50，超出排名的成员折叠为 `other:<dimension>`（label「其他（N）」） |
+| GET | /admin/reports/timeseries?range=7d&bucket=auto&dimension=combo&metric=&metrics=&top_n=10&tz= | {range, bucket, dimension, metric, metrics:[...], from_ms, to_ms, timezone, currency, points:[{bucket_start_ms, label, total, values}], members:[{id, label, total, share, requests, tokens, cost_micro, charge_micro, totals?}], totals:{requests, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, tokens, cost_micro, charge_micro, error_count, active_minutes}, metric_total, folded_members, fx_missing, estimate_note}。dimension ∈ combo/upstream/channel（综合模型/上游模型/上游渠道）；**`metrics=cost_micro,charge_micro` 逗号多指标一次返回**：points[].values 变为 {member_id:{<metric>:value}}，members 增 `totals:{<metric>:total}`；单数 `metric` 向后兼容（values 为 {member_id:value} 平面结构）；top_n 1..50，超出排名的成员折叠为 `other:<dimension>`（label「其他（N）」） |
 | GET | /admin/reports/heatmap?range=7d\|30d\|365d&metric=tokens\|cost\|spend&tz= | {range, mode:"weekday_hour"\|"date_hour", metric, from_ms, to_ms, timezone, currency, columns:[{key,label}×24], rows:[{key, label, values:[24]}], max, total, fx_missing, estimate_note}。7d=星期×小时，30d/365d=日期×小时 |
 | GET | /admin/reports/flow | {nodes, links:[{source, target, charge_micro, cost_micro, requests}], estimate_note} |
 | GET | /admin/reports/margin | {from_ms, to_ms（回显实际生效窗口；省略/<=0 = 全时段，to_ms 取 now+1ms）, report_currency, by_currency:{<cur>:{charge_micro, cost_micro, margin_micro, fx_rate_micro_to_report}}, report_currency_margin_micro, report_currency_charge_micro, report_currency_cost_micro, fx_missing:[string], estimate_note}。报表币种自身 fx_rate=1000000（无需快照）；外币缺汇率时总额为 null 且列出 fx_missing，补 PUT /admin/fx 后立即折算；失败请求的空币种行不计入任何桶 |

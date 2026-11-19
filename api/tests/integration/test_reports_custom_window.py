@@ -148,7 +148,9 @@ def test_timeseries_auto_day_buckets_beyond_48h_and_explicit_bucket_wins(
     assert hourly["bucket"] == "hour"
 
 
-def test_timeseries_explicit_window_overrides_range_enum(client, engine_and_sessionmaker, fixed_now):
+def test_timeseries_explicit_window_overrides_range_enum(
+    client, engine_and_sessionmaker, fixed_now
+):
     _, factory = engine_and_sessionmaker
     window_from = _local_ms(2026, 3, 10, 9, 0)
     window_to = _local_ms(2026, 3, 10, 11, 0)

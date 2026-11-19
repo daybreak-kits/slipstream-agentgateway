@@ -34,7 +34,7 @@ from l04_repo.orm import (
     UpstreamORM,
     UserORM,
 )
-from l05_service import aggregates, money
+from l05_service import aggregates, money, prices
 from l05_service.prices import margin_report
 
 TZ = ZoneInfo("Asia/Shanghai")
@@ -51,6 +51,11 @@ def _local_ms(
 # --------------------------------------------------------------- legacy copy
 # Verbatim transcription of the pre-ADR-022 Python algorithm (aggregates.py
 # before the SQL rewrite), kept ONLY for this parity suite.
+
+
+def _now_ms() -> int:
+    """Frozen clock for the legacy copies; the seeded fixture pins now to AT."""
+    return aggregates.now_ms()
 
 
 def _legacy_tokens(event: GatewayUsageEventORM) -> int:
@@ -520,6 +525,90 @@ def _legacy_latency_report(
     }
 
 
+def _legacy_margin_report(session: Session, from_ms: int = 0, to_ms: int = 0) -> dict:
+    """Verbatim transcription of prices.margin_report before the W6 SQL rewrite
+    (per-row Python summation over charged/成本 rows), kept only for parity."""
+    settings = get_settings()
+    report_currency = (settings.report_currency or "").strip() or "CNY"
+    effective_from = max(int(from_ms or 0), 0)
+    effective_to = int(to_ms or 0) if int(to_ms or 0) > 0 else _now_ms() + 1
+
+    def _currency_of(value: str | None) -> str:
+        return (value or "").strip()
+
+    charges: dict[str, int] = {}
+    for row in session.scalars(
+        select(ChargeEntryORM).where(
+            ChargeEntryORM.status.in_(("ok", "free")),
+            ChargeEntryORM.created_at_ms >= effective_from,
+            ChargeEntryORM.created_at_ms < effective_to,
+        )
+    ).all():
+        currency = _currency_of(row.currency)
+        if row.amount_micro is not None and currency:
+            charges[currency] = charges.get(currency, 0) + row.amount_micro
+    costs: dict[str, int] = {}
+    for row in session.scalars(
+        select(CostEntryORM).where(
+            CostEntryORM.status == "ok",
+            CostEntryORM.created_at_ms >= effective_from,
+            CostEntryORM.created_at_ms < effective_to,
+        )
+    ).all():
+        currency = _currency_of(row.currency)
+        if row.amount_micro is not None and currency:
+            costs[currency] = costs.get(currency, 0) + row.amount_micro
+    currencies = sorted(set(charges) | set(costs))
+    fx: dict[str, int | None] = {}
+    converted_charges = 0
+    converted_costs = 0
+    for currency in currencies:
+        rate: int | None
+        if currency.upper() == report_currency.upper():
+            rate = MICRO
+        else:
+            snapshot = session.scalars(
+                select(FxSnapshotORM)
+                .where(FxSnapshotORM.currency == currency)
+                .order_by(FxSnapshotORM.as_of_ms.desc())
+            ).first()
+            rate = snapshot.rate_micro if snapshot else None
+        fx[currency] = rate
+        if rate is not None:
+            converted_charges += money.round_micro(charges.get(currency, 0) * rate, MICRO)
+            converted_costs += money.round_micro(costs.get(currency, 0) * rate, MICRO)
+    fx_missing = sorted(currency for currency, rate in fx.items() if rate is None)
+    report_currency_total = None
+    report_currency_charge: int | None = 0
+    report_currency_cost: int | None = 0
+    if currencies and not fx_missing:
+        report_currency_total = converted_charges - converted_costs
+        report_currency_charge = converted_charges
+        report_currency_cost = converted_costs
+    elif fx_missing:
+        report_currency_charge = None
+        report_currency_cost = None
+    return {
+        "from_ms": effective_from,
+        "to_ms": effective_to,
+        "report_currency": report_currency,
+        "by_currency": {
+            currency: {
+                "charge_micro": charges.get(currency, 0),
+                "cost_micro": costs.get(currency, 0),
+                "margin_micro": charges.get(currency, 0) - costs.get(currency, 0),
+                "fx_rate_micro_to_report": fx[currency],
+            }
+            for currency in currencies
+        },
+        "report_currency_margin_micro": report_currency_total,
+        "report_currency_charge_micro": report_currency_charge,
+        "report_currency_cost_micro": report_currency_cost,
+        "fx_missing": fx_missing,
+        "estimate_note": "token amounts fold cache into input (stage B pending)",
+    }
+
+
 def _legacy_overview(session: Session, from_ms: int, to_ms: int) -> dict:
     rows = list(session.scalars(select(GatewayUsageEventORM)).all())
     if to_ms:
@@ -532,7 +621,7 @@ def _legacy_overview(session: Session, from_ms: int, to_ms: int) -> dict:
         index = min(len(values) - 1, int(round(fraction * (len(values) - 1))))
         return values[index]
 
-    money_block = margin_report(session, from_ms, to_ms)
+    money_block = _legacy_margin_report(session, from_ms, to_ms)
     report_currency = money_block["report_currency"]
     native = money_block["by_currency"].get(report_currency, {"charge_micro": 0, "cost_micro": 0})
     charge = money_block["report_currency_charge_micro"]
@@ -1157,3 +1246,40 @@ def test_multi_metric_series(seeded):
     # totals for both series are present; totals.cost_micro equals the single run
     assert both["totals"]["cost_micro"] == single_cost["totals"]["cost_micro"]
     assert both["totals"]["charge_micro"] > 0
+
+
+# ------------------------------------------------------------------ margin
+# W6: prices.margin_report sums moved into SQL (GROUP BY currency). The
+# per-row Python loop above (_legacy_margin_report) is the retired algorithm;
+# both run over the same fixture and must agree byte for byte. The default
+# window (from_ms=0/to_ms=0 -> "all time up to now") is pinned with a frozen
+# clock on both sides so the echoed to_ms matches.
+
+
+@pytest.mark.parametrize(
+    "from_ms,to_ms",
+    [
+        (0, 0),  # default window = all time (both sides now() -> AT via patch)
+        (_window("7d")[0], _window("7d")[1]),
+        (AT - 3_600_000, AT),
+        (AT - 86_400_000, AT + 3_600_000),  # includes the billing-after-midnight entry
+    ],
+)
+def test_margin_report_matches_legacy(seeded, monkeypatch, from_ms, to_ms):
+    monkeypatch.setattr(prices, "now_ms", lambda: AT)
+    _engine, factory = seeded
+    with factory() as session:
+        legacy = _legacy_margin_report(session, from_ms, to_ms)
+        sql = margin_report(session, from_ms, to_ms)
+    assert sql == legacy
+
+
+def test_margin_report_default_window_covers_everything(seeded, monkeypatch):
+    """from_ms<=0/to_ms<=0 means "all time", never the empty [0, 0) window."""
+    monkeypatch.setattr(prices, "now_ms", lambda: AT)
+    _engine, factory = seeded
+    with factory() as session:
+        report = margin_report(session)
+    assert report["from_ms"] == 0
+    assert report["to_ms"] == AT + 1
+    assert report["by_currency"]["CNY"]["charge_micro"] > 0

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
 
@@ -64,11 +65,88 @@ _TEST_TMP_PATTERNS = (
     ".tmp-ag-config-check",
 )
 
+_LOCK_NAME = ".ag-dir.lock"
+
+
+@contextmanager
+def _hold_dir_lock(path: Path):
+    """Hold an exclusive lock on <path>/<lock> so other pytest processes skip
+    sweeping this dir (W6: parallel pytest race — one session's cleanup must
+    not delete another process's live AG_CONFIG_DIR).
+
+    Windows uses msvcrt byte-range locks, POSIX fcntl.flock; both are released
+    by the OS when the owning process dies, so a stale dir from a crashed run
+    is sweepable again. The lock file lives inside the dir, so it must be
+    closed before the dir is removed.
+    """
+    lock_path = path / _LOCK_NAME
+    fh = open(lock_path, "a+b")
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            fh.seek(0)
+            fh.write(b"\0")
+            fh.flush()
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fh.close()
+        raise
+    try:
+        yield
+    finally:
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+        except OSError:
+            pass
+        fh.close()
+
+
+def _dir_is_live(path: Path) -> bool:
+    """True when another pytest process holds the dir lock (or the lock file
+    cannot be opened); such dirs are never swept."""
+    lock_path = path / _LOCK_NAME
+    if not lock_path.exists():
+        return False
+    try:
+        fh = open(lock_path, "a+b")
+    except OSError:
+        return True
+    try:
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return True  # locked by a live owner
+        return False
+    finally:
+        fh.close()
+
 
 def _sweep_repo_local_test_dirs() -> None:
     for pattern in _TEST_TMP_PATTERNS:
         for path in TEST_TMP_ROOT.glob(pattern):
-            if path.is_dir():
+            if path.is_dir() and not _dir_is_live(path):
                 _rmtree_retry(str(path))
 
 
@@ -103,7 +181,9 @@ def engine_and_sessionmaker():
     )
     init_db(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False, future=True)
-    yield engine, factory
+    # Hold the dir lock across the test so concurrent sessions cannot sweep it.
+    with _hold_dir_lock(Path(ag_dir)):
+        yield engine, factory
     _rmtree_retry(ag_dir)
     reset_settings_cache()
 

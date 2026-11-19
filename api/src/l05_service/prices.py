@@ -8,7 +8,7 @@ missing prices produce status=unpriced with a NULL amount (never a silent 0).
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from l01_core.errors import AppError, ErrorCode
@@ -230,38 +230,38 @@ def margin_report(session: Session, from_ms: int = 0, to_ms: int = 0) -> dict:
     foreign currency has no rate yet, the converted total stays None and the
     missing currencies are listed in fx_missing instead of being guessed.
     Token amounts in this report are estimates (cache folded into input).
+
+    Sums run in SQL (GROUP BY currency over billed rows only); the retired
+    Python row loop is kept as a parity copy in
+    tests/integration/test_reports_sql_parity.py.
     """
     settings = get_settings()
     report_currency = (settings.report_currency or "").strip() or "CNY"
     effective_from = max(int(from_ms or 0), 0)
     effective_to = int(to_ms or 0) if int(to_ms or 0) > 0 else now_ms() + 1
 
-    def _currency_of(value: str | None) -> str:
-        """Normalise a row currency; failed requests carry no currency and are skipped."""
-        return (value or "").strip()
+    def _sums_by_currency(model, *status_conditions) -> dict[str, int]:
+        """SUM(amount_micro) per currency; failed rows carry no currency and are skipped."""
+        rows = session.execute(
+            select(model.currency, func.sum(model.amount_micro))
+            .where(
+                model.created_at_ms >= effective_from,
+                model.created_at_ms < effective_to,
+                model.amount_micro.is_not(None),
+                *status_conditions,
+            )
+            .group_by(model.currency)
+        ).all()
+        return {
+            (currency or "").strip(): int(total)
+            for currency, total in rows
+            if (currency or "").strip() and total is not None
+        }
 
-    charges: dict[str, int] = {}
-    for row in session.scalars(
-        select(ChargeEntryORM).where(
-            ChargeEntryORM.status.in_(("ok", "free")),
-            ChargeEntryORM.created_at_ms >= effective_from,
-            ChargeEntryORM.created_at_ms < effective_to,
-        )
-    ).all():
-        currency = _currency_of(row.currency)
-        if row.amount_micro is not None and currency:
-            charges[currency] = charges.get(currency, 0) + row.amount_micro
-    costs: dict[str, int] = {}
-    for row in session.scalars(
-        select(CostEntryORM).where(
-            CostEntryORM.status == "ok",
-            CostEntryORM.created_at_ms >= effective_from,
-            CostEntryORM.created_at_ms < effective_to,
-        )
-    ).all():
-        currency = _currency_of(row.currency)
-        if row.amount_micro is not None and currency:
-            costs[currency] = costs.get(currency, 0) + row.amount_micro
+    charges = _sums_by_currency(
+        ChargeEntryORM, ChargeEntryORM.status.in_(("ok", "free"))
+    )
+    costs = _sums_by_currency(CostEntryORM, CostEntryORM.status == "ok")
     currencies = sorted(set(charges) | set(costs))
     fx: dict[str, int | None] = {}
     converted_charges = 0
