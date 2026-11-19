@@ -87,10 +87,10 @@ const publicModels: PublicModel[] = [
 ];
 
 const modelTargets: ModelTarget[] = [
-  { id: "mt_01", public_model_id: "pm_01", upstream_model_name: "glm-5.3", upstream_name: "智谱直连", priority: 1, weight: null, when: null, enabled: true },
-  { id: "mt_02", public_model_id: "pm_01", upstream_model_name: "deepseek/v5-chat", upstream_name: "OpenRouter 聚合", priority: 2, weight: null, when: null, enabled: true },
-  { id: "mt_03", public_model_id: "pm_02", upstream_model_name: "glm-5.3-flash", upstream_name: "智谱直连", priority: null, weight: 12000, when: null, enabled: true },
-  { id: "mt_04", public_model_id: "pm_03", upstream_model_name: "embedding-4", upstream_name: "智谱直连", priority: null, weight: null, when: 'request.user_tier == "trial"', enabled: true },
+  { id: "mt_01", public_model_id: "pm_01", upstream_model_id: "um_01", upstream_model_name: "glm-5.3", upstream_name: "智谱直连", priority: 1, weight: null, when: null, enabled: true },
+  { id: "mt_02", public_model_id: "pm_01", upstream_model_id: "um_04", upstream_model_name: "deepseek/v5-chat", upstream_name: "OpenRouter 聚合", priority: 2, weight: null, when: null, enabled: true },
+  { id: "mt_03", public_model_id: "pm_02", upstream_model_id: "um_02", upstream_model_name: "glm-5.3-flash", upstream_name: "智谱直连", priority: null, weight: 12000, when: null, enabled: true },
+  { id: "mt_04", public_model_id: "pm_03", upstream_model_id: "um_03", upstream_model_name: "embedding-4", upstream_name: "智谱直连", priority: null, weight: null, when: 'request.user_tier == "trial"', enabled: true },
 ];
 let mtSeq = 4;
 
@@ -832,6 +832,20 @@ export async function mockRequest<T>(path: string, init?: RequestInit): Promise<
     return ledgerFor(uid) as T;
   }
   // —— B2 CRUD：上游 ——
+  // 上游详情 GET：详情页整页编辑器依赖（mock 早前只有列表）
+  if (init?.method === "GET" && /^\/admin\/upstreams\/[^/?]+$/.test(path.split("?")[0] ?? "")) {
+    const id = (path.split("?")[0] ?? "").split("/")[3] ?? "";
+    const row = upstreams.find((u) => u.id === id);
+    if (!row) return { error: "not_found" } as T;
+    return {
+      ...structuredClone(row),
+      model_count: upstreamModels.filter((m) => m.upstream_id === id).length,
+    } as T;
+  }
+  // 密钥组列表（演示空表；真实形状见 UpstreamKeyList，UI 归 D 波）
+  if (init?.method === "GET" && /^\/admin\/upstreams\/[^/?]+\/keys$/.test(path.split("?")[0] ?? "")) {
+    return { items: [], limit: 100 } as T;
+  }
   // 契约 3.2：POST body {vendor_id, base_url, api_style, api_key}；name 由 {vendor_slug}-NN 自动生成
   if (init?.method === "POST" && (path.split("?")[0] ?? "") === "/admin/upstreams") {
     const body = JSON.parse(String(init.body ?? "{}")) as { vendor_id?: string; base_url?: string; api_style?: string; api_key?: string };

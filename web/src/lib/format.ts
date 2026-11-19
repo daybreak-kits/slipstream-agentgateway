@@ -178,3 +178,25 @@ export function parseYuanToMicroAllowZero(input: string): number | null {
 export function yuanInput(micro: number): string {
   return (micro / 1_000_000).toFixed(2);
 }
+
+/**
+ * 模型行进价文本（W4-C）：入参是十进制字符串（元 / 1M 词元），统一 2 位小数（¥2.00/M）；
+ * 值 < 0.01 时升到 4 位（避免 ¥0.00 掩盖真实单价，含 0 = 明示零价）；未配置回「—」。
+ * 解析失败的原样回显（编辑弹窗会另行校验）。
+ */
+export function fmtPricePerM(value: string | null | undefined): string {
+  const text = (value ?? "").trim();
+  if (text === "") return "—";
+  const n = Number(text);
+  if (!Number.isFinite(n)) return "¥" + text + "/M";
+  return "¥" + n.toFixed(n < 0.01 ? 4 : 2) + "/M";
+}
+
+/** 成本倍率文本（W4-C）：2 位小数（×1.20）；值 < 0.01 升 4 位；未配置回「—」。 */
+export function fmtMarkup(value: string | null | undefined): string {
+  const text = (value ?? "").trim();
+  if (text === "") return "—";
+  const n = Number(text);
+  if (!Number.isFinite(n)) return "×" + text;
+  return "×" + n.toFixed(n < 0.01 ? 4 : 2);
+}

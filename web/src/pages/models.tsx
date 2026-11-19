@@ -1,13 +1,21 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { useSearchParams } from "react-router-dom";
+import { useMatch, useNavigate, useSearchParams } from "react-router-dom";
 
-import { CooldownDialog, Field, PeriodicCooldownDialog } from "@/components/models/cooldown-dialogs";
+import { CooldownManageDialog } from "@/components/models/cooldown-dialogs";
 import {
   availabilityText, availabilityTone, isCooling, periodicByRow, ruleSummary,
   useAvailabilityMutation, useAvailabilityRulesQuery, useBatchMutation,
 } from "@/components/models/availability";
+import { Field } from "@/components/models/field";
+import { type MemberDraft, nextPriority, targetsPayload, validateMembers } from "@/components/models/member-drafts";
+import { MemberEditor } from "@/components/models/member-editor";
+import {
+  isImageType, MODEL_TYPES, parametersOf, parameterSummary, ROUTING_LABELS, similarity, TYPE_SOURCE_LABELS,
+} from "@/components/models/model-vocab";
+import { PublicModelEditor } from "@/components/models/public-model-editor";
+import { UpstreamModelDialog } from "@/components/models/upstream-model-dialog";
 import { ModelsTable, type ModelColumn } from "@/components/models/table";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
@@ -15,61 +23,18 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Combobox } from "@/components/ui/combobox";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs } from "@/components/ui/tabs";
 import { api, apiList, ENDPOINTS } from "@/lib/api";
-import { fmtCny, formatCount, fmtInt } from "@/lib/format";
+import { fmtCny, fmtInt, fmtMarkup, fmtPricePerM, formatCount } from "@/lib/format";
 import { ACTION_ICONS } from "@/lib/icons";
 import { usePermissions } from "@/lib/permissions";
 import { SELECT_ALL_VALUE } from "@/lib/select-sentinels";
-import type {
-  ModelParameters, ModelTypeSource, PublicModel, RoutingMode, Upstream, UpstreamModel,
-} from "@/types";
-
-/** 旧系统 catalog 的七种模型类型（l02_domain/models.ModelType）。 */
-const MODEL_TYPES: Array<{ value: string; label: string }> = [
-  { value: "chat", label: "chat · 对话" },
-  { value: "embedding", label: "embedding · 向量化" },
-  { value: "rerank", label: "rerank · 重排" },
-  { value: "image_generation", label: "image_generation · 图像生成" },
-  { value: "audio_tts", label: "audio_tts · 语音合成" },
-  { value: "audio_transcription", label: "audio_transcription · 语音转写" },
-  { value: "video", label: "video · 视频生成" },
-];
-
-/** 旧系统 model_type_source 三值；auto 是指令，不是存储值。 */
-const TYPE_SOURCE_LABELS: Record<ModelTypeSource, string> = {
-  default: "默认（按类型推断）",
-  upstream: "上游声明",
-  manual: "人工指定",
-};
-
-const INPUT_TYPES = ["text", "image", "audio", "video", "file"] as const;
-const OUTPUT_TYPES = ["text", "image", "audio", "embedding"] as const;
-
-const ROUTING_LABELS: Record<RoutingMode, { label: string; desc: string }> = {
-  failover: { label: "failover · 故障转移", desc: "按 priority 层级顺序选择；priority 数值小优先，同层由数据面按健康与延迟选择" },
-  weighted: { label: "weighted · 加权分流", desc: "按 weight 整数相对比例分配（1 与 3 = 1:3）；该模式没有跨层兜底" },
-  conditional: { label: "conditional · 条件路由", desc: "按 when 表达式匹配成员，只有末位成员可以留空；该模式没有跨层兜底" },
-};
-
-const DEFAULT_PARAMETERS: ModelParameters = {
-  max_input_tokens: 0,
-  max_output_tokens: 0,
-  reasoning_level: "",
-  input_types: ["text"],
-  output_types: ["text"],
-  tool_call: false,
-  reasoning: false,
-  attachment: false,
-  structured_output: false,
-};
+import type { PublicModel, RoutingMode, Upstream, UpstreamModel } from "@/types";
 
 /** 周期冷却窗口语义增强（窗口期内启用=仅跳过当前窗口）待后端合入；本页文案按现行为描述。 */
 const ENABLE_SEMANTICS_NOTE =
@@ -82,62 +47,6 @@ async function copyText(text: string): Promise<void> {
   } catch {
     toast.error("复制失败", { description: "浏览器拒绝了剪贴板访问" });
   }
-}
-
-function toInt(raw: string): number {
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.trunc(n));
-}
-
-function parametersOf(row: { parameters?: ModelParameters }): ModelParameters {
-  return { ...DEFAULT_PARAMETERS, ...(row.parameters ?? {}) };
-}
-
-function parameterSummary(row: UpstreamModel): string {
-  const p = parametersOf(row);
-  const input = p.input_types.length > 0 ? p.input_types.join("/") : "—";
-  const output = p.output_types.length > 0 ? p.output_types.join("/") : "—";
-  const caps: string[] = [];
-  if (p.tool_call) caps.push("工具");
-  if (p.reasoning) caps.push("推理");
-  if (p.structured_output) caps.push("结构化");
-  return input + " → " + output + (caps.length > 0 ? " · " + caps.join("/") : "");
-}
-
-/** 模型行进价是十进制字符串（元 / 1M 词元）；未配价显示「—」。 */
-function costText(value: string | null | undefined): string {
-  const text = (value ?? "").trim();
-  return text === "" ? "—" : "¥" + text + "/M";
-}
-
-function markupText(value: string | undefined): string {
-  const text = (value ?? "").trim();
-  return text === "" ? "—" : "×" + text;
-}
-
-/** image 类型在 AG 数据面不记词元，无法计费（E14b 实测）。 */
-function isImageType(modelType: string): boolean {
-  return modelType.startsWith("image");
-}
-
-/** 名称相似度：子串优先，其次子序列；用于创建公开模型时提示相似上游模型。 */
-function similarity(needle: string, candidate: string): number {
-  if (!needle) return 0;
-  const normalized = candidate.toLowerCase();
-  if (normalized === needle) return 200;
-  const index = normalized.indexOf(needle);
-  if (index >= 0) return 120 - index + needle.length * 2;
-  let pos = 0;
-  let gaps = 0;
-  for (const ch of needle) {
-    if (ch === "-" || ch === "_" || ch === "." || ch === "/") continue;
-    const found = normalized.indexOf(ch, pos);
-    if (found < 0) return 0;
-    gaps += found - pos;
-    pos = found + 1;
-  }
-  return Math.max(1, 60 - gaps - needle.length);
 }
 
 /** GET /admin/prices/upstream 行；types.ts 的 UpstreamPrice 与实际返回有出入，这里收窄到用到的字段。 */
@@ -166,70 +75,6 @@ function cacheMapOf(items: UpstreamPriceRow[] | undefined): Map<string, CachePri
     }
   }
   return map;
-}
-
-// ---------------------------------------------------------------- 参数编辑器
-
-function ParameterFields({ value, onChange }: { value: ModelParameters; onChange: (next: ModelParameters) => void }) {
-  const toggle = (list: string[], item: string): string[] =>
-    list.includes(item) ? list.filter((x) => x !== item) : [...list, item];
-  return (
-    <div className="space-y-2 rounded-md border border-border p-2">
-      <div className="grid grid-cols-2 gap-2">
-        <Field label="最大输入词元" hint="0 = 未声明">
-          <Input inputMode="numeric" value={String(value.max_input_tokens)} onChange={(e) => onChange({ ...value, max_input_tokens: toInt(e.target.value) })} />
-        </Field>
-        <Field label="最大输出词元" hint="0 = 未声明">
-          <Input inputMode="numeric" value={String(value.max_output_tokens)} onChange={(e) => onChange({ ...value, max_output_tokens: toInt(e.target.value) })} />
-        </Field>
-      </div>
-      <Field label="推理档位" hint="如 low / medium / high，留空表示不声明">
-        <Input value={value.reasoning_level} onChange={(e) => onChange({ ...value, reasoning_level: e.target.value })} placeholder="留空 = 不声明" />
-      </Field>
-      <Field label="输入类型" hint="至少选择 1 个">
-        <div className="flex flex-wrap gap-x-4 gap-y-1">
-          {INPUT_TYPES.map((item) => (
-            <label key={item} className="flex items-center gap-1.5 text-2sm text-body">
-              <Checkbox
-                checked={value.input_types.includes(item)}
-                onCheckedChange={() => onChange({ ...value, input_types: toggle(value.input_types, item) })}
-              />
-              {item}
-            </label>
-          ))}
-        </div>
-      </Field>
-      <Field label="输出类型" hint="至少选择 1 个">
-        <div className="flex flex-wrap gap-x-4 gap-y-1">
-          {OUTPUT_TYPES.map((item) => (
-            <label key={item} className="flex items-center gap-1.5 text-2sm text-body">
-              <Checkbox
-                checked={value.output_types.includes(item)}
-                onCheckedChange={() => onChange({ ...value, output_types: toggle(value.output_types, item) })}
-              />
-              {item}
-            </label>
-          ))}
-        </div>
-      </Field>
-      <div className="flex flex-wrap gap-x-4 gap-y-1">
-        {([
-          ["tool_call", "工具调用"],
-          ["reasoning", "推理"],
-          ["attachment", "附件"],
-          ["structured_output", "结构化输出"],
-        ] as Array<[keyof ModelParameters, string]>).map(([key, label]) => (
-          <label key={key} className="flex items-center gap-1.5 text-2sm text-body">
-            <Checkbox
-              checked={value[key] === true}
-              onCheckedChange={(checked) => onChange({ ...value, [key]: checked === true })}
-            />
-            {label}
-          </label>
-        ))}
-      </div>
-    </div>
-  );
 }
 
 // ---------------------------------------------------------------- 批量改价
@@ -320,190 +165,12 @@ function BatchPriceDialog({
   );
 }
 
-// ---------------------------------------------------------------- 上游模型
-
-interface UpstreamFormState {
-  upstream_id: string;
-  name: string;
-  model_type: string;
-  model_type_source: ModelTypeSource;
-  parameters: ModelParameters;
-  enabled: boolean;
-  cost_input_per_1m: string;
-  cost_output_per_1m: string;
-  markup: string;
-}
-
-function UpstreamModelDialog({
-  initial, upstreams, canCost, onClose,
-}: {
-  initial: UpstreamModel | null; upstreams: Upstream[]; canCost: boolean; onClose: () => void;
-}) {
-  const qc = useQueryClient();
-  const [form, setForm] = useState<UpstreamFormState>({
-    upstream_id: initial?.upstream_id ?? (upstreams[0]?.id ?? ""),
-    name: initial?.name ?? "",
-    model_type: initial?.model_type ?? "chat",
-    model_type_source: initial?.model_type_source ?? "default",
-    parameters: parametersOf(initial ?? {}),
-    enabled: initial?.enabled ?? true,
-    cost_input_per_1m: initial?.cost_input_per_1m ?? "",
-    cost_output_per_1m: initial?.cost_output_per_1m ?? "",
-    markup: initial?.markup ?? "1.0000",
-  });
-  const markupNum = Number(form.markup.trim());
-  const markupInvalid = form.markup.trim() !== "" && (!Number.isFinite(markupNum) || markupNum <= 0 || markupNum > 100);
-  const save = useMutation({
-    mutationFn: () => {
-      const body: Record<string, unknown> = {
-        name: form.name.trim(),
-        model_type: form.model_type,
-        model_type_source: form.model_type_source,
-        parameters: form.parameters,
-        enabled: form.enabled,
-      };
-      if (canCost) {
-        body.cost_input_per_1m = form.cost_input_per_1m.trim() === "" ? null : form.cost_input_per_1m.trim();
-        body.cost_output_per_1m = form.cost_output_per_1m.trim() === "" ? null : form.cost_output_per_1m.trim();
-        if (initial === null || form.markup.trim() !== "") body.markup = form.markup.trim();
-      }
-      if (initial !== null) return api.patch<UpstreamModel>(ENDPOINTS.upstreamModelUpdate(initial.id), body);
-      body.upstream_id = form.upstream_id;
-      return api.post<UpstreamModel>(ENDPOINTS.upstreamModelCreate, body);
-    },
-    onSuccess: () => {
-      toast.success(initial !== null ? "上游模型已更新" : "上游模型已登记");
-      void qc.invalidateQueries({ queryKey: ["upstream-models"] });
-      onClose();
-    },
-    onError: (e: Error) => toast.error("保存失败", { description: e.message }),
-  });
-  const invalid = form.name.trim() === "" || (initial === null && form.upstream_id === "") || markupInvalid;
-  return (
-    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>{initial !== null ? "编辑上游模型" : "登记上游模型"}</DialogTitle>
-        </DialogHeader>
-        <div className="max-h-[70vh] space-y-3 overflow-auto pr-1">
-          <div className="grid grid-cols-2 gap-2">
-            <Field label="所属上游">
-              <Select value={form.upstream_id} disabled={initial !== null} onValueChange={(v) => setForm({ ...form, upstream_id: v })}>
-                <SelectTrigger><SelectValue placeholder="选择上游" /></SelectTrigger>
-                <SelectContent>
-                  {upstreams.map((u) => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label="模型名">
-              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="如 glm-5.3" className="font-mono" />
-            </Field>
-            <Field label="类型">
-              <Select value={form.model_type} onValueChange={(v) => setForm({ ...form, model_type: v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {MODEL_TYPES.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label="类型来源" hint="旧系统 default / upstream / manual">
-              <Select value={form.model_type_source} onValueChange={(v) => setForm({ ...form, model_type_source: v as ModelTypeSource })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {(Object.keys(TYPE_SOURCE_LABELS) as ModelTypeSource[]).map((key) => (
-                    <SelectItem key={key} value={key}>{TYPE_SOURCE_LABELS[key]}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-          </div>
-          <Field label="能力参数" hint="旧系统 channel_models.parameters：两态布尔全量写入，0 表示未声明">
-            <ParameterFields value={form.parameters} onChange={(next) => setForm({ ...form, parameters: next })} />
-          </Field>
-          {canCost ? (
-            <div className="grid grid-cols-3 gap-2 rounded-md border border-border p-2">
-              <Field label="输入成本 / 1M" hint="元，留空 = 未定价">
-                <Input value={form.cost_input_per_1m} onChange={(e) => setForm({ ...form, cost_input_per_1m: e.target.value })} placeholder="如 2.0000" className="tnum" />
-              </Field>
-              <Field label="输出成本 / 1M" hint="元，留空 = 未定价">
-                <Input value={form.cost_output_per_1m} onChange={(e) => setForm({ ...form, cost_output_per_1m: e.target.value })} placeholder="如 8.0000" className="tnum" />
-              </Field>
-              <Field label="倍率" hint={markupInvalid ? "必须是 (0, 100] 的数字" : "如 1.2000 = 1.2 倍"}>
-                <Input value={form.markup} onChange={(e) => setForm({ ...form, markup: e.target.value })} placeholder="1.0000" className="tnum" />
-              </Field>
-            </div>
-          ) : (
-            <p className="text-2xs text-faint">成本与倍率需要 billing:cost 权限；当前账号不可见也不可改。</p>
-          )}
-          <label className="flex items-center gap-2 text-2sm text-body">
-            <Checkbox checked={form.enabled} onCheckedChange={(checked) => setForm({ ...form, enabled: checked === true })} />
-            启用（关闭是人工长期措施；启用会同时清掉冷却）
-          </label>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>取消</Button>
-          <Button disabled={invalid || save.isPending} onClick={() => save.mutate()}>
-            {save.isPending ? "保存中…" : "保存"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ---------------------------------------------------------------- 批量删除确认
-
-/** 批量删除红色确认；超过 10 条需手动输入「删除」二字（DESIGN-AUDIT §4 三档确认）。 */
-function BatchDeleteDialog({
-  count, subject, pending, onConfirm, onClose,
-}: {
-  count: number; subject: string; pending: boolean;
-  onConfirm: () => void; onClose: () => void;
-}) {
-  const [typed, setTyped] = useState("");
-  const needTyping = count > 10;
-  const ready = !needTyping || typed.trim() === "删除";
-  return (
-    <AlertDialog open onOpenChange={(v) => { if (!v) onClose(); }}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>批量删除 {count} 个{subject}？</AlertDialogTitle>
-          <AlertDialogDescription>
-            此操作不可逆：{subject === "上游模型" ? "被公开模型引用的条目会逐条删除失败，其余仍会执行" : "成员引用关系级联删除"}；历史计费流水保留。
-            {needTyping ? "数量超过 10 条，请输入「删除」二字确认。" : ""}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        {needTyping ? (
-          <Input
-            value={typed}
-            onChange={(event) => setTyped(event.target.value)}
-            placeholder="输入「删除」以确认"
-            aria-label="输入删除以确认"
-            autoFocus
-          />
-        ) : null}
-        <AlertDialogFooter>
-          <AlertDialogCancel>取消</AlertDialogCancel>
-          <AlertDialogAction
-            className="bg-danger text-white hover:bg-danger/90"
-            disabled={!ready || pending}
-            onClick={(event) => { event.preventDefault(); onConfirm(); }}
-          >
-            {pending ? "删除中…" : "确认删除"}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-}
-
 // ---------------------------------------------------------------- 上游模型 Tab
 
 function UpstreamTab() {
   const { can } = usePermissions();
   const canCost = can("billing:cost");
   const canWrite = can("upstream_models:write");
-  const canAvailability = can("availability:read") && can("availability:write");
   const qc = useQueryClient();
   const q = useQuery({
     queryKey: ["upstream-models"],
@@ -533,7 +200,6 @@ function UpstreamTab() {
   const [batchDelete, setBatchDelete] = useState(false);
   const [batchPrice, setBatchPrice] = useState(false);
   const [cooldownFor, setCooldownFor] = useState<UpstreamModel | null>(null);
-  const [periodicFor, setPeriodicFor] = useState<{ id: string; title: string } | null>(null);
 
   const allItems = q.data?.items ?? [];
   const needle = search.trim().toLowerCase();
@@ -578,13 +244,19 @@ function UpstreamTab() {
     onError: (e: Error) => toast.error("删除失败", { description: e.message }),
   });
 
+  // 价格单元格（W4-C）：进价 2 位小数（<0.01 升 4 位）；入出均未配置显示灰字「未设置」（同参数列「未声明」样式）。
   const priceCell = (row: UpstreamModel) => {
     const cache = cachePrices.get(row.name);
+    const unpriced = (row.cost_input_per_1m ?? "").trim() === "" && (row.cost_output_per_1m ?? "").trim() === "";
     return (
       <div className="space-y-0.5">
-        <div>入 {costText(row.cost_input_per_1m)} · 出 {costText(row.cost_output_per_1m)}</div>
+        {unpriced ? (
+          <div className="text-faint">未设置</div>
+        ) : (
+          <div>入 {fmtPricePerM(row.cost_input_per_1m)} · 出 {fmtPricePerM(row.cost_output_per_1m)}</div>
+        )}
         <div className="text-faint">
-          倍率 {markupText(row.markup)} · 缓 {cache ? fmtCny(cache.micro) + "/M" : "—"}
+          倍率 {fmtMarkup(row.markup)} · 缓 {cache ? fmtCny(cache.micro) + "/M" : "—"}
         </div>
       </div>
     );
@@ -697,18 +369,13 @@ function UpstreamTab() {
               <ACTION_ICONS.enable className="h-3.5 w-3.5" /> 启用
             </Button>
           )}
+          {/* ADR-025：冷却双模式弹窗（单次/周期两个页签）；冷却中保留行内快捷解除。 */}
+          <Button variant="ghost" size="sm" onClick={() => setCooldownFor(row)}>
+            <ACTION_ICONS.cooldown className="h-3.5 w-3.5" /> 冷却
+          </Button>
           {isCooling(row) ? (
             <Button variant="ghost" size="sm" onClick={() => availability.mutate({ id: row.id, action: "release" })}>
               <ACTION_ICONS.releaseCooldown className="h-3.5 w-3.5" /> 解除冷却
-            </Button>
-          ) : (
-            <Button variant="ghost" size="sm" onClick={() => setCooldownFor(row)}>
-              <ACTION_ICONS.cooldown className="h-3.5 w-3.5" /> 冷却
-            </Button>
-          )}
-          {canAvailability ? (
-            <Button variant="ghost" size="sm" onClick={() => setPeriodicFor({ id: row.id, title: "周期冷却 · " + row.name })}>
-              <ACTION_ICONS.periodic className="h-3.5 w-3.5" /> 周期
             </Button>
           ) : null}
           <Button
@@ -794,23 +461,22 @@ function UpstreamTab() {
         />
       ) : null}
       {cooldownFor !== null ? (
-        <CooldownDialog
+        <CooldownManageDialog
           title={"冷却上游模型 · " + cooldownFor.name}
+          row={cooldownFor}
+          scope="upstream_model"
+          scopeId={cooldownFor.id}
+          rules={(rulesQuery.data ?? []).filter((rule) => rule.scope === "upstream_model" && rule.scope_id === cooldownFor.id)}
           pending={availability.isPending}
-          onConfirm={(deadline, note) => {
+          onCooldown={(deadline, note) => {
             availability.mutate({ id: cooldownFor.id, action: "cooldown", cooldown_until_ms: deadline, note });
             setCooldownFor(null);
           }}
+          onRelease={() => {
+            availability.mutate({ id: cooldownFor.id, action: "release" });
+            setCooldownFor(null);
+          }}
           onClose={() => setCooldownFor(null)}
-        />
-      ) : null}
-      {periodicFor !== null ? (
-        <PeriodicCooldownDialog
-          title={periodicFor.title}
-          scope="upstream_model"
-          scopeId={periodicFor.id}
-          rules={(rulesQuery.data ?? []).filter((rule) => rule.scope === "upstream_model" && rule.scope_id === periodicFor.id)}
-          onClose={() => setPeriodicFor(null)}
         />
       ) : null}
       <ConfirmDialog
@@ -842,126 +508,66 @@ function UpstreamTab() {
   );
 }
 
-// ---------------------------------------------------------------- 公开模型
-
-interface MemberDraft {
-  upstream_model_id: string;
-  priority: string;
-  weight: string;
-  when: string;
-}
-
-function memberDraftsOf(model: PublicModel): MemberDraft[] {
-  return (model.targets ?? []).map((t) => ({
-    upstream_model_id: t.upstream_model_id ?? "",
-    priority: String(t.priority ?? 1),
-    weight: t.weight === null || t.weight === undefined ? "" : String(t.weight),
-    when: t.when ?? "",
-  }));
-}
-
-function nextPriority(members: MemberDraft[]): number {
-  let max = 0;
-  for (const member of members) max = Math.max(max, toInt(member.priority));
-  return max + 1;
-}
-
-function validateMembers(members: MemberDraft[], mode: RoutingMode): string[] {
-  const errors: string[] = [];
-  if (members.length === 0) errors.push("至少保留 1 个成员");
-  const seen = new Set<string>();
-  for (const member of members) {
-    if (!member.upstream_model_id) errors.push("成员缺少上游模型");
-    if (seen.has(member.upstream_model_id)) errors.push("成员重复");
-    seen.add(member.upstream_model_id);
-    const priority = Number(member.priority);
-    if (!Number.isInteger(priority) || priority < 0 || priority > 100) errors.push("priority 必须是 0-100 的整数（数值小优先）");
-    if (mode === "weighted") {
-      const weight = Number(member.weight);
-      if (!Number.isInteger(weight) || weight < 1) errors.push("weighted 模式下 weight 必须是 >= 1 的整数");
-    }
-  }
-  if (mode === "conditional") {
-    const sorted = [...members].sort((a, b) => Number(a.priority) - Number(b.priority));
-    sorted.forEach((member, index) => {
-      if (index < sorted.length - 1 && member.when.trim() === "") errors.push("conditional 模式只有末位成员可以留空 when");
-    });
-  }
-  return Array.from(new Set(errors));
-}
-
-function MemberEditor({
-  members, upstreamModels, mode, onChange,
+/** 批量删除红色确认；超过 10 条需手动输入「删除」二字（DESIGN-AUDIT §4 三档确认）。 */
+function BatchDeleteDialog({
+  count, subject, pending, onConfirm, onClose,
 }: {
-  members: MemberDraft[]; upstreamModels: UpstreamModel[]; mode: RoutingMode;
-  onChange: (next: MemberDraft[]) => void;
+  count: number; subject: string; pending: boolean;
+  onConfirm: () => void; onClose: () => void;
 }) {
-  const [pick, setPick] = useState("");
-  const available = upstreamModels.filter((m) => !members.some((member) => member.upstream_model_id === m.id));
-  const update = (index: number, patch: Partial<MemberDraft>) => {
-    onChange(members.map((member, i) => (i === index ? { ...member, ...patch } : member)));
-  };
+  const [typed, setTyped] = useState("");
+  const needTyping = count > 10;
+  const ready = !needTyping || typed.trim() === "删除";
   return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <Combobox
-          className="max-w-64"
-          placeholder="选择上游模型加入成员"
-          searchPlaceholder="搜索上游模型名称或标识"
-          value={pick}
-          options={available.map((m) => ({
-            value: m.id,
-            label: m.name + (m.upstream_name ? " · " + m.upstream_name : ""),
-          }))}
-          onChange={setPick}
-        />
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={pick === ""}
-          onClick={() => {
-            onChange([...members, { upstream_model_id: pick, priority: String(nextPriority(members)), weight: "", when: "" }]);
-            setPick("");
-          }}
-        >
-          <ACTION_ICONS.add className="h-3.5 w-3.5" /> 添加成员
-        </Button>
-        <span className="text-2xs text-faint">priority 数值小优先；weighted 用 weight 整数比例。</span>
-      </div>
-      <div className="max-h-64 space-y-2 overflow-auto pr-1">
-        {members.map((member, index) => {
-          const model = upstreamModels.find((m) => m.id === member.upstream_model_id);
-          return (
-            <div key={member.upstream_model_id + ":" + index} className="grid grid-cols-12 items-center gap-1 rounded-md border border-border p-2">
-              <span className="col-span-4 truncate text-2sm text-body">{model ? model.name + " · " + (model.upstream_name ?? "") : member.upstream_model_id}</span>
-              <Input className="col-span-2" inputMode="numeric" placeholder="priority" value={member.priority} onChange={(e) => update(index, { priority: e.target.value })} />
-              <Input className="col-span-2" inputMode="numeric" placeholder="weight" value={member.weight} disabled={mode !== "weighted"} onChange={(e) => update(index, { weight: e.target.value })} />
-              <Input className="col-span-3" placeholder="when 条件" value={member.when} disabled={mode !== "conditional"} onChange={(e) => update(index, { when: e.target.value })} />
-              <Button variant="ghost" size="sm" className="col-span-1 text-danger-text" onClick={() => onChange(members.filter((_, i) => i !== index))}>
-                <ACTION_ICONS.clear className="h-3.5 w-3.5" /> 移除
-              </Button>
-            </div>
-          );
-        })}
-        {members.length === 0 ? <p className="text-2xs text-faint">暂无成员；创建公开模型时至少需要一个成员才能路由。</p> : null}
-      </div>
-    </div>
+    <AlertDialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>批量删除 {count} 个{subject}？</AlertDialogTitle>
+          <AlertDialogDescription>
+            此操作不可逆：{subject === "上游模型" ? "被公开模型引用的条目会逐条删除失败，其余仍会执行" : "成员引用关系级联删除"}；历史计费流水保留。
+            {needTyping ? "数量超过 10 条，请输入「删除」二字确认。" : ""}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        {needTyping ? (
+          <Input
+            value={typed}
+            onChange={(event) => setTyped(event.target.value)}
+            placeholder="输入「删除」以确认"
+            aria-label="输入删除以确认"
+            autoFocus
+          />
+        ) : null}
+        <AlertDialogFooter>
+          <AlertDialogCancel>取消</AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-danger text-white hover:bg-danger/90"
+            disabled={!ready || pending}
+            onClick={(event) => { event.preventDefault(); onConfirm(); }}
+          >
+            {pending ? "删除中…" : "确认删除"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 
-function PublicModelDialog({
-  initial, upstreamModels, onClose,
+// ---------------------------------------------------------------- 公开模型 Tab
+
+/** 新建公开模型弹窗（简化版，W4-C）：编辑走整页编辑器 /models/public/:id，这里只管创建。 */
+function PublicModelCreateDialog({
+  upstreamModels, onClose,
 }: {
-  initial: PublicModel | null; upstreamModels: UpstreamModel[]; onClose: () => void;
+  upstreamModels: UpstreamModel[]; onClose: () => void;
 }) {
   const qc = useQueryClient();
   const [form, setForm] = useState({
-    name: initial?.name ?? "",
-    routing_mode: initial?.routing_mode ?? ("failover" as RoutingMode),
-    note: initial?.note ?? "",
-    enabled: initial?.enabled ?? true,
+    name: "",
+    routing_mode: "failover" as RoutingMode,
+    note: "",
+    enabled: true,
   });
-  const [members, setMembers] = useState<MemberDraft[]>(initial !== null ? memberDraftsOf(initial) : []);
+  const [members, setMembers] = useState<MemberDraft[]>([]);
   const suggestions = useMemo(() => {
     const needle = form.name.trim().toLowerCase();
     if (!needle) return [];
@@ -972,34 +578,17 @@ function PublicModelDialog({
       .slice(0, 6);
     return scored;
   }, [form.name, upstreamModels]);
-  // 成员只在创建时一起提交；编辑走单独的成员编排对话框（PUT .../targets）。
-  const errors = initial === null ? validateMembers(members, form.routing_mode) : [];
+  const errors = validateMembers(members, form.routing_mode);
   const save = useMutation({
-    mutationFn: () => {
-      const targets = members.map((member) => ({
-        upstream_model_id: member.upstream_model_id,
-        priority: toInt(member.priority),
-        weight: member.weight.trim() === "" ? 0 : toInt(member.weight),
-        when: member.when.trim(),
-      }));
-      if (initial !== null) {
-        return api.patch<PublicModel>(ENDPOINTS.publicModelUpdate(initial.id), {
-          name: form.name.trim(),
-          routing_mode: form.routing_mode,
-          note: form.note.trim(),
-          enabled: form.enabled,
-        });
-      }
-      return api.post<PublicModel>(ENDPOINTS.publicModels, {
-        name: form.name.trim(),
-        routing_mode: form.routing_mode,
-        note: form.note.trim(),
-        enabled: form.enabled,
-        targets,
-      });
-    },
+    mutationFn: () => api.post<PublicModel>(ENDPOINTS.publicModels, {
+      name: form.name.trim(),
+      routing_mode: form.routing_mode,
+      note: form.note.trim(),
+      enabled: form.enabled,
+      targets: targetsPayload(members),
+    }),
     onSuccess: () => {
-      toast.success(initial !== null ? "公开模型已更新" : "公开模型已创建");
+      toast.success("公开模型已创建");
       void qc.invalidateQueries({ queryKey: ["public-models"] });
       onClose();
     },
@@ -1017,13 +606,13 @@ function PublicModelDialog({
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>{initial !== null ? "编辑公开模型" : "新建公开模型"}</DialogTitle>
+          <DialogTitle>新建公开模型</DialogTitle>
         </DialogHeader>
         <div className="max-h-[70vh] space-y-3 overflow-auto pr-1">
           <Field label="名称" hint="用户请求时使用的模型名">
             <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="如 glm-5.3" />
           </Field>
-          {initial === null && suggestions.length > 0 ? (
+          {suggestions.length > 0 ? (
             <div className="rounded-md border border-border bg-surface-2 p-2">
               <div className="mb-1 text-2xs text-faint">相似上游模型（勾选即成为成员）</div>
               <div className="space-y-1">
@@ -1053,11 +642,9 @@ function PublicModelDialog({
               ))}
             </RadioGroup>
           </Field>
-          {initial === null ? (
-            <Field label="成员编排">
-              <MemberEditor members={members} upstreamModels={upstreamModels} mode={form.routing_mode} onChange={setMembers} />
-            </Field>
-          ) : null}
+          <Field label="成员编排">
+            <MemberEditor members={members} upstreamModels={upstreamModels} mode={form.routing_mode} onChange={setMembers} />
+          </Field>
           {errors.length > 0 ? <p className="text-2xs text-danger-text">{errors.join("；")}</p> : null}
           <Field label="备注">
             <Input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="选填" />
@@ -1078,61 +665,10 @@ function PublicModelDialog({
   );
 }
 
-function MembersDialog({
-  model, upstreamModels, onClose,
-}: {
-  model: PublicModel; upstreamModels: UpstreamModel[]; onClose: () => void;
-}) {
-  const qc = useQueryClient();
-  const [members, setMembers] = useState<MemberDraft[]>(memberDraftsOf(model));
-  const errors = validateMembers(members, model.routing_mode);
-  const save = useMutation({
-    mutationFn: () => {
-      const targets = members
-        .map((member) => ({
-          upstream_model_id: member.upstream_model_id,
-          priority: toInt(member.priority),
-          weight: member.weight.trim() === "" ? 0 : toInt(member.weight),
-          when: member.when.trim(),
-        }))
-        .sort((a, b) => a.priority - b.priority);
-      return api.put(ENDPOINTS.publicModelTargets(model.id), { targets });
-    },
-    onSuccess: () => {
-      toast.success("成员已保存");
-      void qc.invalidateQueries({ queryKey: ["public-models"] });
-      onClose();
-    },
-    onError: (e: Error) => toast.error("保存失败", { description: e.message }),
-  });
-  return (
-    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>成员编排 · {model.name}</DialogTitle>
-        </DialogHeader>
-        <p className="text-2xs text-faint">
-          {ROUTING_LABELS[model.routing_mode].desc}。保存是整批替换；后端按 priority 升序校验，被引用的上游模型不能删除。
-        </p>
-        <MemberEditor members={members} upstreamModels={upstreamModels} mode={model.routing_mode} onChange={setMembers} />
-        {errors.length > 0 ? <p className="text-2xs text-danger-text">{errors.join("；")}</p> : null}
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>取消</Button>
-          <Button disabled={save.isPending || errors.length > 0} onClick={() => save.mutate()}>
-            {save.isPending ? "保存中…" : "保存成员"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ---------------------------------------------------------------- 公开模型 Tab
-
 function PublicTab() {
   const { can } = usePermissions();
   const canWrite = can("public_models:write");
-  const canAvailability = can("availability:read") && can("availability:write");
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const q = useQuery({
     queryKey: ["public-models"],
@@ -1142,17 +678,12 @@ function PublicTab() {
   const qModels = useQuery({ queryKey: ["upstream-models"], queryFn: () => apiList<UpstreamModel>(ENDPOINTS.upstreamModels) });
   const availability = useAvailabilityMutation("public");
   const batch = useBatchMutation("public");
-  const rulesQuery = useAvailabilityRulesQuery(can("availability:read"));
-  const periodicRules = periodicByRow(rulesQuery.data, "public_model");
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
-  const [dialog, setDialog] = useState<{ open: boolean; initial: PublicModel | null }>({ open: false, initial: null });
-  const [membersFor, setMembersFor] = useState<PublicModel | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
   const [deleting, setDeleting] = useState<PublicModel | null>(null);
   const [batchDelete, setBatchDelete] = useState(false);
-  const [cooldownFor, setCooldownFor] = useState<PublicModel | null>(null);
-  const [periodicFor, setPeriodicFor] = useState<{ id: string; title: string } | null>(null);
 
   const allItems = q.data?.items ?? [];
   const needle = search.trim().toLowerCase();
@@ -1189,6 +720,8 @@ function PublicTab() {
     },
     onError: (e: Error) => toast.error("删除失败", { description: e.message }),
   });
+
+  const openEditor = (row: PublicModel) => navigate("/models/public/" + row.id);
 
   const selectColumn: ModelColumn<PublicModel> = {
     key: "select",
@@ -1252,21 +785,13 @@ function PublicTab() {
     {
       key: "status",
       label: "状态",
-      cell: (row) => {
-        const periodic = periodicRules.get(row.id);
-        return (
-          <div>
-            <Badge tone={availabilityTone(row)}>{availabilityText(row)}</Badge>
-            {periodic ? <div className="mt-1 text-2xs text-faint">周期：{ruleSummary(periodic)}</div> : null}
-          </div>
-        );
-      },
+      cell: (row) => <Badge tone={availabilityTone(row)}>{availabilityText(row)}</Badge>,
     },
     ...(canWrite ? [{
       key: "actions",
       label: "操作",
       hideable: false,
-      headerClassName: "min-w-72",
+      headerClassName: "min-w-56",
       cell: (row: PublicModel) => (
         <div className="flex flex-wrap gap-1">
           <Button
@@ -1279,10 +804,8 @@ function PublicTab() {
           >
             <ACTION_ICONS.copy className="h-3.5 w-3.5" />
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => setMembersFor(row)}>
-            <ACTION_ICONS.members className="h-3.5 w-3.5" /> 成员
-          </Button>
-          <Button variant="ghost" size="sm" onClick={() => setDialog({ open: true, initial: row })}>
+          {/* ADR-025：编辑+成员合并为整页编辑器入口；新建仍走简化弹窗。 */}
+          <Button variant="ghost" size="sm" onClick={() => openEditor(row)}>
             <ACTION_ICONS.edit className="h-3.5 w-3.5" /> 编辑
           </Button>
           {row.enabled ? (
@@ -1294,20 +817,6 @@ function PublicTab() {
               <ACTION_ICONS.enable className="h-3.5 w-3.5" /> 启用
             </Button>
           )}
-          {isCooling(row) ? (
-            <Button variant="ghost" size="sm" onClick={() => availability.mutate({ id: row.id, action: "release" })}>
-              <ACTION_ICONS.releaseCooldown className="h-3.5 w-3.5" /> 解除冷却
-            </Button>
-          ) : (
-            <Button variant="ghost" size="sm" onClick={() => setCooldownFor(row)}>
-              <ACTION_ICONS.cooldown className="h-3.5 w-3.5" /> 冷却
-            </Button>
-          )}
-          {canAvailability ? (
-            <Button variant="ghost" size="sm" onClick={() => setPeriodicFor({ id: row.id, title: "周期冷却 · " + row.name })}>
-              <ACTION_ICONS.periodic className="h-3.5 w-3.5" /> 周期
-            </Button>
-          ) : null}
           <Button variant="ghost" size="sm" className="text-danger-text" onClick={() => setDeleting(row)}>
             <ACTION_ICONS.delete className="h-3.5 w-3.5" /> 删除
           </Button>
@@ -1343,8 +852,7 @@ function PublicTab() {
   return (
     <div className="space-y-3">
       <p className="text-2xs text-faint">
-        公开模型是运营对外发放的别名：策略 + 成员（priority / weight）+ 可用性。关闭是人工长期措施，冷却到期自动恢复。
-        {ENABLE_SEMANTICS_NOTE}
+        公开模型是运营对外发放的别名：策略 + 成员（priority / weight）+ 启停。可用性措施（冷却/周期）只作用于上游模型（ADR-025），行内「编辑」进入整页编辑器合并维护成员。
       </p>
       <ModelsTable<PublicModel>
         columns={columns}
@@ -1360,38 +868,12 @@ function PublicTab() {
         searchPlaceholder="搜索公开名、备注或成员"
         toolbarEnd={toolbarEnd}
         emptyText="还没有公开模型"
-        emptyAction={canWrite ? <Button size="sm" onClick={() => setDialog({ open: true, initial: null })}>新建公开模型</Button> : undefined}
+        emptyAction={canWrite ? <Button size="sm" onClick={() => setCreateOpen(true)}>新建公开模型</Button> : undefined}
         onClearFilters={() => setSearch("")}
+        onRowClick={canWrite ? openEditor : undefined}
       />
-      {dialog.open ? (
-        <PublicModelDialog
-          initial={dialog.initial}
-          upstreamModels={qModels.data?.items ?? []}
-          onClose={() => setDialog({ open: false, initial: null })}
-        />
-      ) : null}
-      {membersFor !== null ? (
-        <MembersDialog model={membersFor} upstreamModels={qModels.data?.items ?? []} onClose={() => setMembersFor(null)} />
-      ) : null}
-      {cooldownFor !== null ? (
-        <CooldownDialog
-          title={"冷却公开模型 · " + cooldownFor.name}
-          pending={availability.isPending}
-          onConfirm={(deadline, note) => {
-            availability.mutate({ id: cooldownFor.id, action: "cooldown", cooldown_until_ms: deadline, note });
-            setCooldownFor(null);
-          }}
-          onClose={() => setCooldownFor(null)}
-        />
-      ) : null}
-      {periodicFor !== null ? (
-        <PeriodicCooldownDialog
-          title={periodicFor.title}
-          scope="public_model"
-          scopeId={periodicFor.id}
-          rules={(rulesQuery.data ?? []).filter((rule) => rule.scope === "public_model" && rule.scope_id === periodicFor.id)}
-          onClose={() => setPeriodicFor(null)}
-        />
+      {createOpen ? (
+        <PublicModelCreateDialog upstreamModels={qModels.data?.items ?? []} onClose={() => setCreateOpen(false)} />
       ) : null}
       <ConfirmDialog
         open={deleting !== null}
@@ -1416,7 +898,10 @@ function PublicTab() {
 }
 
 export function ModelsPage() {
+  // W4-C：/models/public/:id 也挂在本页面模块（PAGE_MODULES 按文件懒加载），按路径分流到整页编辑器。
+  const editorMatch = useMatch("/models/public/:id");
   const [params] = useSearchParams();
+  if (editorMatch) return <PublicModelEditor id={editorMatch.params.id ?? ""} />;
   const initialKey = params.get("tab") === "public" ? "public" : "upstream";
   return (
     <Tabs

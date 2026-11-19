@@ -6,16 +6,18 @@ import type {
   AvailabilityRule, CooldownRecurrence, ModelAvailability, ModelBatchResult,
 } from "@/types";
 
-/** 冷却对话框的默认值：30 分钟（旧系统冷却例牌档位）；到期后读取即自愈。 */
-export const DEFAULT_COOLDOWN_MINUTES = 30;
+/** 冷却对话框的默认值：1 小时（预设首位）；到期后读取即自愈。 */
+export const DEFAULT_COOLDOWN_HOURS = 1;
 
-/** 一次性冷却时长快捷档（分钟）；「自定义」走 datetime-local。 */
-export const COOLDOWN_PRESETS: Array<{ minutes: number | null; label: string }> = [
-  { minutes: 30, label: "30 分钟" },
-  { minutes: 60, label: "1 小时" },
-  { minutes: 120, label: "2 小时" },
-  { minutes: 360, label: "6 小时" },
-  { minutes: null, label: "自定义截止" },
+/** 一次性冷却时长快捷档（小时，GLOSSARY §3 定案 1/3/6/12/24/72）；「自定义」走 datetime-local。 */
+export const COOLDOWN_PRESETS: Array<{ hours: number | null; label: string }> = [
+  { hours: 1, label: "1 小时" },
+  { hours: 3, label: "3 小时" },
+  { hours: 6, label: "6 小时" },
+  { hours: 12, label: "12 小时" },
+  { hours: 24, label: "24 小时" },
+  { hours: 72, label: "72 小时" },
+  { hours: null, label: "自定义截止" },
 ];
 
 export const WEEKDAY_OPTIONS: Array<{ value: number; label: string }> = [

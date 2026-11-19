@@ -1,159 +1,29 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Plus } from "lucide-react";
 import { toast } from "sonner";
 
+import { UpstreamModelDialog } from "@/components/models/upstream-model-dialog";
+import { parameterSummary } from "@/components/models/model-vocab";
 import { DataTable } from "@/components/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Field, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api, apiList, ENDPOINTS } from "@/lib/api";
+import { fmtMarkup, fmtPricePerM } from "@/lib/format";
 import { ACTION_ICONS } from "@/lib/icons";
-import { costText, markupText, MODEL_TYPE_OPTIONS, type UpstreamRow } from "./shared";
-import type { ModelParameters, UpstreamModel } from "@/types";
-
-/** 能力位摘要：输入类型 → 输出类型 · 能力（与模型管理页同一口径）。 */
-function parameterSummary(parameters?: ModelParameters): string {
-  if (!parameters) return "—";
-  const input = parameters.input_types.length > 0 ? parameters.input_types.join("/") : "—";
-  const output = parameters.output_types.length > 0 ? parameters.output_types.join("/") : "—";
-  const caps: string[] = [];
-  if (parameters.tool_call) caps.push("工具");
-  if (parameters.reasoning) caps.push("推理");
-  if (parameters.structured_output) caps.push("结构化");
-  return input + " → " + output + (caps.length > 0 ? " · " + caps.join("/") : "");
-}
-
-/** 添加 / 编辑上游模型弹窗：模型名 + 类型 + 进价（入 / 出 / 倍率），留空 = 不修改。 */
-function ModelDialog({
-  upstreamId,
-  initial,
-  onClose,
-}: {
-  upstreamId: string;
-  initial: UpstreamModel | null;
-  onClose: () => void;
-}) {
-  const qc = useQueryClient();
-  const isEdit = initial !== null;
-  const [name, setName] = useState(initial?.name ?? "");
-  const [modelType, setModelType] = useState(initial?.model_type ?? "chat");
-  const [costIn, setCostIn] = useState(initial?.cost_input_per_1m ?? "");
-  const [costOut, setCostOut] = useState(initial?.cost_output_per_1m ?? "");
-  const [markup, setMarkup] = useState(initial?.markup ?? "");
-
-  const numericOrUndefined = (value: string): string | undefined => {
-    const text = value.trim();
-    if (text === "") return undefined;
-    return Number.isNaN(Number(text)) ? "" : text;
-  };
-  const badNumber = [costIn, costOut, markup].some((value) => {
-    const text = value.trim();
-    return text !== "" && Number.isNaN(Number(text));
-  });
-
-  const save = useMutation({
-    mutationFn: () => {
-      if (isEdit && initial) {
-        const patch: Record<string, unknown> = { name: name.trim(), model_type: modelType };
-        const cin = numericOrUndefined(costIn);
-        const cout = numericOrUndefined(costOut);
-        const mk = numericOrUndefined(markup);
-        if (cin !== undefined) patch.cost_input_per_1m = cin;
-        if (cout !== undefined) patch.cost_output_per_1m = cout;
-        if (mk !== undefined) patch.markup = mk;
-        return api.patch<UpstreamModel>(ENDPOINTS.upstreamModelUpdate(initial.id), patch);
-      }
-      return api.post<UpstreamModel>(ENDPOINTS.upstreamModelCreate, {
-        upstream_id: upstreamId,
-        name: name.trim(),
-        model_type: modelType,
-        ...(costIn.trim() !== "" ? { cost_input_per_1m: costIn.trim() } : {}),
-        ...(costOut.trim() !== "" ? { cost_output_per_1m: costOut.trim() } : {}),
-        ...(markup.trim() !== "" ? { markup: markup.trim() } : {}),
-      });
-    },
-    onSuccess: () => {
-      toast.success(isEdit ? "模型已更新" : "模型已登记");
-      void qc.invalidateQueries({ queryKey: ["upstream-models"] });
-      void qc.invalidateQueries({ queryKey: ["upstreams"] });
-      void qc.invalidateQueries({ queryKey: ["upstream", upstreamId] });
-      onClose();
-    },
-  });
-
-  const canSave = name.trim() !== "" && !badNumber;
-
-  return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>{isEdit ? "编辑模型 " + initial.name : "添加模型"}</DialogTitle>
-          <DialogDescription>
-            上游模型是发给上游的原始名称；进价为元 / 1M 词元，倍率 = 花费 ÷ 成本，价格也可在价目管理维护。
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-3">
-          <Field>
-            <FieldLabel htmlFor="up-model-name">模型名</FieldLabel>
-            <Input id="up-model-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="如 gpt-5-mini" className="font-mono" />
-          </Field>
-          <Field>
-            <FieldLabel>类型</FieldLabel>
-            <Select value={modelType} onValueChange={setModelType}>
-              <SelectTrigger aria-label="模型类型">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {MODEL_TYPE_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-          <div className="grid grid-cols-3 gap-2">
-            <Field>
-              <FieldLabel htmlFor="up-model-cost-in">进价·输入</FieldLabel>
-              <Input id="up-model-cost-in" inputMode="decimal" value={costIn} onChange={(e) => setCostIn(e.target.value)} placeholder="元 / 1M" />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="up-model-cost-out">进价·输出</FieldLabel>
-              <Input id="up-model-cost-out" inputMode="decimal" value={costOut} onChange={(e) => setCostOut(e.target.value)} placeholder="元 / 1M" />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="up-model-markup">倍率</FieldLabel>
-              <Input id="up-model-markup" inputMode="decimal" value={markup} onChange={(e) => setMarkup(e.target.value)} placeholder="如 1.2" />
-            </Field>
-          </div>
-          {badNumber ? <p className="text-2xs text-danger-text">进价与倍率必须是数字</p> : null}
-        </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>取消</Button>
-          <Button disabled={!canSave || save.isPending} onClick={() => save.mutate()}>
-            {save.isPending ? "保存中…" : "保存"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
+import { usePermissions } from "@/lib/permissions";
+import { type UpstreamRow } from "./shared";
+import type { UpstreamModel } from "@/types";
 
 /** Tab2 路由与映射：本上游登记的上游模型表。
- *  说明：后端只有上游级 test-connection，没有模型级探测；「探测」列如实展示上游级最近探测。 */
+ *  说明：后端只有上游级 test-connection，没有模型级探测；「探测」列如实展示上游级最近探测。
+ *  编辑弹窗与模型管理页共用同一实现（W4-C 归一，字段全集 + upstream_models:write 门禁）。 */
 export function UpstreamModelsPanel({ upstream }: { upstream: UpstreamRow }) {
   const qc = useQueryClient();
+  const { can } = usePermissions();
+  const canWrite = can("upstream_models:write");
+  const canCost = can("billing:cost");
   const q = useQuery({
     queryKey: ["upstream-models"],
     queryFn: () => apiList<UpstreamModel>(ENDPOINTS.upstreamModels),
@@ -209,14 +79,14 @@ export function UpstreamModelsPanel({ upstream }: { upstream: UpstreamRow }) {
     {
       id: "params",
       header: "参数摘要",
-      cell: (c) => <span className="text-2xs text-body">{parameterSummary(c.row.original.parameters)}</span>,
+      cell: (c) => <span className="text-2xs text-body">{parameterSummary(c.row.original)}</span>,
     },
     {
       id: "price",
       header: "进价（入 · 出 · 倍率）",
       cell: (c) => (
         <span className="tnum text-2sm text-body">
-          {costText(c.row.original.cost_input_per_1m)} · {costText(c.row.original.cost_output_per_1m)} · {markupText(c.row.original.markup)}
+          {fmtPricePerM(c.row.original.cost_input_per_1m)} · {fmtPricePerM(c.row.original.cost_output_per_1m)} · {fmtMarkup(c.row.original.markup)}
         </span>
       ),
     },
@@ -237,6 +107,7 @@ export function UpstreamModelsPanel({ upstream }: { upstream: UpstreamRow }) {
       header: "操作",
       cell: (c) => {
         const row = c.row.original;
+        if (!canWrite) return null;
         return (
           <div className="flex flex-wrap gap-1">
             <Button variant="ghost" size="dense" onClick={() => setDialog({ open: true, initial: row })}>
@@ -269,9 +140,11 @@ export function UpstreamModelsPanel({ upstream }: { upstream: UpstreamRow }) {
           已接入 <span className="tnum">{rows.length}</span> 个模型；公开模型通过成员引用这里的行。
           探测列为上游级连通状态（后端仅提供上游级测试连接，没有模型级探测）。
         </p>
-        <Button size="sm" onClick={() => setDialog({ open: true, initial: null })}>
-          <Plus className="h-3.5 w-3.5" /> 添加模型
-        </Button>
+        {canWrite ? (
+          <Button size="sm" onClick={() => setDialog({ open: true, initial: null })}>
+            <ACTION_ICONS.add className="h-3.5 w-3.5" /> 添加模型
+          </Button>
+        ) : null}
       </div>
       <DataTable
         columns={columns}
@@ -284,7 +157,16 @@ export function UpstreamModelsPanel({ upstream }: { upstream: UpstreamRow }) {
         storageKey="slipstream.cols.upstream-models"
       />
       {dialog.open ? (
-        <ModelDialog upstreamId={upstream.id} initial={dialog.initial} onClose={() => setDialog({ open: false, initial: null })} />
+        <UpstreamModelDialog
+          initial={dialog.initial}
+          upstreams={[upstream]}
+          canCost={canCost}
+          onClose={() => setDialog({ open: false, initial: null })}
+          onSaved={() => {
+            void qc.invalidateQueries({ queryKey: ["upstreams"] });
+            void qc.invalidateQueries({ queryKey: ["upstream", upstream.id] });
+          }}
+        />
       ) : null}
       <ConfirmDialog
         open={deleting !== null}

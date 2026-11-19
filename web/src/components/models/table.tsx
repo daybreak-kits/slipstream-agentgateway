@@ -55,6 +55,8 @@ interface ModelsTableProps<T> {
   emptyText: string;
   emptyAction?: ReactNode;
   onClearFilters: () => void;
+  /** 行点击回调（W4-C：公开模型整行进入整页编辑器）；传入后行加 cursor-pointer。行内按钮/复选框的点击不触发。 */
+  onRowClick?: (row: T) => void;
 }
 
 type ColsMap = Record<string, string[]>;
@@ -91,7 +93,7 @@ function writeHiddenCols(storageKey: string, tabKey: string, hidden: string[]): 
 export function ModelsTable<T>({
   columns, rows, totalCount, loading = false, error, onRetry,
   storageKey, tabKey, searchText, onSearchChange, searchPlaceholder,
-  typeFilter, toolbarEnd, emptyText, emptyAction, onClearFilters,
+  typeFilter, toolbarEnd, emptyText, emptyAction, onClearFilters, onRowClick,
 }: ModelsTableProps<T>) {
   const [hiddenCols, setHiddenCols] = useState<string[]>(() => readHiddenCols(storageKey, tabKey));
   const [pageIndex, setPageIndex] = useState(1);
@@ -233,7 +235,18 @@ export function ModelsTable<T>({
               </tr>
             ) : (
               pageRows.map((row, index) => (
-                <TR key={(row as { id?: string }).id ?? index}>
+                <TR
+                  key={(row as { id?: string }).id ?? index}
+                  className={onRowClick ? "cursor-pointer" : undefined}
+                  onClick={onRowClick
+                    ? (event) => {
+                        // 行内按钮/复选框/链接有自己的动作，不再触发行点击
+                        const target = event.target as HTMLElement;
+                        if (target.closest("button, a, input, label, [role='checkbox'], [role='menuitem']")) return;
+                        onRowClick(row);
+                      }
+                    : undefined}
+                >
                   {visibleColumns.map((col) => (
                     <TD key={col.key} className={cn("py-1.5", col.className)}>
                       {col.cell(row)}

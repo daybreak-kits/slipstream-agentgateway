@@ -175,6 +175,15 @@ export const ROUTES: RouteDef[] = [
     note: "ticket 10：上游模型 / 公开模型两个 Tab",
   },
   {
+    path: "/models/public/:id",
+    layout: "app",
+    page: "models",
+    component: "ModelsPage",
+    title: "编辑公开模型",
+    permission: "public_models:write",
+    note: "W4-C：公开模型整页编辑器（编辑+成员合并入口，ADR-025）；PAGE_MODULES 按页面文件懒加载，ModelsPage 内按路径分流",
+  },
+  {
     path: "/pricing",
     layout: "app",
     page: "pricing",

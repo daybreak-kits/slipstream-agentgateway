@@ -173,17 +173,6 @@ export function urlPathOf(url: string): string {
   return withoutOrigin === "" ? "/" : withoutOrigin;
 }
 
-/** 进价是十进制字符串（元 / 1M 词元）；未配置显示「—」，与模型管理页同一口径。 */
-export function costText(value: string | null | undefined): string {
-  const text = (value ?? "").trim();
-  return text === "" ? "—" : "¥" + text + "/M";
-}
-
-export function markupText(value: string | null | undefined): string {
-  const text = (value ?? "").trim();
-  return text === "" ? "—" : "×" + text;
-}
-
 /** 批量粘贴：一行一把，去掉空行与行内注释；返回去重结果与重复计数。 */
 export function parseKeyLines(
   text: string,

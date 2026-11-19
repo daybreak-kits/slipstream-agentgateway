@@ -78,12 +78,14 @@ for (const route of routes) {
   if (!route.nav) info.push("路由 " + route.path + " 不在侧栏导航中（" + route.component + "）");
 }
 
-/* 5. 页头标题：AppShell 按导航项最长前缀匹配，动态页需要带导航的父路径兜底 */
+/* 5. 页头标题：AppShell 按导航项最长前缀匹配（pathname.startsWith(navPath + "/")），
+ * 审计用同一规则核对路由模式；嵌套段路由（如 /models/public/:id 挂在 /models 下）同样命中，
+ * 不再按「第一个 : 前的整段」找精确父路径（那会对多段动态路由误报回退）。 */
 for (const route of routes) {
   if (!route.path.includes(":") || route.nav) continue;
-  const prefix = route.path.split("/:")[0];
-  if (!routes.some((other) => other.path === prefix && Boolean(other.nav))) {
-    warnings.push("动态路由 " + route.path + " 没有带导航的父路由 " + prefix + "，页头标题会回退为 Slipstream");
+  const parent = routes.find((other) => Boolean(other.nav) && route.path.startsWith(other.path + "/"));
+  if (!parent) {
+    warnings.push("动态路由 " + route.path + " 没有带导航的父路由，页头标题会回退为 Slipstream");
   }
 }
 
