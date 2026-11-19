@@ -90,12 +90,14 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 | W4 密钥 + 用户 + 角色 | 连接密钥（掩码常驻 + 审计化 reveal + 一次性明文弹窗 + 签发入口）；用户管理 API 用户/控制台账号两 Tab（ADR-019）；角色管理权限矩阵（41 权限键） |
 | W5 策略 + 审计 + 配置 + 设置 | 网关策略三 Tab 合并页（流量策略/护栏/MCP，validate→保存→apply→版本留档）；审计；配置版本；用户设置/运营设置；登录/404 |
 | W6 清理 + 验收 | 后端：conftest 临时目录进程隔离、契约补录（缓存词元/上游改名可选/可用性窗口跳读）；前端：ENDPOINTS 归并、死代码删除、mock 补桩、术语 error 档；浏览器：26 路由/32 URL 逐页四查 + 七流程端到端 |
+| W7 迁移终版（M1–M4） | 渲染层迁移落地 ADR-024 混合形态（gateways + llm.gateways + 顶层 policies[] 的 internal/llm:request 重试）；网关策略页「请求内重试 + 健康驱逐」配置面（M3）；日志检索与摄取管线 SQL 化（P2-7/8）；终版全量回归与文档收敛 |
 
 ### 6.2 门禁结果（2026-11-19 全绿）
 
-- 后端：`python -m pytest` **578 passed / EXIT=0**（含 test_availability 时钟冻结修复）；`ruff check src tests` All checks passed；import-lint 通过。
-- 前端六门禁：`tsc --noEmit` 0；`eslint src` 0；`vite build` 成功；`check:bundle` PASS（首包 gzip **202.7 KB**、**70** 个 JS chunk）；`check-ui-foundation` **37/37**；`terminology_audit --strict` **error 0 · warn 0**（旧词 封禁/对外模型/客户端密钥 已清零）。
-- 浏览器验收：`node ops/checks/w6_acceptance.mjs`（Playwright + msedge headless，3700 同源托管）→ **PASS 39 / FAIL 0**：26 条路由展开 32 URL 逐页四查（首屏/空态/错误态/交互）+ flow1 建上游→模型→公开模型→下发、flow2 建用户→签发密钥→复制 toast、flow3 日志筛选/排序/列显隐/详情、flow4 看板连点、flow5 价目导出导入回环、flow6 危险三档 + 周期冷却窗口启用、flow7 强制 500 降级；证据 `ops/checks/.logs/acceptance/w6-20261119-105143/report.md`（不入库）。
+- 后端：`python -m pytest` **658 passed / 8 skipped / EXIT=0**（含 test_availability 时钟冻结修复、M2/M3 渲染迁移与策略配置面用例）；`python -m ruff check src tests` **All checks passed**；import-lint（`tests/integration/test_import_layers.py` 全量 AST 分层扫描 + `test_layering_guards.py`）随 pytest 通过。
+- 前端六门禁：`tsc --noEmit` 0；`eslint src` 0；`vite build` 成功；`check:bundle` PASS（首包 gzip **202.7 KB**、**70** 个 JS chunk）；`check-ui-foundation` **37/37**；`terminology_audit --strict` **error 0 · warn 0**（旧词 封禁/对外模型/客户端密钥 已清零）；`ops/checks/verify_web.sh` **RESULT PASS（tsc/eslint/route 3/3）**。
+- 浏览器验收（M4 终版复跑，3700 同源托管）：`node ops/checks/w6_acceptance.mjs`（Playwright + msedge headless）→ **PASS 39 / FAIL 0**：26 条路由展开 32 URL 逐页四查（首屏/空态/错误态/交互）+ flow1 建上游→模型→公开模型→下发、flow2 建用户→签发密钥→复制 toast、flow3 日志筛选/排序/列显隐/详情、flow4 看板连点、flow5 价目导出导入回环、flow6 危险三档 + 周期冷却窗口启用、flow7 强制 500 降级；证据 `ops/checks/.logs/acceptance/m4-20261119-193758/report.md`（不入库）。
+- 流程七（ADR-024/M3 配置面，M4 固化）：`node ops/checks/acceptance/m4_retry_flow.mjs` → **PASS 11 / FAIL 0**：网关策略页开「请求内重试」→ 4xx 码未配对健康驱逐时保存禁用并提示 → 配对（consecutive_failures=1）后保存下发 → 渲染配置出现 `internal/llm:request` + `gateway-retry` + `unhealthyExpression` → 真实 AG 加载后 mock 主目标 500 重试两次切备 200（命中矩阵 primary 2 / backup 1）→ 策略页关闭 → 渲染回默认透传 → 同一请求直接 500（primary +1 / backup +0）。证据 `ops/checks/.logs/acceptance/m4-retry-20261119-193758/report.md`（不入库）。
 - 验收中发现并修复的真 bug：①Dialog 内 Select/Dropdown 被遮罩拦截点击（`--z-popover` 40→60，弹层浮在 modal 之上）；②启用/解除冷却前端先删周期规则导致窗口跳过失效（删除 clearPeriodicCooldowns，语义归后端）；③连接密钥签发 body 缺 `user_id` 必填字段；④test_availability 五个窗口用例在 UTC 02:00-04:00 运行时机钟依赖偶发失败（冻结服务时钟于用例窗口内）。
 
 ### 6.3 部署注意（生产必读）
@@ -107,9 +109,11 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 
 ### 6.4 三期已知边界
 
-1. **AG 1.7 请求内零重试**：LLM 配置面不接受 retry 策略（validate 拒绝），策略页 retry 必须为 null。
+1. **请求内重试默认关闭，可按策略开启**（ADR-024/M3 取代早期「AG 1.7 零重试」结论）：网关策略页可开「请求内重试」+「健康标记与驱逐」；`retry.codes` 含 4xx 时必须成对配置 `health.unhealthyExpression` 与 `eviction.consecutiveFailures>=1`（保存前校验 + 渲染层兜底），关闭即回到默认透传。边界：**流式响应首字节后中断不切换目标**；**request_logs 仍 1 请求 1 行**（无尝试级日志，重试不产生额外行）；同一层内仍是 P2C 概率选路。
 2. **image 类型上游模型不记词元**：无法计费，模型管理行内提示「AG 不记词元」。
 3. **请求/响应正文日志默认不落库**：运营设置需开 `ag_access_log_llm=full` 才记录（metadata 默认）。
 4. **日志接口类型 join 为前端实现，upstream-models 列表 200 条分页上限**：模型列表接口本身分页上限 200 条；请求日志的名称回填由前端按页内 id 自行 join。
 5. **热力图 30 天以上档位行内滚动**：行虚拟化（30d+ 行内滚），非整页展开。
 6. **审计时间筛选未做**：审计其余筛选（动作/操作者/对象）可用，时间范围筛选待后续。
+
+**ADR-024 混合形态（终版落地）**：渲染层迁移最初按 AG 1.7「完整形态」（`gateways` + AI 组）设计，但 1.7 的路由只能匹配 path/method/query/header/host，**读不到请求体里的 model**，一个 route 只对应一个 AI 后端，AI 组也没有 weight——若全部公开模型走同一路径/body，无法区分模型，会塌缩到同一后端并丢失各模型的 failover 链与健康策略，因此简化的「纯完整形态」被推翻。终版采用混合形态：模型路由与 failover/weighted/conditional 仍由 `llm.models`/`llm.virtualModels` 表达；网关面迁到 `gateways` + `llm.gateways`；请求内 retry 以顶层 `policies[]` 挂到内部路由 `internal/llm:request`。强制项：每个上游必须带自己的 `apiKey.file`（否则 AG 会把客户端 Authorization 透传到上游）、baseUrl 必须是绝对 http(s)、https 上游渲染 `models[].tls.hostname`。金样 `api/tests/contract/fixtures/ag_1_7_full_config.yaml` 由真实 1.7 二进制 `--validate-only` 校验。

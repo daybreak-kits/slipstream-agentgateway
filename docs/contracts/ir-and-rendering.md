@@ -173,18 +173,29 @@ class PoliciesSpec:
 
 完整样例见 `api/tests/contract/fixtures/ag_1_7_full_config.yaml`（黄金契约，
 由 `test_ag_render_golden.py` 精确比对，并由 `test_ag_validate.py` 交给真实
-1.7 二进制 `--validate-only`）。核心形状：
+1.7 二进制 `--validate-only`）。**ADR-024 混合形态**：模型路由与
+failover/weighted/conditional 仍留在 `llm.models`/`llm.virtualModels`，网关面
+迁到 `gateways` + `llm.gateways`，请求内 retry 以顶层 `policies[]` 挂内部路由
+`internal/llm:request`（纯完整形态读不到 body model、会塌缩到同一后端，已推翻）。
+核心形状：
 
 ```yaml
+gateways:
+  default:
+    port: 3600
 llm:
-  port: 3600
+  gateways: default
   providers:
     - name: ups_a
       provider: openai
       params:
         baseUrl: "https://api.example.com/v1"
         apiKey:
-          file: "./keys/ups_a.key"
+          file: keys/ups_a.key
+      defaults:
+        requestHeaders:
+          set:
+            x-team: slipstream
   models:
     - name: umdl_a
       provider:
@@ -192,17 +203,27 @@ llm:
       visibility: internal
       params:
         model: "glm-5.3"
+      tls:
+        hostname: api.example.com
+      health:
+        unhealthyExpression: "response.code >= 400"
+        eviction:
+          consecutiveFailures: 1
+      requestTransformation:
+        set:
+          x-trace: "slipstream"
+        body: "toJson(json(request.body).with(b, b.merge({\"temperature\": ...})))"
       responseHeaders:
-        remove: ["server", "x-powered-by"]
+        remove: ["x-internal-debug", "server", "x-powered-by"]
   virtualModels:
     - name: flagship
       routing:
         failover:
           targets:
-            - model: umdl_a
-              priority: 0
             - model: umdl_b
-              priority: 1
+              priority: 0
+            - model: umdl_a
+              priority: 10
   policies:
     apiKey:
       mode: strict
@@ -214,14 +235,30 @@ llm:
         type: requests
         maxTokens: 120
         fillInterval: 1m
+policies:
+  - name:
+      name: "gateway-retry"
+      namespace: default
+    target:
+      route:
+        name: "llm:request"
+        namespace: internal
+    phase: route
+    policy:
+      retry:
+        attempts: 2
+        codes: [429, 500, 502, 503]
+        backoff: 100ms
 mcp:
   targets:
-    - name: fs
-      sse: {host: "https://mcp.example.com"}
+    - name: files
+      sse:
+        host: "https://mcp.example.com"
 ```
 
 failover 里 0 先于 1；weighted 把 `priority` 换成 `weight`，conditional 换成
-`when`，两者都保持 IR 原序。
+`when`，两者都保持 IR 原序。retry 只在显式配置时渲染；未配置即默认透传（首字节后
+不切备、request_logs 1 请求 1 行，见 DELIVERY §6.4）。
 
 ## 7. AG 1.7 实测结论（`--validate-only`）
 
@@ -234,9 +271,9 @@ C:/Users/microsoft/agentgateway/agentgateway.exe --validate-only -f config.yaml
 
 - **providers/models 必须是数组**：map 形状报
   `llm.providers: invalid type: map, expected a sequence`；v1 渲染因此全量改写。
-- **retry 不存在于 1.7 二进制**：`llm.policies: unknown field 'retry'`；即使
-  schema 有 `RetryPolicy`，也不能下发。能力矩阵 `policies.retry=false`，
-  集成测试会故意注入 retry 证明被拒。
+- **retry 不能挂在 `llm.policies`**：`llm.policies: unknown field 'retry'`；请求内
+  重试只能以顶层 `policies[]` 挂内部路由 `internal/llm:request`（ADR-024/M3，真实
+  上游切备见 E17-T3）。集成测试保留 `llm.policies.retry` 被拒的反例。
 - **`llm.policies.transformations` 是 untagged enum**：`response` 单独可用、
   `conditional` 单独可用，**同时出现**报
   `unknown field 'response', expected 'conditional'`。因此默认 header delete
@@ -268,7 +305,8 @@ C:/Users/microsoft/agentgateway/agentgateway.exe --validate-only -f config.yaml
   解析限制，UI 需要拆成 model 级 + 仅 conditional 的全局块。
 - 逐用户预付余额由控制面账本执行；数据面只有全局 rpm/tpm 规则，重启清零
   （E12），UI 不得把余额说成数据面强一致。
-- `displayName` / `modelAliases` / `maxBufferSize` / `retry` /
-  `remoteRateLimit` 在 1.7 无配置面，相关字段只能报错或 warning。
+- `displayName` / `modelAliases` / `maxBufferSize` /
+  `remoteRateLimit` 在 1.7 无配置面，相关字段只能报错或 warning；retry 例外，
+  只能走顶层 `policies[]` 的路由级条目（ADR-024）。
 - apply/validate/rollback 的 v2 编排属于 ticket 08；本契约只覆盖渲染与
   capability 错误。
