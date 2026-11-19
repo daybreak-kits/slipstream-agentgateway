@@ -30,6 +30,7 @@ from l02_domain.ir import (
     WEBHOOK_GUARD_ACTIONS,
     GatewayIR,
     GuardSpec,
+    PublicModelSpec,
 )
 
 _DURATION_RE = re.compile(r"^[1-9][0-9]*(ms|s|m|h)$")
@@ -66,6 +67,7 @@ def validate_gateway_ir(ir: GatewayIR) -> ValidationResult:
 
     upstream_set = set(upstream_ids)
     model_set = set(model_ids)
+    model_upstream_by_id = {m.id: m.upstream_id for m in ir.models}
     for upstream in ir.upstreams:
         # E17 安全红线：without a per-provider credential AG forwards the
         # client's Authorization header to the upstream verbatim.
@@ -115,7 +117,7 @@ def validate_gateway_ir(ir: GatewayIR) -> ValidationResult:
                 f"对外模型 {public.name} routing_mode 非法: {public.routing_mode!r}"
                 f"（允许: {ROUTING_MODES}）"
             )
-        catch_all_started = False  # conditional: a when-empty entry has been seen
+        catch_all_seen = False  # conditional: a when-empty entry has been seen
         for index, target in enumerate(public.targets):
             if target.upstream_model_id not in model_set:
                 errors.append(
@@ -155,19 +157,38 @@ def validate_gateway_ir(ir: GatewayIR) -> ValidationResult:
                         f"weighted 模式忽略 priority={target.priority}"
                     )
             else:  # conditional
-                # when-empty entries must form one trailing suffix: AG evaluates
-                # conditional targets in order, so a no-when (catch-all) entry
-                # followed by a predicate would never be reachable. ADR-026 key
-                # expansion turns the single catch-all tail into one entry per
-                # key, hence a suffix instead of "only the last target".
+                # E20（AG 1.7 实测）：无 when 兜底**至多 1 条且必须是末条**——AG 把
+                # 该约束实现为硬校验（拒收原文 "conditional fallback target must
+                # be last"，连可达性都不检查）。旧不变量「无 when 条目必须是连续
+                # 末段」比 AG 真实约束宽（多密钥兜底展开成 N 条末段会被 AG
+                # validate 拒收，P0-RESULTS §E20 T1-mixed-kn2），故收紧。
                 if not target.when:
-                    catch_all_started = True
-                elif catch_all_started:
+                    if catch_all_seen:
+                        errors.append(
+                            f"对外模型 {public.name} 目标 {target.id}: "
+                            "conditional 模式无 when 兜底至多 1 条"
+                            "（AG: conditional fallback target must be last，E20）"
+                        )
+                    if index != len(public.targets) - 1:
+                        errors.append(
+                            f"对外模型 {public.name} 目标 {target.id}: "
+                            "conditional 模式无 when 兜底必须位于末位"
+                            "（AG: conditional fallback target must be last，E20）"
+                        )
+                    catch_all_seen = True
+                elif catch_all_seen:
                     errors.append(
                         f"对外模型 {public.name} 目标 {target.id}: "
-                        f"conditional 模式仅末段目标可省略 when（无 when 的条目"
-                        "必须是连续末段）"
+                        "conditional 模式仅末位目标可省略 when（无 when 兜底"
+                        "至多 1 条且必须末位；AG: conditional fallback target "
+                        "must be last，E20）"
                     )
+        # E20：conditional × 多密钥组合可用但密钥平权失效——不 422，warning 提示
+        # （详见 _conditional_multikey_warning）。
+        if public.routing_mode == "conditional":
+            warning = _conditional_multikey_warning(ir, public, model_upstream_by_id)
+            if warning:
+                warnings.append(warning)
 
     for alias in ir.model_aliases:
         if alias.target_model_id not in model_set:
@@ -195,6 +216,45 @@ def validate_gateway_ir(ir: GatewayIR) -> ValidationResult:
     _validate_policies(ir, errors)
     _validate_mcp(ir, errors)
     return ValidationResult(ok=not errors, errors=tuple(errors), warnings=tuple(warnings))
+
+
+#: ADR-026 密钥展开命名：provider id = ``{upstream_id}#{seq}``、上游模型别名 =
+#: ``{model}#k{seq}``（唯一事实源在 l05_service/rendering.py 的 provider_id /
+#: model_alias；这里只做同形后缀剥离，用于把展开后的条目归并回逻辑上游）。
+_PROVIDER_SEQ_SUFFIX = re.compile(r"#\d+$")
+
+
+def _conditional_multikey_warning(
+    ir: GatewayIR, public: PublicModelSpec, model_upstream_by_id: dict[str, str]
+) -> str:
+    """E20：conditional × 多密钥 = 密钥平权失效，给 warning 不给 422。
+
+    ADR-026 把每把密钥展开为独立 provider（id 形如 ``{upstream_id}#{seq}``），
+    所以同一逻辑上游出现多个 provider 即「多密钥」。E20 证实 AG 对 conditional
+    targets 按 first-match 求值：同谓词条目首条独占（40:0，无告警）、兜底多把
+    密钥被 validate 拒收、when 条目间无请求内切换——可用，但每目标只用第一把
+    密钥，密钥级平权/容错只有 failover/weighted 支持。
+    """
+    bases: set[str] = set()
+    for target in public.targets:
+        upstream_id = model_upstream_by_id.get(target.upstream_model_id)
+        if upstream_id:
+            bases.add(_PROVIDER_SEQ_SUFFIX.sub("", upstream_id))
+    if not bases:
+        return ""
+    providers_per_base: dict[str, int] = {}
+    for upstream in ir.upstreams:
+        base = _PROVIDER_SEQ_SUFFIX.sub("", upstream.id)
+        providers_per_base[base] = providers_per_base.get(base, 0) + 1
+    multi = sorted(base for base in bases if providers_per_base.get(base, 0) > 1)
+    if not multi:
+        return ""
+    return (
+        f"对外模型 {public.name}: conditional 模式密钥平权不生效（E20）：上游 "
+        f"{', '.join(multi)} 配了多把密钥，AG conditional targets 按 first-match "
+        "首条独占（同谓词其余密钥 0 流量、无请求内切换），每目标仅使用第一把密钥；"
+        "密钥级平权/容错只有 failover/weighted 模式支持"
+    )
 
 
 def _validate_policies(ir: GatewayIR, errors: list[str]) -> None:

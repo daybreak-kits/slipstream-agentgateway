@@ -7,9 +7,16 @@ public model references every key entry as one same-priority target layer (P2C
 概率分流，非均匀). Also pins the renderer's no-duplicate-name invariant: AG's
 validate silently collapses same-name llm.models entries (E18 60:0), so the
 control plane refuses them with ValueError instead.
+
+E20 修正（P0-RESULTS §E20）：密钥维度的 target 展开只在 failover/weighted 成立；
+conditional 模式不展开（AG first-match 首条独占，N-1 把密钥静默 0 流量），每个
+target 只渲染第一把密钥的一条，无 when 兜底因此天然单条（AG 硬校验
+``conditional fallback target must be last``）。
 """
 
 from __future__ import annotations
+
+import logging
 
 from l01_core.settings import reset_settings_cache
 from l02_domain.ir import (
@@ -22,7 +29,7 @@ from l02_domain.ir import (
 )
 from l03_adapters.agentgateway.render import render_config
 from l03_adapters.mock import MockAdapter
-from l04_repo.orm import UpstreamKeyORM
+from l04_repo.orm import ModelTargetORM, PublicModelORM, UpstreamKeyORM
 from l05_service.rendering import build_render_plan, model_alias, provider_id
 from l01_core.timeutil import now_ms
 
@@ -94,6 +101,97 @@ def test_two_keys_expand_into_two_provider_and_model_entries(engine_and_sessionm
     assert targets == [
         {"model": "umdl_test#k1", "priority": 1},
         {"model": "umdl_test#k2", "priority": 1},
+    ]
+
+
+def test_conditional_public_model_renders_one_entry_per_target(engine_and_sessionmaker):
+    """E20 裁决：conditional 公开模型不展开密钥维度。
+
+    同 when × N 条 #kN 在 AG validate 合法但运行时 first-match 首条独占
+    （E20 T2：40:0，无告警），因此每个 target 只渲染第一把密钥的一条；无 when
+    兜底随之单条且末位，满足 AG 硬校验 conditional fallback target must be
+    last。上游模型条目仍逐把密钥展开（internal，与路由模式无关）。
+    """
+    engine, factory = engine_and_sessionmaker
+    seed_channel(engine, factory)
+    _add_second_key(engine, factory)
+    with factory() as session:
+        public = session.get(PublicModelORM, "pmdl_test")
+        public.routing_mode = "conditional"
+        session.add(
+            ModelTargetORM(
+                id="mt_test_when",
+                public_model_id="pmdl_test",
+                upstream_model_id="umdl_test",
+                priority=0,
+                when_expr='request.headers["x-route"] == "a"',
+                created_at_ms=now_ms() + 5,
+            )
+        )
+        session.commit()
+        ir, _ = build_render_plan(session, revision="rev_cond", adapter=MockAdapter())
+    engine.dispose()
+
+    # 上游模型条目仍逐把密钥展开（两个 provider 各自的 internal 条目）
+    assert [m.id for m in ir.models] == [
+        model_alias("umdl_test", 1),
+        model_alias("umdl_test", 2),
+    ]
+
+    flagship = ir.public_models[0]
+    assert flagship.routing_mode == "conditional"
+    # 每个 target 恰好一条，全部引用第一把密钥的别名；无 when 兜底单条且末位
+    assert [(t.id, t.upstream_model_id) for t in flagship.targets] == [
+        ("mt_test_when#k1", model_alias("umdl_test", 1)),
+        ("mt_test#k1", model_alias("umdl_test", 1)),
+    ]
+    assert flagship.targets[-1].when == ""
+
+    config = render_config(ir, llm_port=3600)
+    assert config["llm"]["virtualModels"][0]["routing"]["conditional"]["targets"] == [
+        {"model": "umdl_test#k1", "when": 'request.headers["x-route"] == "a"'},
+        {"model": "umdl_test#k1"},
+    ]
+
+
+def test_conditional_multikey_render_logs_key_parity_warning(
+    engine_and_sessionmaker, caplog
+):
+    """E20：conditional × 多密钥渲染时打 warning 日志（可用但密钥平权失效）。"""
+    engine, factory = engine_and_sessionmaker
+    seed_channel(engine, factory)
+    _add_second_key(engine, factory)
+    with factory() as session:
+        session.get(PublicModelORM, "pmdl_test").routing_mode = "conditional"
+        session.commit()
+        with caplog.at_level(logging.WARNING, logger="l05_service.rendering"):
+            ir, _ = build_render_plan(session, revision="rev_cond_warn", adapter=MockAdapter())
+    engine.dispose()
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        "密钥平权不生效" in message and "ups_test" in message and "failover/weighted" in message
+        for message in messages
+    ), messages
+    assert [t.id for t in ir.public_models[0].targets] == ["mt_test#k1"]
+
+
+def test_weighted_public_model_still_expands_keys(engine_and_sessionmaker):
+    """E20 对照：weighted（与 failover，见上方 golden）仍按 ADR-026/E18 展开。"""
+    engine, factory = engine_and_sessionmaker
+    seed_channel(engine, factory)
+    _add_second_key(engine, factory)
+    with factory() as session:
+        session.get(PublicModelORM, "pmdl_test").routing_mode = "weighted"
+        session.get(ModelTargetORM, "mt_test").weight = 1
+        session.commit()
+        ir, _ = build_render_plan(session, revision="rev_weighted", adapter=MockAdapter())
+    engine.dispose()
+
+    flagship = ir.public_models[0]
+    assert [(t.id, t.upstream_model_id, t.weight) for t in flagship.targets] == [
+        ("mt_test#k1", model_alias("umdl_test", 1), 1),
+        ("mt_test#k2", model_alias("umdl_test", 2), 1),
     ]
 
 

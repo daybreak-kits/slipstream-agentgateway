@@ -150,6 +150,138 @@ def test_conditional_keeps_order_and_omits_empty_last_when():
     ]
 
 
+def test_validation_rejects_multiple_no_when_conditional_targets():
+    """E20 收紧：无 when 兜底至多 1 条（AG: conditional fallback target must be
+    last）——旧不变量「连续末段」比 AG 真实约束宽，多密钥兜底展开会被拒收。"""
+    ir = _ir(
+        public_models=(
+            PublicModelSpec(
+                name="flagship",
+                routing_mode="conditional",
+                targets=(
+                    TargetSpec(
+                        id="t1", upstream_model_id="m1", priority=0, when='request.model == "m"'
+                    ),
+                    TargetSpec(id="t2", upstream_model_id="m2", priority=1),
+                    TargetSpec(id="t3", upstream_model_id="m1", priority=2),
+                ),
+            ),
+        )
+    )
+    result = validate_gateway_ir(ir)
+    assert not result.ok
+    joined = " | ".join(result.errors)
+    assert "至多 1 条" in joined
+    assert "conditional fallback target must be last" in joined
+
+
+def test_validation_rejects_no_when_conditional_target_not_last():
+    """E20 T1-neg-tail：无 when 在前、when 在后——AG 硬校验兜底必须末位。"""
+    ir = _ir(
+        public_models=(
+            PublicModelSpec(
+                name="flagship",
+                routing_mode="conditional",
+                targets=(
+                    TargetSpec(id="t1", upstream_model_id="m1", priority=0),
+                    TargetSpec(id="t2", upstream_model_id="m2", priority=1, when="true"),
+                ),
+            ),
+        )
+    )
+    result = validate_gateway_ir(ir)
+    assert not result.ok
+    joined = " | ".join(result.errors)
+    assert "必须位于末位" in joined
+    assert "conditional fallback target must be last" in joined
+
+
+def test_conditional_single_no_when_last_target_is_still_valid():
+    ir = _ir(
+        public_models=(
+            PublicModelSpec(
+                name="flagship",
+                routing_mode="conditional",
+                targets=(
+                    TargetSpec(
+                        id="t1", upstream_model_id="m1", priority=0, when='request.model == "m"'
+                    ),
+                    TargetSpec(id="t2", upstream_model_id="m2", priority=1),
+                ),
+            ),
+        )
+    )
+    result = validate_gateway_ir(ir)
+    assert result.ok, result.errors
+
+
+def test_validation_warns_conditional_with_multikey_upstream():
+    """E20 T1-when2 形状：同谓词两条 #kN validate 合法但运行时首条独占
+    （40:0）——不 422，warning 提示密钥平权失效；failover 不给该 warning。"""
+    multikey = _ir(
+        upstreams=(
+            UpstreamSpec(
+                id="ups_a#1",
+                base_url="https://api.example.com/v1",
+                api_style="openai_chat",
+                key_file="keys/ups_a#1.key",
+            ),
+            UpstreamSpec(
+                id="ups_a#2",
+                base_url="https://api.example.com/v1",
+                api_style="openai_chat",
+                key_file="keys/ups_a#2.key",
+            ),
+        ),
+        models=(
+            UpstreamModelSpec(
+                id="m1#k1", upstream_id="ups_a#1", upstream_model_name="glm-5.3", model_type="chat"
+            ),
+            UpstreamModelSpec(
+                id="m1#k2", upstream_id="ups_a#2", upstream_model_name="glm-5.3", model_type="chat"
+            ),
+        ),
+        public_models=(
+            PublicModelSpec(
+                name="flagship",
+                routing_mode="conditional",
+                targets=(
+                    TargetSpec(
+                        id="t1",
+                        upstream_model_id="m1#k1",
+                        priority=0,
+                        when='request.headers["x-route"] == "a"',
+                    ),
+                    TargetSpec(id="t2", upstream_model_id="m1#k2", priority=1),
+                ),
+            ),
+        ),
+    )
+    result = validate_gateway_ir(multikey)
+    assert result.ok, result.errors
+    assert any(
+        "密钥平权不生效" in warning and "failover/weighted" in warning
+        for warning in result.warnings
+    ), result.warnings
+
+    failover = _ir(
+        upstreams=multikey.upstreams,
+        models=multikey.models,
+        public_models=(
+            PublicModelSpec(
+                name="flagship",
+                routing_mode="failover",
+                targets=(
+                    TargetSpec(id="t1", upstream_model_id="m1#k1", priority=0),
+                    TargetSpec(id="t2", upstream_model_id="m1#k2", priority=0),
+                ),
+            ),
+        ),
+    )
+    failover_result = validate_gateway_ir(failover)
+    assert failover_result.ok and failover_result.warnings == ()
+
+
 def test_api_keys_are_hashed_with_strict_mode():
     cfg = render_config(_ir(), 3600)
     policy = cfg["llm"]["policies"]["apiKey"]

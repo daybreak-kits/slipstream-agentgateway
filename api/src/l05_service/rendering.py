@@ -6,7 +6,12 @@ upstream expands into its own IR upstream (provider id ``{upstream_id}#{seq}``,
 key file ``keys/{upstream_id}#{seq}.key``) and its own copy of every upstream
 model (``{model_id}#k{seq}``); public-model targets expand the same way, so one
 logical target becomes one same-priority routing layer entry per key (E18:
-P2C 下的平权分流). The IR references key files, never inline keys.
+P2C 下的平权分流). E20 修正：该展开只对 failover/weighted 成立——AG 对
+conditional targets 按 first-match 求值（首条独占、无请求内切换），同 when 多条
+``#kN`` 只会让 N-1 把密钥静默 0 流量，故 conditional 模式每个 target 只渲染
+第一把密钥的一条（并打 warning）；无 when 兜底也随之只渲染单条，与 AG
+硬校验「至多 1 条无 when 且必须末条」对齐。The IR references key files, never
+inline keys.
 Per-upstream transforms load from upstreams.transforms_json (task-164). ADR-010
 hardening: active ban/cooldown rules exclude targets at render time (E3: health
 is AG-process-local), the IR self-validates before any write (E8: AG accepts
@@ -16,6 +21,7 @@ priority=0), and failed rollouts are archived as status="failed" revisions.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import replace
 
@@ -57,6 +63,8 @@ from l05_service.policy_store import stored_policy_blocks
 #: ADR-021 app-settings key: metadata | full; anything else means "unset".
 ACCESS_LOG_LLM_KEY = "ag_access_log_llm"
 ACCESS_LOG_LLM_MODES = ("metadata", "full")
+
+logger = logging.getLogger(__name__)
 
 
 def build_render_plan(
@@ -149,23 +157,46 @@ def build_render_plan(
         # not a sort key); failover/conditional keep priority order.
         if public.routing_mode != "weighted":
             rows = sorted(rows, key=lambda t: t.priority)
-        spec_targets = tuple(
-            TargetSpec(
-                id=f"{t.id}#k{seq}",
-                upstream_model_id=model_alias(t.upstream_model_id, seq),
-                priority=t.priority,
-                weight=t.weight,
-                when=t.when_expr,
+        spec_targets: list[TargetSpec] = []
+        for t in rows:
+            if t.upstream_model_id not in model_db_ids:
+                continue
+            seqs = key_seqs_by_upstream[upstream_id_by_model[t.upstream_model_id]]
+            # E20（P0-RESULTS §E20）：AG 对 conditional targets 按 first-match
+            # 求值——同 when 的多条 #kN 条目 validate 合法但运行时首条独占
+            # （40:0，无告警），N-1 把密钥静默 0 流量，且 when 条目间无请求内
+            # 切换。密钥维度的展开只在 failover/weighted 成立（E18 P2C 平权），
+            # conditional 每个 target 只渲染第一把密钥的一条；无 when 兜底也
+            # 因此天然单条，满足 AG 硬校验「至多 1 条无 when 且必须末条」。
+            if public.routing_mode == "conditional":
+                key_count = len(seqs)
+                seqs = seqs[:1]
+                if key_count > 1:
+                    logger.warning(
+                        "对外模型 %s: conditional 模式密钥平权不生效（E20）：上游 %s 配了"
+                        "%d 把密钥，AG conditional targets 按 first-match 首条独占"
+                        "（同谓词其余密钥 0 流量、无请求内切换），每目标仅使用第一把密钥；"
+                        "密钥级平权/容错只有 failover/weighted 模式支持",
+                        public.name,
+                        upstream_id_by_model[t.upstream_model_id],
+                        key_count,
+                    )
+            spec_targets.extend(
+                TargetSpec(
+                    id=f"{t.id}#k{seq}",
+                    upstream_model_id=model_alias(t.upstream_model_id, seq),
+                    priority=t.priority,
+                    weight=t.weight,
+                    when=t.when_expr,
+                )
+                for seq in seqs
             )
-            for t in rows
-            if t.upstream_model_id in model_db_ids
-            for seq in key_seqs_by_upstream[
-                upstream_id_by_model[t.upstream_model_id]
-            ]
-        )
-        if not spec_targets:
+        targets_tuple = tuple(spec_targets)
+        if not targets_tuple:
             continue  # no-target public models never render (contract invariant 1)
-        ordered = sort_targets(spec_targets) if public.routing_mode == "failover" else spec_targets
+        ordered = (
+            sort_targets(targets_tuple) if public.routing_mode == "failover" else targets_tuple
+        )
         public_specs.append(
             PublicModelSpec(
                 name=public.name, targets=ordered, routing_mode=public.routing_mode

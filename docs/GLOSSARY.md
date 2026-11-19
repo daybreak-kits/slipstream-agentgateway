@@ -23,6 +23,7 @@
 | 层 Layer | priority 相同的全部目标 | 层内不是“备胎”，是负载均衡 |
 | 同层选路 | 由**数据面** P2C 选一个目标：随机取两个候选，按健康/延迟/负载择优；控制面不参与。E7 实测为带偏置随机，非轮询 | 不是轮询、不是控制面排序 |
 | 故障转移 Failover | 当前层全部降级 → 下一层。请求内重试**默认关闭**（E1 实测 0 次：失败 5xx 直接返回客户端，故障转移只影响后续请求；E13 证 `llm.policies` 的 retry 被 AG 拒收）；**可配置重试见 ADR-024**（网关策略页开关：retry codes + 健康驱逐成对，流式首字节后不切换，request_logs 仍 1 请求 1 行） | 不是轮次；开启后也受 attempts 上限约束，不是无界重试 |
+| 条件路由 Conditional | 成员按 `when` CEL 谓词**按序求值、first-match**：命中首条即独占该请求；无 when 兜底**至多 1 条且必须末位**（AG 硬校验 `conditional fallback target must be last`，E20）。**密钥平权不生效（E20）**：同一 when 配多把密钥时首条独占、其余密钥 0 流量且无请求内切换，渲染层每目标只使用第一把密钥；要密钥级平权/容错只有 failover/weighted | 不是分流：同谓词条目不走 P2C；谓词不命中（含变量缺失）干净落兜底 |
 | 组合 Combo | **已删除**。用 PublicModel + ModelTarget 表达 | 不要再出现 combo、嵌套、轮次 |
 
 ## 3. 可用性（只有两种措施）
