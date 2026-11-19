@@ -14,7 +14,7 @@ surface in /admin/unpriced.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
 
 from sqlalchemy import select, text
@@ -24,6 +24,7 @@ from l01_core.ids import new_id
 from l01_core.timeutil import now_ms
 from l02_domain.models import UsageEvent
 from l04_repo.orm import (
+    ApiKeyORM,
     ChargeEntryORM,
     CostDailyORM,
     CostEntryORM,
@@ -32,15 +33,104 @@ from l04_repo.orm import (
     PublicModelORM,
     UpstreamModelORM,
     UpstreamORM,
+    UpstreamPriceORM,
     UserDailyORM,
     UserORM,
 )
 from l05_service import pricing
 from l05_service.balances import deduct_for_charge
-from l05_service.prices import effective_upstream_price
 
 _DAY_MS = 86_400_000
 _MISSING = object()
+#: Upper bound on an IN (...) id list; one ingestion page / billing batch resolves
+#: in a single query per reference table instead of one query per event.
+_IN_CHUNK = 500
+
+
+def _batched_ids(ids: Iterable[str]) -> Iterable[list[str]]:
+    """Split an id stream into chunks small enough for one IN (...) statement."""
+    batch: list[str] = []
+    for item in ids:
+        batch.append(item)
+        if len(batch) >= _IN_CHUNK:
+            yield batch
+            batch = []
+    if batch:
+        yield batch
+
+
+def _users_by_id(session: Session, user_ids: Iterable[str]) -> dict[str, UserORM]:
+    """Preload the user rows referenced by ledger rows (one IN query per chunk)."""
+    users: dict[str, UserORM] = {}
+    for chunk in _batched_ids(sorted({user_id for user_id in user_ids if user_id})):
+        rows = session.scalars(select(UserORM).where(UserORM.id.in_(chunk))).all()
+        for user in rows:
+            users[user.id] = user
+    return users
+
+
+class _BillingCache:
+    """Reference rows + cache prices for one billing pass; the event loop runs no SQL.
+
+    Every lookup the per-event code used to send to the database (session.get or
+    select) is answered from these maps. Each map keeps the query order of the SQL
+    it replaces - models grouped by name in table order, price groups ordered by
+    (effective_from_ms desc, version desc) - so candidate selection is unchanged.
+    """
+
+    def __init__(self, session: Session, events: Sequence[GatewayUsageEventORM]) -> None:
+        self.upstreams: dict[str, UpstreamORM] = {
+            upstream.id: upstream for upstream in session.scalars(select(UpstreamORM)).all()
+        }
+        self.models_by_id: dict[str, UpstreamModelORM] = {}
+        self.models_by_name: dict[str, list[UpstreamModelORM]] = {}
+        for model in session.scalars(select(UpstreamModelORM)).all():
+            self.models_by_id[model.id] = model
+            self.models_by_name.setdefault(model.name, []).append(model)
+        self.publics_by_name: dict[str, list[PublicModelORM]] = {}
+        for public in session.scalars(select(PublicModelORM)).all():
+            self.publics_by_name.setdefault(public.name, []).append(public)
+        self.prices: dict[tuple[str, str, str], list[UpstreamPriceORM]] = {}
+        for price in session.scalars(select(UpstreamPriceORM)).all():
+            key = (price.vendor_id, price.upstream_model, price.item)
+            self.prices.setdefault(key, []).append(price)
+        for group in self.prices.values():
+            # effective_upstream_price: newest effective_from wins, then version.
+            group.sort(
+                key=lambda price: (price.effective_from_ms, price.version), reverse=True
+            )
+        key_ids = sorted({row.api_key_id for row in events if row.api_key_id})
+        self.keys: dict[str, ApiKeyORM] = {}
+        for chunk in _batched_ids(key_ids):
+            rows = session.scalars(select(ApiKeyORM).where(ApiKeyORM.id.in_(chunk))).all()
+            for key in rows:
+                self.keys[key.id] = key
+        user_ids = sorted({key.user_id for key in self.keys.values()})
+        self.users: dict[str, UserORM] = {}
+        for chunk in _batched_ids(user_ids):
+            rows = session.scalars(select(UserORM).where(UserORM.id.in_(chunk))).all()
+            for user in rows:
+                self.users[user.id] = user
+
+    def effective_price(
+        self, vendor_id: str, upstream_model: str, item: str, at_ms: int
+    ) -> UpstreamPriceORM | None:
+        """effective_upstream_price from memory: newest row effective at at_ms."""
+        for price in self.prices.get((vendor_id, upstream_model, item), ()):
+            if price.effective_from_ms <= at_ms:
+                return price
+        return None
+
+    def public_model(self, name: str) -> PublicModelORM | None:
+        """The first public-model row with this name (the per-event .first() lookup)."""
+        matches = self.publics_by_name.get(name)
+        return matches[0] if matches else None
+
+    def api_key(self, key_id: str) -> ApiKeyORM | None:
+        return self.keys.get(key_id)
+
+    def user(self, user_id: str) -> UserORM | None:
+        return self.users.get(user_id)
 
 
 def ingest_usage_events(session: Session, events: Iterable[UsageEvent]) -> int:
@@ -52,9 +142,43 @@ def ingest_usage_events(session: Session, events: Iterable[UsageEvent]) -> int:
     """
     added = 0
     added_keys: dict[str, int] = {}
+    seen: set[str] = set()
+    batch: list[UsageEvent] = []
     for event in events:
-        if session.get(GatewayUsageEventORM, event.event_id) is not None:
+        batch.append(event)
+        if len(batch) >= _IN_CHUNK:
+            added += _ingest_batch(session, batch, seen, added_keys)
+            batch = []
+    if batch:
+        added += _ingest_batch(session, batch, seen, added_keys)
+    session.flush()
+    _touch_api_keys_last_used(session, added_keys)
+    return added
+
+
+def _ingest_batch(
+    session: Session,
+    batch: list[UsageEvent],
+    seen: set[str],
+    added_keys: dict[str, int],
+) -> int:
+    """Add the unseen events of one IN-sized chunk; returns how many were added.
+
+    The chunk resolves its existing ids with one IN query. The seen set also
+    carries the ids added by this call, so an event_id repeated inside one page
+    counts once instead of failing the later flush on the primary key.
+    """
+    existing = session.scalars(
+        select(GatewayUsageEventORM.event_id).where(
+            GatewayUsageEventORM.event_id.in_([event.event_id for event in batch])
+        )
+    ).all()
+    seen.update(existing)
+    added = 0
+    for event in batch:
+        if event.event_id in seen:
             continue
+        seen.add(event.event_id)
         session.add(
             GatewayUsageEventORM(
                 event_id=event.event_id,
@@ -83,8 +207,6 @@ def ingest_usage_events(session: Session, events: Iterable[UsageEvent]) -> int:
             added_keys[event.api_key_id] = max(
                 added_keys.get(event.api_key_id, 0), event.started_at_ms
             )
-    session.flush()
-    _touch_api_keys_last_used(session, added_keys)
     return added
 
 
@@ -145,15 +267,21 @@ def process_billing(session: Session, *, recompute_event_ids: list[str] | None =
     recomputed = 0
     if recompute_event_ids:
         recomputed = _drop_entries(session, recompute_event_ids)
+    # Only the ids are needed to decide skip/build; loading whole entries here
+    # was the cheapest part of the old N+1 and stays a constant two queries.
     priced = {
-        row.gateway_event_id
-        for row in session.scalars(select(CostEntryORM)).all()
+        event_id
+        for event_id in session.scalars(select(CostEntryORM.gateway_event_id)).all()
     }
     charged = {
-        row.gateway_event_id
-        for row in session.scalars(select(ChargeEntryORM)).all()
+        event_id
+        for event_id in session.scalars(select(ChargeEntryORM.gateway_event_id)).all()
     }
     events = session.scalars(select(GatewayUsageEventORM)).all()
+    # One preload outside both loops: every reference the per-event builders need
+    # (model rows, upstreams, public models, cache prices, keys/users) is resolved
+    # from this cache, so a pass costs a constant number of SELECTs per batch.
+    cache = _BillingCache(session, events)
     cost_added = 0
     charge_added = 0
     touched_days: set[str] = set()
@@ -162,7 +290,7 @@ def process_billing(session: Session, *, recompute_event_ids: list[str] | None =
     for row in events:
         if row.event_id in priced and row.event_id not in recompute:
             continue
-        _entry, numerator = _build_cost_entry(session, row)
+        _entry, numerator = _build_cost_entry(session, cache, row)
         numerators[row.event_id] = numerator
         cost_added += 1
         touched_days.add(_day_of(row.started_at_ms or now_ms()))
@@ -172,7 +300,7 @@ def process_billing(session: Session, *, recompute_event_ids: list[str] | None =
         # A freshly built cost entry hands its exact numerator over so the markup
         # book does not recompute the same cost arithmetic a second time.
         numerator = numerators.get(row.event_id, _MISSING)
-        if _build_charge_entry(session, row, cost_numerator=numerator):
+        if _build_charge_entry(session, cache, row, cost_numerator=numerator):
             charge_added += 1
     for day in touched_days:
         refresh_cost_daily(session, day)
@@ -184,6 +312,22 @@ def process_billing(session: Session, *, recompute_event_ids: list[str] | None =
     }
 
 
+def _entries_by_event(
+    session: Session,
+    model: type[CostEntryORM] | type[ChargeEntryORM],
+    event_ids: list[str],
+) -> dict[str, CostEntryORM | ChargeEntryORM]:
+    """First cost/charge entry per gateway_event_id (that column is unique)."""
+    found: dict[str, CostEntryORM | ChargeEntryORM] = {}
+    for chunk in _batched_ids(event_ids):
+        rows = session.scalars(
+            select(model).where(model.gateway_event_id.in_(chunk))
+        ).all()
+        for row in rows:
+            found.setdefault(row.gateway_event_id, row)
+    return found
+
+
 def _drop_entries(session: Session, event_ids: list[str]) -> int:
     """Remove entries and the ledger rows they own; returns how many entries went.
 
@@ -193,27 +337,37 @@ def _drop_entries(session: Session, event_ids: list[str]) -> int:
     (rather than writing a reversing one) keeps the book to exactly one movement
     per entry and leaves no offsetting pair to reconcile.
     """
+    costs = _entries_by_event(session, CostEntryORM, event_ids)
+    charges = _entries_by_event(session, ChargeEntryORM, event_ids)
+    ledgers: dict[str, list[LedgerEntryORM]] = {}
+    for chunk in _batched_ids([charge.id for charge in charges.values()]):
+        rows = session.scalars(
+            select(LedgerEntryORM).where(
+                LedgerEntryORM.kind == "charge",
+                LedgerEntryORM.ref_id.in_(chunk),
+            )
+        ).all()
+        for ledger in rows:
+            if ledger.ref_id is not None:
+                ledgers.setdefault(ledger.ref_id, []).append(ledger)
+    users = _users_by_id(
+        session, [ledger.user_id for group in ledgers.values() for ledger in group]
+    )
     dropped = 0
+    # The preloaded maps are looked up per occurrence, exactly like the old
+    # per-event queries: a recompute list repeating an event_id keeps its
+    # historical counting/balance effect.
     for event_id in event_ids:
-        cost = session.scalars(
-            select(CostEntryORM).where(CostEntryORM.gateway_event_id == event_id)
-        ).first()
+        cost = costs.get(event_id)
         if cost is not None:
             session.delete(cost)
             dropped += 1
-        charge = session.scalars(
-            select(ChargeEntryORM).where(ChargeEntryORM.gateway_event_id == event_id)
-        ).first()
+        charge = charges.get(event_id)
         if charge is not None:
-            for ledger in session.scalars(
-                select(LedgerEntryORM).where(
-                    LedgerEntryORM.kind == "charge",
-                    LedgerEntryORM.ref_id == charge.id,
-                )
-            ).all():
+            for ledger in ledgers.get(charge.id, ()):
                 # Give the balance back before the row disappears; the rebuilt
                 # charge deducts its own (new) amount below.
-                user = session.get(UserORM, ledger.user_id)
+                user = users.get(ledger.user_id)
                 if user is not None:
                     user.balance_micro -= ledger.delta_micro
                 session.delete(ledger)
@@ -224,7 +378,7 @@ def _drop_entries(session: Session, event_ids: list[str]) -> int:
 
 
 def _resolve_cost_target(
-    session: Session, row: GatewayUsageEventORM
+    cache: _BillingCache, row: GatewayUsageEventORM
 ) -> tuple[str | None, str | None, str | None]:
     """(vendor_id, our upstream model row id, upstream model name) for one event.
 
@@ -235,12 +389,8 @@ def _resolve_cost_target(
     name = row.upstream_model
     if not name:
         return None, None, None
-    candidates = session.scalars(
-        select(UpstreamModelORM).where(UpstreamModelORM.name == name)
-    ).all()
-    upstreams = {
-        u.id: u for u in session.scalars(select(UpstreamORM)).all()
-    }
+    candidates = cache.models_by_name.get(name, [])
+    upstreams = cache.upstreams
     chosen = None
     for candidate in candidates:
         upstream = upstreams.get(candidate.upstream_id)
@@ -260,23 +410,23 @@ def _resolve_cost_target(
     return vendor_id, chosen.id, name
 
 
-def _price_version_ref(session: Session, vendor_id: str | None, model_name: str) -> str:
+def _price_version_ref(cache: _BillingCache, vendor_id: str | None, model_name: str) -> str:
     """price_version snapshot for the ledger: the model row id (ADR-020 authority).
 
     Falls back to the newest cache-price row id, which is the only channel left
     on the legacy book, so a cost entry always carries a traceable snapshot.
     """
     if vendor_id and model_name:
-        price = effective_upstream_price(session, vendor_id, model_name, "cache_read", 0)
+        price = cache.effective_price(vendor_id, model_name, "cache_read", 0)
         if price is None:
-            price = effective_upstream_price(session, vendor_id, model_name, "cache_write", 0)
+            price = cache.effective_price(vendor_id, model_name, "cache_write", 0)
         if price is not None:
             return price.id
     return ""
 
 
 def _cache_numerator(
-    session: Session,
+    cache: _BillingCache,
     vendor_id: str | None,
     model_name: str,
     row: GatewayUsageEventORM,
@@ -297,7 +447,7 @@ def _cache_numerator(
     ):
         if not tokens:
             continue
-        price = effective_upstream_price(session, vendor_id or "", model_name, item, at_ms)
+        price = cache.effective_price(vendor_id or "", model_name, item, at_ms)
         if price is not None:
             # micro-per-1M x tokens; rounded half-up at the micro boundary (the
             # same rule the model-row path uses) so the caller can add it to that
@@ -307,7 +457,7 @@ def _cache_numerator(
 
 
 def _build_cost_entry(
-    session: Session, row: GatewayUsageEventORM
+    session: Session, cache: _BillingCache, row: GatewayUsageEventORM
 ) -> tuple[CostEntryORM, int | None]:
     """One cost entry per event plus its exact numerator (None when unpriced).
 
@@ -315,7 +465,7 @@ def _build_cost_entry(
     rounded once at the micro boundary. Cache tokens add their book price on top
     (the cache-price exception; see _cache_numerator).
     """
-    vendor_id, model_id, model_name = _resolve_cost_target(session, row)
+    vendor_id, model_id, model_name = _resolve_cost_target(cache, row)
     input_tokens = row.input_tokens + row.cache_read_tokens + row.cache_write_tokens
     base = dict(
         id=new_id("cost"),
@@ -349,7 +499,7 @@ def _build_cost_entry(
         session.add(entry)
         session.flush()
         return entry, None
-    model = session.get(UpstreamModelORM, model_id)
+    model = cache.models_by_id.get(model_id)
     if model is None:
         entry = CostEntryORM(
             amount_micro=None, currency="", price_version_id="", status="unpriced", **base
@@ -370,8 +520,8 @@ def _build_cost_entry(
         session.add(entry)
         session.flush()
         return entry, None
-    numerator += _cache_numerator(session, vendor_id, model_name, row, at_ms)
-    version = _price_version_ref(session, vendor_id, model_name)
+    numerator += _cache_numerator(cache, vendor_id, model_name, row, at_ms)
+    version = _price_version_ref(cache, vendor_id, model_name)
     entry = CostEntryORM(
         # pricing.cost_micro already rounds to the integer micro boundary; the
         # cache term is micro-per-1M x tokens, so the sum needs no second rounding.
@@ -388,6 +538,7 @@ def _build_cost_entry(
 
 def _build_charge_entry(
     session: Session,
+    cache: _BillingCache,
     row: GatewayUsageEventORM,
     *,
     cost_numerator: int | None | object = _MISSING,
@@ -400,16 +551,12 @@ def _build_charge_entry(
     """
     if row.http_status != 200:
         return None
-    public = session.scalars(
-        select(PublicModelORM).where(PublicModelORM.name == row.public_model)
-    ).first()
+    public = cache.public_model(row.public_model)
     user: UserORM | None = None
     if row.api_key_id:
-        from l04_repo.orm import ApiKeyORM
-
-        key = session.get(ApiKeyORM, row.api_key_id)
+        key = cache.api_key(row.api_key_id)
         if key is not None:
-            user = session.get(UserORM, key.user_id)
+            user = cache.user(key.user_id)
     input_tokens = row.input_tokens + row.cache_read_tokens + row.cache_write_tokens
     base = dict(
         id=new_id("chg"),
@@ -425,11 +572,11 @@ def _build_charge_entry(
         amount_micro=None, currency="", price_version_id="", status="unpriced", **base
     )
     numerator = (
-        _cost_numerator(session, row)
+        _cost_numerator(cache, row)
         if cost_numerator is _MISSING
         else cost_numerator
     )
-    model = _cost_model(session, row)
+    model = _cost_model(cache, row)
     if numerator is not None and model is not None:
         # ADR-020: spend = cost x the model row's own markup; there is no
         # separately maintained charge price (charge_prices is retired).
@@ -452,22 +599,22 @@ def _build_charge_entry(
     return entry
 
 
-def _cost_model(session: Session, row: GatewayUsageEventORM) -> UpstreamModelORM | None:
+def _cost_model(cache: _BillingCache, row: GatewayUsageEventORM) -> UpstreamModelORM | None:
     """The upstream model row that prices this event (ADR-020 single source)."""
-    _vendor_id, model_id, _name = _resolve_cost_target(session, row)
-    return session.get(UpstreamModelORM, model_id) if model_id else None
+    _vendor_id, model_id, _name = _resolve_cost_target(cache, row)
+    return cache.models_by_id.get(model_id) if model_id else None
 
 
-def _cost_numerator(session: Session, row: GatewayUsageEventORM) -> int | None:
+def _cost_numerator(cache: _BillingCache, row: GatewayUsageEventORM) -> int | None:
     """Exact pre-rounding cost numerator (tokens x micro-per-1M), or None if unpriced.
 
     Mirrors _build_cost_entry's arithmetic so a charge rebuilt without its cost
     entry in the same pass prices identically (cache items included).
     """
-    vendor_id, model_id, model_name = _resolve_cost_target(session, row)
+    vendor_id, model_id, model_name = _resolve_cost_target(cache, row)
     if model_name is None or model_id is None:
         return None
-    model = session.get(UpstreamModelORM, model_id)
+    model = cache.models_by_id.get(model_id)
     if model is None:
         return None
     at_ms = row.started_at_ms or now_ms()
@@ -476,7 +623,7 @@ def _cost_numerator(session: Session, row: GatewayUsageEventORM) -> int | None:
     )
     if numerator is None:
         return None
-    return numerator + _cache_numerator(session, vendor_id, model_name, row, at_ms)
+    return numerator + _cache_numerator(cache, vendor_id, model_name, row, at_ms)
 
 
 def refresh_cost_daily(session: Session, day: str | None = None) -> str:

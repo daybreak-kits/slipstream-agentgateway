@@ -11,7 +11,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import func, select, union_all
 from sqlalchemy.orm import Session
 
 from l04_repo.orm import (
@@ -214,14 +214,43 @@ def billing_ledger(
     cost never divides). Without billing:cost the cost/margin keys are absent.
     """
     limit, off = page_params(page_size, offset)
+    # Page the event ids in SQL (one query): max(created_at_ms) across both books
+    # reproduces the old (created_at_ms, gateway_event_id) desc order without
+    # loading either table into memory.
+    event_times = union_all(
+        select(
+            CostEntryORM.gateway_event_id.label("gateway_event_id"),
+            CostEntryORM.created_at_ms.label("created_at_ms"),
+        ),
+        select(
+            ChargeEntryORM.gateway_event_id.label("gateway_event_id"),
+            ChargeEntryORM.created_at_ms.label("created_at_ms"),
+        ),
+    ).subquery()
+    newest = func.max(event_times.c.created_at_ms)
+    page = session.execute(
+        select(event_times.c.gateway_event_id)
+        .group_by(event_times.c.gateway_event_id)
+        .order_by(newest.desc(), event_times.c.gateway_event_id.desc())
+        .offset(off)
+        .limit(limit)
+    ).all()
+    event_ids = [row.gateway_event_id for row in page]
+    # Only this page's entries travel out of the database (two more queries).
     costs = {
-        row.gateway_event_id: row for row in session.scalars(select(CostEntryORM)).all()
+        row.gateway_event_id: row
+        for row in session.scalars(
+            select(CostEntryORM).where(CostEntryORM.gateway_event_id.in_(event_ids))
+        ).all()
     }
     charges = {
-        row.gateway_event_id: row for row in session.scalars(select(ChargeEntryORM)).all()
+        row.gateway_event_id: row
+        for row in session.scalars(
+            select(ChargeEntryORM).where(ChargeEntryORM.gateway_event_id.in_(event_ids))
+        ).all()
     }
     rows: list[dict] = []
-    for event_id in set(costs) | set(charges):
+    for event_id in event_ids:
         cost = costs.get(event_id)
         charge = charges.get(event_id)
         cost_amount = cost.amount_micro if cost is not None else None
@@ -248,5 +277,4 @@ def billing_ledger(
                 "created_at_ms": created,
             }
         )
-    rows.sort(key=lambda item: (item["created_at_ms"], item["gateway_event_id"]), reverse=True)
-    return rows[off : off + limit]
+    return rows
