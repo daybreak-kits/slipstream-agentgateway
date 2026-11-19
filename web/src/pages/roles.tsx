@@ -226,6 +226,7 @@ export function AdminsPage() {
           loading={rolesQ.isPending}
           filterPlaceholder="筛选名称 / 标识"
           emptyText="还没有角色"
+          storageKey="slipstream.cols.roles"
         />
       )}
 

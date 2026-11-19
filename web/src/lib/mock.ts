@@ -354,7 +354,7 @@ const policies: PolicySnapshot = {
     key: "apiKey.user_id",
     type: "tokens",
     tokensPerFill: 0,
-    semantics: "预付费：余额即初始令牌桶，永不回填；网关重启桶清零，台账才是权威（E10）",
+    semantics: "预付费：余额即初始词元桶，永不回填；网关重启桶清零，台账才是权威（E10）",
   },
   transforms_defaults: {
     response_header_deletes: ["server", "x-powered-by"],

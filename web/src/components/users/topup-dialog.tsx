@@ -8,7 +8,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { parseYuanToMicro } from "@/components/governance/format";
+import { parseYuanToMicro } from "@/lib/format";
 
 const QUICK_AMOUNTS = ["100", "500", "1000", "5000"];
 

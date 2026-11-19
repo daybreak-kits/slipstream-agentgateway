@@ -276,6 +276,7 @@ export function UpstreamModelsPanel({ upstream }: { upstream: UpstreamRow }) {
         onRetry={() => void q.refetch()}
         emptyText="还没有登记模型；用页头「获取上游模型」探测导入，或手动添加"
         filterPlaceholder="搜索模型名"
+        storageKey="slipstream.cols.upstream-models"
       />
       {dialog.open ? (
         <ModelDialog upstreamId={upstream.id} initial={dialog.initial} onClose={() => setDialog({ open: false, initial: null })} />

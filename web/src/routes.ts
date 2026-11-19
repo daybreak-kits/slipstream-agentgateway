@@ -256,7 +256,7 @@ export const ROUTES: RouteDef[] = [
     variants: [
       { path: "/settings/profile", title: "个人资料" },
       { path: "/settings/theme", title: "主题" },
-      { path: "/settings/tokens", title: "连接令牌" },
+      { path: "/settings/tokens", title: "连接密钥" },
       { path: "/settings/spend", title: "我的花费" },
       { path: "/settings/notifications", title: "通知偏好" },
     ],

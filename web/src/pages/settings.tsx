@@ -7,7 +7,7 @@ import { Link, NavLink, useParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { roleHint, roleLabel } from "@/components/governance/roles";
-import { fmtMs } from "@/components/governance/format";
+import { fmtMs } from "@/lib/format";
 import { SettingsGrid, SettingsTile } from "@/components/settings/tile";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -50,7 +50,7 @@ const NOTIFY_PREFS: { key: NotifyKey; title: string; hint: string }[] = [
 const SECTIONS: Array<{ key: SectionKey; label: string; icon: typeof UserRound }> = [
   { key: "profile", label: "个人资料", icon: UserRound },
   { key: "theme", label: "主题", icon: Palette },
-  { key: "tokens", label: "连接令牌", icon: KeyRound },
+  { key: "tokens", label: "连接密钥", icon: KeyRound },
   { key: "spend", label: "我的花费", icon: Coins },
   { key: "notifications", label: "通知偏好", icon: Bell },
 ];
@@ -286,8 +286,8 @@ function ThemeSection() {
   );
 }
 
-/** 用户设置·连接令牌：统一连接地址 + 我的密钥 + 接入示例。 */
-function ConnectionTokenSection() {
+/** 用户设置·连接密钥：统一连接地址 + 我的密钥 + 接入示例。 */
+function ConnectionKeysSection() {
   const { can } = usePermissions();
   const connection = useConnection();
   const address = effectiveBaseUrl(connection.data);
@@ -502,7 +502,7 @@ function NotificationsSection() {
   );
 }
 
-/** 用户设置：个人资料 / 主题 / 连接令牌 / 我的花费 / 通知偏好（ticket 16）。 */
+/** 用户设置：个人资料 / 主题 / 连接密钥 / 我的花费 / 通知偏好（ticket 16）。 */
 export function SettingsPage() {
   const { section } = useParams<{ section?: string }>();
   const active = SECTIONS.find((item) => item.key === section) ?? SECTIONS[0]!;
@@ -537,7 +537,7 @@ export function SettingsPage() {
 
       {active.key === "profile" && <ProfileSection />}
       {active.key === "theme" && <ThemeSection />}
-      {active.key === "tokens" && <ConnectionTokenSection />}
+      {active.key === "tokens" && <ConnectionKeysSection />}
       {active.key === "spend" && <SpendSection />}
       {active.key === "notifications" && <NotificationsSection />}
     </div>

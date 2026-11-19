@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Combobox } from "@/components/ui/combobox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Sheet,
@@ -162,23 +163,18 @@ export function AuditLogsPage() {
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
-        <Select
-          value={actor}
-          onValueChange={(value) => {
-            setActor(value);
+        <Combobox
+          className="w-44"
+          ariaLabel="按操作者筛选"
+          placeholder="全部操作者"
+          searchPlaceholder="搜索操作者"
+          value={actor === "all" ? "" : actor}
+          options={actors.map((item) => ({ value: item, label: item }))}
+          onChange={(value) => {
+            setActor(value === "" ? "all" : value);
             setPage(0);
           }}
-        >
-          <SelectTrigger className="w-44" aria-label="按操作者筛选">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">全部操作者</SelectItem>
-            {actors.map((item) => (
-              <SelectItem key={item} value={item}>{item}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        />
         <Select
           value={action}
           onValueChange={(value) => {
@@ -214,6 +210,7 @@ export function AuditLogsPage() {
         onRetry={() => void refetch()}
         emptyText={filtered ? "没有匹配的审计记录" : "没有审计记录"}
         emptyAction={filtered ? <Button variant="outline" size="sm" onClick={clearFilters}>清除筛选</Button> : undefined}
+        storageKey="slipstream.cols.audits"
         paging={{
           mode: "server",
           offset: page * pageSize,

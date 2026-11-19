@@ -232,6 +232,7 @@ export function ConsoleTab({
           pageSize={50}
           filterPlaceholder="筛选登录名 / 显示名"
           emptyText="没有匹配的账号"
+          storageKey="slipstream.cols.users-console"
         />
       )}
 

@@ -58,6 +58,7 @@ export function UnpricedPanel() {
     {
       id: "fix",
       header: "缺口 / 操作",
+      meta: { hideable: false },
       cell: (c) => (
         <div className="flex flex-wrap items-center gap-1.5">
           <Badge tone="warning">缺上游成本价</Badge>
@@ -93,6 +94,7 @@ export function UnpricedPanel() {
     {
       id: "fix",
       header: "缺口 / 操作",
+      meta: { hideable: false },
       cell: (c) => (
         <div className="flex flex-wrap items-center gap-1.5">
           <Badge tone="warning">缺对外花费价</Badge>
@@ -144,6 +146,7 @@ export function UnpricedPanel() {
           error={q.isError ? (q.error as Error).message : null}
           onRetry={() => void q.refetch()}
           emptyText="没有待补价的成本流水"
+          storageKey="slipstream.cols.billing-unpriced-cost"
         />
       </section>
       <section className="space-y-1">
@@ -155,6 +158,7 @@ export function UnpricedPanel() {
           error={q.isError ? (q.error as Error).message : null}
           onRetry={() => void q.refetch()}
           emptyText="没有待补价的花费流水"
+          storageKey="slipstream.cols.billing-unpriced-charge"
         />
       </section>
     </div>

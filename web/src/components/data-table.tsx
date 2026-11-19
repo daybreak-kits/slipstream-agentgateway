@@ -1,11 +1,15 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import {
   flexRender, getCoreRowModel, getFilteredRowModel, getPaginationRowModel,
   getSortedRowModel, useReactTable, type ColumnDef, type SortingState,
 } from "@tanstack/react-table";
-import { ArrowDown, ArrowUp } from "lucide-react";
+import { ArrowDown, ArrowUp, Settings2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Empty } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { PAGE_SIZE_OPTIONS, Pagination } from "@/components/ui/pagination";
@@ -45,6 +49,27 @@ function stableColumnRenderer(
   return renderer;
 }
 
+/** 列显隐持久化：JSON 字符串数组（隐藏列 id）；存储不可用（隐私模式）时只在当前会话生效。 */
+function readHiddenCols(storageKey: string | undefined): string[] {
+  if (!storageKey) return [];
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeHiddenCols(storageKey: string | undefined, hidden: string[]): void {
+  if (!storageKey) return;
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(hidden));
+  } catch {
+    // 存储不可用（隐私模式）时列设置只在当前会话生效
+  }
+}
 /** 分页模式：client 在当前数据里切页；server 只展示当前页，翻页/换档位交给调用方。 */
 export type DataTablePaging =
   | { mode: "client" }
@@ -73,16 +98,25 @@ interface DataTableProps<T> {
   pageSize?: (typeof PAGE_SIZE_OPTIONS)[number];
   /** 不传等价于 `{mode:"client"}`，保持既有页面行为不变 */
   paging?: DataTablePaging;
+  /** 列显隐持久化（DESIGN-AUDIT §2）：localStorage key 存隐藏列 id 数组，如 slipstream.cols.audits */
+  storageKey?: string;
+  /** 列设置菜单的展示名：表头为函数/自定义节点时用它补充（键为列 id） */
+  columnLabels?: Record<string, string>;
 }
 
 /** 全站统一的表格封装：排序 / 全局筛选 / 分页 / 空态 / 加载骨架。 */
 export function DataTable<T>({
   columns, data, loading = false, error, onRetry, emptyText = "暂无数据", emptyAction, filterPlaceholder,
-  pageSize = 50, paging,
+  pageSize = 50, paging, storageKey, columnLabels,
 }: DataTableProps<T>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = useState("");
+  const [hiddenCols, setHiddenCols] = useState<string[]>(() => readHiddenCols(storageKey));
   const serverPaging = paging?.mode === "server" ? paging : undefined;
+  const columnVisibility = useMemo(
+    () => Object.fromEntries(hiddenCols.map((id) => [id, false])),
+    [hiddenCols],
+  );
 
   // 稳定的单元格/表头包装器：列定义可以每次渲染都新建，但 React 看到的组件类型不变，
   // 单元格里的输入框因此不会被卸载重建（详见 stableColumnRenderer 注释）。
@@ -102,6 +136,7 @@ export function DataTable<T>({
     state: {
       sorting,
       globalFilter,
+      columnVisibility,
       ...(serverPaging
         ? { pagination: { pageIndex: serverPageIndex, pageSize: serverPaging.pageSize } }
         : {}),
@@ -121,16 +156,77 @@ export function DataTable<T>({
     initialState: serverPaging ? undefined : { pagination: { pageSize } },
   });
 
+  // 列设置菜单的可隐藏列：排除操作列（id=actions）与 meta.hideable=false 的列；
+  // 表头为函数时用 meta.label / columnLabels 补展示名，都没有则不进菜单。
+  const hideableColumns = useMemo(() => {
+    if (!storageKey) return [] as Array<{ id: string; label: string }>;
+    const result: Array<{ id: string; label: string }> = [];
+    for (const column of table.getVisibleLeafColumns()) {
+      if (column.id === "actions") continue;
+      const meta = column.columnDef.meta as { label?: string; hideable?: boolean } | undefined;
+      if (meta?.hideable === false) continue;
+      const header = column.columnDef.header;
+      const label =
+        meta?.label ??
+        columnLabels?.[column.id] ??
+        (typeof header === "string" && header.length > 0 ? header : undefined);
+      if (label) result.push({ id: column.id, label });
+    }
+    return result;
+  }, [storageKey, columnLabels, table]);
+
+  const toggleColumn = (id: string) => {
+    setHiddenCols((prev) => {
+      const nextHidden = prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id];
+      writeHiddenCols(storageKey, nextHidden);
+      return nextHidden;
+    });
+  };
+  const resetColumns = () => {
+    setHiddenCols([]);
+    writeHiddenCols(storageKey, []);
+  };
+
   return (
     <div className="space-y-2">
-      {filterPlaceholder !== undefined && serverPaging === undefined && (
-        <Input
-          value={globalFilter}
-          onChange={(e) => setGlobalFilter(e.target.value)}
-          placeholder={filterPlaceholder}
-          className="max-w-64"
-        />
-      )}
+      {(filterPlaceholder !== undefined && serverPaging === undefined) || hideableColumns.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2">
+          {filterPlaceholder !== undefined && serverPaging === undefined ? (
+            <Input
+              value={globalFilter}
+              onChange={(e) => setGlobalFilter(e.target.value)}
+              placeholder={filterPlaceholder}
+              className="max-w-64"
+            />
+          ) : null}
+          {hideableColumns.length > 0 ? (
+            <div className="ml-auto">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" aria-label="列设置">
+                    <Settings2 className="h-3.5 w-3.5" /> 列设置
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-44">
+                  <DropdownMenuLabel>显示列</DropdownMenuLabel>
+                  {hideableColumns.map((column) => (
+                    <DropdownMenuCheckboxItem
+                      key={column.id}
+                      checked={!hiddenCols.includes(column.id)}
+                      onCheckedChange={() => toggleColumn(column.id)}
+                      onSelect={(event) => event.preventDefault()}
+                    >
+                      {column.label}
+                    </DropdownMenuCheckboxItem>
+                  ))}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={resetColumns}>恢复默认</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       <TableWrap className="rounded-lg border border-border bg-surface">
         <Table>
           <THead>
@@ -163,7 +259,7 @@ export function DataTable<T>({
             {loading ? (
               Array.from({ length: 5 }, (_, i) => (
                 <TR key={i}>
-                  {table.getAllLeafColumns().map((col) => (
+                  {table.getVisibleLeafColumns().map((col) => (
                     <TD
                       key={col.id}
                       className={(col.columnDef.meta as { className?: string } | undefined)?.className}
@@ -175,7 +271,7 @@ export function DataTable<T>({
               ))
             ) : error ? (
               <tr>
-                <td colSpan={table.getAllLeafColumns().length}>
+                <td colSpan={table.getVisibleLeafColumns().length}>
                   <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
                     <p className="text-sm text-danger-text">加载失败：{error}</p>
                     {onRetry && (
@@ -188,7 +284,7 @@ export function DataTable<T>({
               </tr>
             ) : table.getRowModel().rows.length === 0 ? (
               <tr>
-                <td colSpan={table.getAllLeafColumns().length}>
+                <td colSpan={table.getVisibleLeafColumns().length}>
                   <Empty text={emptyText} action={emptyAction} />
                 </td>
               </tr>

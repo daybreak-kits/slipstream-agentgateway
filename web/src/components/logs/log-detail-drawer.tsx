@@ -22,14 +22,13 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { api, ApiError } from "@/lib/api";
-import { fmtInt, fmtSeconds } from "@/lib/format";
+import { fmtInt, fmtMoney6, fmtSeconds } from "@/lib/format";
 import { usePermissions } from "@/lib/permissions";
 import { formatDateTime } from "@/lib/time";
 import type { IntervalTimezone } from "@/lib/time-range";
 
 import {
   fmtCachePct,
-  fmtMoney,
   fmtThroughput,
   statusLabel,
   statusTone,
@@ -230,7 +229,7 @@ export function LogDetailDrawer({ open, row, timezone, onOpenChange }: LogDetail
                 <p className="text-2xs text-faint">
                   毛利{" "}
                   <span className="tnum text-body">
-                    {margin === undefined || margin === null ? "—" : fmtMoney(margin, currency)}
+                    {margin === undefined || margin === null ? "—" : fmtMoney6(margin, currency)}
                   </span>{" "}
                   · 花费 − 成本
                 </p>
@@ -422,7 +421,7 @@ function MoneyCard({
         </div>
       ) : (
         <p className="mt-1 text-lg font-semibold tabular-nums text-title">
-          {fmtMoney(micro, currency)}
+          {fmtMoney6(micro, currency)}
         </p>
       )}
       <p className="mt-1 text-2xs text-faint">

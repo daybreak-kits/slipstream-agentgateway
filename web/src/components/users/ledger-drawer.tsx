@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
-import { fmtMs, fmtSignedMicro } from "@/components/governance/format";
+import { fmtMs, fmtSignedMicro } from "@/lib/format";
 import { KIND_LABEL, KIND_TONE, LEDGER_KINDS, LEDGER_PAGE_SIZE } from "@/components/governance/ledger-meta";
 import type { LedgerEntry } from "@/components/governance/types";
 import { Badge } from "@/components/ui/badge";

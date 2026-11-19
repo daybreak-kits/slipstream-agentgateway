@@ -16,7 +16,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { api, apiList, ENDPOINTS } from "@/lib/api";
-import { fmtMs } from "@/components/governance/format";
+import { fmtMs } from "@/lib/format";
 import { revisionStatusMeta } from "@/lib/revision-status";
 import { usePermissions } from "@/lib/permissions";
 import type { ConfigRevision } from "@/types";
@@ -223,6 +223,7 @@ export function ConfigRevisionsPage() {
         onRetry={() => void q.refetch()}
         emptyText="暂无配置版本"
         filterPlaceholder="筛选版本 / 操作人 / 备注"
+        storageKey="slipstream.cols.config-revisions"
       />
       <RevisionDetailDrawer row={detailRow} open={drawerOpen} onOpenChange={setDrawerOpen} />
     </div>

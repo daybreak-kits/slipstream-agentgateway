@@ -315,6 +315,7 @@ export function MySpendPanel() {
                 emptyText="所选范围内没有模型花费"
                 filterPlaceholder="筛选模型"
                 pageSize={25}
+                storageKey="slipstream.cols.billing-spend-by-model"
               />
             </section>
             <section className="space-y-1">
@@ -328,6 +329,7 @@ export function MySpendPanel() {
                 emptyText="所选范围内没有用户花费"
                 filterPlaceholder="筛选用户"
                 pageSize={25}
+                storageKey="slipstream.cols.billing-spend-by-user"
               />
             </section>
           </div>

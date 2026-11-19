@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { NavLink, useParams } from "react-router-dom";
 import { toast } from "sonner";
 
-import { fmtMs } from "@/components/governance/format";
+import { fmtMs } from "@/lib/format";
 import { ErrorState, SectionCard } from "@/components/governance/panel";
 import {
   RUN_INFO_KEYS,
@@ -174,7 +174,7 @@ function ConnectionSection({ canWrite }: { canWrite: boolean }) {
   const save = useMutation({
     mutationFn: (next: string) => api.put<SettingsResponse>(ENDPOINTS.settings, { values: { gateway_base_url: next } }),
     onSuccess: () => {
-      toast.success("连接地址已保存", { description: "所有用户的连接令牌页与概览会读取同一地址" });
+      toast.success("连接地址已保存", { description: "所有用户的连接密钥页与概览会读取同一地址" });
       setError(null);
       void queryClient.invalidateQueries({ queryKey: CONNECTION_QUERY_KEY });
       void queryClient.invalidateQueries({ queryKey: SETTINGS_KEY });
@@ -248,7 +248,7 @@ function ConnectionSection({ canWrite }: { canWrite: boolean }) {
       <SettingsTile title="端口约定" hint="数据面固定 3600，控制面固定 3700；本设置只影响展示给用户的接入地址。" className="md:col-span-3 xl:col-span-6">
         <p className="text-2xs text-faint">
           默认值不落库：控制面只在显式配置公网地址时写入 gateway_base_url。清空配置即回到「浏览器当前 host + 3600」，
-          同一份设置被连接令牌页、概览页与客户端配置示例统一读取。
+          同一份设置被连接密钥页、概览页与客户端配置示例统一读取。
         </p>
       </SettingsTile>
     </SettingsGrid>

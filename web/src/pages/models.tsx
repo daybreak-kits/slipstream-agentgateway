@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Combobox } from "@/components/ui/combobox";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -881,14 +882,17 @@ function MemberEditor({
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
-        <Select value={pick} onValueChange={setPick}>
-          <SelectTrigger className="max-w-64"><SelectValue placeholder="选择上游模型加入成员" /></SelectTrigger>
-          <SelectContent>
-            {available.map((m) => (
-              <SelectItem key={m.id} value={m.id}>{m.name + (m.upstream_name ? " · " + m.upstream_name : "")}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <Combobox
+          className="max-w-64"
+          placeholder="选择上游模型加入成员"
+          searchPlaceholder="搜索上游模型名称或标识"
+          value={pick}
+          options={available.map((m) => ({
+            value: m.id,
+            label: m.name + (m.upstream_name ? " · " + m.upstream_name : ""),
+          }))}
+          onChange={setPick}
+        />
         <Button
           variant="outline"
           size="sm"

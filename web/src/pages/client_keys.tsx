@@ -12,7 +12,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { fmtMs } from "@/components/governance/format";
+import { fmtMs } from "@/lib/format";
 import { OneTimeSecretDialog } from "@/components/users/one-time-secret-dialog";
 import { ENDPOINTS, api } from "@/lib/api";
 import { usePermissions } from "@/lib/permissions";
@@ -220,6 +220,7 @@ export function ClientKeysPage() {
         onRetry={() => void qKeys.refetch()}
         emptyText="还没有连接密钥"
         filterPlaceholder="筛选名称 / 掩码"
+        storageKey="slipstream.cols.client-keys"
       />
 
       <Dialog open={issueOpen} onOpenChange={(next) => { if (!next) setIssueOpen(false); }}>

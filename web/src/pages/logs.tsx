@@ -7,7 +7,6 @@ import {
   ListFilter,
   RefreshCw,
   Search,
-  Settings2,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { toast } from "sonner";
@@ -41,15 +40,6 @@ import { TimeRangePicker } from "@/components/time-range-picker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Empty } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -79,38 +69,16 @@ const STATUS_OPTIONS: Array<{ value: LogStatusFilter; label: string }> = [
   { value: "5xx", label: "5XX 服务端错误" },
 ];
 
-/** 列显隐（DESIGN-AUDIT §2）：key=slipstream.cols.logs 存隐藏列 key 数组，默认全显。 */
-const LOGS_COLS_KEY = "slipstream.cols.logs";
-
-const HIDEABLE_COLUMNS: Array<{ key: string; label: string }> = [
-  { key: "datetime", label: "日期时间" },
-  { key: "model", label: "模型 · 路由" },
-  { key: "user", label: "用户" },
-  { key: "key", label: "密钥" },
-  { key: "tokens", label: "词元" },
-  { key: "money", label: "费用" },
-  { key: "duration", label: "耗时" },
-];
-
-function readHiddenCols(): string[] {
-  try {
-    const raw = localStorage.getItem(LOGS_COLS_KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeHiddenCols(hidden: string[]): void {
-  try {
-    localStorage.setItem(LOGS_COLS_KEY, JSON.stringify(hidden));
-  } catch {
-    // 存储不可用（隐私模式）时列设置只在当前会话生效
-  }
-}
-
+/** DataTable 列设置菜单的展示名（表头是函数/自定义节点时需要显式给出）。 */
+const LOG_COLUMN_LABELS: Record<string, string> = {
+  datetime: "日期时间",
+  model: "模型 · 路由",
+  user: "用户",
+  key: "密钥",
+  tokens: "词元",
+  money: "费用",
+  duration: "耗时",
+};
 function makeApplied(draft: LogFilterDraft): AppliedLogFilters {
   const built = buildLogQuery(draft);
   const bounds = logWindowBounds(draft.window);
@@ -126,7 +94,6 @@ export function LogsPage() {
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState<number>(50);
   const [selected, setSelected] = useState<LogRow | null>(null);
-  const [hiddenCols, setHiddenCols] = useState<string[]>(readHiddenCols);
 
   // 筛选下拉的数据源与接口类型 join（upstream_model_id → model_type）。
   const publicModelsQ = useQuery({
@@ -249,18 +216,6 @@ export function LogsPage() {
     setPage(0);
   }, []);
 
-  const toggleCol = (key: string) => {
-    setHiddenCols((prev) => {
-      const next = prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key];
-      writeHiddenCols(next);
-      return next;
-    });
-  };
-  const resetCols = () => {
-    setHiddenCols([]);
-    writeHiddenCols([]);
-  };
-
   const openDetail = useCallback((row: LogRow) => setSelected(row), []);
   const { can } = usePermissions();
   const canCost = can("billing:cost");
@@ -278,12 +233,6 @@ export function LogsPage() {
         modelTypes,
       }),
     [mode, sort, handleSort, openDetail, canCost, canSpend, modelTypes],
-  );
-
-  // 列显隐：money 列已按权限缺席，其余按 localStorage 记忆过滤；查看详情列固定。
-  const visibleColumns = useMemo(
-    () => columns.filter((column) => !hiddenCols.includes(column.id ?? "")),
-    [columns, hiddenCols],
   );
 
   const total = logsQuery.data?.total ?? 0;
@@ -355,12 +304,6 @@ export function LogsPage() {
             aria-label="关键词或查询语法"
           />
           <QuerySyntaxHelp />
-          <ColumnSettingsMenu
-            canShowMoney={canCost || canSpend}
-            hiddenCols={hiddenCols}
-            onToggle={toggleCol}
-            onReset={resetCols}
-          />
           <Button type="button" variant="ghost" onClick={reset}>
             重置
           </Button>
@@ -420,10 +363,12 @@ export function LogsPage() {
         </div>
       ) : (
         <DataTable
-          columns={visibleColumns}
+          columns={columns}
           data={logsQuery.data?.items}
           loading={logsQuery.isPending}
           emptyText="当前页没有记录"
+          storageKey="slipstream.cols.logs"
+          columnLabels={LOG_COLUMN_LABELS}
           paging={{
             mode: "server",
             offset: page * pageSize,
@@ -447,45 +392,6 @@ export function LogsPage() {
         }}
       />
     </div>
-  );
-}
-
-function ColumnSettingsMenu({
-  canShowMoney,
-  hiddenCols,
-  onToggle,
-  onReset,
-}: {
-  canShowMoney: boolean;
-  hiddenCols: string[];
-  onToggle: (key: string) => void;
-  onReset: () => void;
-}) {
-  const columns = HIDEABLE_COLUMNS.filter((column) => column.key !== "money" || canShowMoney);
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="outline" aria-label="列设置">
-          <Settings2 className="h-3.5 w-3.5" />
-          列设置
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-44">
-        <DropdownMenuLabel>显示列</DropdownMenuLabel>
-        {columns.map((column) => (
-          <DropdownMenuCheckboxItem
-            key={column.key}
-            checked={!hiddenCols.includes(column.key)}
-            onCheckedChange={() => onToggle(column.key)}
-            onSelect={(event) => event.preventDefault()}
-          >
-            {column.label}
-          </DropdownMenuCheckboxItem>
-        ))}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={onReset}>恢复默认</DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
   );
 }
 

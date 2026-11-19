@@ -117,6 +117,7 @@ export function CostPanel() {
         onRetry={() => void q.refetch()}
         emptyText="暂无成本流水"
         filterPlaceholder="筛选流水号 / 厂商 / 模型"
+        storageKey="slipstream.cols.billing-cost"
       />
     </div>
   );

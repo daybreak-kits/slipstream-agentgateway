@@ -1,17 +1,7 @@
-import { currencySymbol, fmtPct } from "@/lib/format";
+import { fmtPct } from "@/lib/format";
 
 export type LogBadgeTone = "neutral" | "success" | "warning" | "danger" | "info";
 
-/** 账本金额是整数微单位；货币以账本返回的 currency 为准，缺省按人民币展示。 */
-export function fmtMoney(micro: number | null | undefined, currency: string): string {
-  if (micro === null || micro === undefined) return "—";
-  const value = micro / 1_000_000;
-  // 单笔金额保留 2–6 位：低于 0.01 的单价不能被四舍五入成 0，明细列用 fmtMoney6 恒定 6 位。
-  return (
-    currencySymbol(currency) +
-    value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 6 })
-  );
-}
 
 /** 吞吐只展示生成阶段的速度，单位由调用方补「词元/s」；无输出或无法测速时留白。 */
 export function fmtThroughput(tps: number | null | undefined): string {

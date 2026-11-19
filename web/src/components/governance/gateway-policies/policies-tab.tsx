@@ -243,9 +243,9 @@ export function PoliciesTab({ data, draft, onDraftChange, canWrite, dirtyCount }
                   disabled={!caps.local_rate_limit.supported}
                 />
               </Field>
-              <Field label="每分钟令牌数（留空 = 不渲染）">
+              <Field label="每分钟词元数（留空 = 不渲染）">
                 <Input
-                  aria-label="每分钟令牌数"
+                  aria-label="每分钟词元数"
                   value={draft.local_rate_limit.tokens_per_minute ?? ""}
                   inputMode="numeric"
                   onChange={(event) => update((next) => {
@@ -584,7 +584,7 @@ export function PoliciesTab({ data, draft, onDraftChange, canWrite, dirtyCount }
               <Fact label="每分钟请求数">
                 <span className="tnum">{config.local_rate_limit.requests_per_minute ?? "未设置"}</span>
               </Fact>
-              <Fact label="每分钟令牌数">
+              <Fact label="每分钟词元数">
                 <span className="tnum">{config.local_rate_limit.tokens_per_minute ?? "未设置"}</span>
               </Fact>
               <Fact label="桶语义">{data.effective.local_rate_limit.semantics}</Fact>

@@ -942,7 +942,7 @@ export interface CatalogEntry extends CatalogItem {
   /** ADR-067：条目只有直连与组合两种；组合的来源由 origin 区分。 */
   kind: "direct" | "combo";
   origin?: "manual" | "auto" | null;
-  /** 定时封禁到期时刻（epoch ms）；null/缺省表示没有定时封禁。 */
+  /** 定时关闭到期时刻（epoch ms）；null/缺省表示没有定时封禁。 */
   banned_until?: number | null;
   status: string;
   /** 后端派生状态（api/src/l06_api/schemas.py 的 CatalogEntry，与 lib/playground-model-options.ts 的 Literal 一致）。 */
@@ -1105,7 +1105,7 @@ export const PARAM_HINTS = {
   },
   extraFields: { range: "顶层 JSON 对象", usage: "厂商私有字段原样合并进请求体，后写覆盖先写" },
   systemPrompt: { range: "可选", usage: "作为 system 消息置顶，本会话每次请求都带" },
-  apiKey: { range: "留空用登录令牌", usage: "只留在浏览器内存，随请求发 Authorization" },
+  apiKey: { range: "留空用登录凭证", usage: "只留在浏览器内存，随请求发 Authorization" },
   streamMode: { range: "开 / 关", usage: "开=逐条收 SSE；关=等完整回复一次返回" },
   reasoningLevel: { range: "只读", usage: "当前选择的思考档位；在模型对话框或高级参数里调整" },
 } satisfies Record<string, ParamHint>;

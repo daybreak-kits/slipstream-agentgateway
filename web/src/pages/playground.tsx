@@ -27,6 +27,7 @@ import {
 } from "@/components/playground/sessions";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
+import { formatDuration } from "@/lib/format";
 import { AUTH_ME_QUERY_KEY, fetchMe } from "@/lib/auth";
 import { useMock } from "@/lib/mock";
 import {
@@ -339,7 +340,7 @@ export function PlaygroundPage() {
           streaming: false,
         }));
         toast.success("回复完成", {
-          description: usage.totalTokens + " 词元 · " + (stats.elapsedMs / 1000).toFixed(2) + "s",
+          description: usage.totalTokens + " 词元 · " + formatDuration(stats.elapsedMs),
         });
         void enrichUsage(sessionId, assistantId, model, startedAt, usage);
       } catch (error) {

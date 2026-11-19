@@ -6,7 +6,7 @@
 /** 上游模型的健康状态（由数据面派生）。 */
 export type HealthStatus = "normal" | "open" | "half_open" | "fault";
 
-/** 对外可见状态：在健康状态之外多一个人工封禁态。 */
+/** 公开可见状态：在健康状态之外多一个人工封禁态。 */
 export type VisibleStatus = "normal" | "open" | "half_open" | "fault" | "disabled";
 
 export type InputType = "text" | "image" | "audio" | "video" | "file";

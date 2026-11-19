@@ -309,6 +309,7 @@ export function ApiUsersTab({
           pageSize={50}
           filterPlaceholder="筛选显示名 / 登录名"
           emptyText="没有匹配的用户"
+          storageKey="slipstream.cols.users-api"
         />
       )}
 

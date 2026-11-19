@@ -58,7 +58,7 @@ export const METRIC_ICONS = {
   models: { icon: Boxes, tone: "primary" },
   /** 用户数 */
   users: { icon: Users, tone: "info" },
-  /** 客户端密钥 */
+  /** 连接密钥 */
   keys: { icon: KeyRound, tone: "info" },
   /** 接口风格 */
   apiStyle: { icon: Plug, tone: "info" },
