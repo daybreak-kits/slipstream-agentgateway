@@ -643,6 +643,75 @@ T4 平权声明复核（#k1/#k2/#k3 + vm 同层三 target，同 baseUrl 异 key_
 
 原始证据：evidence/E19-T1-otel.json.md、E19-T2-metrics.json.md、E19-T3-accesslog-fields.json.md、E19-T4-debug-log.json.md、E19-T5-agctl.json.md、E19-metrics-full.txt；配置 evidence/cfg-E19-T1-otel.yaml、cfg-E19-T4-debug-log.yaml（T3 各变体配置内嵌于证据 JSON 的 variants[].config）；AG 运行日志 evidence/ag-E19-t1.log、ag-E19-t1b.log、ag-E19-t3a…t3f.log、ag-E19-t4-control/debug/trace.log。脚本 e19_telemetry.py（五探针编排，复用 e17_common Harness/MockServer——Harness 证据命名前缀参数化为类属性、E19 子类仅覆写前缀）+ otel_capture.py（OTLP 裸接收 + 无依赖 protobuf 解码，traces/logs 双布局）。二进制同 E14–E17（bin-e14/agentgateway.exe，v1.7.0，sha256 909b93dc…ed3c）。
 
+## E20 · conditional 路由 × 多密钥展开运行时语义探针（D 波遗留空白）
+
+目的：E18 钉死了 **failover 形态**的多密钥展开（同层 targets P2C 分流 + 请求内切备），但公开模型 targets 带 `when` 条件（conditional 路由）时，ADR-026 展开会把同一 when 复制成 N 条 `#k{seq}` 条目、把无 when 兜底条目展开成 N 条连续末段——AG 运行时对**重复谓词条目**之间是否分流、兜底末段是否可渲染、谓词不命中是否正确跳转、when 条目间有无请求内切换，全部未验证。控制面 validation 已把 conditional 不变量放宽为「无 when 条目必须是连续末段」（validation.py），AG 侧真实约束需实测。顺带钉死不可达条目问题（无 when 在前、when 在后的形状）。
+
+环境与配置（脚本 e20_conditional_multikey_probe.py；混合形态同 E18：`gateways.default` + `llm.gateways: default` + `llm.providers/models/virtualModels` + 顶层 `policies[]` retry；conditional virtualModel 按 render.py `_routing_entry` 形状渲染 `routing.conditional.targets[{model, when}]`；when 谓词 = `request.headers["x-route"] == "a"`；自备端口 3698/3934-3936/8098，不碰生产；mock_upstream.py 单实例 8098；哑密钥 `.e20-tmp/keys/*.key`（每 key-provider 一把），不读 .env.e15、无真实凭据；命中归因三通道——mock Authorization 前缀（每密钥不同）+ 上游模型名（up-a/up-b 可区分）+ 上游收到的 x-route 头回显；每个配置先 `--validate-only`；二进制同 E14–E19 pin）。
+
+T1 合法性判定表（--validate-only，6 形状）：
+
+| 配置 | 形状 | validate 结果 |
+| --- | --- | --- |
+| T1-when2 | 同一 when × 2 条 `#kN`（核心展开形状） | exit=0，无告警 |
+| T1-mixed-kn2 | 忠实 D 波形状 `[when#k1, when#k2, 无when#k1, 无when#k2]`（兜底 target × 2 密钥 = 连续末段 2 条） | **exit=1** `Error: virtual model vm-e20 conditional fallback target must be last` |
+| T1-mixed-k1 | 单密钥对照 `[when#k1, 无when#k1]`（schema 文档形状） | exit=0，无告警 |
+| T1-true-tail | 同 kn2 形状但兜底渲染为 `when: "true"` × 2（workaround 候选） | exit=0，无告警 |
+| T1-neg-tail | 无 when 在前、when 在后（控制面必拒的不可达形状） | exit=1，同 `fallback target must be last` |
+| T1-ctrl-single | 单 when 条目基线 | exit=0，无告警 |
+
+关键矛盾：AG 1.7.0 只接受**至多一条**无 when 兜底且必须在最后；ADR-026 展开把一个兜底 target × N 密钥渲染成 N 条连续末段——控制面已放宽的「连续末段」不变量比 AG 真实约束宽，按现状渲染 conditional 公开模型会被 AG validate/apply 拒收。
+
+T2 命中分流判定表（when 命中请求，`x-route: a`，N=40/20）：
+
+| 场景 | N | 客户端 | key-a : key-b 命中 | /v1/models | 判定 |
+| --- | --- | --- | --- | --- | --- |
+| T2-when2（两 #k 条目上游模型名可区分 up-a/up-b） | 40 | 40×200 | **40 : 0**（全 up-a） | 仅 vm-e20（internal 不外露） | 同 when 不分流，**首条独占** |
+| T2-when2-faithful（两 #k 条目同一上游模型名 glm-5.3，按密钥归因） | 20 | 20×200 | **20 : 0** | 仅 vm-e20 | 同上，不依赖上游模型名差异 |
+
+与 E18 failover 形态对照（T1b-kn2 40:20、faithful 13:7）：conditional 同谓词条目**不走 P2C**，而是 first-match——schema 文档原话 "targets are evaluated in order. The first matching condition selects the model" 对重复谓词同样生效。
+
+T3 谓词跳转判定表（mixed-kn2 被 T1 拒收 → 按预案改在 T1-mixed-k1（单密钥）上验证谓词跳转；另跑 T1-true-tail（合法 workaround 形状）验证多密钥兜底行为）：
+
+| 场景 | 请求 | N | 客户端 | 命中（模型 / 密钥） | 判定 |
+| --- | --- | --- | --- | --- | --- |
+| T3-mixed-k1 b1 | `x-route: b`（头在、谓词不命中） | 40 | 40×200 | 全 glm-mini（up-b）/ key-a | 不命中**正确跳到**无 when 兜底条目 |
+| T3-mixed-k1 b2 | 无 x-route 头（谓词求值缺变量） | 10 | 10×200 | 全 glm-mini（up-b）/ key-a | 头缺失**不炸选路**，干净落兜底 |
+| T3-mixed-k1 b3 | `x-route: a`（命中对照） | 10 | 10×200 | 全 glm-5.3（up-a）/ key-a | 兜底 burst 之后条件路由仍正常 |
+| T3-true-tail b1 | `x-route: b`（kn2 形状） | 40 | 40×200 | 全 glm-mini（up-b），key-a : key-b = **40 : 0** | 兜底即使渲染为 when:"true" × 2 仍首条独占 |
+| T3-true-tail b2 | 无头 | 10 | 10×200 | 全 glm-mini（up-b），key-a 10 | 同上 |
+
+T4 when × 请求内切换判定表（#k1 条目恒 500（params.model=code-500）、#k2 条目恒 200（ok-b），retry codes=[500] attempts=2 backoff=100ms + 每条 model 挂 health.unhealthyExpression="response.code >= 400" + eviction.consecutiveFailures=1 三件套，E18 T3 口径）：
+
+| N | 客户端 | 上游命中矩阵 | retry/health | duration |
+| --- | --- | --- | --- | --- |
+| 10 | **10×500** | 30 次全打 code-500（key-a）；#k2（ok-b/key-b）**0 命中** | 每请求 `retry.attempt=2`（3 次上游尝试**全部重选同一首条**）；AG 日志无 evict/unhealthy 行，健康驱逐不改变 conditional 选路 | 218–240ms（含 2×100ms backoff） |
+
+与 E18 T3-s1 failover 形态对照（10/10 客户端 200 请求内切备）：conditional 形态重试后 first-match 仍钉死首条，同谓词条目间**没有请求内切换**。
+
+观察细节：
+
+- T2/T3/T4 request_logs 均 1 客户端请求 1 行（+1 行 /v1/models），gen_ai_request_model 记**最终**上游模型名（b1 全 up-b、T4 全 code-500）；密钥级归因仍靠 mock Authorization 前缀（与 E18 相同，request_logs 模型列不可用于密钥记账）。
+- mock 命中日志回显上游收到的 x-route 头与客户端发送一致（b1 全 "b"、b2 全 absent、b3 全 "a"）——AG 原样转发客户端头，三归因通道互洽。
+- T1 两条拒收形状的错误原文完全一致：`Error: virtual model vm-e20 conditional fallback target must be last`——AG 把「无 when 兜底必须最后」实现为硬校验（连可达性都不检查，neg-tail 的拒收理由是同一约束的字面表述）。
+- T1-when2 合法 + T2 首条独占组合起来是**完全静默**的行为：validate 通过、启动无告警、N-1 把密钥 0 流量——与 E18 同名塌缩同级的静默语义，validate 抓不住，必须控制面把关。
+
+结论（conditional × 多密钥的产品语义裁决）：**受限——多密钥平权在 conditional 层不成立，控制面必须限制渲染**。三个具体裁决：
+
+1. **同一 when × N 条 `#kN` 条目：validate 合法但运行时 first-match 首条独占**（40:0 / 20:0，无告警、无权重、无健康分流）。多密钥展开在 conditional 模式下退化为「永远只用第 1 把密钥」，其余 N-1 把密钥静默 0 流量——不能当分流层渲染，用户若在 conditional 公开模型上配多密钥会得到单密钥热点 + 零冗余。
+2. **兜底 target × 多密钥展开不可渲染**：AG 拒收 2 条无 when 末段（`conditional fallback target must be last`），控制面现行「无 when 条目必须是连续末段」的不变量比 AG 真实约束宽，必须收紧为「无 when 条目至多 1 条且必须最后」。workaround：兜底渲染为 `when: "true"` 可过 validate（T1-true-tail exit=0），但 T3-true-tail 显示同样首条独占（40:0）——兜底密钥永远单点，没有免费的平权。
+3. **谓词跳转本身正确**：不命中（含头缺失）干净落到兜底/后续条目，命中对照正常；但 **when + failover 三件套下无请求内切换**（10×500，3 次重试全打同一首条同一条目，健康驱逐不改变 conditional 选路）。conditional 层的 5xx/坏密钥直接透传客户端，重试只是同一把密钥多打几次。
+
+对 D 波渲染设计的建议：
+
+- conditional 公开模型 × 多密钥：每个 when target **只应展开一次**（或明确降级为首密钥并告知），绝不能渲染 N 条同 when 条目当分流层；要密钥级平权/容错只有 failover/weighted 模式（E18 已证），控制面在 conditional 模式选择多密钥时应拒绝或强提示。
+- 控制面 conditional 不变量收紧：`无 when 条目至多 1 条且必须是末条`（替换现行「连续末段」）；如需保留 N 密钥兜底形状，渲染为 `when: "true"` 并接受兜底单点，或文档明确不支持。
+- conditional 模式的密钥级容错不存在：若产品要求 conditional + 密钥 failover，是 AG 1.7.0 能力缺口（可跟踪上游版本），控制面文档需如实声明。
+
+遗留：E20 谓词只用 `request.headers` 形态（生产真实谓词可能用 `llm.*` 变量如 llm.originalModel，first-match/兜底约束预期同构但未实测）；全部结论为 mock 双通道归因（真实上游形状由 E15/E17 交叉背书）；n=40/20/10 对「确定性塌缩」类结论（40:0、30 次全打同一条目）样本充分，但对「是否有微小分流」不敏感——若未来 AG 版本宣称 conditional 支持 P2C，需加大样本复测。
+
+原始证据：evidence/E20-T1-validate.json.md、E20-T2-when2.json.md、E20-T2-when2-faithful.json.md、E20-T3-predicate-jump.json.md、E20-T3-true-tail.json.md、E20-T4-when-failover.json.md；配置 evidence/cfg-E20-*.yaml（6 个，key file 路径脱敏为占位符）；mock 命中日志 evidence/mock-E20-*.jsonl（含 x-route 回显）；AG 运行日志 evidence/ag-E20-*.log（gitignored）。脚本 e20_conditional_multikey_probe.py（自备端口 3698/3934-3936/8098，哑密钥 .e20-tmp/keys/*.key，不读 .env.e15；运行期工作区 .e20-tmp gitignored）。二进制同 E14–E19（bin-e14/agentgateway.exe，v1.7.0，sha256 909b93dc…ed3c）。
+
 ## 对 v1 设计的影响汇总
 
 1. 路由语义：priority 分层严格；同层随机（约 1/3:2/3 偏置）；失败不请求内重试，只影响后续选路。GLOSSARY/ADR-003 需补「非请求内重试」。
@@ -662,6 +731,7 @@ T4 平权声明复核（#k1/#k2/#k3 + vm 同层三 target，同 baseUrl 异 key_
 15. 完整形态（E16）：显式 route + backends[].ai 时 route 层 retry 真正作用于 LLM 流量并实现请求内组间 failover（主 5xx → 重试 → 组2 → 200，4/4）；4xx 需 codes 含 4xx + health.unhealthyExpression + eviction 三件套才请求内切组（单配 codes 时 3 次全打原组）；backend/provider 层无 retry 字段（validate 拒收）；health 必须表达式与 eviction 同配（只配表达式会让驱逐整体失效）；同组内切换是 P2C 概率行为非保证；request_logs 1 请求 1 行不变。→ v1 若保「客户端无感重试」产品语义，渲染层从简化 llm 模式迁完整形态即可，官方能力在 1.7 的完整形态 API 面（gateways/routes/policies.retry + backends[].ai）已具备。
 16. 鉴权通道与迁移可行性（E17）：完整形态真实上游鉴权可用——providers[].policies.backendAuth {key:{file}} 等价 "Authorization: Bearer <key>"，credentials 可自定义 header name/prefix；真实 NVIDIA 200，错误 key 403/401 与直连上游 body 全等透传；route policies.apiKey strict 可做客户端鉴权（上游只见 provider key）。流式+retry：首字节前失败切备并收完整 SSE（9 chunks），首字节后中断不切备（E14 语义在完整形态成立，chunked 上游时 AG 已感知 error 仍不 failover）；request_logs 的 tokens/ttft/tpot 列形状与简化模式完全一致。真实上游 401 组间 failover：仅 retry.codes 不换组（3/3 全打主组），codes+health+eviction 三件套下非流式/流式均 200 切备。→ 简化→完整形态迁移可立项；渲染层强制 backendAuth、host:port + backendTLS.hostname、4xx 三件套；OR :free 当日 429 且有 AG panic（outlierdetection SystemTime overflow）风险需跟踪。
 17. 多密钥展开语义（E18，ADR-026 前置）：同名 `llm.models[]` 多条（不同 provider.reference）validate 静默通过但运行时**首条独占、其余静默丢弃**（60:0，无告警，/v1/models 去重）——渲染必须用 `{model}#k{seq}` 唯一别名 + virtualModel 同层逐条 targets（validate/分流/failover//v1/models 四面全绿，两 provider 同一上游模型名的真实形状亦分流 13:7）。同 baseUrl 不同 key_file 的 key-provider 组内请求内 failover 与跨 upstream 一致（retry codes+health 三件套下 10/10 客户端 200、命中矩阵同构、duration 含 backoff）；同层 3 target 非均匀（29:12:19，P2C 适用于 provider 维度）。控制面须自检 llm.models 禁同名；密钥级用量归因不能依赖 request_logs 模型列（只记最终上游）。
+18. conditional × 多密钥展开（E20，D 波遗留）：**多密钥平权只在 failover/weighted 层成立，conditional 层不成立**——同一 when × N 条 `#kN` 条目 validate 合法但运行时 first-match 首条独占（40:0/20:0，N-1 把密钥静默 0 流量）；兜底 target × N 密钥的展开形状被 AG validate 拒收（`conditional fallback target must be last`，AG 只接受至多 1 条无 when 且必须最后——控制面现行「连续末段」不变量必须收紧），`when: "true"` workaround 可过 validate 但兜底仍首条独占；谓词不命中（含头缺失）正确跳到兜底；when + retry/health 三件套无请求内切换（10×500，3 次重试全打同一首条）→ conditional 公开模型配多密钥时控制面应拒绝或强提示（单密钥热点 + 零冗余 + 零容错），密钥级平权/容错只有 failover/weighted 可用。
 
 ## 与 Lead 第二轮决策的交叉
 
@@ -688,6 +758,7 @@ T4 平权声明复核（#k1/#k2/#k3 + vm 同层三 target，同 baseUrl 异 key_
 - E15 遗留：SenseNova 在实验期间触发账号级限流（429），未能作为健康对照；若需三上游交叉，建议错峰或换 key 重跑。weighted 3:1 两批 18:2 / 15:5，小样本方差大，若 v1 要严格比例需加大样本。S3 的「流中断」用本地代理模拟，未覆盖真实上游 TLS 层断连（语义应相同，但真实网络抖动形态更多）。E15 只测了 401/404 两类错误码，5xx 与连接拒绝的真实上游行为仍沿用 E14 的 mock 结论。
 - E16 遗留：① 完整形态的鉴权（route/listener 层 FilterOrPolicy.apiKey）未实测——简化模式是 llm.policies.apiKey，迁移需另测；② 流式 + retry 未测（retry.precondition 默认对流式跳过 buffering，语义需单独验证）；③ 同组内切换是 P2C 概率行为（A5 一次 3 连打失败 provider 返回 500），要确定性同层 failover 的机制未深入；④ 完整形态未用真实上游复验（mock 结论，按 E14/E15 交叉验证原则，如上线需真实上游补一轮）；⑤ hostOverride 拨号机制只对 plain-HTTP 上游验证，TLS/HBONE 隧道未测。
 - E17 遗留与风险：OpenRouter :free 当日 429（free-models-per-day，reset≈2026-11-20 08:00 CST）导致 T3 备源改用第二 NVIDIA key，OR 真实链路未完成，需配额恢复后补测或换其它上游；AG v1.7.0 收到 OR 429 后 panic（crates/agentgateway/src/http/outlierdetection.rs:60:30 SystemTime overflow），客户端断连，接「会返回 429 的上游」前需验证/上报；未配 backendAuth 时客户端 Authorization 原样转发上游（渲染器必须强制）；host:443 无 backendTLS 能过 validate 但运行时上游 400，控制面需自校验；流式中途断连 request_logs 记 http 200（b1 error=null / b2 chunked error="response body failed..."）、tokens null，账本需按 done=false 处理；同组内确定性 failover 仍未测（沿用 E16 A5 概率结论）。
+- E20 遗留：conditional 谓词只用 request.headers 形态实测（生产若用 llm.originalModel 等变量，first-match/兜底约束预期同构但未实测）；conditional × 多密钥的产品裁决是「受限，需控制面限制」——渲染层改造（conditional target 只展开一次 / 兜底收紧为至多 1 条且必须末条）属 D 波编码任务，本实验只钉语义不动代码；若未来 AG 升级宣称 conditional 支持 P2C/健康分流，需加大样本复测（E20 样本对确定性塌缩充分、对微小分流不敏感）。
 
 ## 原始证据索引
 
@@ -703,5 +774,6 @@ T4 平权声明复核（#k1/#k2/#k3 + vm 同层三 target，同 baseUrl 异 key_
 - E16 脚本：slipstream/ops/experiments/ag-lab/e16_full_form.py（完整形态 gateways/routes/backends[].ai，mock 上游，hostOverride 拨号 + pathPrefix 分计数）；证据 evidence/E16-A0-baseline.json.md、evidence/E16-A1-route-retry.json.md、evidence/E16-A1-401-health-failover.json.md、evidence/E16-A2-backend-retry.json.md、evidence/E16-A3-group-failover.json.md、evidence/E16-A4-health-4xx.json.md、evidence/E16-A5-same-group-switch.json.md、evidence/cfg-E16-*.yaml、evidence/ag-e16-*.log
 - E17 脚本：slipstream/ops/experiments/ag-lab/e17_common.py（共享 harness：配置构造、validate/start/stop、mock、计数/Kill 代理、request_logs 导出、密钥打码）+ e17_t1_auth.py、e17_t1_supp.py、e17_t2_stream_retry.py、e17_t3_real_failover.py；证据 evidence/E17-T1-*.json.md（9 个）、evidence/E17-T2-{a,b,c}.json.md、evidence/E17-T3-s{1,2}.json.md、evidence/cfg-E17-*.yaml、evidence/ag-E17-*.log；凭据读 .env.e15，临时 key 在 .e17-tmp（gitignored，已清理）。
 - E18 脚本：slipstream/ops/experiments/ag-lab/e18_multikey_probe.py（多密钥分流探针，ADR-024 混合形态；自备端口 3696/3924-3926/8096-8097，哑密钥 .e18-tmp/keys/*.key，不读 .env.e15，命中归因用 mock Authorization 前缀 + 上游模型名双通道）；证据 evidence/E18-T1-validate.json.md、E18-T2-direct.json.md、E18-T2-vm.json.md、E18-T1b-kn2.json.md、E18-T1b-kn2-faithful.json.md、E18-T3-s1-samegroup.json.md、E18-T3-s2-crossup.json.md、E18-T4-kn3.json.md、evidence/cfg-E18-*.yaml（13 个）、evidence/mock-E18-*.jsonl、evidence/ag-E18-*.log（gitignored）；运行期工作区 .e18-tmp（gitignored）。二进制同 E14–E17。
+- E20 脚本：slipstream/ops/experiments/ag-lab/e20_conditional_multikey_probe.py（conditional × 多密钥展开探针，ADR-024 混合形态；自备端口 3698/3934-3936/8098，哑密钥 .e20-tmp/keys/*.key，不读 .env.e15，命中归因用 mock Authorization 前缀 + 上游模型名 + x-route 头回显三通道）；证据 evidence/E20-T1-validate.json.md、E20-T2-when2.json.md、E20-T2-when2-faithful.json.md、E20-T3-predicate-jump.json.md、E20-T3-true-tail.json.md、E20-T4-when-failover.json.md、evidence/cfg-E20-*.yaml（6 个）、evidence/mock-E20-*.jsonl、evidence/ag-E20-*.log（gitignored）；运行期工作区 .e20-tmp（gitignored）。二进制同 E14–E19。
 - mock 上游新增 usage 变体：模型名含 usage-p100 时返回 prompt=100/completion=0，含 usage-c100 时返回 prompt=0/completion=100（mock_upstream.py 的 _usage_for）；响应头 x-ratelimit-* 与 429 证据见 E12 两组 JSON。
 - mock 上游 E14 新增端点：模型名 code-<N> 返回状态码 N、code-timeout-<s> 挂起、POST /plain/<spec>（纯数字恒定码、seq-<N>-200 首败后 200、slow-<ms>）、任意前缀 /embeddings、/images/generations、/systemone 返回合法 JSON（mock_upstream.py do_POST）。

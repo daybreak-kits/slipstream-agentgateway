@@ -1,0 +1,134 @@
+{
+  "config": {
+    "adminAddr": "127.0.0.1:3934",
+    "statsAddr": "127.0.0.1:3935",
+    "readinessAddr": "127.0.0.1:3936",
+    "database": {
+      "url": "sqlite://data.db"
+    },
+    "storage": {
+      "mode": "file"
+    },
+    "session": {
+      "key": "3a5dde678b895d76e244397deac58c4eac0199d751ee0c168e4ef022d62e9c2e"
+    }
+  },
+  "gateways": {
+    "default": {
+      "port": 3698,
+      "bindAddress": "127.0.0.1"
+    }
+  },
+  "frontendPolicies": {
+    "accessLog": {
+      "database": {
+        "llm": "full"
+      }
+    }
+  },
+  "llm": {
+    "gateways": "default",
+    "providers": [
+      {
+        "name": "up-ka",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8098/v1",
+          "apiKey": {
+            "file": "<gitignored-key-file>"
+          }
+        }
+      },
+      {
+        "name": "up-kb",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8098/v1",
+          "apiKey": {
+            "file": "<gitignored-key-file>"
+          }
+        }
+      }
+    ],
+    "models": [
+      {
+        "name": "glm-5.3#k1",
+        "provider": {
+          "reference": "up-ka"
+        },
+        "visibility": "internal",
+        "params": {
+          "model": "up-a"
+        }
+      },
+      {
+        "name": "glm-5.3#k2",
+        "provider": {
+          "reference": "up-kb"
+        },
+        "visibility": "internal",
+        "params": {
+          "model": "up-a"
+        }
+      },
+      {
+        "name": "glm-mini#k1",
+        "provider": {
+          "reference": "up-ka"
+        },
+        "visibility": "internal",
+        "params": {
+          "model": "up-b"
+        }
+      },
+      {
+        "name": "glm-mini#k2",
+        "provider": {
+          "reference": "up-kb"
+        },
+        "visibility": "internal",
+        "params": {
+          "model": "up-b"
+        }
+      }
+    ],
+    "virtualModels": [
+      {
+        "name": "vm-e20",
+        "routing": {
+          "conditional": {
+            "targets": [
+              {
+                "model": "glm-5.3#k1"
+              },
+              {
+                "model": "glm-5.3#k2"
+              },
+              {
+                "model": "glm-mini#k1",
+                "when": "request.headers[\"x-route\"] == \"a\""
+              },
+              {
+                "model": "glm-mini#k2",
+                "when": "request.headers[\"x-route\"] == \"a\""
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "policies": {
+      "apiKey": {
+        "mode": "strict",
+        "keys": [
+          {
+            "key": "sk-ss-lab-client-0001",
+            "metadata": {
+              "name": "lab-client"
+            }
+          }
+        ]
+      }
+    }
+  }
+}
