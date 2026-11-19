@@ -449,6 +449,10 @@ class VendorPatch(BaseModel):
 
 
 class UpstreamPatch(BaseModel):
+    """Partial upstream update. name (ADR-023 #6 改名路径): a non-blank value
+    renames with uniqueness enforced; blank/absent leaves the name untouched."""
+
+    name: str | None = Field(default=None, max_length=255)
     base_url: str | None = Field(default=None, min_length=1, max_length=512)
     api_style: str | None = Field(default=None, min_length=1, max_length=64)
     transforms: dict | None = None

@@ -232,6 +232,11 @@ class AvailabilityRuleORM(Base):
     recurrence: Mapped[str | None] = mapped_column(String(16), nullable=True)
     expires_at_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     schedule_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # GLOSSARY §3 一次性窗口例外：窗口期内人工「启用」= 仅跳过当前窗口。skip_until_ms
+    # 锚定该规则当前窗口的 deadline（rule_deadline_ms），过期即惰性失效，规则保留；
+    # skip_set_at_ms 记录例外创建时刻，供 rules_changed_since 把这次状态变化推给 job。
+    skip_until_ms: Mapped[int] = mapped_column(BigInteger, default=0)
+    skip_set_at_ms: Mapped[int] = mapped_column(BigInteger, default=0)
     note: Mapped[str] = mapped_column(Text, default="")
     created_at_ms: Mapped[int] = mapped_column(BigInteger, default=0)
 

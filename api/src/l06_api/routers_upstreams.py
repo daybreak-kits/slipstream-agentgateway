@@ -290,6 +290,15 @@ def patch_upstream(
     upstream_id: str, payload: UpstreamPatch, session: Session = Depends(session_of)
 ) -> dict:
     fields = payload.model_dump(exclude_none=True)
+    if "name" in fields:
+        # ADR-023 #6 改名路径: an explicit non-blank name wins (duplicates are a
+        # 422 like every other entity); blank/absent leaves the name untouched.
+        # The host:port auto-name is a create-time fallback only, so a renamed
+        # upstream never gets re-derived when base_url changes later.
+        name = (fields.pop("name") or "").strip()
+        if name and name != _load(session, upstream_id).name:
+            crud.ensure_unique_name(session, UpstreamORM, name)
+            fields["name"] = name
     crud.update_upstream(session, upstream_id, fields=fields, secret_box=_secret_box())
     session.commit()
     return _body(session, _load(session, upstream_id))

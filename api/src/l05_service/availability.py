@@ -19,6 +19,14 @@ State vocabulary shared by the API and rendering:
 - ``closed`` (disabled): the row is disabled, or an active ban applies.
 
 ``closed`` wins over ``cooling``, preserving the old console precedence.
+
+Recurring windows carry a one-shot exception (GLOSSARY §3, 2026-11-19 ruling):
+manually enabling a row while one of its own schedule rules is inside the
+current window skips THAT window only — ``rule_is_active`` reads the rule's
+``skip_until_ms`` (anchored to the window deadline), the rule itself stays and
+the next window cools again. The exception dies with the rule row, is cleared
+when the schedule is re-applied (update_rule) or by 解除冷却
+(``release_model_cooldown``), and expires lazily once the window has passed.
 """
 
 from __future__ import annotations
@@ -79,9 +87,17 @@ class AvailabilityView:
 
     state: AvailabilityState
     cooldown_until_ms: int = 0
+    # > 0 while a schedule rule's current window was skipped by an explicit
+    # 启用 (GLOSSARY §3): the row is usable now, the rule stays, the next
+    # window cools again. 0 = no active window exception.
+    window_skip_until_ms: int = 0
 
     def as_dict(self) -> dict[str, Any]:
-        return {"state": self.state.value, "cooldown_until_ms": self.cooldown_until_ms}
+        return {
+            "state": self.state.value,
+            "cooldown_until_ms": self.cooldown_until_ms,
+            "window_skip_until_ms": self.window_skip_until_ms,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,11 +135,18 @@ class AvailabilitySnapshot:
 
 
 def rule_is_active(rule: AvailabilityRuleORM, now_ms: int) -> bool:
-    """Evaluate one rule against a wall-clock instant."""
+    """Evaluate one rule against a wall-clock instant.
+
+    A one-shot window exception (``skip_until_ms`` in the future, GLOSSARY §3)
+    suppresses only that schedule rule's current window; bans are human
+    decisions and can never be skipped by an enable.
+    """
     if rule.kind == "ban":
         return True
     if rule.kind != "cooldown":
         raise AppError(ErrorCode.VALIDATION_ERROR, f"未知可用性措施: {rule.kind}")
+    if int(rule.skip_until_ms or 0) > now_ms:
+        return False
     recurrence = rule.recurrence or "once"
     if recurrence == "once":
         if rule.expires_at_ms is None:
@@ -285,6 +308,14 @@ def update_rule(
         setattr(rule, field, value)
     if "note" in changes:
         rule.note = changes["note"] or ""
+    if any(
+        field in changes
+        for field in ("kind", "recurrence", "expires_at_ms", "schedule_json")
+    ):
+        # Re-applying the rule invalidates the anchored window exception
+        # (GLOSSARY §3: 重新应用规则清除例外); note-only edits keep it.
+        rule.skip_until_ms = 0
+        rule.skip_set_at_ms = 0
     session.flush()
     sync_cooldown_projection(session, scope=old_scope, scope_id=old_scope_id)
     sync_cooldown_projection(session, scope=rule.scope, scope_id=rule.scope_id)
@@ -359,8 +390,81 @@ def set_model_cooldown(
 
 
 def release_model_cooldown(session: Session, *, scope: str, scope_id: str) -> None:
-    """解除冷却: remove the managed once-cooldown; other rules stay authoritative."""
+    """解除冷却: remove the managed once-cooldown and any window exception.
+
+    Periodic rules stay authoritative (ADR-004: 解除只删托管规则，不误删周期规则),
+    so a row inside an active window cools again — this is also the documented
+    way to undo a 启用 window-skip (GLOSSARY §3: 例外可通过解除冷却清除).
+    """
+    _clear_window_skips(session, scope=scope, scope_id=scope_id)
     set_model_cooldown(session, scope=scope, scope_id=scope_id, until_ms=0)
+
+
+def enable_model_availability(
+    session: Session, *, scope: str, scope_id: str, now_ms: int | None = None
+) -> dict[str, Any] | None:
+    """Write path behind 启用: release the row cooldown + skip the current window.
+
+    The router clears the row's ``enabled`` flag itself. Here the managed
+    once-cooldown is removed (old reset semantics) and, when one of the scope's
+    own schedule rules is inside its window right now, a one-shot exception
+    (``skip_until_ms`` = that window's deadline) suppresses exactly that window:
+    the rule stays and later windows cool again (GLOSSARY §3, 2026-11-19
+    ruling). Returns the API hint payload, or None when nothing was skipped.
+    """
+    if scope not in MODEL_SCOPES:
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR,
+            f"scope 必须是 {'/'.join(MODEL_SCOPES)}，得到 {scope!r}",
+        )
+    moment = int(now_ms if now_ms is not None else utc_now_ms())
+    rules = list(
+        session.scalars(
+            select(AvailabilityRuleORM).where(
+                AvailabilityRuleORM.scope == scope,
+                AvailabilityRuleORM.scope_id == scope_id,
+            )
+        ).all()
+    )
+    skipped: list[str] = []
+    skip_until = 0
+    for rule in rules:
+        if rule.kind != "cooldown" or (rule.recurrence or "once") == "once":
+            continue
+        if not rule_is_active(rule, moment):
+            continue  # only a rule inside its window right now gets skipped
+        deadline = rule_deadline_ms(rule, moment)
+        if deadline <= moment:
+            continue
+        rule.skip_until_ms = deadline
+        rule.skip_set_at_ms = moment
+        skipped.append(rule.id)
+        skip_until = max(skip_until, deadline)
+    if skipped:
+        session.flush()
+    # The projection refresh inside set_model_cooldown sees the freshly set
+    # skips, so a skipped window contributes no cooldown_until_ms.
+    set_model_cooldown(session, scope=scope, scope_id=scope_id, until_ms=0)
+    if not skipped:
+        return None
+    return {
+        "rule_ids": skipped,
+        "skip_until_ms": skip_until,
+        "message": "本次启用仅跳过当前窗口，后续窗口照常",
+    }
+
+
+def _clear_window_skips(session: Session, *, scope: str, scope_id: str) -> None:
+    """Drop one-shot window exceptions of a scope; the rules themselves stay."""
+    for rule in session.scalars(
+        select(AvailabilityRuleORM).where(
+            AvailabilityRuleORM.scope == scope,
+            AvailabilityRuleORM.scope_id == scope_id,
+        )
+    ).all():
+        if int(rule.skip_until_ms or 0) or int(rule.skip_set_at_ms or 0):
+            rule.skip_until_ms = 0
+            rule.skip_set_at_ms = 0
 
 
 def row_cooldown_rule_id(scope: str, scope_id: str) -> str:
@@ -463,10 +567,12 @@ def migrate_legacy_cooldowns(session: Session, now_ms: int | None = None) -> int
 def rules_changed_since(
     session: Session, since_ms: int, now_ms: int | None = None
 ) -> list[AvailabilityRuleORM]:
-    """Cooldown rules whose active/inactive state changed in (since_ms, now].
+    """Cooldown rules whose effective state changed in (since_ms, now].
 
-    Covers once-expiry and recurring-window boundaries; the render job uses it
-    to know when the data plane must be refreshed.
+    Covers once-expiry and recurring-window boundaries, plus a window exception
+    created by 启用 (skip_set_at_ms): the skip is stored state, so comparing
+    stored-state activity alone would retroactively hide the transition. The
+    render job uses this to know when the data plane must be refreshed.
     """
     moment = int(now_ms if now_ms is not None else utc_now_ms())
     rules = list(
@@ -478,6 +584,7 @@ def rules_changed_since(
         rule
         for rule in rules
         if rule_is_active(rule, since_ms) != rule_is_active(rule, moment)
+        or since_ms < int(rule.skip_set_at_ms or 0) <= moment
     ]
 
 
@@ -546,9 +653,15 @@ def _row_view(
         legacy = int(cooldown_until_ms or 0)
         if legacy > now_ms:
             deadlines.append(legacy)
+    skips = [
+        int(rule.skip_until_ms or 0) for rule in rules if int(rule.skip_until_ms or 0) > now_ms
+    ]
+    window_skip = max(skips, default=0)
     if deadlines:
-        return AvailabilityView(AvailabilityState.COOLING, max(deadlines))
-    return AvailabilityView(AvailabilityState.NORMAL)
+        return AvailabilityView(
+            AvailabilityState.COOLING, max(deadlines), window_skip
+        )
+    return AvailabilityView(AvailabilityState.NORMAL, 0, window_skip)
 
 
 def _projected_deadline(rules: list[AvailabilityRuleORM], *, now_ms: int) -> int:

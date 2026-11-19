@@ -38,6 +38,7 @@ from l05_service.availability import (
     SCOPE_PUBLIC_MODEL,
     SCOPE_UPSTREAM_MODEL,
     AvailabilitySnapshot,
+    enable_model_availability,
     evaluate,
     release_model_cooldown,
     set_model_cooldown,
@@ -294,21 +295,28 @@ def update_upstream_model(
         row.model_type_source = validate_type_source(payload.model_type_source)
     if "parameters" in provided:
         row.parameters_json = canonical_parameters(payload.parameters)
+    window_skip = None
     if "enabled" in provided:
         if payload.enabled is None:
             raise AppError(ErrorCode.VALIDATION_ERROR, "enabled 不能为空")
         row.enabled = payload.enabled
-        if payload.enabled:  # 启用即解除冷却（旧 reset 语义）
-            release_model_cooldown(
+        if payload.enabled:  # 启用=解除关闭+托管冷却；周期窗口内仅跳过当前窗口（GLOSSARY §3）
+            window_skip = enable_model_availability(
                 session, scope=SCOPE_UPSTREAM_MODEL, scope_id=row.id
             )
     if "cooldown_until_ms" in provided:
-        set_model_cooldown(
-            session,
-            scope=SCOPE_UPSTREAM_MODEL,
-            scope_id=row.id,
-            until_ms=payload.cooldown_until_ms,
-        )
+        if payload.cooldown_until_ms:
+            set_model_cooldown(
+                session,
+                scope=SCOPE_UPSTREAM_MODEL,
+                scope_id=row.id,
+                until_ms=payload.cooldown_until_ms,
+            )
+        else:
+            # 解除冷却 (GLOSSARY §3): 托管规则与窗口例外一并清除，周期规则重获效力。
+            release_model_cooldown(
+                session, scope=SCOPE_UPSTREAM_MODEL, scope_id=row.id
+            )
     _apply_cost_fields(row, payload)
     session.commit()
     availability = evaluate(session)
@@ -321,13 +329,15 @@ def update_upstream_model(
         )
         or 0
     )
-    return _um_body(
+    body = _um_body(
         row,
         upstream_name=upstream_name,
         vendor_name=vendor_name,
         target_count=target_count,
         availability=availability,
     )
+    body["window_skip"] = window_skip
+    return body
 
 
 @router.delete("/admin/upstream-models/{upstream_model_id}", status_code=204)
@@ -467,29 +477,38 @@ def update_public_model(
         crud.set_public_model_routing_mode(session, row, payload.routing_mode)
     if "note" in provided:
         row.note = payload.note or ""
+    window_skip = None
     if "enabled" in provided:
         if payload.enabled is None:
             raise AppError(ErrorCode.VALIDATION_ERROR, "enabled 不能为空")
         row.enabled = payload.enabled
-        if payload.enabled:
-            release_model_cooldown(
+        if payload.enabled:  # 启用=解除关闭+托管冷却；周期窗口内仅跳过当前窗口（GLOSSARY §3）
+            window_skip = enable_model_availability(
                 session, scope=SCOPE_PUBLIC_MODEL, scope_id=row.id
             )
     if "cooldown_until_ms" in provided:
-        set_model_cooldown(
-            session,
-            scope=SCOPE_PUBLIC_MODEL,
-            scope_id=row.id,
-            until_ms=payload.cooldown_until_ms,
-        )
+        if payload.cooldown_until_ms:
+            set_model_cooldown(
+                session,
+                scope=SCOPE_PUBLIC_MODEL,
+                scope_id=row.id,
+                until_ms=payload.cooldown_until_ms,
+            )
+        else:
+            # 解除冷却 (GLOSSARY §3): 托管规则与窗口例外一并清除，周期规则重获效力。
+            release_model_cooldown(
+                session, scope=SCOPE_PUBLIC_MODEL, scope_id=row.id
+            )
     session.commit()
     targets = _targets_by_public(session, [row.id]).get(row.id, [])
-    return _pm_body(
+    body = _pm_body(
         row,
         targets=targets,
         names=_model_names(session),
         availability=evaluate(session),
     )
+    body["window_skip"] = window_skip
+    return body
 
 
 @router.delete("/admin/public-models/{public_model_id}", status_code=204)
@@ -654,6 +673,8 @@ def _apply_batch(
     changed: list[str] = []
     missing: list[str] = []
     failed: list[dict] = []
+    # 启用落到周期冷却窗口内时逐行记下跳过的窗口（GLOSSARY §3），随结果带回。
+    skipped_windows: list[dict] = []
     if action in {"cooldown", "release"} and not allow_cooldown:
         # Members have no cooldown column: the deadline belongs to the model that
         # owns them, so fail loudly instead of setting an attribute that is not there.
@@ -684,7 +705,11 @@ def _apply_batch(
             elif action == "enable":
                 row.enabled = True
                 if allow_cooldown:
-                    _release_row_cooldown(session, row)
+                    window_skip = enable_model_availability(
+                        session, scope=_row_scope(row), scope_id=entity_id
+                    )
+                    if window_skip:
+                        skipped_windows.append({"id": entity_id, **window_skip})
             elif action == "disable":
                 row.enabled = False
                 if allow_cooldown:
@@ -705,4 +730,7 @@ def _apply_batch(
             continue
         changed.append(entity_id)
     session.commit()
-    return {"action": action, "changed": changed, "missing": missing, "failed": failed}
+    result = {"action": action, "changed": changed, "missing": missing, "failed": failed}
+    if action == "enable":
+        result["window_skipped"] = skipped_windows
+    return result
