@@ -1,6 +1,12 @@
 # W4-D 上游渠道：多密钥平权落地 + 编辑器修正（ADR-026 实施）
 
-前置：**必须先读 docs/experiments/P0-RESULTS.md 的 E18 结论**（同名多条 vs #kN 别名的裁决），渲染形态按 E18 结论实现。规范：ADR-026、DESIGN-AUDIT §15/16、GLOSSARY §3 上游密钥行。
+前置：**E18 已裁决（commit 5764333，docs/experiments/P0-RESULTS.md §E18）**，渲染形态钉死如下，不再自行裁量：
+- **禁用同名多条**：`llm.models[]` 同名多条（不同 provider）validate 静默通过但运行时首条独占、其余静默丢弃（60:0，无告警）——**渲染层必须自检「llm.models 禁同名」不变量**（validate 抓不住，控制面把关，违反即 422/ValueError）。
+- **采用 `{model}#k{seq}` 唯一别名**：每把密钥展开为唯一名上游模型条目 + virtualModel 同层逐条 targets（validate/分流/failover//v1/models 四面全绿；两 provider 同一上游模型名的真实形状分流 13:7）。
+- 同 baseUrl 不同 key_file 组内请求内 failover 与跨 upstream 一致（codes+health 三件套原样适用，10/10 切备 200）。
+- 分流文案**写「概率分流（P2C）」不得写「均匀」**（3 target 实测 29:12:19）。
+- **记账边界**：request_logs 模型列只记最终上游，按上游密钥的用量归因 AG 侧不可得——账本仍按最终上游计，UI 不承诺按密钥分账（DELIVERY 已知边界用语）。
+规范：ADR-026、DESIGN-AUDIT §15/16、GLOSSARY §3/§12 上游密钥行。
 
 ## 后端（api/src）
 1. `l05_service/upstream_ops.py` 重写密钥 CRUD：
