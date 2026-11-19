@@ -1,40 +1,281 @@
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
 
-import { GuardrailsPage } from "@/pages/guardrails";
-import { McpPage } from "@/pages/mcp";
-import { PoliciesPage } from "@/pages/policies";
+import { describeError } from "@/components/governance/gateway-policies";
+import { GuardrailsTab } from "@/components/governance/gateway-policies/guardrails-tab";
+import { McpTab } from "@/components/governance/gateway-policies/mcp-tab";
+import { PoliciesTab } from "@/components/governance/gateway-policies/policies-tab";
+import {
+  countDirtyGuardrails,
+  countDirtyMcp,
+  countDirtyPolicies,
+  type McpDraftDocument,
+} from "@/components/governance/gateway-policies/helpers";
+import { ErrorState, PageToolbar } from "@/components/governance/panel";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { TabBar } from "@/components/ui/tabs";
+import { api, ENDPOINTS } from "@/lib/api";
+import { usePermissions } from "@/lib/permissions";
+import type {
+  ApplyRevision,
+  GuardrailConfig,
+  McpServersResponse,
+  PoliciesResponse,
+  PolicyConfig,
+  GuardrailsResponse,
+} from "@/lib/policies";
 
 /**
- * 网关策略（ADR-023）：策略 / 护栏 / MCP 合并为单页三 Tab，?tab=policies|guardrails|mcp。
- * 当前为 W2 骨架的临时壳：机械包裹三个既有页组件（一次只挂载当前 Tab），
- * 样式与「共用 validate→保存→apply→版本留档」在 F6 工位重做。
+ * 网关策略（ADR-023 第 3 条）：流量策略 / 护栏 / MCP 单页三 Tab。
+ *
+ * 共用保存链：三个 Tab 的编辑都只写各自草稿（Tab 切换不丢）；
+ * 页级动作条统一「试运行校验 → 保存并下发」——保存按分区顺序 PUT，
+ * 全部成功后调用一次 POST /admin/config/apply，生成配置修订留档。
+ * 任一分区失败即停止（不 apply），已落库分区在修复后重新保存。
  */
+
+type TabKey = "policies" | "guardrails" | "mcp";
+
+type ValidateResult = { ok: boolean; errors: string[]; warnings: string[] };
+
 const TAB_ITEMS: Array<{ key: TabKey; label: string }> = [
   { key: "policies", label: "流量策略" },
   { key: "guardrails", label: "护栏" },
   { key: "mcp", label: "MCP" },
 ];
 
-type TabKey = "policies" | "guardrails" | "mcp";
-
 function parseTab(raw: string | null): TabKey {
   return raw === "guardrails" || raw === "mcp" ? raw : "policies";
 }
 
 export function GatewayPoliciesPage() {
+  const queryClient = useQueryClient();
   const [params, setParams] = useSearchParams();
   const tab = parseTab(params.get("tab"));
+  const { can } = usePermissions();
+  const canWrite = can("policies:write");
+
+  const policies = useQuery({
+    queryKey: ["policies"],
+    queryFn: () => api.get<PoliciesResponse>(ENDPOINTS.policies),
+  });
+  const guardrails = useQuery({
+    queryKey: ["guardrails"],
+    queryFn: () => api.get<GuardrailsResponse>(ENDPOINTS.guardrails),
+  });
+  const mcpServers = useQuery({
+    queryKey: ["mcp-servers"],
+    queryFn: () => api.get<McpServersResponse>(ENDPOINTS.mcpServers),
+  });
+
+  // 三份草稿：null = 该 Tab 无未保存修改；挂在页级，Tab 切换不丢。
+  const [policyDraft, setPolicyDraft] = useState<PolicyConfig | null>(null);
+  const [guardrailDraft, setGuardrailDraft] = useState<GuardrailConfig | null>(null);
+  const [mcpDraft, setMcpDraft] = useState<McpDraftDocument | null>(null);
+  const [validating, setValidating] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const dirtyPolicies =
+    policies.data === undefined ? 0 : countDirtyPolicies(policies.data.config, policyDraft);
+  const dirtyGuardrails =
+    guardrails.data === undefined ? 0 : countDirtyGuardrails(guardrails.data.config, guardrailDraft);
+  const dirtyMcp = mcpServers.data === undefined ? 0 : countDirtyMcp(
+    { servers: mcpServers.data.servers, port: mcpServers.data.port },
+    mcpDraft,
+  );
+  const dirtyTotal = dirtyPolicies + dirtyGuardrails + dirtyMcp;
+  const busy = validating || saving;
+
+  const clearDrafts = () => {
+    setPolicyDraft(null);
+    setGuardrailDraft(null);
+    setMcpDraft(null);
+    setSaveError(null);
+  };
+
+  const invalidateAll = () => {
+    void queryClient.invalidateQueries({ queryKey: ["policies"] });
+    void queryClient.invalidateQueries({ queryKey: ["guardrails"] });
+    void queryClient.invalidateQueries({ queryKey: ["mcp-servers"] });
+    void queryClient.invalidateQueries({ queryKey: ["config-status"] });
+  };
+
+  const validateAll = async () => {
+    setValidating(true);
+    const failures: string[] = [];
+    const warnings: string[] = [];
+    const checked: string[] = [];
+    try {
+      if (policyDraft !== null && policies.data !== undefined) {
+        const result = await api.post<ValidateResult>(ENDPOINTS.policiesValidate, { config: policyDraft });
+        checked.push("流量策略");
+        if (result.ok) warnings.push(...result.warnings.map((item) => "流量策略：" + item));
+        else failures.push("流量策略：" + (result.errors.join("；") || "未通过校验"));
+      }
+      if (guardrailDraft !== null && guardrails.data !== undefined) {
+        const result = await api.post<ValidateResult>(ENDPOINTS.guardrailsValidate, { config: guardrailDraft });
+        checked.push("护栏");
+        if (result.ok) warnings.push(...result.warnings.map((item) => "护栏：" + item));
+        else failures.push("护栏：" + (result.errors.join("；") || "未通过校验"));
+      }
+      if (mcpDraft !== null && mcpServers.data !== undefined) {
+        const result = await api.post<ValidateResult>(ENDPOINTS.mcpValidate, mcpDraft);
+        checked.push("MCP");
+        if (result.ok) warnings.push(...result.warnings.map((item) => "MCP：" + item));
+        else failures.push("MCP：" + (result.errors.join("；") || "未通过校验"));
+      }
+      if (checked.length === 0) return;
+      if (failures.length === 0) {
+        toast.success(checked.join("、") + " 通过 AG 1.7 校验", {
+          description: warnings.length > 0 ? warnings.join("；") : "可以保存并下发",
+        });
+      } else {
+        toast.error("配置未通过校验", { description: failures.join("；") });
+      }
+    } catch (error) {
+      toast.error("校验请求失败", { description: describeError(error) });
+    } finally {
+      setValidating(false);
+    }
+  };
+
+  const saveAll = async () => {
+    setSaving(true);
+    setSaveError(null);
+    const savedTabs: string[] = [];
+    try {
+      if (policyDraft !== null) {
+        await api.put(ENDPOINTS.policies, { config: policyDraft });
+        savedTabs.push("流量策略");
+      }
+      if (guardrailDraft !== null) {
+        await api.put(ENDPOINTS.guardrails, { config: guardrailDraft });
+        savedTabs.push("护栏");
+      }
+      if (mcpDraft !== null) {
+        await api.put(ENDPOINTS.mcpServers, mcpDraft);
+        savedTabs.push("MCP");
+      }
+      const revision = await api.post<ApplyRevision>(ENDPOINTS.configApply, {
+        reason: "控制面网关策略编辑（" + savedTabs.join("、") + "）",
+      });
+      toast.success("网关策略已保存并下发", {
+        description: "配置修订 " + revision.id + " · " + savedTabs.join("、"),
+      });
+      clearDrafts();
+      invalidateAll();
+    } catch (error) {
+      // 部分分区可能已写库但未 apply：如实提示，不静默回滚。
+      setSaveError(
+        describeError(error) +
+          (savedTabs.length > 0
+            ? "（" + savedTabs.join("、") + " 已写库但未下发；修复后重新保存即可）"
+            : ""),
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const pending = policies.isPending || guardrails.isPending || mcpServers.isPending;
+  const loadError = policies.isError
+    ? { title: "策略配置加载失败", description: policies.error.message + "（GET /admin/policies）" }
+    : guardrails.isError
+      ? { title: "护栏配置加载失败", description: guardrails.error.message + "（GET /admin/guardrails）" }
+      : mcpServers.isError
+        ? { title: "MCP 配置加载失败", description: mcpServers.error.message + "（GET /admin/mcp-servers）" }
+        : null;
+
+  if (pending) {
+    return (
+      <div className="space-y-3">
+        <Skeleton className="h-4 w-72" />
+        <Skeleton className="h-44 w-full" />
+        <Skeleton className="h-44 w-full" />
+      </div>
+    );
+  }
+
+  if (loadError !== null || policies.data === undefined || guardrails.data === undefined || mcpServers.data === undefined) {
+    return (
+      <ErrorState
+        title={loadError?.title ?? "网关策略加载失败"}
+        description={loadError?.description ?? "控制面返回了空响应。"}
+        onRetry={() => {
+          void policies.refetch();
+          void guardrails.refetch();
+          void mcpServers.refetch();
+        }}
+        retrying={policies.isFetching || guardrails.isFetching || mcpServers.isFetching}
+      />
+    );
+  }
 
   return (
     <div className="space-y-3">
+      <PageToolbar>
+        <span className="text-2sm text-faint">
+          {dirtyTotal === 0
+            ? "三个分区共用一条保存链：校验 → 保存 → apply → 配置版本留档。"
+            : `待保存修改 ${dirtyTotal} 处：流量策略 ${dirtyPolicies} · 护栏 ${dirtyGuardrails} · MCP ${dirtyMcp}`}
+        </span>
+        {canWrite && (
+          <div className="ml-auto flex items-center gap-1.5">
+            <Button variant="outline" size="sm" onClick={() => void validateAll()} disabled={dirtyTotal === 0 || busy}>
+              {validating ? "校验中…" : "试运行校验"}
+            </Button>
+            <Button variant="primary" size="sm" onClick={() => void saveAll()} disabled={dirtyTotal === 0 || busy}>
+              {saving ? "保存并下发中…" : "保存并下发"}
+            </Button>
+          </div>
+        )}
+      </PageToolbar>
+
+      {saveError !== null && (
+        <div className="rounded-md border border-danger bg-danger-soft px-2.5 py-1.5 text-2xs text-danger-text">
+          保存失败：{saveError}
+        </div>
+      )}
+
       <TabBar
         ariaLabel="网关策略分区"
         items={TAB_ITEMS}
         value={tab}
         onValueChange={(key) => setParams({ tab: key }, { replace: true })}
       />
-      {tab === "policies" ? <PoliciesPage /> : tab === "guardrails" ? <GuardrailsPage /> : <McpPage />}
+
+      {/* 三个面板保持挂载（仅隐藏），Tab 切换不丢草稿与原始 JSON 编辑态。 */}
+      <div hidden={tab !== "policies"}>
+        <PoliciesTab
+          data={policies.data}
+          draft={policyDraft}
+          onDraftChange={setPolicyDraft}
+          canWrite={canWrite}
+          dirtyCount={dirtyPolicies}
+        />
+      </div>
+      <div hidden={tab !== "guardrails"}>
+        <GuardrailsTab
+          data={guardrails.data}
+          draft={guardrailDraft}
+          onDraftChange={setGuardrailDraft}
+          canWrite={canWrite}
+          dirtyCount={dirtyGuardrails}
+        />
+      </div>
+      <div hidden={tab !== "mcp"}>
+        <McpTab
+          data={mcpServers.data}
+          draft={mcpDraft}
+          onDraftChange={setMcpDraft}
+          canWrite={canWrite}
+          dirtyCount={dirtyMcp}
+        />
+      </div>
     </div>
   );
 }

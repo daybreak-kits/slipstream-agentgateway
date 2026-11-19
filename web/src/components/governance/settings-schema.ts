@@ -52,7 +52,7 @@ export interface SettingsSchemaPayload {
 export const RUN_INFO_KEYS: ReadonlyArray<{ key: string; label: string }> = [
   { key: "gateway_artifact_path", label: "下发配置落盘路径" },
   { key: "usage_poll_interval_s", label: "用量拉取周期（秒）" },
-  { key: "client_key_length", label: "客户端密钥长度" },
+  { key: "client_key_length", label: "连接密钥长度" },
   { key: "price_version", label: "当前计价快照" },
 ];
 

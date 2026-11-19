@@ -1,30 +1,28 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { usePermissions } from "@/lib/permissions";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
 
-import { ErrorState, SectionCard } from "@/components/governance/panel";
+import { CapabilityBadge, DirtyHint } from "./shared";
+import { describeError } from "./helpers";
 import { RawJsonEditor } from "@/components/governance/raw-json-editor";
+import { PageToolbar, SectionCard } from "@/components/governance/panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableWrap, TD, TH, THead, TR } from "@/components/ui/table";
-import { api, ApiError, ENDPOINTS } from "@/lib/api";
+import { api, ENDPOINTS } from "@/lib/api";
 import {
   parseJsonDocument,
   saveAndApply,
-  type CapabilityInfo,
   type GuardConfig,
-  type GuardrailsResponse,
   type GuardrailConfig,
+  type GuardrailsResponse,
 } from "@/lib/policies";
 
-type Mode = "view" | "edit" | "raw";
 type Phase = "request" | "response";
 
 const BUILTINS = [
@@ -42,19 +40,6 @@ const SCOPES = [
 ];
 const REGEX_ACTIONS = ["mask", "reject", "audit"];
 const WEBHOOK_ACTIONS = ["reject", "audit"];
-
-function describeError(error: unknown): string {
-  if (error instanceof ApiError) {
-    const lines = error.errorLines();
-    return lines.length > 0 ? error.message + "：" + lines.join("；") : error.message;
-  }
-  return (error as Error).message;
-}
-
-function CapabilityBadge({ capability }: { capability: CapabilityInfo }) {
-  if (!capability.supported) return <Badge tone="neutral">AG 1.7 不支持</Badge>;
-  return capability.verified ? <Badge tone="success">已验证</Badge> : <Badge tone="warning">未实测</Badge>;
-}
 
 function newRegexGuard(): GuardConfig {
   return {
@@ -82,116 +67,58 @@ function newWebhookGuard(): GuardConfig {
   };
 }
 
-export function GuardrailsPage() {
+/**
+ * 网关策略·护栏 Tab：streaming + request/response 护栏列表（regex|webhook）。
+ * 表单/原始 JSON 只改草稿；校验与保存统一走页级动作条。恢复默认是既有直接下发动作。
+ */
+export function GuardrailsTab({ data, draft, onDraftChange, canWrite, dirtyCount }: {
+  data: GuardrailsResponse;
+  draft: GuardrailConfig | null;
+  onDraftChange: (draft: GuardrailConfig | null) => void;
+  canWrite: boolean;
+  dirtyCount: number;
+}) {
   const queryClient = useQueryClient();
-  const q = useQuery({
-    queryKey: ["guardrails"],
-    queryFn: () => api.get<GuardrailsResponse>(ENDPOINTS.guardrails),
-  });
-  const [mode, setMode] = useState<Mode>("view");
-  const { can } = usePermissions();
-  const canWrite = can("policies:write");
-  const [draft, setDraft] = useState<GuardrailConfig | null>(null);
+  const [rawOpen, setRawOpen] = useState(false);
   const [rawText, setRawText] = useState("");
   const [rawError, setRawError] = useState<string | undefined>(undefined);
-  const [saveError, setSaveError] = useState<string | null>(null);
-
-  const save = useMutation({
-    mutationFn: (config: GuardrailConfig) =>
-      saveAndApply(() => api.put(ENDPOINTS.guardrails, { config }), "控制面护栏编辑"),
-    onSuccess: (revisionId) => {
-      toast.success("护栏已保存并下发", { description: "配置修订 " + revisionId });
-      setMode("view");
-      setDraft(null);
-      setSaveError(null);
-      void queryClient.invalidateQueries({ queryKey: ["guardrails"] });
-      void queryClient.invalidateQueries({ queryKey: ["config-status"] });
-    },
-    onError: (error) => setSaveError(describeError(error)),
-  });
 
   const reset = useMutation({
     mutationFn: () => saveAndApply(() => api.del<unknown>(ENDPOINTS.guardrails), "恢复默认护栏"),
     onSuccess: (revisionId) => {
       toast.success("已恢复默认护栏并下发", { description: "配置修订 " + revisionId });
-      setMode("view");
       void queryClient.invalidateQueries({ queryKey: ["guardrails"] });
       void queryClient.invalidateQueries({ queryKey: ["config-status"] });
     },
-    onError: (error) => setSaveError(describeError(error)),
+    onError: (error) => toast.error("恢复默认失败", { description: describeError(error) }),
   });
 
-  const validate = useMutation({
-    mutationFn: (config: GuardrailConfig) =>
-      api.post<{ ok: boolean; errors: string[]; warnings: string[] }>(
-        ENDPOINTS.guardrailsValidate,
-        { config },
-      ),
-    onSuccess: (result) => {
-      if (result.ok) {
-        toast.success("护栏配置通过 AG 1.7 校验", {
-          description: result.warnings.length > 0 ? result.warnings.join("；") : "可以保存并下发",
-        });
-      } else {
-        toast.error("护栏配置未通过校验", { description: result.errors.join("；") });
-      }
-    },
-    onError: (error) => toast.error("校验请求失败", { description: describeError(error) }),
-  });
-
-  if (q.isPending) {
-    return (
-      <div className="space-y-3">
-        <Skeleton className="h-4 w-72" />
-        <Skeleton className="h-40 w-full" />
-        <Skeleton className="h-40 w-full" />
-      </div>
-    );
-  }
-
-  if (q.isError) {
-    return (
-      <ErrorState
-        title="护栏配置加载失败"
-        description={q.error.message + "（GET /admin/guardrails）"}
-        onRetry={() => void q.refetch()}
-        retrying={q.isFetching}
-      />
-    );
-  }
-
-  const data = q.data;
-  if (data === undefined) {
-    return <ErrorState title="护栏配置为空" description="控制面返回了空响应。" />;
-  }
   const config = data.config;
   const caps = data.capabilities;
+  const editing = draft !== null;
 
   const startEdit = () => {
-    setDraft(structuredClone(config));
-    setMode("edit");
-    setSaveError(null);
+    onDraftChange(structuredClone(config));
+    setRawError(undefined);
   };
 
   const startRaw = () => {
-    setRawText(JSON.stringify(config, null, 2));
+    setRawText(JSON.stringify(draft ?? config, null, 2));
     setRawError(undefined);
-    setMode("raw");
-    setSaveError(null);
+    setRawOpen(true);
   };
 
   const cancel = () => {
-    setMode("view");
-    setDraft(null);
+    onDraftChange(null);
+    setRawOpen(false);
     setRawError(undefined);
-    setSaveError(null);
   };
 
   const update = (mutate: (current: GuardrailConfig) => void) => {
     if (draft === null) return;
     const next = structuredClone(draft);
     mutate(next);
-    setDraft(next);
+    onDraftChange(next);
   };
 
   const updateGuard = (phase: Phase, index: number, mutate: (guard: GuardConfig) => void) => {
@@ -218,24 +145,17 @@ export function GuardrailsPage() {
     });
   };
 
-  const submitForm = () => {
-    if (draft === null) return;
-    setSaveError(null);
-    save.mutate(draft);
-  };
-
-  const submitRaw = () => {
+  const applyRaw = () => {
     try {
       const parsed = parseJsonDocument<GuardrailConfig>(rawText);
       setRawError(undefined);
-      setSaveError(null);
-      save.mutate(parsed);
+      onDraftChange(parsed);
+      setRawOpen(false);
+      toast.success("JSON 已应用到草稿", { description: "确认无误后用页级动作条校验/保存" });
     } catch (error) {
       setRawError((error as Error).message);
     }
   };
-
-  const busy = save.isPending || reset.isPending;
 
   const renderGuardEditor = (phase: Phase, guard: GuardConfig, index: number) => {
     const actions = guard.kind === "webhook" ? WEBHOOK_ACTIONS : REGEX_ACTIONS;
@@ -478,51 +398,41 @@ export function GuardrailsPage() {
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <p className="text-2sm text-faint">
+      <PageToolbar>
+        <span className="text-2sm text-faint">
           护栏支持 regex（内置敏感信息 + 自定义正则）与 webhook 审核的安全子集；保存后自动走
           apply 流程，不支持的能力由后端显式拒绝。
-        </p>
+        </span>
         <div className="ml-auto flex items-center gap-1.5">
-          {mode === "view" && canWrite ? (
+          {!editing && canWrite ? (
             <>
-              <Button variant="outline" size="sm" onClick={startRaw}>
-                原始 JSON
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => reset.mutate()} disabled={busy}>
+              <Button variant="outline" size="sm" onClick={startRaw}>原始 JSON</Button>
+              <Button variant="outline" size="sm" onClick={() => reset.mutate()} disabled={reset.isPending}>
                 恢复默认
               </Button>
-              <Button variant="primary" size="sm" onClick={startEdit}>
-                编辑
-              </Button>
+              <Button variant="primary" size="sm" onClick={startEdit}>编辑</Button>
             </>
-          ) : (
-            <Button variant="ghost" size="sm" onClick={cancel} disabled={busy}>
-              取消
-            </Button>
-          )}
+          ) : editing ? (
+            <Button variant="ghost" size="sm" onClick={cancel} disabled={reset.isPending}>取消</Button>
+          ) : null}
         </div>
-      </div>
+      </PageToolbar>
 
-      {saveError !== null && (
-        <div className="rounded-md border border-danger bg-danger-soft px-2.5 py-1.5 text-2xs text-danger-text">
-          保存失败：{saveError}
-        </div>
-      )}
+      <DirtyHint count={dirtyCount} />
 
-      {mode === "raw" ? (
+      {rawOpen ? (
         <SectionCard
           title="原始 JSON 高级编辑"
-          description="整份护栏文档；JSON 语法错误会阻止保存。"
+          description="整份护栏文档；「应用 JSON 更改」先写回草稿，再由页级动作条校验与保存。"
           actions={
-            <Button variant="primary" size="sm" onClick={submitRaw} disabled={busy || rawError !== undefined}>
-              {save.isPending ? "保存中…" : "保存并下发"}
+            <Button variant="primary" size="sm" onClick={applyRaw} disabled={rawError !== undefined}>
+              应用 JSON 更改
             </Button>
           }
         >
-          <RawJsonEditor value={rawText} onChange={setRawText} error={rawError} disabled={busy} />
+          <RawJsonEditor value={rawText} onChange={setRawText} error={rawError} />
         </SectionCard>
-      ) : mode === "edit" && draft !== null ? (
+      ) : editing && draft !== null ? (
         <>
           <SectionCard
             title="流式检查"
@@ -561,7 +471,7 @@ export function GuardrailsPage() {
                   size="sm"
                   onClick={() =>
                     update((next) => {
-                      next[phase].push(phase === "request" ? newRegexGuard() : newRegexGuard());
+                      next[phase].push(newRegexGuard());
                     })
                   }
                 >
@@ -591,20 +501,6 @@ export function GuardrailsPage() {
               </div>
             </SectionCard>
           ))}
-
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="primary" size="sm" onClick={submitForm} disabled={busy}>
-              {save.isPending ? "保存并下发中…" : "保存并下发"}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => draft !== null && validate.mutate(draft)}
-              disabled={busy || validate.isPending}
-            >
-              {validate.isPending ? "校验中…" : "仅校验"}
-            </Button>
-          </div>
         </>
       ) : (
         <>

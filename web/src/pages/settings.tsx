@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   Bell, Check, Coins, Copy, KeyRound, Monitor, Moon, Palette, Save, Sun, UserRound,
 } from "lucide-react";
@@ -31,6 +31,10 @@ import {
 import { useTheme, type Theme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import type { ApiKey, MySpendResponse, UserPreferences } from "@/types";
+
+// docs/api-contract.md：POST /admin/auth/change-password（自助改密，ADR-019）；
+// lib/api.ts 的 ENDPOINTS 没有这条（本工位不改 lib），故在页面内拼写。
+const CHANGE_PASSWORD_ENDPOINT = "/admin/auth/change-password";
 
 type SectionKey = "profile" | "theme" | "tokens" | "spend" | "notifications";
 
@@ -68,6 +72,87 @@ async function copyText(text: string, label: string): Promise<void> {
 
 function TileSkeleton() {
   return <Skeleton className="h-28 w-full" />;
+}
+
+/** 用户设置·自助改密（ADR-019）：验证旧密码后设置新密码；其他已登录会话吊销，当前会话保留。 */
+function PasswordTile() {
+  const [oldPassword, setOldPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
+  const save = useMutation({
+    mutationFn: (payload: { old_password: string; new_password: string }) =>
+      api.post<{ ok: boolean; revoked_sessions: number }>(CHANGE_PASSWORD_ENDPOINT, payload),
+    onSuccess: (result) => {
+      toast.success("密码已修改", {
+        description:
+          result.revoked_sessions > 0
+            ? "已吊销其他 " + result.revoked_sessions + " 个会话，当前会话保留"
+            : "当前会话保留",
+      });
+      setOldPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setFormError(null);
+    },
+    onError: (error) => setFormError(error.message),
+  });
+
+  const submit = () => {
+    if (newPassword.length < 8) {
+      setFormError("新密码至少 8 位");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setFormError("两次输入的新密码不一致");
+      return;
+    }
+    if (newPassword === oldPassword) {
+      setFormError("新密码不能与旧密码相同");
+      return;
+    }
+    setFormError(null);
+    save.mutate({ old_password: oldPassword, new_password: newPassword });
+  };
+
+  const filled = oldPassword !== "" && newPassword !== "" && confirmPassword !== "";
+
+  return (
+    <SettingsTile
+      title="修改密码"
+      hint="验证旧密码后设置新密码（至少 8 位）；保存后其他已登录会话全部吊销，当前会话保留。管理员重置他人密码在用户管理页。"
+      className="md:col-span-3 xl:col-span-3"
+    >
+      <Input
+        type="password"
+        autoComplete="current-password"
+        aria-label="旧密码"
+        placeholder="旧密码"
+        value={oldPassword}
+        onChange={(event) => setOldPassword(event.target.value)}
+      />
+      <Input
+        type="password"
+        autoComplete="new-password"
+        aria-label="新密码"
+        placeholder="新密码（至少 8 位）"
+        value={newPassword}
+        onChange={(event) => setNewPassword(event.target.value)}
+      />
+      <Input
+        type="password"
+        autoComplete="new-password"
+        aria-label="确认新密码"
+        placeholder="确认新密码"
+        value={confirmPassword}
+        onChange={(event) => setConfirmPassword(event.target.value)}
+      />
+      {formError !== null && <p className="text-2xs text-danger-text">{formError}</p>}
+      <Button variant="primary" size="sm" disabled={!filled || save.isPending} onClick={submit}>
+        {save.isPending ? "修改中…" : "修改密码"}
+      </Button>
+    </SettingsTile>
+  );
 }
 
 /** 用户设置·个人资料：显示名可改，用户名/角色只读。 */
@@ -129,6 +214,7 @@ function ProfileSection() {
           {current.expires_at ? "有效期至 " + fmtMs(Date.parse(current.expires_at)) : "有效期由控制面会话策略决定"}
         </p>
       </SettingsTile>
+      <PasswordTile />
       <SettingsTile title="权限" hint="来自 /admin/auth/me，前端只用于显隐，后端仍强制校验。" className="md:col-span-3 xl:col-span-3">
         <div className="flex flex-wrap gap-1">
           {current.permissions.length === 0 ? (
@@ -216,7 +302,7 @@ function ConnectionTokenSection() {
 
   const curlSample = [
     "curl " + baseUrl + "/chat/completions \\",
-    '  -H "Authorization: Bearer sk-ss-你的客户端密钥" \\',
+    '  -H "Authorization: Bearer sk-ss-你的连接密钥" \\',
     '  -H "Content-Type: application/json" \\',
     '  -d \'{"model":"glm","messages":[{"role":"user","content":"你好"}],"stream":true}\'',
   ].join("\n");
@@ -259,7 +345,7 @@ function ConnectionTokenSection() {
         ) : keys.isError ? (
           <p className="text-2xs text-danger-text">密钥列表加载失败：{(keys.error as Error).message}</p>
         ) : (keys.data?.items.length ?? 0) === 0 ? (
-          <p className="text-2xs text-faint">还没有客户端密钥。</p>
+          <p className="text-2xs text-faint">还没有连接密钥。</p>
         ) : (
           <ul className="space-y-1">
             {keys.data!.items.slice(0, 5).map((item) => (
@@ -274,11 +360,11 @@ function ConnectionTokenSection() {
         )}
         {canReadKeys && (
           <Link to="/client-keys" className="text-2xs text-primary hover:underline">
-            去客户端密钥页管理 →
+            去连接密钥页管理 →
           </Link>
         )}
       </SettingsTile>
-      <SettingsTile title="接入示例" hint="把占位密钥换成你的客户端密钥。" className="md:col-span-3 xl:col-span-6">
+      <SettingsTile title="接入示例" hint="把占位密钥换成你的连接密钥。" className="md:col-span-3 xl:col-span-6">
         <pre className="overflow-x-auto rounded-md border border-border bg-surface-2 p-2 text-2xs leading-5">
           <code className="font-mono text-body">{curlSample}</code>
         </pre>

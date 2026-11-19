@@ -1,264 +1,129 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { usePermissions } from "@/lib/permissions";
-import type { ReactNode } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
 
-import { ErrorState, SectionCard } from "@/components/governance/panel";
+import { CapabilityBadge, Chips, DirtyHint, Fact, Field } from "./shared";
+import { describeError } from "./helpers";
 import { RawJsonEditor } from "@/components/governance/raw-json-editor";
+import { PageToolbar, SectionCard } from "@/components/governance/panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { api, ApiError, ENDPOINTS } from "@/lib/api";
+import { api, ENDPOINTS } from "@/lib/api";
 import {
   linesToList,
   listToLines,
   parseJsonDocument,
   saveAndApply,
-  type CapabilityInfo,
-  type PoliciesResponse,
   type PolicyConfig,
+  type PoliciesResponse,
 } from "@/lib/policies";
 
-type Mode = "view" | "edit" | "raw";
-
-function describeError(error: unknown): string {
-  if (error instanceof ApiError) {
-    const lines = error.errorLines();
-    return lines.length > 0 ? error.message + "：" + lines.join("；") : error.message;
-  }
-  return (error as Error).message;
-}
-
-function CapabilityBadge({ capability }: { capability: CapabilityInfo }) {
-  if (!capability.supported) return <Badge tone="neutral">AG 1.7 不支持</Badge>;
-  return capability.verified ? <Badge tone="success">已验证</Badge> : <Badge tone="warning">未实测</Badge>;
-}
-
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: ReactNode;
-  children: ReactNode;
+/**
+ * 网关策略·流量策略 Tab：表单/原始 JSON 都只改草稿；校验与保存统一走页级动作条
+ * （validate → 保存 → apply → 配置版本留档）。恢复默认是既有直接下发动作，不走草稿。
+ */
+export function PoliciesTab({ data, draft, onDraftChange, canWrite, dirtyCount }: {
+  data: PoliciesResponse;
+  draft: PolicyConfig | null;
+  onDraftChange: (draft: PolicyConfig | null) => void;
+  canWrite: boolean;
+  dirtyCount: number;
 }) {
-  return (
-    <div className="space-y-1">
-      <Label className="text-2xs text-body">{label}</Label>
-      {children}
-      {hint !== undefined && <p className="text-2xs text-faint">{hint}</p>}
-    </div>
-  );
-}
-
-function Fact({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="space-y-0.5">
-      <div className="text-2xs text-faint">{label}</div>
-      <div className="text-2xs leading-relaxed text-body">{children}</div>
-    </div>
-  );
-}
-
-function Chips({ items }: { items: string[] }) {
-  if (items.length === 0) return <span className="text-faint">—</span>;
-  return (
-    <div className="flex flex-wrap gap-1">
-      {items.map((item) => (
-        <span key={item} className="rounded border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-2xs">
-          {item}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-const EMPTY_RETRY = { attempts: 1, backoff: "", codes: [502, 503, 504], precondition: "", condition: "" };
-
-export function PoliciesPage() {
   const queryClient = useQueryClient();
-  const q = useQuery({
-    queryKey: ["policies"],
-    queryFn: () => api.get<PoliciesResponse>(ENDPOINTS.policies),
-  });
-  const [mode, setMode] = useState<Mode>("view");
-  const { can } = usePermissions();
-  const canWrite = can("policies:write");
-  const [draft, setDraft] = useState<PolicyConfig | null>(null);
+  const [rawOpen, setRawOpen] = useState(false);
   const [rawText, setRawText] = useState("");
   const [rawError, setRawError] = useState<string | undefined>(undefined);
-  const [saveError, setSaveError] = useState<string | null>(null);
-
-  const save = useMutation({
-    mutationFn: (config: PolicyConfig) =>
-      saveAndApply(() => api.put(ENDPOINTS.policies, { config }), "控制面策略编辑"),
-    onSuccess: (revisionId) => {
-      toast.success("策略已保存并下发", { description: "配置修订 " + revisionId });
-      setMode("view");
-      setDraft(null);
-      setSaveError(null);
-      void queryClient.invalidateQueries({ queryKey: ["policies"] });
-      void queryClient.invalidateQueries({ queryKey: ["config-status"] });
-    },
-    onError: (error) => setSaveError(describeError(error)),
-  });
 
   const reset = useMutation({
     mutationFn: () => saveAndApply(() => api.del<unknown>(ENDPOINTS.policies), "恢复默认策略"),
     onSuccess: (revisionId) => {
       toast.success("已恢复默认策略并下发", { description: "配置修订 " + revisionId });
-      setMode("view");
       void queryClient.invalidateQueries({ queryKey: ["policies"] });
       void queryClient.invalidateQueries({ queryKey: ["config-status"] });
     },
-    onError: (error) => setSaveError(describeError(error)),
+    onError: (error) => toast.error("恢复默认失败", { description: describeError(error) }),
   });
 
-  const validate = useMutation({
-    mutationFn: (config: PolicyConfig) =>
-      api.post<{ ok: boolean; errors: string[]; warnings: string[] }>(ENDPOINTS.policiesValidate, {
-        config,
-      }),
-    onSuccess: (result) => {
-      if (result.ok) {
-        toast.success("配置通过 AG 1.7 校验", {
-          description: result.warnings.length > 0 ? result.warnings.join("；") : "可以保存并下发",
-        });
-      } else {
-        toast.error("配置未通过校验", { description: result.errors.join("；") });
-      }
-    },
-    onError: (error) => toast.error("校验请求失败", { description: describeError(error) }),
-  });
-
-  if (q.isPending) {
-    return (
-      <div className="space-y-3">
-        <Skeleton className="h-4 w-72" />
-        <Skeleton className="h-44 w-full" />
-        <Skeleton className="h-44 w-full" />
-      </div>
-    );
-  }
-
-  if (q.isError) {
-    return (
-      <ErrorState
-        title="策略配置加载失败"
-        description={q.error.message + "（GET /admin/policies）"}
-        onRetry={() => void q.refetch()}
-        retrying={q.isFetching}
-      />
-    );
-  }
-
-  const data = q.data;
-  if (data === undefined) {
-    return <ErrorState title="策略配置为空" description="控制面返回了空响应。" />;
-  }
-  const caps = data.capabilities;
   const config = data.config;
+  const caps = data.capabilities;
+  const editing = draft !== null;
 
   const startEdit = () => {
-    setDraft(structuredClone(config));
-    setMode("edit");
-    setSaveError(null);
+    onDraftChange(structuredClone(config));
+    setRawError(undefined);
   };
 
   const startRaw = () => {
-    setRawText(JSON.stringify(config, null, 2));
+    setRawText(JSON.stringify(draft ?? config, null, 2));
     setRawError(undefined);
-    setMode("raw");
-    setSaveError(null);
+    setRawOpen(true);
   };
 
   const cancel = () => {
-    setMode("view");
-    setDraft(null);
+    onDraftChange(null);
+    setRawOpen(false);
     setRawError(undefined);
-    setSaveError(null);
   };
 
   const update = (mutate: (current: PolicyConfig) => void) => {
     if (draft === null) return;
     const next = structuredClone(draft);
     mutate(next);
-    setDraft(next);
+    onDraftChange(next);
   };
 
-  const submitForm = () => {
-    if (draft === null) return;
-    setSaveError(null);
-    save.mutate(draft);
-  };
-
-  const submitRaw = () => {
+  const applyRaw = () => {
     try {
       const parsed = parseJsonDocument<PolicyConfig>(rawText);
       setRawError(undefined);
-      setSaveError(null);
-      save.mutate(parsed);
+      onDraftChange(parsed);
+      setRawOpen(false);
+      toast.success("JSON 已应用到草稿", { description: "确认无误后用页级动作条校验/保存" });
     } catch (error) {
       setRawError((error as Error).message);
     }
   };
 
-  const busy = save.isPending || reset.isPending;
-
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <p className="text-2sm text-faint">
-          策略在这里编辑并落库；保存 = 写配置 + 走现有「渲染 → --validate-only → 下发」流程。
-          AG 1.7 不支持的字段会被后端 422 拒绝，不会静默丢弃。
-        </p>
+      <PageToolbar>
+        <span className="text-2sm text-faint">
+          策略在这里编辑并落库；页级「保存并下发」= 写配置 + 渲染校验 + 下发 + 配置版本留档。
+        </span>
         <div className="ml-auto flex items-center gap-1.5">
-          {mode === "view" && canWrite ? (
+          {!editing && canWrite ? (
             <>
-              <Button variant="outline" size="sm" onClick={startRaw}>
-                原始 JSON
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => reset.mutate()} disabled={busy}>
+              <Button variant="outline" size="sm" onClick={startRaw}>原始 JSON</Button>
+              <Button variant="outline" size="sm" onClick={() => reset.mutate()} disabled={reset.isPending}>
                 恢复默认
               </Button>
-              <Button variant="primary" size="sm" onClick={startEdit}>
-                编辑
-              </Button>
+              <Button variant="primary" size="sm" onClick={startEdit}>编辑</Button>
             </>
-          ) : (
-            <Button variant="ghost" size="sm" onClick={cancel} disabled={busy}>
-              取消
-            </Button>
-          )}
+          ) : editing ? (
+            <Button variant="ghost" size="sm" onClick={cancel} disabled={reset.isPending}>取消</Button>
+          ) : null}
         </div>
-      </div>
+      </PageToolbar>
 
-      {saveError !== null && (
-        <div className="rounded-md border border-danger bg-danger-soft px-2.5 py-1.5 text-2xs text-danger-text">
-          保存失败：{saveError}
-        </div>
-      )}
+      <DirtyHint count={dirtyCount} />
 
-      {mode === "raw" ? (
+      {rawOpen ? (
         <SectionCard
           title="原始 JSON 高级编辑"
-          description="整份策略文档；JSON 语法错误会阻止保存，服务端仍会做 IR/AG 1.7 校验。"
+          description="整份策略文档；「应用 JSON 更改」先写回草稿，再由页级动作条校验与保存。"
           actions={
-            <Button variant="primary" size="sm" onClick={submitRaw} disabled={busy || rawError !== undefined}>
-              {save.isPending ? "保存中…" : "保存并下发"}
+            <Button variant="primary" size="sm" onClick={applyRaw} disabled={rawError !== undefined}>
+              应用 JSON 更改
             </Button>
           }
         >
-          <RawJsonEditor value={rawText} onChange={setRawText} error={rawError} disabled={busy} />
+          <RawJsonEditor value={rawText} onChange={setRawText} error={rawError} />
         </SectionCard>
-      ) : mode === "edit" && draft !== null ? (
+      ) : editing && draft !== null ? (
         <>
           <SectionCard
             title="跨域 CORS"
@@ -324,9 +189,9 @@ export function PoliciesPage() {
             actions={<CapabilityBadge capability={caps.api_key} />}
           >
             <div className="flex flex-wrap items-end gap-4">
-              <Field label="启用客户端密钥校验">
+              <Field label="启用连接密钥校验">
                 <Switch
-                  aria-label="启用客户端密钥校验"
+                  aria-label="启用连接密钥校验"
                   checked={draft.api_key.enabled}
                   onCheckedChange={(checked) => update((next) => { next.api_key.enabled = checked; })}
                   disabled={!caps.api_key.supported}
@@ -454,7 +319,7 @@ export function PoliciesPage() {
             description={data.notes.retry}
             actions={
               <Badge tone={caps.retry.supported ? "success" : "warning"}>
-                {caps.retry.supported ? "支持" : "AG 1.7 暂不支持"}
+                {caps.retry.supported ? "支持" : "AG 1.7 不支持请求内重试"}
               </Badge>
             }
           >
@@ -462,7 +327,7 @@ export function PoliciesPage() {
               <p className="text-2xs text-body">
                 {caps.retry.supported
                   ? "AG 1.7 接受 llm.policies.retry，可编辑。"
-                  : "pinned AG 1.7 的 llm.policies 拒绝 retry（unknown field），后端会 422 拒绝；表单不提供编辑，已有值可清空。"}
+                  : "AG 1.7 不支持请求内重试：pinned AG 1.7 的 llm.policies 拒绝 retry（unknown field），后端会 422 拒绝；表单不提供编辑，已有值可清空。"}
               </p>
               {draft.retry !== null && (
                 <div className="space-y-2 rounded-md border border-warning bg-warning-soft p-2">
@@ -479,29 +344,10 @@ export function PoliciesPage() {
                 </div>
               )}
               {draft.retry === null && (
-                <p className="text-2xs text-faint">
-                  当前不渲染重试（保持 null 才能保存）。示例字段：{JSON.stringify(EMPTY_RETRY)}
-                </p>
+                <p className="text-2xs text-faint">当前不渲染重试（保持 null 才能保存）。</p>
               )}
             </div>
           </SectionCard>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="primary" size="sm" onClick={submitForm} disabled={busy}>
-              {save.isPending ? "保存并下发中…" : "保存并下发"}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => draft !== null && validate.mutate(draft)}
-              disabled={busy || validate.isPending}
-            >
-              {validate.isPending ? "校验中…" : "仅校验"}
-            </Button>
-            <span className="text-2xs text-faint">
-              保存后自动调用 POST /admin/config/apply，配置修订会变化；下发失败会显示后端错误。
-            </span>
-          </div>
         </>
       ) : (
         <div className="grid gap-3 lg:grid-cols-2">
@@ -594,7 +440,7 @@ export function PoliciesPage() {
             actions={<CapabilityBadge capability={caps.retry} />}
           >
             {config.retry === null ? (
-              <p className="text-2xs text-faint">未配置；AG 1.7 当前拒绝 llm.policies.retry。</p>
+              <p className="text-2xs text-faint">AG 1.7 不支持请求内重试：不渲染 retry（保持 null）。</p>
             ) : (
               <pre className="overflow-x-auto font-mono text-2xs text-danger-text">
                 {JSON.stringify(config.retry, null, 2)}

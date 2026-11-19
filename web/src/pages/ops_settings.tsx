@@ -58,6 +58,13 @@ function validateField(field: SettingFieldDef, raw: string): string | null {
   return null;
 }
 
+/** 个别设置键的 UI 说明文案（覆盖 schema 通用描述）；键 absent 时不影响其它字段。 */
+const FIELD_DESCRIPTION_OVERRIDES: Record<string, string> = {
+  // ADR-021：正文记录开关的说明基调——磁盘线性增长 + 敏感内容合规提示。
+  ag_access_log_llm:
+    "开启后记录请求/响应正文（prompt 与 completion），磁盘随流量线性增长并随日志保留期清理；正文含用户敏感内容，开启前请评估合规要求。",
+};
+
 /** 单个设置字段卡：只读值 ⇄ 编辑控件，保存时只 PUT 这一个键。 */
 function FieldTile({ field, value, missing, canWrite }: {
   field: SettingFieldDef;
@@ -275,7 +282,11 @@ function SystemSection({ canWrite, items, groups }: {
           group.fields.map((field) => (
             <FieldTile
               key={field.key}
-              field={{ ...field, description: group.title + " · " + field.description }}
+              field={{
+                ...field,
+                description:
+                  FIELD_DESCRIPTION_OVERRIDES[field.key] ?? group.title + " · " + field.description,
+              }}
               value={serverValues.get(field.key) ?? field.default}
               missing={!serverValues.has(field.key)}
               canWrite={canWrite}

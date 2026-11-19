@@ -102,9 +102,6 @@ export function LoginPage() {
               {busy ? "登录中…" : "登录"}
             </Button>
           </div>
-          <p className="mt-4 text-2xs text-faint">
-            演示默认账号 admin / admin12345，首次登录后请立即在「管理员」页修改密码。
-          </p>
           </Card>
         </form>
         <p className="mt-4 text-center text-2xs text-faint">

@@ -31,7 +31,7 @@ export const PERMISSION_RESOURCES: readonly PermissionResource[] = [
   { key: "vendor", label: "供应商", group: "主数据" },
   { key: "upstream", label: "上游", group: "主数据" },
   { key: "upstream_model", label: "上游模型", group: "主数据" },
-  { key: "public_model", label: "对外模型", group: "主数据" },
+  { key: "public_model", label: "公开模型", group: "主数据" },
   { key: "model_target", label: "模型目标", group: "主数据" },
   { key: "availability_rule", label: "可用性规则", group: "流量治理" },
   { key: "transforms", label: "改写规则", group: "流量治理" },
@@ -41,7 +41,7 @@ export const PERMISSION_RESOURCES: readonly PermissionResource[] = [
   { key: "ledger", label: "账本", group: "计费" },
   { key: "billing", label: "计费规则", group: "计费" },
   { key: "user", label: "用户", group: "账号" },
-  { key: "api_key", label: "客户端密钥", group: "账号" },
+  { key: "api_key", label: "连接密钥", group: "账号" },
   { key: "admin_user", label: "管理员", group: "账号" },
 ];
 

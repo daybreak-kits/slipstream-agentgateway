@@ -116,7 +116,7 @@ function SectionEditor({ config, rules, allTransforms, onChange, upstreamId }: S
       }),
     onSuccess: (data) => {
       setPreview(data);
-      toast.success("预览成功");
+      toast.success("试运行完成");
     },
   });
 
@@ -408,12 +408,13 @@ function SectionEditor({ config, rules, allTransforms, onChange, upstreamId }: S
             disabled={!allValid || previewMut.isPending}
             onClick={() => previewMut.mutate()}
           >
-            <Play className="h-3.5 w-3.5" /> 预览本段
+            <Play className="h-3.5 w-3.5" /> 试运行本段
           </Button>
-          {!allValid && <span className="text-2xs text-danger-text">存在无效或受保护的行，修正后才能预览/保存</span>}
+          {!allValid && <span className="text-2xs text-danger-text">存在无效或受保护的行，修正后才能试运行/保存</span>}
         </div>
         {preview && (
           <div className="space-y-1.5 rounded-md bg-surface-2/60 p-2.5">
+            <div className="text-2xs font-medium text-body">试运行结果</div>
             {preview.skipped.map((reason) => (
               <Badge key={reason} tone="warning">
                 跳过原因：{reason}
@@ -426,7 +427,7 @@ function SectionEditor({ config, rules, allTransforms, onChange, upstreamId }: S
             ))}
             <div className="grid gap-2 md:grid-cols-2">
               <div>
-                <div className="text-2xs text-faint">本段规则（下发前）</div>
+                <div className="text-2xs text-faint">下发前（本段规则）</div>
                 <pre className="tnum max-h-40 overflow-auto whitespace-pre-wrap rounded bg-surface p-2 font-mono text-2xs">
                   {JSON.stringify(allTransforms[config.section], null, 2)}
                 </pre>
@@ -515,7 +516,7 @@ export function TransformsEditor({ upstreamId }: { upstreamId: string }) {
         lines={["删除出站头 server 与 x-powered-by（代理指纹），对所有上游固定生效"]}
       />
       <ReadOnlyBlock
-        title="响应改写默认条件：无（W1 整改）"
+        title="响应改写默认条件：无"
         lines={[
           "控制面不再注入 response.code < 400 守卫，管理员写的改写行原样生效",
           "要只改成功响应，请自行加一行 response.code < 400 条件；错误体是否改写由管理员决定",
@@ -523,7 +524,7 @@ export function TransformsEditor({ upstreamId }: { upstreamId: string }) {
       />
       <div className="flex items-center justify-between gap-2">
         <p className="text-2xs text-faint">
-          头与体共用同一套动作词表（契约 v2）。同段顺序即生效顺序；无条件规则必须排在末位。
+          四段改写共用同一套动作词表（ADR-009）。同段顺序即生效顺序；无条件规则必须排在末位。改写不会随页头「保存」提交，用本页「保存全部」单独写库；试运行只做编译预览，不落库。
         </p>
         <Button variant="primary" size="sm" disabled={!dirty || saveMut.isPending} onClick={() => saveMut.mutate()}>
           <Save className="h-3.5 w-3.5" /> 保存全部
