@@ -15,6 +15,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   Dialog,
   DialogContent,
@@ -58,8 +59,15 @@ function BatchPasteDialog({
   const [text, setText] = useState("");
   const parsed = useMemo(() => parseKeyLines(text, existingPlain), [text, existingPlain]);
   const ready = parsed.entries.length > 0;
+  // W4-A2 弹窗草稿守卫：粘贴了内容后 Esc/遮罩/取消不放行，先确认「放弃修改？」。
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const requestClose = () => {
+    if (text.trim() !== "") setConfirmDiscard(true);
+    else onClose();
+  };
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+    <>
+    <Dialog open onOpenChange={(open) => { if (!open) requestClose(); }}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>批量粘贴密钥</DialogTitle>
@@ -79,13 +87,28 @@ function BatchPasteDialog({
           。确认后逐条提交，结果以汇总提示为准。
         </p>
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>取消</Button>
+          <Button variant="ghost" onClick={requestClose}>取消</Button>
           <Button disabled={!ready || busy} onClick={() => onConfirm(parsed.entries, parsed.duplicates)}>
             逐条添加 {parsed.entries.length} 把
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {confirmDiscard ? (
+      <ConfirmDialog
+        open
+        onOpenChange={(v) => { if (!v) setConfirmDiscard(false); }}
+        title="放弃修改？"
+        description="弹窗内粘贴的密钥明文不会写入任何上游，关闭后将丢失。"
+        confirmLabel="放弃修改"
+        destructive
+        onConfirm={() => {
+          setConfirmDiscard(false);
+          onClose();
+        }}
+      />
+    ) : null}
+    </>
   );
 }
 
@@ -102,8 +125,15 @@ function AddKeyDialog({
   const [label, setLabel] = useState("");
   const [apiKey, setApiKey] = useState("");
   const ready = apiKey.trim() !== "";
+  // W4-A2 弹窗草稿守卫：填了备注或密钥后 Esc/遮罩/取消不放行，先确认「放弃修改？」。
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const requestClose = () => {
+    if (label.trim() !== "" || apiKey.trim() !== "") setConfirmDiscard(true);
+    else onClose();
+  };
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+    <>
+    <Dialog open onOpenChange={(open) => { if (!open) requestClose(); }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>添加密钥</DialogTitle>
@@ -126,13 +156,28 @@ function AddKeyDialog({
           </div>
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>取消</Button>
+          <Button variant="ghost" onClick={requestClose}>取消</Button>
           <Button disabled={!ready || busy} onClick={() => onConfirm(label.trim(), apiKey.trim())}>
             {busy ? "保存中…" : "保存"}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {confirmDiscard ? (
+      <ConfirmDialog
+        open
+        onOpenChange={(v) => { if (!v) setConfirmDiscard(false); }}
+        title="放弃修改？"
+        description="弹窗内已填的密钥明文不会写入任何上游，关闭后将丢失。"
+        confirmLabel="放弃修改"
+        destructive
+        onConfirm={() => {
+          setConfirmDiscard(false);
+          onClose();
+        }}
+      />
+    ) : null}
+    </>
   );
 }
 
@@ -290,8 +335,15 @@ export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [renaming, setRenaming] = useState<UpstreamKey | null>(null);
   const [renameLabel, setRenameLabel] = useState("");
+  // W4-A2 弹窗草稿守卫：备注改了之后 Esc/遮罩/取消不放行，先确认「放弃修改？」。
+  const [renameDiscard, setRenameDiscard] = useState(false);
   const [deleting, setDeleting] = useState<UpstreamKey | null>(null);
   const [batchDeleteConfirm, setBatchDeleteConfirm] = useState(false);
+
+  const requestRenameClose = () => {
+    if (renaming !== null && renameLabel !== renaming.label) setRenameDiscard(true);
+    else setRenaming(null);
+  };
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ["upstream-keys", upstreamId] });
@@ -505,7 +557,7 @@ export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
         />
       ) : null}
 
-      <Dialog open={renaming !== null} onOpenChange={(open) => { if (!open) setRenaming(null); }}>
+      <Dialog open={renaming !== null} onOpenChange={(open) => { if (!open) requestRenameClose(); }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>重命名密钥</DialogTitle>
@@ -515,7 +567,7 @@ export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
             <Input id="up-key-rename" value={renameLabel} onChange={(e) => setRenameLabel(e.target.value)} />
           </div>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setRenaming(null)}>取消</Button>
+            <Button variant="ghost" onClick={requestRenameClose}>取消</Button>
             <Button
               disabled={renameLabel.trim() === "" || rename.isPending}
               onClick={() => rename.mutate()}
@@ -525,6 +577,21 @@ export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {renameDiscard ? (
+        <ConfirmDialog
+          open
+          onOpenChange={(open) => { if (!open) setRenameDiscard(false); }}
+          title="放弃修改？"
+          description="已改的备注不会写入，关闭后将丢失。"
+          confirmLabel="放弃修改"
+          destructive
+          onConfirm={() => {
+            setRenameDiscard(false);
+            setRenaming(null);
+          }}
+        />
+      ) : null}
 
       <AlertDialog
         open={deleting !== null}

@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { api } from "@/lib/api";
 import { describeApiError } from "@/components/users/api-error";
+import { ACTION_ICONS } from "@/lib/icons";
 import { usePermissions } from "@/lib/permissions";
 import { deleteRole, fetchPermissionGroups, fetchRoles, updateRole } from "@/lib/roles";
 import { fmtInt } from "@/lib/format";
@@ -119,6 +120,7 @@ export function AdminsPage() {
     {
       accessorKey: "member_count",
       header: "成员数",
+      meta: { className: "text-right tnum" },
       cell: (cell) => {
         const role = cell.row.original;
         if (!canBrowseUsers) return <span className="tnum">{role.member_count}</span>;
@@ -138,6 +140,7 @@ export function AdminsPage() {
     {
       id: "permissions",
       header: "权限数",
+      meta: { className: "text-right tnum" },
       cell: (cell) => {
         const role = cell.row.original;
         return (
@@ -164,7 +167,7 @@ export function AdminsPage() {
                   setDrawerOpen(true);
                 }}
               >
-                查看权限
+                <ACTION_ICONS.view className="h-3.5 w-3.5" /> 查看权限
               </Button>
             ) : (
               canManageRoles && (
@@ -176,7 +179,7 @@ export function AdminsPage() {
                     setDrawerOpen(true);
                   }}
                 >
-                  编辑
+                  <ACTION_ICONS.edit className="h-3.5 w-3.5" /> 编辑
                 </Button>
               )
             )}
@@ -187,7 +190,7 @@ export function AdminsPage() {
                 className="text-danger-text"
                 onClick={() => setDeleteTarget(role)}
               >
-                删除
+                <ACTION_ICONS.delete className="h-3.5 w-3.5" /> 删除
               </Button>
             )}
           </div>
@@ -211,6 +214,7 @@ export function AdminsPage() {
         </p>
         <span className="ml-auto flex items-center gap-1.5">
           <Button variant="outline" size="sm" onClick={() => void rolesQ.refetch()} disabled={rolesQ.isFetching}>
+            <ACTION_ICONS.refresh className="h-3.5 w-3.5" />
             {rolesQ.isFetching ? "刷新中…" : "刷新"}
           </Button>
           {canManageRoles && (
@@ -222,7 +226,7 @@ export function AdminsPage() {
                 setDrawerOpen(true);
               }}
             >
-              新建角色
+              <ACTION_ICONS.add className="h-3.5 w-3.5" /> 新建角色
             </Button>
           )}
         </span>

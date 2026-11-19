@@ -351,7 +351,7 @@ function ConnectionKeysSection() {
             {keys.data!.items.slice(0, 5).map((item) => (
               <li key={item.id} className="flex items-center gap-1.5 text-2xs">
                 <span className="font-mono text-title">{item.mask}</span>
-                <Badge tone={item.status === "active" ? "success" : "neutral"}>
+                <Badge tone={item.status === "active" ? "success" : "warning"}>
                   {item.status === "active" ? "启用" : "关闭"}
                 </Badge>
               </li>

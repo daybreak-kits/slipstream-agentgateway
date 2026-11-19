@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Copy } from "lucide-react";
 
 import { DataTable } from "@/components/data-table";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +16,7 @@ import {
 } from "@/components/ui/sheet";
 import { api, apiList, ENDPOINTS } from "@/lib/api";
 import { fmtMs } from "@/lib/format";
+import { ACTION_ICONS } from "@/lib/icons";
 import { revisionStatusMeta } from "@/lib/revision-status";
 import { usePermissions } from "@/lib/permissions";
 import type { ConfigRevision } from "@/types";
@@ -106,7 +106,7 @@ function RevisionDetailDrawer({ row, open, onOpenChange }: {
                   size="sm"
                   onClick={() => void copyText(row.artifact_hash, "Artifact 哈希")}
                 >
-                  <Copy className="h-3.5 w-3.5" />
+                  <ACTION_ICONS.copy className="h-3.5 w-3.5" />
                   复制
                 </Button>
               )}
@@ -137,7 +137,7 @@ function RevisionDetailDrawer({ row, open, onOpenChange }: {
                 disabled={!canRollback || rollback.isPending}
                 onClick={() => setConfirmOpen(true)}
               >
-                回滚到此版本
+                <ACTION_ICONS.undo className="h-3.5 w-3.5" /> 回滚到此版本
               </Button>
               {!canRollback && (
                 <p className="mt-1 text-2xs text-faint">回滚需要 config:write 权限。</p>
@@ -171,7 +171,12 @@ export function ConfigRevisionsPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const columns: ColumnDef<ConfigRevision, unknown>[] = [
-    { accessorKey: "id", header: "版本", cell: (c) => <span className="tnum">{c.row.original.id}</span> },
+    {
+      accessorKey: "id",
+      header: "版本",
+      meta: { className: "text-right tnum" },
+      cell: (c) => <span className="tnum">{c.row.original.id}</span>,
+    },
     { accessorKey: "operator", header: "操作人" },
     {
       accessorKey: "status",
@@ -184,6 +189,7 @@ export function ConfigRevisionsPage() {
     {
       accessorKey: "created_at_ms",
       header: "时间",
+      meta: { className: "text-right tnum" },
       cell: (c) => <span className="tnum text-2xs">{fmtMs(c.row.original.created_at_ms)}</span>,
     },
     {
@@ -195,7 +201,7 @@ export function ConfigRevisionsPage() {
     },
     {
       id: "actions",
-      header: "",
+      header: "操作",
       enableSorting: false,
       cell: (c) => (
         <Button
@@ -206,7 +212,7 @@ export function ConfigRevisionsPage() {
             setDrawerOpen(true);
           }}
         >
-          详情
+          <ACTION_ICONS.view className="h-3.5 w-3.5" /> 详情
         </Button>
       ),
     },

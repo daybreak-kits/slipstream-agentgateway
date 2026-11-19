@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { api } from "@/lib/api";
 import { fmtCny } from "@/lib/format";
+import { ACTION_ICONS } from "@/lib/icons";
 import type { UserTreeNode } from "@/types";
 
 import { describeApiError } from "./api-error";
@@ -282,11 +283,13 @@ export function UsersPanel({
     {
       accessorKey: "balance_micro",
       header: "余额",
+      meta: { className: "text-right tnum" },
       cell: (cell) => <span className="tnum text-title">{fmtCny(cell.row.original.balance_micro)}</span>,
     },
     {
       id: "keys",
       header: "密钥数",
+      meta: { className: "text-right tnum" },
       cell: (cell) => {
         if (keyCountsState === "pending") return <span className="text-2xs text-faint">…</span>;
         if (keyCountsState === "error") return <span className="text-2xs text-faint">—</span>;
@@ -322,13 +325,19 @@ export function UsersPanel({
         return (
           <div className="flex flex-wrap items-center gap-1.5">
             {canUpdate && (
-              <Button variant="primary" size="sm" onClick={() => setTopupUser(user)}>充值</Button>
+              <Button variant="primary" size="sm" onClick={() => setTopupUser(user)}>
+                <ACTION_ICONS.recharge className="h-3.5 w-3.5" /> 充值
+              </Button>
             )}
             {canUpdate && (
-              <Button variant="outline" size="sm" onClick={() => setAdjustUser(user)}>调整余额</Button>
+              <Button variant="outline" size="sm" onClick={() => setAdjustUser(user)}>
+                <ACTION_ICONS.adjustBalance className="h-3.5 w-3.5" /> 调整余额
+              </Button>
             )}
             {canReadLedger && (
-              <Button variant="ghost" size="sm" onClick={() => setLedgerUser(user)}>流水</Button>
+              <Button variant="ghost" size="sm" onClick={() => setLedgerUser(user)}>
+                <ACTION_ICONS.transactions className="h-3.5 w-3.5" /> 流水
+              </Button>
             )}
             {canUpdate && (
               <Button variant="outline" size="sm" onClick={() => setResetTarget({ id: user.id, name: user.name })}>
@@ -347,7 +356,9 @@ export function UsersPanel({
               </Button>
             )}
             {canUpdate && (
-              <Button variant="outline" size="sm" onClick={() => setEditing(user)}>编辑</Button>
+              <Button variant="outline" size="sm" onClick={() => setEditing(user)}>
+                <ACTION_ICONS.edit className="h-3.5 w-3.5" /> 编辑
+              </Button>
             )}
             {canDelete && (
               <Button
@@ -358,7 +369,7 @@ export function UsersPanel({
                 title={isRoot ? "根用户不可删除" : undefined}
                 onClick={() => setDeleteTarget(user)}
               >
-                删除
+                <ACTION_ICONS.delete className="h-3.5 w-3.5" /> 删除
               </Button>
             )}
           </div>
@@ -393,7 +404,7 @@ export function UsersPanel({
         )}
         {canCreate && (
           <Button variant="primary" size="sm" className="ml-auto" onClick={() => setCreateOpen(true)}>
-            新建用户
+            <ACTION_ICONS.addUser className="h-3.5 w-3.5" /> 新建用户
           </Button>
         )}
       </div>

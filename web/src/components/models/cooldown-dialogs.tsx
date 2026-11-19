@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -7,6 +7,7 @@ import { Field } from "@/components/models/field";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -24,10 +25,12 @@ import type { AvailabilityRule, CooldownRecurrence, ModelAvailability } from "@/
  * 选中即时显示到期时刻（按 lib/time 的时区语义）；可选自定义截止与原因备注。
  */
 function SingleCooldownForm({
-  pending, onConfirm,
+  pending, onConfirm, onDirtyChange,
 }: {
   pending: boolean;
   onConfirm: (deadline: number, note: string) => void;
+  /** 弹窗草稿守卫（W4-A2）：自由输入变化时上报给弹窗层 */
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const { mode: timezone } = useTimezone();
   const [preset, setPreset] = useState<number | null>(DEFAULT_COOLDOWN_HOURS);
@@ -37,6 +40,12 @@ function SingleCooldownForm({
     ? (custom ? new Date(custom).getTime() : 0)
     : Date.now() + (preset ?? 0) * 3_600_000;
   const invalid = !Number.isFinite(deadline) || deadline <= Date.now();
+  // 守卫只看自由输入（自定义时刻/原因）：预设点选一键可恢复，不当作草稿。
+  const dirty = custom !== "" || note !== "";
+  useEffect(() => {
+    onDirtyChange(dirty);
+    return () => onDirtyChange(false);
+  }, [dirty, onDirtyChange]);
   return (
     <div className="space-y-3">
       <Field label="时长">
@@ -65,7 +74,7 @@ function SingleCooldownForm({
           ? "到期时刻：请选择将来的时间"
           : "到期时刻：" + (invalid ? "—" : formatDateTime(deadline, timezone)) + "（到期后自动恢复，无需排期）"}
       </p>
-      <Field label="原因" hint="选填，写入冷却规则备注，供其他管理员查看">
+      <Field label="原因" hint="选填，写入冷却规则备注，供其他管理用户查看">
         <Input value={note} onChange={(event) => setNote(event.target.value)} placeholder="如：上游厂商例行维护" />
       </Field>
       <div className="flex items-center justify-end gap-2">
@@ -79,12 +88,14 @@ function SingleCooldownForm({
 
 /** 周期冷却紧凑编辑（弹窗 Tab2）：重复方式 + 时间窗 + IANA 时区解释（完整排期日历不做，按 ADR-004 规则表存储）。 */
 function PeriodicCooldownForm({
-  scope, scopeId, rules, onClose,
+  scope, scopeId, rules, onClose, onDirtyChange,
 }: {
   scope: string;
   scopeId: string;
   rules: AvailabilityRule[];
   onClose: () => void;
+  /** 弹窗草稿守卫（W4-A2）：改了任何默认项时上报给弹窗层 */
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const qc = useQueryClient();
   const [recurrence, setRecurrence] = useState<Exclude<CooldownRecurrence, "once">>("daily");
@@ -101,6 +112,18 @@ function PeriodicCooldownForm({
     !timePattern.test(end) ||
     (recurrence === "weekly" && days.length === 0) ||
     (recurrence === "monthly" && (!Number.isInteger(monthDay) || monthDay < 1 || monthDay > 31));
+  // 守卫口径与上方 useState 初值一致：改了任何默认项（重复方式/时间窗/星期/日期/备注）即视为草稿。
+  const dirty =
+    recurrence !== "daily" ||
+    start !== "02:00" ||
+    end !== "04:00" ||
+    days.length !== 1 || !days.includes(1) ||
+    dayOfMonth !== "1" ||
+    note !== "";
+  useEffect(() => {
+    onDirtyChange(dirty);
+    return () => onDirtyChange(false);
+  }, [dirty, onDirtyChange]);
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ["availability-rules"] });
     void qc.invalidateQueries({ queryKey: ["upstream-models"] });
@@ -209,8 +232,17 @@ export function CooldownManageDialog({
   onClose: () => void;
 }) {
   const cooling = isCooling(row);
+  // W4-A2 弹窗草稿守卫：任一页签表单改了内容后，Esc/遮罩/取消先确认「放弃修改？」。
+  const [formDirty, setFormDirty] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const handleFormDirty = useCallback((next: boolean) => setFormDirty(next), []);
+  const requestClose = () => {
+    if (formDirty) setConfirmDiscard(true);
+    else onClose();
+  };
   return (
-    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+    <>
+    <Dialog open onOpenChange={(v) => { if (!v) requestClose(); }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
@@ -236,16 +268,31 @@ export function CooldownManageDialog({
             {
               key: "single",
               label: "单次冷却",
-              content: <SingleCooldownForm pending={pending} onConfirm={onCooldown} />,
+              content: <SingleCooldownForm pending={pending} onConfirm={onCooldown} onDirtyChange={handleFormDirty} />,
             },
             {
               key: "periodic",
               label: "周期冷却",
-              content: <PeriodicCooldownForm scope={scope} scopeId={scopeId} rules={rules} onClose={onClose} />,
+              content: <PeriodicCooldownForm scope={scope} scopeId={scopeId} rules={rules} onClose={onClose} onDirtyChange={handleFormDirty} />,
             },
           ]}
         />
       </DialogContent>
     </Dialog>
+    {confirmDiscard ? (
+      <ConfirmDialog
+        open
+        onOpenChange={(v) => { if (!v) setConfirmDiscard(false); }}
+        title="放弃修改？"
+        description="弹窗内已填的冷却草稿（自定义时刻、原因、周期窗口）不会写入，关闭后将丢失。"
+        confirmLabel="放弃修改"
+        destructive
+        onConfirm={() => {
+          setConfirmDiscard(false);
+          onClose();
+        }}
+      />
+    ) : null}
+    </>
   );
 }

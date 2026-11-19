@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fmtMs } from "@/lib/format";
+import { ACTION_ICONS } from "@/lib/icons";
 import { OneTimeSecretDialog } from "@/components/users/one-time-secret-dialog";
 import { ENDPOINTS, api } from "@/lib/api";
 import { usePermissions } from "@/lib/permissions";
@@ -144,6 +145,7 @@ export function ClientKeysPage() {
     {
       accessorKey: "last_used_at_ms",
       header: "最后使用",
+      meta: { className: "text-right tnum" },
       cell: (cell) => {
         const usedAt = cell.row.original.last_used_at_ms;
         return <span className="tnum text-2xs">{usedAt ? fmtMs(usedAt) : "—"}</span>;
@@ -154,12 +156,14 @@ export function ClientKeysPage() {
       header: "状态",
       cell: (cell) => {
         const active = cell.row.original.status === "active";
-        return <Badge tone={active ? "success" : "neutral"}>{active ? "启用" : "关闭"}</Badge>;
+        // 关闭是可逆启停（非终态），用 warning 提示「被人为停用」而不是中性灰（DESIGN-AUDIT 四期 §16）。
+        return <Badge tone={active ? "success" : "warning"}>{active ? "启用" : "关闭"}</Badge>;
       },
     },
     {
       accessorKey: "created_at_ms",
       header: "创建时间",
+      meta: { className: "text-right tnum" },
       cell: (cell) => <span className="tnum text-2xs">{fmtMs(cell.row.original.created_at_ms)}</span>,
     },
     {
@@ -177,13 +181,21 @@ export function ClientKeysPage() {
               disabled={setStatus.isPending}
               onClick={() => setStatus.mutate({ keyId: key.id, status: active ? "disabled" : "active" })}
             >
-              {active ? "关闭" : "启用"}
+              {active ? (
+                <>
+                  <ACTION_ICONS.disable className="h-3.5 w-3.5" /> 关闭
+                </>
+              ) : (
+                <>
+                  <ACTION_ICONS.enable className="h-3.5 w-3.5" /> 启用
+                </>
+              )}
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setRenameTarget(key)}>
-              重命名
+              <ACTION_ICONS.rename className="h-3.5 w-3.5" /> 重命名
             </Button>
             <Button variant="outline" size="sm" onClick={() => setRotateTarget(key)}>
-              重置
+              <ACTION_ICONS.resetKey className="h-3.5 w-3.5" /> 重置
             </Button>
             <Button
               variant="ghost"
@@ -191,7 +203,7 @@ export function ClientKeysPage() {
               className="text-danger-text"
               onClick={() => setDeleteTarget(key)}
             >
-              删除
+              <ACTION_ICONS.delete className="h-3.5 w-3.5" /> 删除
             </Button>
           </div>
         );
@@ -208,7 +220,7 @@ export function ClientKeysPage() {
       {canWrite && (
         <div className="flex items-center justify-end">
           <Button variant="primary" size="sm" onClick={() => setIssueOpen(true)}>
-            新建密钥
+            <ACTION_ICONS.add className="h-3.5 w-3.5" /> 新建密钥
           </Button>
         </div>
       )}
@@ -266,6 +278,7 @@ export function ClientKeysPage() {
               onClick={() => issue.mutate({ userId: issueUserId, name: issueName })}
               disabled={issue.isPending || !issueUserId}
             >
+              <ACTION_ICONS.issueKey className="h-3.5 w-3.5" />
               {issue.isPending ? "签发中…" : "签发密钥"}
             </Button>
           </DialogFooter>

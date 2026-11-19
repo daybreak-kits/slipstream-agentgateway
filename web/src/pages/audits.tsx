@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/sheet";
 import { api, ENDPOINTS } from "@/lib/api";
 import { fmtTime } from "@/lib/format";
+import { ACTION_ICONS } from "@/lib/icons";
 import type { AuditLog, AuditLogList } from "@/types";
 
 /**
@@ -144,11 +145,11 @@ export function AuditLogsPage() {
     },
     {
       id: "actions",
-      header: "",
+      header: "操作",
       enableSorting: false,
       cell: (c) => (
         <Button variant="ghost" size="sm" onClick={() => openDetail(c.row.original)}>
-          详情
+          <ACTION_ICONS.view className="h-3.5 w-3.5" /> 详情
         </Button>
       ),
     },

@@ -21,6 +21,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { TabBar } from "@/components/ui/tabs";
 import { api, apiList, ENDPOINTS } from "@/lib/api";
+import { ACTION_ICONS } from "@/lib/icons";
 import { useDirtyGuard } from "@/lib/use-dirty-guard";
 import { formatDateTime, useTimezone } from "@/lib/time";
 import { METRIC_ICONS } from "@/lib/metric-icons";
@@ -330,7 +331,7 @@ export function UpstreamDetailPage() {
             title={isNew ? "先保存上游渠道，再获取模型" : undefined}
             onClick={() => setDiscoverOpen(true)}
           >
-            获取上游模型
+            <ACTION_ICONS.fetchModels className="h-3.5 w-3.5" /> 获取上游模型
           </Button>
           <Button
             variant="outline"
@@ -339,6 +340,7 @@ export function UpstreamDetailPage() {
             title={isNew ? "先保存上游渠道，再测试连接" : undefined}
             onClick={requestTest}
           >
+            <ACTION_ICONS.testConnection className="h-3.5 w-3.5" />
             {test.isPending ? "测试中…" : "测试连接"}
           </Button>
           <Button
@@ -347,6 +349,7 @@ export function UpstreamDetailPage() {
             title="保存写入配置；测试连接与获取模型使用页面最新填写的协议风格"
             onClick={() => save.mutate()}
           >
+            <ACTION_ICONS.save className="h-3.5 w-3.5" />
             {save.isPending ? "保存中…" : "保存"}
           </Button>
         </div>

@@ -2,6 +2,8 @@ import {
   Ban,
   CalendarClock,
   CircleDollarSign,
+  CloudDownload,
+  Coins,
   Copy,
   Eye,
   FileJson,
@@ -22,6 +24,7 @@ import {
   Trash2,
   Undo2,
   Upload,
+  UserPlus,
   Users,
   Wallet,
   X,
@@ -49,6 +52,8 @@ export const ACTION_ICONS = {
   enable: Play,
   /** 测试连接 */
   testConnection: PlugZap,
+  /** 获取上游模型（从上游渠道拉取模型列表） */
+  fetchModels: CloudDownload,
   /** 刷新 / 重试（重试沿用日志页既有 RefreshCw 形） */
   refresh: RefreshCw,
   /** 复制 */
@@ -65,8 +70,14 @@ export const ACTION_ICONS = {
   periodic: CalendarClock,
   /** 重置（密钥） */
   resetKey: KeyRound,
+  /** 签发密钥（与重置同形：都是生成新密钥材料） */
+  issueKey: KeyRound,
   /** 充值 */
   recharge: Wallet,
+  /** 调整余额（差额可正可负，区别于充值 Wallet） */
+  adjustBalance: Coins,
+  /** 新建用户 */
+  addUser: UserPlus,
   /** 流水 */
   transactions: Receipt,
   /** 撤销 */

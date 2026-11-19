@@ -7,6 +7,7 @@ import { MODEL_TYPES, parametersOf, toInt, TYPE_SOURCE_LABELS } from "@/componen
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -152,7 +153,7 @@ export function UpstreamModelDialog({
   const [paramsSource, setParamsSource] = useState<ModelParamsSource>(
     initial?.params_source === "models.dev" ? "models.dev" : "manual",
   );
-  const [form, setForm] = useState<UpstreamFormState>({
+  const initialForm = (): UpstreamFormState => ({
     upstream_id: initial?.upstream_id ?? (upstreams[0]?.id ?? ""),
     name: initial?.name ?? "",
     model_type: initial?.model_type ?? "chat",
@@ -163,8 +164,27 @@ export function UpstreamModelDialog({
     cost_output_per_1m: initial?.cost_output_per_1m ?? "",
     markup: initial?.markup ?? "1.0000",
   });
+  const [form, setForm] = useState<UpstreamFormState>(initialForm);
+  // W4-A2 弹窗草稿守卫：基线=挂载时刻的表单（编辑态=服务端行，新建态=空白默认）。
+  const [baseline, setBaseline] = useState<UpstreamFormState>(initialForm);
   const markupNum = Number(form.markup.trim());
   const markupInvalid = form.markup.trim() !== "" && (!Number.isFinite(markupNum) || markupNum <= 0 || markupNum > 100);
+  // 改了任何字段即视为未保存（parameters 整体替换，序列化后比对）。
+  const dirty =
+    form.upstream_id !== baseline.upstream_id ||
+    form.name !== baseline.name ||
+    form.model_type !== baseline.model_type ||
+    form.model_type_source !== baseline.model_type_source ||
+    form.enabled !== baseline.enabled ||
+    form.cost_input_per_1m !== baseline.cost_input_per_1m ||
+    form.cost_output_per_1m !== baseline.cost_output_per_1m ||
+    form.markup !== baseline.markup ||
+    JSON.stringify(form.parameters) !== JSON.stringify(baseline.parameters);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const requestClose = () => {
+    if (dirty) setConfirmDiscard(true);
+    else onClose();
+  };
   const save = useMutation({
     mutationFn: () => {
       const body: Record<string, unknown> = {
@@ -207,12 +227,15 @@ export function UpstreamModelDialog({
         return;
       }
       if (row) {
-        setForm((prev) => ({
+        const backfill = (prev: UpstreamFormState): UpstreamFormState => ({
           ...prev,
           parameters: parametersOf(row),
           cost_input_per_1m: row.cost_input_per_1m ?? prev.cost_input_per_1m,
           cost_output_per_1m: row.cost_output_per_1m ?? prev.cost_output_per_1m,
-        }));
+        });
+        setForm(backfill);
+        // 兑入结果已落库：基线随之前移，Esc 不把兑入结果当未保存草稿。
+        setBaseline(backfill);
         setParamsSource(row.params_source === "models.dev" ? "models.dev" : "manual");
       }
       const summary = adoptSummary(result);
@@ -230,7 +253,8 @@ export function UpstreamModelDialog({
     setForm({ ...form, parameters: next });
   };
   return (
-    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+    <>
+    <Dialog open onOpenChange={(v) => { if (!v) requestClose(); }}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>{initial !== null ? "编辑上游模型" : "登记上游模型"}</DialogTitle>
@@ -309,12 +333,27 @@ export function UpstreamModelDialog({
           </label>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>取消</Button>
+          <Button variant="outline" onClick={requestClose}>取消</Button>
           <Button disabled={invalid || save.isPending} onClick={() => save.mutate()}>
             {save.isPending ? "保存中…" : "保存"}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {confirmDiscard ? (
+      <ConfirmDialog
+        open
+        onOpenChange={(v) => { if (!v) setConfirmDiscard(false); }}
+        title="放弃修改？"
+        description="弹窗内已改的模型字段（含能力参数与价格）不会写入，关闭后将丢失。"
+        confirmLabel="放弃修改"
+        destructive
+        onConfirm={() => {
+          setConfirmDiscard(false);
+          onClose();
+        }}
+      />
+    ) : null}
+    </>
   );
 }
