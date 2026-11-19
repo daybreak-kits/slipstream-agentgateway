@@ -38,6 +38,7 @@ import {
 } from "@/lib/playground";
 import type { PlaygroundParamsState } from "@/lib/playground-params";
 import { cn } from "@/lib/utils";
+import type { MyModelOut } from "@/types";
 
 const THINKING_OPTIONS: ThinkingMode[] = [
   "off",
@@ -56,6 +57,8 @@ export interface ParamsPanelProps {
   disabled: boolean;
   mockMode: boolean;
   onOpenModels: () => void;
+  /** W4-H：当前选中公开模型的参数合集（GET /admin/my/models，登录即可）；无数据时整块隐藏。 */
+  modelInfo?: MyModelOut | null;
 }
 
 function ParamLabel({
@@ -141,12 +144,63 @@ function ParamGroup({
 
 const inputClass = "h-7 px-1.5 text-2xs tnum";
 
+const CAPABILITY_LABELS: Array<[keyof MyModelOut["parameters"], string]> = [
+  ["tool_call", "工具调用"],
+  ["reasoning", "推理"],
+  ["attachment", "附件"],
+  ["structured_output", "结构化输出"],
+];
+
+/** W4-H：当前模型的登记参数（控制面只读元数据，不参与请求改写）。 */
+function ModelInfoBlock({ modelInfo }: { modelInfo: MyModelOut }) {
+  const p = modelInfo.parameters;
+  const capabilities = CAPABILITY_LABELS.filter(([key]) => p[key] === true).map(([, label]) => label);
+  return (
+    <ParamGroup title="模型参数" count={4}>
+      <div className="space-y-1.5 text-2xs leading-relaxed">
+        <div className="tnum">
+          上下文窗口 {p.max_input_tokens > 0 ? p.max_input_tokens.toLocaleString() : "未声明"}
+          <span className="mx-1.5 text-faint">·</span>
+          最大输出 {p.max_output_tokens > 0 ? p.max_output_tokens.toLocaleString() : "未声明"}
+        </div>
+        <div>
+          输入 {p.input_types.join(" / ")}
+          <span className="mx-1.5 text-faint">→</span>
+          输出 {p.output_types.join(" / ")}
+          {p.reasoning_level ? (
+            <>
+              <span className="mx-1.5 text-faint">·</span>
+              推理档位 {p.reasoning_level}
+            </>
+          ) : null}
+        </div>
+        {capabilities.length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {capabilities.map((label) => (
+              <Badge key={label} tone="info" className="text-2xs">
+                {label}
+              </Badge>
+            ))}
+          </div>
+        ) : null}
+        {modelInfo.sources.length > 1 ? (
+          <p className="text-faint">成员参数合集：{modelInfo.sources.join("、")}</p>
+        ) : null}
+        <p className="text-faint">
+          来自控制面「{modelInfo.model_type}」模型登记（models.dev / 手动维护），不改动请求。
+        </p>
+      </div>
+    </ParamGroup>
+  );
+}
+
 export function ParamsPanel({
   value,
   onChange,
   disabled,
   mockMode,
   onOpenModels,
+  modelInfo,
 }: ParamsPanelProps) {
   const patch = (next: Partial<PlaygroundParamsState>) => onChange({ ...value, ...next });
   const limit = maxOutputTokensFor(null);
@@ -164,6 +218,7 @@ export function ParamsPanel({
           </Badge>
         </CardHeader>
         <CardContent className="min-h-0 flex-1 space-y-4 overflow-y-auto pt-0">
+          {modelInfo ? <ModelInfoBlock modelInfo={modelInfo} /> : null}
           <ParamGroup title="系统" count={4}>
             <ParamField id="playground-system" label="system prompt" hintKey="systemPrompt">
               <Textarea

@@ -212,6 +212,10 @@ export const ENDPOINTS = {
   upstreamModelBatch: "/admin/upstream-models/batch",
   publicModelBatch: "/admin/public-models/batch",
   publicModelTargets: (id: string) => "/admin/public-models/" + id + "/targets",
+  // W4-H：models.dev 快照兑入（单条=编辑弹窗按钮，批量=工具条同步按钮）与用户侧模型参数
+  upstreamModelAdopt: (id: string) => "/admin/upstream-models/" + id + "/adopt-modelsdev",
+  upstreamModelsAdopt: "/admin/upstream-models/adopt-modelsdev",
+  myModels: "/admin/my/models",
 } as const;
 
 export const api = {

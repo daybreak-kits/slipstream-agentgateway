@@ -4,16 +4,58 @@ import { toast } from "sonner";
 
 import { Field } from "@/components/models/field";
 import { MODEL_TYPES, parametersOf, toInt, TYPE_SOURCE_LABELS } from "@/components/models/model-vocab";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { api, ENDPOINTS } from "@/lib/api";
-import type { ModelParameters, ModelTypeSource, Upstream, UpstreamModel } from "@/types";
+import { api, apiList, ENDPOINTS } from "@/lib/api";
+import type {
+  AdoptModelsDevResult,
+  ModelParameters,
+  ModelParamsSource,
+  ModelTypeSource,
+  Upstream,
+  UpstreamModel,
+} from "@/types";
 
 const INPUT_TYPES = ["text", "image", "audio", "video", "file"] as const;
 const OUTPUT_TYPES = ["text", "image", "audio", "embedding"] as const;
+
+/** W4-H：兑入结果的键 → 中文标签（toast 逐键可读）。 */
+const ADOPT_KEY_LABELS: Record<string, string> = {
+  "parameters.max_input_tokens": "最大输入词元",
+  "parameters.max_output_tokens": "最大输出词元",
+  "parameters.reasoning_level": "推理档位",
+  "parameters.input_types": "输入类型",
+  "parameters.output_types": "输出类型",
+  "parameters.tool_call": "工具调用",
+  "parameters.reasoning": "推理",
+  "parameters.attachment": "附件",
+  "parameters.structured_output": "结构化输出",
+  cost_input_per_1m: "输入成本/1M",
+  cost_output_per_1m: "输出成本/1M",
+};
+
+function adoptSummary(result: AdoptModelsDevResult): { title: string; description: string } {
+  const label = (key: string) => ADOPT_KEY_LABELS[key] ?? key;
+  const filled = (result.filled ?? []).map(label);
+  const skipped = Object.entries(result.results ?? {})
+    .filter(([key, status]) => status !== "filled" && !(result.filled ?? []).includes(key))
+    .map(([key, status]) =>
+      status === "skipped-no-fx" ? label(key) + "（缺美元汇率）" : label(key),
+    );
+  return {
+    title: filled.length > 0 ? `已兑入 ${filled.length} 项` : "没有需要兑入的空键",
+    description: [
+      filled.length > 0 ? "已填：" + filled.join("、") : "",
+      skipped.length > 0 ? "保留手改：" + skipped.join("、") : "",
+    ]
+      .filter(Boolean)
+      .join("；"),
+  };
+}
 
 /** 能力参数编辑块（旧系统 channel_models.parameters：两态布尔全量写入，0 表示未声明）。 */
 function ParameterFields({ value, onChange }: { value: ModelParameters; onChange: (next: ModelParameters) => void }) {
@@ -92,7 +134,8 @@ interface UpstreamFormState {
 
 /**
  * 上游模型编辑弹窗（W4-C 归一：模型管理页与上游详情页共用同一实现，字段全集）：
- * 所属上游 / 模型名 / 类型 / 类型来源 / 能力参数 / 入出进价与倍率（billing:cost 才可见）/ 启用。
+ * 所属上游 / 模型名 / 类型 / 类型来源 / 能力参数（W4-H 加「从 models.dev 兑入」与来源徽章）/
+ * 入出进价与倍率（billing:cost 才可见）/ 启用。
  * 成功后统一失效 ["upstream-models"]；调用方还有页面专属缓存要失效时用 onSaved。
  */
 export function UpstreamModelDialog({
@@ -105,6 +148,10 @@ export function UpstreamModelDialog({
   onSaved?: () => void;
 }) {
   const qc = useQueryClient();
+  // W4-H：参数块来源徽章（manual / models.dev），随兑入结果与手改实时更新。
+  const [paramsSource, setParamsSource] = useState<ModelParamsSource>(
+    initial?.params_source === "models.dev" ? "models.dev" : "manual",
+  );
   const [form, setForm] = useState<UpstreamFormState>({
     upstream_id: initial?.upstream_id ?? (upstreams[0]?.id ?? ""),
     name: initial?.name ?? "",
@@ -144,7 +191,44 @@ export function UpstreamModelDialog({
     },
     onError: (e: Error) => toast.error("保存失败", { description: e.message }),
   });
+  // W4-H：从 models.dev 兑入——只填空键（0/False/默认单模态/未定价），手改永不覆盖；
+  // 成功后取回最新行回填表单并更新来源徽章。
+  const adopt = useMutation({
+    mutationFn: async () => {
+      if (initial === null) throw new Error("新模型请先保存后再兑入");
+      const result = await api.post<AdoptModelsDevResult>(ENDPOINTS.upstreamModelAdopt(initial.id));
+      const page = await apiList<UpstreamModel>(ENDPOINTS.upstreamModels + "?page_size=200");
+      const row = page.items.find((item) => item.id === initial.id);
+      return { result, row };
+    },
+    onSuccess: ({ result, row }) => {
+      if (!result.matched) {
+        toast.warning("未命中 models.dev", { description: "快照里没有与该模型名匹配的条目（不做模糊猜测）" });
+        return;
+      }
+      if (row) {
+        setForm((prev) => ({
+          ...prev,
+          parameters: parametersOf(row),
+          cost_input_per_1m: row.cost_input_per_1m ?? prev.cost_input_per_1m,
+          cost_output_per_1m: row.cost_output_per_1m ?? prev.cost_output_per_1m,
+        }));
+        setParamsSource(row.params_source === "models.dev" ? "models.dev" : "manual");
+      }
+      const summary = adoptSummary(result);
+      if ((result.filled ?? []).length > 0) toast.success(summary.title, { description: summary.description });
+      else toast.info(summary.title, { description: summary.description });
+      void qc.invalidateQueries({ queryKey: ["upstream-models"] });
+      onSaved?.();
+    },
+    onError: (e: Error) => toast.error("兑入失败", { description: e.message }),
+  });
   const invalid = form.name.trim() === "" || (initial === null && form.upstream_id === "") || markupInvalid;
+  const patchParameters = (next: ModelParameters) => {
+    // 弹窗内的人工编辑即时摘掉 models.dev 徽章（服务端以实际是否改动为准）。
+    setParamsSource("manual");
+    setForm({ ...form, parameters: next });
+  };
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className="max-w-2xl">
@@ -183,9 +267,27 @@ export function UpstreamModelDialog({
               </Select>
             </Field>
           </div>
-          <Field label="能力参数" hint="旧系统 channel_models.parameters：两态布尔全量写入，0 表示未声明">
-            <ParameterFields value={form.parameters} onChange={(next) => setForm({ ...form, parameters: next })} />
-          </Field>
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium">能力参数</span>
+              <Badge tone={paramsSource === "models.dev" ? "info" : "neutral"}>
+                {paramsSource === "models.dev" ? "来源 models.dev" : "来源 手动"}
+              </Badge>
+              {initial !== null ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="ml-auto h-7 px-2 text-2xs"
+                  disabled={adopt.isPending}
+                  onClick={() => adopt.mutate()}
+                >
+                  {adopt.isPending ? "兑入中…" : "从 models.dev 兑入"}
+                </Button>
+              ) : null}
+            </div>
+            <p className="text-2xs text-faint">旧系统 channel_models.parameters：两态布尔全量写入，0 表示未声明；兑入只填空键，手改值永不覆盖。</p>
+            <ParameterFields value={form.parameters} onChange={patchParameters} />
+          </div>
           {canCost ? (
             <div className="grid grid-cols-3 gap-2 rounded-md border border-border p-2">
               <Field label="输入成本 / 1M" hint="元，留空 = 未定价">

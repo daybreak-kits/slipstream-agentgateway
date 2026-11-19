@@ -1,6 +1,6 @@
 import type {
   AdminAccount, ApiKey, AuditLog, AvailabilityRule, ChargePrice, ChargeEntry, ConfigRevision,
-  CostEntry, GuardrailMatrix, McpServersInfo, ModelTarget, OverviewStats,
+  CostEntry, GuardrailMatrix, McpServersInfo, ModelTarget, MyModelOut, OverviewStats,
   PolicySnapshot, PublicModel, PublicModelPrice, SettingItem, TransformPreviewResult, UnpricedList, Upstream,
   UpstreamModel, UpstreamPrice, UpstreamTransforms, UserPreferences, UserTreeNode, Vendor,
 } from "../types";
@@ -84,6 +84,42 @@ const publicModels: PublicModel[] = [
   { id: "pm_01", name: "glm-5.3", routing_mode: "failover", note: "主力对话", enabled: true, created_at_ms: Date.parse("2026-11-05T10:00:00") },
   { id: "pm_02", name: "glm-flash", routing_mode: "weighted", note: "轻量对话", enabled: true, created_at_ms: Date.parse("2026-11-06T10:00:00") },
   { id: "pm_03", name: "embed-v4", routing_mode: "conditional", note: null, enabled: false, created_at_ms: Date.parse("2026-11-07T10:00:00") },
+];
+
+/** W4-H：GET /admin/my/models 的演示数据（启用公开模型 → 成员参数合集，无金额键）。 */
+const myModels: MyModelOut[] = [
+  {
+    name: "glm-5.3",
+    model_type: "chat",
+    sources: ["glm-5.3", "deepseek/v5-chat"],
+    parameters: {
+      max_input_tokens: 200_000,
+      max_output_tokens: 128_000,
+      reasoning_level: "high",
+      input_types: ["text", "image"],
+      output_types: ["text"],
+      tool_call: true,
+      reasoning: true,
+      attachment: false,
+      structured_output: true,
+    },
+  },
+  {
+    name: "glm-flash",
+    model_type: "chat",
+    sources: ["glm-5.3-flash"],
+    parameters: {
+      max_input_tokens: 1_000_000,
+      max_output_tokens: 131_072,
+      reasoning_level: "",
+      input_types: ["text"],
+      output_types: ["text"],
+      tool_call: true,
+      reasoning: false,
+      attachment: false,
+      structured_output: false,
+    },
+  },
 ];
 
 const modelTargets: ModelTarget[] = [
@@ -657,6 +693,7 @@ const routes: Array<[RegExp, unknown]> = [
   [/^\/admin\/users$/, mockUsers],
   [/^\/admin\/settings\/schema$/, settingsSchema],
   [/^\/admin\/settings$/, { items: settings }],
+  [/^\/admin\/my\/models$/, myModels],
 ];
 
 const PREVIEW_BODY = JSON.stringify({

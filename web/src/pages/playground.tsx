@@ -26,7 +26,7 @@ import {
   type SessionState,
 } from "@/components/playground/sessions";
 import { Button } from "@/components/ui/button";
-import { api } from "@/lib/api";
+import { api, ENDPOINTS } from "@/lib/api";
 import { formatDuration } from "@/lib/format";
 import { AUTH_ME_QUERY_KEY, fetchMe } from "@/lib/auth";
 import { useMock } from "@/lib/mock";
@@ -48,6 +48,7 @@ import {
   type PlaygroundMessage,
   type PlaygroundUsage,
 } from "@/lib/playground";
+import type { MyModelOut } from "@/types";
 
 /** 后端 /admin/logs 只接受 25/50/100/200 四档 page_size（api deps.page_params）。 */
 const USAGE_LOG_PAGE_SIZE = 25;
@@ -172,6 +173,18 @@ export function PlaygroundPage() {
     queryFn: fetchMe,
     staleTime: 60_000,
   });
+
+  // W4-H：登录用户可见的启用公开模型参数（/admin/my/models，无金额键）；失败静默隐藏。
+  const myModelsQuery = useQuery({
+    queryKey: ["my-models"],
+    queryFn: () => api.get<MyModelOut[]>(ENDPOINTS.myModels),
+    staleTime: 60_000,
+    retry: false,
+  });
+  const activeModelInfo = useMemo(
+    () => myModelsQuery.data?.find((item) => item.name === params.model) ?? null,
+    [myModelsQuery.data, params.model],
+  );
 
   const permissions = meQuery.data?.permissions ?? [];
   const canSeeCost =
@@ -709,6 +722,7 @@ export function PlaygroundPage() {
           disabled={streaming}
           mockMode={useMock}
           onOpenModels={() => setModelDialogOpen(true)}
+          modelInfo={activeModelInfo}
         />
       </aside>
 

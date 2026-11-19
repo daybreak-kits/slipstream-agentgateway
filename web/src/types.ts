@@ -164,6 +164,48 @@ export interface UpstreamModel {
   cost_input_per_1m?: string | null;
   cost_output_per_1m?: string | null;
   markup?: string;
+  /** W4-H：参数块来源（manual=人工录入 / models.dev=最近一次兑入填过空键） */
+  params_source?: ModelParamsSource;
+}
+
+/** W4-H：参数块来源徽章。 */
+export type ModelParamsSource = "manual" | "models.dev";
+
+/** W4-H：POST /admin/upstream-models/{id}/adopt-modelsdev 单条兑入结果（逐键状态）。 */
+export interface AdoptModelsDevResult {
+  id: string;
+  name: string;
+  matched: boolean;
+  /** filled=已填空键 / nothing-to-fill=无空键可填 / no-match=未命中 models.dev */
+  status: string;
+  provider?: string;
+  model?: string;
+  /** 本次是否真的刷新了快照（false=拉取失败，降级用库内快照） */
+  refreshed?: boolean;
+  /** 逐键结果：键（parameters.xxx / cost_input_per_1m …）→ filled / skipped-manual / skipped-no-fx */
+  results?: Record<string, string>;
+  filled?: string[];
+  params_source?: ModelParamsSource;
+}
+
+/** W4-H：POST /admin/upstream-models/adopt-modelsdev 批量同步汇总。 */
+export interface AdoptModelsDevBatchResult {
+  refreshed: boolean;
+  snapshot?: { providers?: number; models?: number; fetched_at_ms?: number };
+  total: number;
+  matched: number;
+  filled_models: number;
+  filled_keys: number;
+  no_match: number;
+  items: AdoptModelsDevResult[];
+}
+
+/** W4-H：GET /admin/my/models 行（登录用户可见的启用公开模型参数，无金额键）。 */
+export interface MyModelOut {
+  name: string;
+  model_type: string;
+  parameters: ModelParameters;
+  sources: string[];
 }
 
 export interface ModelTarget {

@@ -34,7 +34,13 @@ import { fmtCny, fmtInt, fmtMarkup, fmtPricePerM, formatCount } from "@/lib/form
 import { ACTION_ICONS } from "@/lib/icons";
 import { usePermissions } from "@/lib/permissions";
 import { SELECT_ALL_VALUE } from "@/lib/select-sentinels";
-import type { PublicModel, RoutingMode, Upstream, UpstreamModel } from "@/types";
+import type {
+  AdoptModelsDevBatchResult,
+  PublicModel,
+  RoutingMode,
+  Upstream,
+  UpstreamModel,
+} from "@/types";
 
 /** 周期冷却窗口语义增强（窗口期内启用=仅跳过当前窗口）待后端合入；本页文案按现行为描述。 */
 const ENABLE_SEMANTICS_NOTE =
@@ -244,6 +250,25 @@ function UpstreamTab() {
     onError: (e: Error) => toast.error("删除失败", { description: e.message }),
   });
 
+  // W4-H：工具条「同步 models.dev」——批量兑入端点（只填空键，手改不覆盖）。
+  const syncModelsDev = useMutation({
+    mutationFn: () => api.post<AdoptModelsDevBatchResult>(ENDPOINTS.upstreamModelsAdopt),
+    onSuccess: (result) => {
+      const source = result.refreshed ? "已拉取 models.dev 快照" : "拉取失败，使用库内快照";
+      if (result.filled_models > 0) {
+        toast.success("已兑入 " + result.filled_models + " 个模型", {
+          description: source + "；共填 " + result.filled_keys + " 个键，" + result.no_match + " 个未命中（手改值未覆盖）",
+        });
+      } else {
+        toast.info("没有需要兑入的空键", {
+          description: source + "；" + result.matched + " 个命中但无空键，" + result.no_match + " 个未命中",
+        });
+      }
+      void qc.invalidateQueries({ queryKey: ["upstream-models"] });
+    },
+    onError: (e: Error) => toast.error("同步 models.dev 失败", { description: e.message }),
+  });
+
   // 价格单元格（W4-C）：进价 2 位小数（<0.01 升 4 位）；入出均未配置显示灰字「未设置」（同参数列「未声明」样式）。
   const priceCell = (row: UpstreamModel) => {
     const cache = cachePrices.get(row.name);
@@ -399,25 +424,40 @@ function UpstreamTab() {
     setBatchDelete(false);
   };
 
-  const toolbarEnd = canWrite && selected.size > 0 ? (
+  // W4-H：「同步 models.dev」是常驻工具条动作（不依赖勾选），与批量按钮并存。
+  const toolbarEnd = canWrite ? (
     <>
-      <span className="text-2xs text-faint">已选 <span className="tnum font-medium text-title">{selected.size}</span></span>
-      <Button variant="outline" size="sm" disabled={batch.isPending} onClick={() => runBatch("enable")}>
-        <ACTION_ICONS.enable className="h-3.5 w-3.5" /> 批量启用
-      </Button>
-      <Button variant="outline" size="sm" disabled={batch.isPending} onClick={() => runBatch("disable")}>
-        <ACTION_ICONS.disable className="h-3.5 w-3.5" /> 批量关闭
-      </Button>
-      {canCost ? (
-        <Button variant="outline" size="sm" onClick={() => setBatchPrice(true)}>
-          <ACTION_ICONS.batchPrice className="h-3.5 w-3.5" /> 批量改价
-        </Button>
+      {selected.size > 0 ? (
+        <>
+          <span className="text-2xs text-faint">已选 <span className="tnum font-medium text-title">{selected.size}</span></span>
+          <Button variant="outline" size="sm" disabled={batch.isPending} onClick={() => runBatch("enable")}>
+            <ACTION_ICONS.enable className="h-3.5 w-3.5" /> 批量启用
+          </Button>
+          <Button variant="outline" size="sm" disabled={batch.isPending} onClick={() => runBatch("disable")}>
+            <ACTION_ICONS.disable className="h-3.5 w-3.5" /> 批量关闭
+          </Button>
+          {canCost ? (
+            <Button variant="outline" size="sm" onClick={() => setBatchPrice(true)}>
+              <ACTION_ICONS.batchPrice className="h-3.5 w-3.5" /> 批量改价
+            </Button>
+          ) : null}
+          <Button variant="ghost" size="sm" className="text-danger-text" disabled={batch.isPending} onClick={() => setBatchDelete(true)}>
+            <ACTION_ICONS.delete className="h-3.5 w-3.5" /> 批量删除
+          </Button>
+          <Button variant="ghost" size="sm" disabled={batch.isPending} onClick={() => setSelected(new Set())}>
+            <ACTION_ICONS.clear className="h-3.5 w-3.5" /> 清除选择
+          </Button>
+        </>
       ) : null}
-      <Button variant="ghost" size="sm" className="text-danger-text" disabled={batch.isPending} onClick={() => setBatchDelete(true)}>
-        <ACTION_ICONS.delete className="h-3.5 w-3.5" /> 批量删除
-      </Button>
-      <Button variant="ghost" size="sm" disabled={batch.isPending} onClick={() => setSelected(new Set())}>
-        <ACTION_ICONS.clear className="h-3.5 w-3.5" /> 清除选择
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={syncModelsDev.isPending}
+        title="拉取 models.dev 快照并为所有上游模型填空键（手改值不覆盖）"
+        onClick={() => syncModelsDev.mutate()}
+      >
+        <ACTION_ICONS.refresh className="h-3.5 w-3.5" />
+        {syncModelsDev.isPending ? "同步中…" : "同步 models.dev"}
       </Button>
     </>
   ) : null;
