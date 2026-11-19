@@ -180,12 +180,18 @@ def _apply_cost_fields(row: UpstreamModelORM, payload) -> None:
 # ---------------------------------------------------------------- upstream models
 
 
-@router.post("/admin/upstream-models", status_code=201)
+@router.post(
+    "/admin/upstream-models",
+    status_code=201,
+    dependencies=[Depends(require("billing:cost"))],
+)
 def create_upstream_model(
     payload: UpstreamModelCreate,
     session: Session = Depends(session_of),
     principal=Depends(require("upstream_models:write")),
 ) -> dict:
+    """Create a model; cost/markup ride the same payload, so the billing:cost gate
+    mirrors the PATCH route (P2: symmetric write permission for price fields)."""
     row = crud.create_upstream_model(
         session,
         upstream_id=payload.upstream_id,

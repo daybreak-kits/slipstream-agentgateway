@@ -488,7 +488,7 @@ AES-GCM 密文 + sk-...abcd 掩码。
 | GET | /admin/usage/events | 请求事件（分页），含 tokens/latency/status |
 | GET | /admin/usage/events/{event_id} | 单条事件详情 |
 | GET | /admin/usage/ledger | 账本分录（charge/topup/refund/adjust） |
-| GET | /admin/usage/daily | 按日聚合（user_daily / cost_daily） |
+| GET | /admin/usage/daily | 按日聚合（user_daily） |
 | POST | /admin/usage/pull | 立即触发 AG SQLite → usage_events 增量拉取（运维按钮） |
 
 ### 4.3 价格与对账
@@ -500,7 +500,7 @@ AES-GCM 密文 + sk-...abcd 掩码。
 | GET | /admin/prices/export | upstream_models:read | **价目 JSON 一键导出**（ADR-020，权威=模型行）：见下方「价目 JSON 导入/导出」 |
 | POST | /admin/prices/import | upstream_models:write | **价目 JSON 整体导入**（ADR-020/023 dry-run，全部通过才落库）：见下方「价目 JSON 导入/导出」 |
 | GET | /admin/unpriced | 缺价清单，`{cost:[...], charge:[...]}` 两个数组（demo 各 3 条） |
-| POST | /admin/unpriced/recompute | 补价后重算：{resolved, remaining} |
+| POST | /admin/unpriced/recompute | 补价后重算：`{cost_entries, charge_entries, recomputed}` |
 | GET | /admin/cost/entries | 上游成本分录（status: ok\|unpriced） |
 | GET | /admin/charge/entries | 用户计费分录（status: ok\|unpriced\|free） |
 | GET/PUT | /admin/fx | 汇率快照（USD→CNY，rate_micro） |
@@ -601,7 +601,7 @@ AES-GCM 密文 + sk-...abcd 掩码。
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | /admin/bills/my-spend?range=30d&scope=self\|subtree&user_id=&tz= | billing:spend（subtree 另需 billing:subtree，普通用户 403）。返回 {range, bucket, timezone, from_ms, to_ms, scope, all_users, user:{id,name,role}\|null, summary:{charges/costs/margins per currency + report_currency 汇总}, series:[{start_ms,label,...}], by_user:[...], by_model:[...]}——登录者本人节点或可见子树的花费/成本/毛利聚合；`user_id` 用于子树页切换分支（须可见）。比值/占比由前端计算 |
-| GET | /admin/billing/ledger?page_size=&offset= | ledger:read。**逐请求金额台账**（裸数组）：每条用量事件的 cost（成本账）/ charge（花费账）/ margin = charge - cost / markup = charge÷cost（cost 为 0 或未配价时 null）；按 created_at_ms 升序；金额字段过 §0.5 字段级过滤，无 billing:cost 时 cost/margin 键缺失 |
+| GET | /admin/billing/ledger?page_size=&offset= | ledger:read。**逐请求金额台账**（裸数组）：每条用量事件的 cost（成本账）/ charge（花费账）/ margin = charge - cost / markup = charge÷cost（cost 为 0 或未配价时 null）；按 created_at_ms 降序；金额字段过 §0.5 字段级过滤，无 billing:cost 时 cost/margin 键缺失 |
 
 ## 5. 前端旧路径 → 契约基准（t7 修复清单）
 
