@@ -4,12 +4,29 @@
 import { ApiError } from "@/lib/api";
 import type { Upstream, UpstreamProbe } from "@/types";
 
-/** 后端 D：vendor_id 可空；列表/详情带 has_api_key；详情带 api_style_source。 */
+/** 后端 D：vendor_id 可空；详情带 api_style_source。ADR-026 后 has_api_key 只反映
+ *  已退役的镜像列（恒为 false），前端不再读取。 */
 export type UpstreamRow = Omit<Upstream, "vendor_id"> & {
   vendor_id?: string | null;
   has_api_key?: boolean;
   api_style_source?: string;
 };
+
+/** 逐把测试（POST /{id}/keys/test，ADR-026 ③）的单把结果。 */
+export interface KeyTestItem {
+  key_id: string;
+  ok: boolean;
+  status_code: number;
+  latency_ms: number;
+  error: string;
+}
+
+/** 逐把测试响应：每把密钥一条结果，同步落库到各密钥行。 */
+export interface KeyTestResult {
+  upstream_id: string;
+  api_style: string;
+  items: KeyTestItem[];
+}
 
 /** 协议探测单步（后端 C probe_steps 的项，l05_service/upstream_ops.detect_api_style）。 */
 export interface ProbeStep {
@@ -38,7 +55,7 @@ export interface ProbeResultView {
   probe_steps?: ProbeStep[];
 }
 
-/** 新建上游时的草稿（编辑态名称/厂商只读，见 api-contract §3.2 PATCH 范围）。 */
+/** 新建上游时的草稿（名称已解锁随 PATCH 提交；厂商仍只读，见 api-contract §3.2）。 */
 export interface UpstreamDraft {
   name: string;
   /** "" = 未分组（不传 vendor_id） */
@@ -108,9 +125,8 @@ export function probeKindLabel(kind?: string | null): string {
   return "探测";
 }
 
-/** 鉴权方式按已识别协议人话化；无密钥如实写匿名。 */
-export function authStyleLabel(protocol?: string | null, hasApiKey?: boolean): string {
-  if (!hasApiKey) return "匿名（未配置密钥）";
+/** 鉴权方式按已识别协议人话化（ADR-026：密钥逐把管理，匿名探测分支已删除）。 */
+export function authStyleLabel(protocol?: string | null): string {
   switch (protocol) {
     case "gemini":
       return "x-goog-api-key 请求头";

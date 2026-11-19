@@ -1,6 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -30,6 +29,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableWrap, TD, TH, THead, TR } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { api, ENDPOINTS } from "@/lib/api";
+import { ACTION_ICONS } from "@/lib/icons";
 import { formatDateTime, useTimezone } from "@/lib/time";
 import { parseKeyLines, type PendingKey } from "./shared";
 import type { UpstreamKey, UpstreamKeyList } from "@/types";
@@ -89,21 +89,18 @@ function BatchPasteDialog({
   );
 }
 
-/** 单条添加弹窗（两态共用）：备注 + 密钥（+ 设为主密钥，仅已存上游）。 */
+/** 单条添加弹窗（两态共用）：备注 + 密钥；密钥平权，无主备概念（ADR-026）。 */
 function AddKeyDialog({
-  withPrimary,
   busy,
   onConfirm,
   onClose,
 }: {
-  withPrimary: boolean;
   busy: boolean;
-  onConfirm: (label: string, apiKey: string, setPrimary: boolean) => void;
+  onConfirm: (label: string, apiKey: string) => void;
   onClose: () => void;
 }) {
   const [label, setLabel] = useState("");
   const [apiKey, setApiKey] = useState("");
-  const [setPrimary, setSetPrimary] = useState(false);
   const ready = apiKey.trim() !== "";
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -127,18 +124,10 @@ function AddKeyDialog({
               placeholder="仅提交后保存为密文"
             />
           </div>
-          {withPrimary ? (
-            <label className="flex items-center gap-2 text-2sm text-body">
-              <Checkbox checked={setPrimary} onCheckedChange={(checked) => setSetPrimary(checked === true)} />
-              添加后设为主密钥
-            </label>
-          ) : (
-            <p className="text-2xs text-faint">保存上游渠道时，第一把密钥自动成为主密钥。</p>
-          )}
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>取消</Button>
-          <Button disabled={!ready || busy} onClick={() => onConfirm(label.trim(), apiKey.trim(), setPrimary)}>
+          <Button disabled={!ready || busy} onClick={() => onConfirm(label.trim(), apiKey.trim())}>
             {busy ? "保存中…" : "保存"}
           </Button>
         </DialogFooter>
@@ -151,20 +140,70 @@ interface KeyRowModel {
   id: string;
   label: string;
   masked: string;
-  isPrimary: boolean;
   createdText: string;
+  /** 已存行才有：最近一次逐把测试；pending 草稿行恒为 null */
+  lastTest: UpstreamKey["last_test"];
+  lastTestAtMs: number;
   pending?: boolean;
 }
 
-function KeysTable({ rows, actions }: { rows: KeyRowModel[]; actions: (row: KeyRowModel) => ReactNode }) {
+/** 逐把测试结果（ADR-026 ③）：失效标红 danger、成功标绿、未测中性，含测试时间。 */
+function KeyTestCell({ row }: { row: KeyRowModel }) {
+  const { mode: timezone } = useTimezone();
+  if (row.pending || row.lastTest === null || row.lastTest === undefined) {
+    return <Badge tone="neutral">未测试</Badge>;
+  }
+  const testedAt = row.lastTestAtMs > 0 ? formatDateTime(row.lastTestAtMs, timezone) : "";
+  if (row.lastTest.ok) {
+    return (
+      <span className="space-y-0.5">
+        <Badge tone="success">HTTP {row.lastTest.status_code} · {row.lastTest.latency_ms} ms</Badge>
+        {testedAt ? <p className="text-2xs text-faint tnum">{testedAt}</p> : null}
+      </span>
+    );
+  }
+  const reason = row.lastTest.error || (row.lastTest.status_code > 0 ? "HTTP " + row.lastTest.status_code : "连接失败");
   return (
-    <TableWrap className="rounded-lg border border-border bg-surface">
+    <span className="space-y-0.5">
+      <Badge tone="danger">{reason}</Badge>
+      {testedAt ? <p className="text-2xs text-danger-text tnum">{testedAt}</p> : null}
+    </span>
+  );
+}
+
+function KeysTable({
+  rows,
+  selected,
+  onToggle,
+  onToggleAll,
+  selectable,
+  actions,
+}: {
+  rows: KeyRowModel[];
+  selected: Set<string>;
+  onToggle: (id: string) => void;
+  onToggleAll: (checked: boolean) => void;
+  selectable: boolean;
+  actions: (row: KeyRowModel) => ReactNode;
+}) {
+  const allSelected = selectable && rows.length > 0 && rows.every((row) => selected.has(row.id));
+  return (
+    <TableWrap>
       <Table>
         <THead>
           <tr>
+            {selectable ? (
+              <TH className="w-8">
+                <Checkbox
+                  checked={allSelected}
+                  onCheckedChange={(checked) => onToggleAll(checked === true)}
+                  aria-label="全选密钥"
+                />
+              </TH>
+            ) : null}
             <TH>备注</TH>
             <TH>密钥</TH>
-            <TH>状态</TH>
+            <TH>测试结果</TH>
             <TH>创建时间</TH>
             <TH>操作</TH>
           </tr>
@@ -172,6 +211,15 @@ function KeysTable({ rows, actions }: { rows: KeyRowModel[]; actions: (row: KeyR
         <tbody>
           {rows.map((row) => (
             <TR key={row.id}>
+              {selectable ? (
+                <TD>
+                  <Checkbox
+                    checked={selected.has(row.id)}
+                    onCheckedChange={() => onToggle(row.id)}
+                    aria-label={"选择密钥 " + (row.label || row.masked)}
+                  />
+                </TD>
+              ) : null}
               <TD>
                 <span className="font-medium text-title">{row.label || "未命名"}</span>
                 {row.pending ? <Badge tone="warning">待保存</Badge> : null}
@@ -179,7 +227,7 @@ function KeysTable({ rows, actions }: { rows: KeyRowModel[]; actions: (row: KeyR
               <TD>
                 <span className="tnum font-mono text-2xs">{row.masked}</span>
               </TD>
-              <TD>{row.isPrimary ? <Badge tone="success">主密钥</Badge> : <Badge tone="neutral">备用</Badge>}</TD>
+              <TD><KeyTestCell row={row} /></TD>
               <TD>
                 <span className="tnum text-2xs text-body">{row.createdText}</span>
               </TD>
@@ -199,6 +247,7 @@ function PanelHeader({
   onAdd,
   onBatch,
   addDisabled,
+  batchDelete,
 }: {
   count: number;
   limit: number;
@@ -206,22 +255,26 @@ function PanelHeader({
   onAdd: () => void;
   onBatch: () => void;
   addDisabled: boolean;
+  /** 已存面板才有：勾选后可批量删除 */
+  batchDelete?: ReactNode;
 }) {
+  const AddIcon = ACTION_ICONS.add;
   return (
     <div className="flex flex-wrap items-start justify-between gap-2">
       <p className="text-2xs text-faint">{hint}</p>
       <div className="flex items-center gap-2">
+        {batchDelete}
         <span className="text-2xs text-faint tnum">{count} / {limit} 把</span>
         <Button variant="outline" size="sm" disabled={addDisabled} onClick={onBatch}>批量粘贴</Button>
         <Button size="sm" disabled={addDisabled} onClick={onAdd}>
-          <Plus className="h-3.5 w-3.5" /> 添加密钥
+          <AddIcon className="h-3.5 w-3.5" /> 添加密钥
         </Button>
       </div>
     </div>
   );
 }
 
-/** 已保存上游的源密钥面板：服务端密钥行的增删改 + 轮换主密钥。 */
+/** 已保存上游的源密钥面板：密钥平权（ADR-026）——重命名/删除/逐把测试/勾选批量删除。 */
 export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
   const qc = useQueryClient();
   const { mode: timezone } = useTimezone();
@@ -234,11 +287,11 @@ export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
 
   const [adding, setAdding] = useState(false);
   const [batching, setBatching] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [renaming, setRenaming] = useState<UpstreamKey | null>(null);
   const [renameLabel, setRenameLabel] = useState("");
-  const [rotating, setRotating] = useState(false);
-  const [rotateKey, setRotateKey] = useState("");
   const [deleting, setDeleting] = useState<UpstreamKey | null>(null);
+  const [batchDeleteConfirm, setBatchDeleteConfirm] = useState(false);
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ["upstream-keys", upstreamId] });
@@ -247,11 +300,10 @@ export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
   };
 
   const add = useMutation({
-    mutationFn: (vars: { label: string; apiKey: string; setPrimary: boolean }) =>
+    mutationFn: (vars: { label: string; apiKey: string }) =>
       api.post<UpstreamKey>(ENDPOINTS.upstreamKeys(upstreamId), {
         label: vars.label,
         api_key: vars.apiKey,
-        set_primary: vars.setPrimary,
       }),
     onSuccess: () => {
       toast.success("密钥已添加");
@@ -310,25 +362,6 @@ export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
     },
   });
 
-  const rotate = useMutation({
-    mutationFn: () => api.post<UpstreamKey>(ENDPOINTS.rotateUpstreamKey(upstreamId), { api_key: rotateKey.trim() }),
-    onSuccess: () => {
-      toast.success("主密钥已轮换", { description: "行数不变，旧明文立即失效。" });
-      setRotating(false);
-      setRotateKey("");
-      refresh();
-    },
-  });
-
-  const promote = useMutation({
-    mutationFn: (key: UpstreamKey) =>
-      api.patch<UpstreamKey>(ENDPOINTS.upstreamKey(upstreamId, key.id), { is_primary: true }),
-    onSuccess: () => {
-      toast.success("已设为主密钥", { description: "数据面下一个配置周期起使用这把密钥。" });
-      refresh();
-    },
-  });
-
   const del = useMutation({
     mutationFn: (key: UpstreamKey) => api.del<{ deleted: string }>(ENDPOINTS.upstreamKey(upstreamId, key.id)),
     onSuccess: () => {
@@ -338,24 +371,78 @@ export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
     },
   });
 
+  /** 逐把测试：一次触发本上游全部密钥行，结果落库并回填每行。 */
+  const testKeys = useMutation({
+    mutationFn: () => api.post<{ items: Array<{ key_id: string; ok: boolean }> }>(ENDPOINTS.upstreamKeysTest(upstreamId)),
+    onSuccess: (result) => {
+      const okCount = result.items.filter((item) => item.ok).length;
+      const failCount = result.items.length - okCount;
+      const description = "成功 " + okCount + " 把" + (failCount > 0 ? " · 失效 " + failCount + " 把（已标红）" : "");
+      if (failCount > 0) toast.warning("逐把测试完成", { description });
+      else toast.success("逐把测试完成", { description });
+      refresh();
+    },
+  });
+
+  const batchDelete = useMutation({
+    mutationFn: () =>
+      api.post<{ deleted: number; items: Array<{ key_id: string; ok: boolean; error?: string }> }>(
+        ENDPOINTS.upstreamKeysBatchDelete(upstreamId),
+        { ids: [...selected] },
+      ),
+    onSuccess: (result) => {
+      const failedItems = result.items.filter((item) => !item.ok);
+      const parts = ["删除 " + result.deleted + " 把"];
+      if (failedItems.length > 0) {
+        const firstError = failedItems[0]?.error ?? "失败";
+        parts.push("未删 " + failedItems.length + " 把（" + firstError + "）");
+        toast.warning("批量删除完成", { description: parts.join(" · ") });
+      } else {
+        toast.success("批量删除完成", { description: parts.join(" · ") });
+      }
+      setSelected(new Set());
+      setBatchDeleteConfirm(false);
+      refresh();
+    },
+  });
+
+  const toggle = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   const rows: KeyRowModel[] = keys.map((key) => ({
     id: key.id,
     label: key.label,
     masked: key.masked,
-    isPrimary: key.is_primary,
     createdText: formatDateTime(key.created_at_ms, timezone),
+    lastTest: key.last_test,
+    lastTestAtMs: key.last_test_at_ms,
     pending: false,
   }));
+
+  const selectedCount = selected.size;
+  const DeleteIcon = ACTION_ICONS.delete;
+  const batchDeleteButton = selectedCount > 0 ? (
+    <Button variant="danger" size="sm" onClick={() => setBatchDeleteConfirm(true)}>
+      <DeleteIcon className="h-3.5 w-3.5" /> 删除选中 {selectedCount} 把
+    </Button>
+  ) : null;
 
   return (
     <div className="space-y-2">
       <PanelHeader
         count={keys.length}
         limit={limit}
-        hint="数据面只取用主密钥；备用密钥先「设为主密钥」再轮换。明文只在提交时传输，控制台不回显。"
+        hint="每把密钥=一个独立 AG 上游，同层概率分流（P2C）；失效密钥标红。明文只在提交时传输，控制台不回显。"
         onAdd={() => setAdding(true)}
         onBatch={() => setBatching(true)}
         addDisabled={keys.length >= limit}
+        batchDelete={batchDeleteButton}
       />
       {q.isPending ? (
         <Skeleton className="h-24 w-full" />
@@ -365,24 +452,25 @@ export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
           <Button variant="outline" size="sm" onClick={() => void q.refetch()}>重试</Button>
         </div>
       ) : rows.length === 0 ? (
-        <p className="py-6 text-center text-2sm text-faint">还没有密钥；测试连接与获取模型都会用到第一把主密钥。</p>
+        <p className="py-6 text-center text-2sm text-faint">还没有密钥；至少保留一把密钥后才能保存与调用。</p>
       ) : (
         <KeysTable
           rows={rows}
+          selected={selected}
+          onToggle={toggle}
+          onToggleAll={(checked) => setSelected(checked ? new Set(rows.map((row) => row.id)) : new Set())}
+          selectable
           actions={(row) => (
             <div className="flex flex-wrap gap-1">
-              {row.isPrimary ? (
-                <Button variant="outline" size="dense" onClick={() => setRotating(true)}>轮换</Button>
-              ) : (
-                <Button
-                  variant="outline"
-                  size="dense"
-                  disabled={promote.isPending}
-                  onClick={() => promote.mutate(keys.find((key) => key.id === row.id)!)}
-                >
-                  设为主密钥
-                </Button>
-              )}
+              <Button
+                variant="outline"
+                size="dense"
+                disabled={testKeys.isPending}
+                title="对本上游全部密钥逐把发起最小鉴权请求"
+                onClick={() => testKeys.mutate()}
+              >
+                {testKeys.isPending ? "测试中…" : "测试"}
+              </Button>
               <Button
                 variant="ghost"
                 size="dense"
@@ -403,9 +491,8 @@ export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
 
       {adding ? (
         <AddKeyDialog
-          withPrimary
           busy={add.isPending}
-          onConfirm={(label, apiKey, setPrimary) => add.mutate({ label, apiKey, setPrimary })}
+          onConfirm={(label, apiKey) => add.mutate({ label, apiKey })}
           onClose={() => setAdding(false)}
         />
       ) : null}
@@ -439,31 +526,6 @@ export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={rotating} onOpenChange={(open) => { if (!open) { setRotating(false); setRotateKey(""); } }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>轮换主密钥</DialogTitle>
-            <DialogDescription>用新明文替换当前主密钥；行数不变，旧值立即失效。</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-1">
-            <Label htmlFor="up-key-rotate">新 API Key</Label>
-            <Input
-              id="up-key-rotate"
-              type="password"
-              value={rotateKey}
-              onChange={(e) => setRotateKey(e.target.value)}
-              placeholder="仅提交后保存为密文"
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setRotating(false)}>取消</Button>
-            <Button disabled={rotateKey.trim() === "" || rotate.isPending} onClick={() => rotate.mutate()}>
-              {rotate.isPending ? "轮换中…" : "轮换"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       <AlertDialog
         open={deleting !== null}
         onOpenChange={(open) => { if (!open) setDeleting(null); }}
@@ -472,7 +534,7 @@ export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
           <AlertDialogHeader>
             <AlertDialogTitle>删除密钥 {deleting?.label || deleting?.masked}？</AlertDialogTitle>
             <AlertDialogDescription>
-              删除不可撤销；至少保留一把密钥（最后一把会被拒绝）。删除主密钥后最早添加的备用密钥自动接任。
+              删除不可撤销；至少保留一把密钥（最后一把会被拒绝）。被删除密钥展开的 AG 上游将随下一次配置下发移除。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -486,11 +548,34 @@ export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <AlertDialog
+        open={batchDeleteConfirm}
+        onOpenChange={(open) => { if (!open) setBatchDeleteConfirm(false); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>批量删除 {selectedCount} 把密钥？</AlertDialogTitle>
+            <AlertDialogDescription>
+              删除不可撤销，逐把返回结果；至少保留一把密钥（最后一把会被拒绝）。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-danger text-white hover:bg-danger/90"
+              onClick={() => batchDelete.mutate()}
+            >
+              确认删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
 
-/** 新建未保存时的密钥草稿：行只存内存，保存时第一把作为主密钥随创建提交，其余逐条补录。 */
+/** 新建未保存时的密钥草稿：行只存内存，保存时第一把随创建提交，其余逐条补录。 */
 export function PendingKeysPanel({
   keys,
   onChange,
@@ -513,25 +598,30 @@ export function PendingKeysPanel({
       <PanelHeader
         count={keys.length}
         limit={KEY_LIMIT}
-        hint="密钥先登记在本地草稿；保存上游渠道时第一把随创建提交（主密钥），其余逐条补录。"
+        hint="每把密钥=一个独立 AG 上游，平权分流；先登记在本地草稿，保存时随创建提交。"
         onAdd={() => setAdding(true)}
         onBatch={() => setBatching(true)}
         addDisabled={keys.length >= KEY_LIMIT}
       />
       {keys.length === 0 ? (
         <p className="py-6 text-center text-2sm text-faint">
-          至少添加一把密钥才能保存；测试连接与获取模型都会用到主密钥。
+          至少添加一把密钥才能保存；测试连接与获取模型都会用到其中一把。
         </p>
       ) : (
         <KeysTable
-          rows={keys.map((key, index) => ({
+          rows={keys.map((key) => ({
             id: key.localId,
             label: key.label,
             masked: maskPreview(key.apiKey),
-            isPrimary: index === 0,
             createdText: "保存后生成",
+            lastTest: null,
+            lastTestAtMs: 0,
             pending: true,
           }))}
+          selected={new Set()}
+          onToggle={() => undefined}
+          onToggleAll={() => undefined}
+          selectable={false}
           actions={(row) => (
             <div className="flex flex-wrap gap-1">
               <Button
@@ -549,7 +639,6 @@ export function PendingKeysPanel({
 
       {adding ? (
         <AddKeyDialog
-          withPrimary={false}
           busy={false}
           onConfirm={(label, apiKey) => {
             addPending(label, apiKey);

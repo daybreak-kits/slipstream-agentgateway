@@ -1,9 +1,12 @@
 import { Check, X } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { api, ENDPOINTS } from "@/lib/api";
 import { formatDateTime, useTimezone } from "@/lib/time";
+import type { UpstreamKeyList } from "@/types";
 import {
   API_STYLE_LABELS,
   API_STYLE_SHORT,
@@ -11,6 +14,7 @@ import {
   probeKindLabel,
   probeStatusView,
   urlPathOf,
+  type KeyTestResult,
   type ProbeResultView,
   type ProbeStep,
   type UpstreamRow,
@@ -73,15 +77,18 @@ function StepDetailList({ steps }: { steps: ProbeStep[] }) {
   );
 }
 
-/** 右列「连接状态」卡：最近探测 + 已识别协议 + 探测步骤。probe 是本次会话的实测结果，
- *  没有则回退 upstream.last_probe（列表摘要，无步骤）。 */
+/** 右列「连接状态」卡：最近探测 + 已识别协议 + 逐把测试结果。probe 是本次会话的实测结果，
+ *  没有则回退 upstream.last_probe（列表摘要，无步骤）。逐把测试（ADR-026 ③）读密钥行
+ *  的 last_test 落库值。 */
 export function UpstreamStatusPanel({
   upstream,
   probe,
+  keyTests,
   showDraftHint,
 }: {
   upstream: UpstreamRow | null;
   probe: ProbeResultView | null;
+  keyTests: KeyTestResult | null;
   showDraftHint: boolean;
 }) {
   const { mode: timezone } = useTimezone();
@@ -92,7 +99,15 @@ export function UpstreamStatusPanel({
   const protocol = view?.protocol ?? upstream?.api_style ?? null;
   const protocolSource = view?.protocol_source ?? upstream?.api_style_source ?? null;
   const hasSteps = Array.isArray(view?.probe_steps) && (view?.probe_steps?.length ?? 0) > 0;
-  const hasApiKey = upstream?.has_api_key ?? true;
+  // 密钥行落库的逐把测试（label 用密钥行备注补齐）；runtime 响应与落库内容一致。
+  const keysQ = useQuery({
+    queryKey: ["upstream-keys", upstream?.id ?? ""],
+    queryFn: () => api.get<UpstreamKeyList>(ENDPOINTS.upstreamKeys(upstream?.id ?? "")),
+    enabled: !!upstream,
+  });
+  const testedRows = (keysQ.data?.items ?? []).filter((key) => key.last_test !== null);
+  const keyLabelOf = (keyId: string) =>
+    (keysQ.data?.items ?? []).find((key) => key.id === keyId)?.label || "";
 
   return (
     <Card>
@@ -135,7 +150,34 @@ export function UpstreamStatusPanel({
           )}
         </StatusRow>
         <StatusRow label="鉴权方式">
-          <span>{authStyleLabel(protocol, hasApiKey)}</span>
+          <span>{authStyleLabel(protocol)}</span>
+        </StatusRow>
+        <StatusRow label="逐把测试">
+          {keyTests && keyTests.items.length === 0 ? (
+            <span className="text-faint">没有可测试的密钥</span>
+          ) : testedRows.length > 0 ? (
+            <ul className="space-y-1">
+              {testedRows.map((row) => {
+                const result = row.last_test!;
+                const label = keyLabelOf(result.key_id) || row.masked;
+                return (
+                  <li key={row.id} className="flex flex-wrap items-center gap-2 text-2xs">
+                    <span className="min-w-0 max-w-40 truncate font-medium text-body">{label}</span>
+                    {result.ok ? (
+                      <Badge tone="success">HTTP {result.status_code} · {result.latency_ms} ms</Badge>
+                    ) : (
+                      <Badge tone="danger">{result.error || "HTTP " + result.status_code}</Badge>
+                    )}
+                    {row.last_test_at_ms > 0 ? (
+                      <span className="tnum text-2xs text-faint">{formatDateTime(row.last_test_at_ms, timezone)}</span>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <span className="text-faint">—</span>
+          )}
         </StatusRow>
         {hasSteps ? (
           <StatusRow label="探测步骤">
@@ -155,9 +197,9 @@ export function UpstreamStatusPanel({
             连接地址已修改未保存；测试连接与获取模型使用已保存的地址执行。
           </p>
         ) : null}
-        {!view ? (
+        {!view && testedRows.length === 0 ? (
           <p className="py-2 text-2xs text-faint">
-            还没有探测记录；用页头「测试连接」验证连通性，结果会写库并在这里展示。
+            还没有探测记录；用页头「测试连接」逐把验证密钥连通性，结果会写库并在这里展示。
           </p>
         ) : null}
       </CardContent>

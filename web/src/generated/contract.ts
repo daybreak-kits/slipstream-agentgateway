@@ -354,19 +354,21 @@ export interface UpstreamImportModels {
   model_type?: string;
 }
 
+export interface UpstreamKeyBatchDelete {
+  ids: string[];
+}
+
 export interface UpstreamKeyCreate {
   label?: string;
   api_key: string;
-  set_primary?: boolean;
 }
 
 export interface UpstreamKeyPatch {
   label?: string | null;
-  is_primary?: boolean | null;
 }
 
-export interface UpstreamKeyRotate {
-  api_key: string;
+export interface UpstreamKeyTestIn {
+  api_style?: string | null;
 }
 
 export interface UpstreamModelCreate {

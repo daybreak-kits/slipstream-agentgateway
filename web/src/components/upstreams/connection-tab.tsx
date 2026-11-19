@@ -4,7 +4,7 @@ import { PendingKeysPanel, UpstreamKeysPanel } from "./keys-panel";
 import { UpstreamStatusPanel } from "./status-panel";
 import {
   API_STYLE_LABELS, API_STYLE_OPTIONS, chatUrlFor, modelsUrlFor,
-  type PendingKey, type ProbeResultView, type UpstreamDraft, type UpstreamRow,
+  type KeyTestResult, type PendingKey, type ProbeResultView, type UpstreamDraft, type UpstreamRow,
 } from "./shared";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,6 +27,7 @@ export function ConnectionTab({
   pendingKeys,
   onPendingKeysChange,
   probe,
+  keyTests,
   modelCount,
   onGoModels,
 }: {
@@ -38,6 +39,7 @@ export function ConnectionTab({
   pendingKeys: PendingKey[];
   onPendingKeysChange: (keys: PendingKey[]) => void;
   probe: ProbeResultView | null;
+  keyTests: KeyTestResult | null;
   modelCount: number;
   onGoModels: () => void;
 }) {
@@ -54,22 +56,16 @@ export function ConnectionTab({
         <CardContent className="space-y-4 pt-0">
           <Field>
             <FieldLabel htmlFor="up-name">名称</FieldLabel>
-            {isNew ? (
-              <Input
-                id="up-name"
-                value={draft.name}
-                onChange={(e) => onDraftChange({ name: e.target.value })}
-                placeholder="留空则按连接地址自动生成（如 www-abc-com-8080）"
-              />
-            ) : (
-              <ReadOnlyValue>
-                <span className="font-medium text-title">{upstream?.name ?? "—"}</span>
-              </ReadOnlyValue>
-            )}
+            <Input
+              id="up-name"
+              value={draft.name}
+              onChange={(e) => onDraftChange({ name: e.target.value })}
+              placeholder={isNew ? "留空则按连接地址自动生成（如 www-abc-com-8080）" : ""}
+            />
             <FieldDescription>
               {isNew
                 ? "可自由填写或留空：无厂商时按 host:port 生成，指定厂商时按 {厂商代号}-NN 编号。"
-                : "名称暂不支持修改（后端增强合入后开放）。"}
+                : "名称可修改，保存时随配置一起提交；与其他上游重名会被 422 拒绝。"}
             </FieldDescription>
           </Field>
 
@@ -122,7 +118,7 @@ export function ConnectionTab({
               <ReadOnlyValue>{vendorName}</ReadOnlyValue>
             )}
             <FieldDescription>
-              厂商仅作展示分组；{isNew ? "可选，未分组时名称按连接地址生成。" : "创建后暂不支持修改（后端增强合入后开放）。"}
+              厂商仅作展示分组；{isNew ? "可选，未分组时名称按连接地址生成。" : "创建后不支持修改。"}
             </FieldDescription>
           </Field>
 
@@ -153,20 +149,25 @@ export function ConnectionTab({
 
           <Field>
             <FieldLabel>源密钥</FieldLabel>
-            <div className="rounded-lg border border-border bg-surface p-3">
-              {isNew ? (
-                <PendingKeysPanel keys={pendingKeys} onChange={onPendingKeysChange} />
-              ) : upstream ? (
-                <UpstreamKeysPanel upstreamId={upstream.id} />
-              ) : null}
-            </div>
-            <FieldDescription>每上游最多 20 把；数据面取用主密钥。</FieldDescription>
+            {isNew ? (
+              <PendingKeysPanel keys={pendingKeys} onChange={onPendingKeysChange} />
+            ) : upstream ? (
+              <UpstreamKeysPanel upstreamId={upstream.id} />
+            ) : null}
+            <FieldDescription>
+              每把密钥=一个独立 AG 上游，平权分流；失效密钥标红。每上游最多 20 把。
+            </FieldDescription>
           </Field>
         </CardContent>
       </Card>
 
       <div className="space-y-3">
-        <UpstreamStatusPanel upstream={upstream} probe={probe} showDraftHint={!isNew && baseUrl !== (upstream?.base_url ?? "")} />
+        <UpstreamStatusPanel
+          upstream={upstream}
+          probe={probe}
+          keyTests={keyTests}
+          showDraftHint={!isNew && baseUrl !== (upstream?.base_url ?? "")}
+        />
         <Card>
           <CardHeader>
             <CardTitle className="text-2sm">模型</CardTitle>

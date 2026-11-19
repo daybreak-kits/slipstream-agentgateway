@@ -46,15 +46,24 @@ export interface Upstream {
   last_probe?: UpstreamProbe | null;
 }
 
-/** GET /admin/upstreams/{id}/keys 的一项；明文只在新增时提交，永不回读 */
+/** GET /admin/upstreams/{id}/keys 的一项；明文只在新增时提交，永不回读。
+ *  ADR-026：密钥平权无主备，每把密钥在适配层展开为一个独立 AG 上游。 */
 export interface UpstreamKey {
   id: string;
   label: string;
   /** 形如 …a1b2，仅尾 4 位 */
   masked: string;
   key_suffix: string;
-  is_primary: boolean;
   created_at_ms: number;
+  /** 最近一次逐把测试（POST keys/test 落库）；null = 从未测试 */
+  last_test: {
+    key_id: string;
+    ok: boolean;
+    status_code: number;
+    latency_ms: number;
+    error: string;
+  } | null;
+  last_test_at_ms: number;
   /** 迁移前内联密钥的合成行，首次写操作后落表 */
   legacy?: boolean;
 }

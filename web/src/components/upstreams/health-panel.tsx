@@ -70,7 +70,7 @@ export function UpstreamHealthPanel({ upstream }: { upstream: Upstream }) {
         <CardContent className="pt-0">
           <p className="mb-2 text-2xs text-faint">
             测试与「发现模型」请求同一个地址：<span className="font-mono">{upstream.base_url}</span>
-            （<span className="font-mono">{"<base_url>/models"}</span>，以主密钥鉴权）。结果写库并作为列表与详情的历史状态。
+            （<span className="font-mono">{"<base_url>/models"}</span>，用其中一把密钥鉴权）。结果写库并作为列表与详情的历史状态。
           </p>
           {probe ? (
             <>

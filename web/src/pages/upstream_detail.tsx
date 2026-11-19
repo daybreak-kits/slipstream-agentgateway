@@ -10,7 +10,7 @@ import { DiscoverModelsDialog } from "@/components/upstreams/discover-dialog";
 import { LockedTabNotice, UpstreamModelsPanel } from "@/components/upstreams/models-panel";
 import {
   API_STYLE_LABELS, probeKindLabel, probeStatusView, probeViewFromApiError,
-  type PendingKey, type ProbeResultView, type UpstreamDraft, type UpstreamRow,
+  type KeyTestResult, type PendingKey, type ProbeResultView, type UpstreamDraft, type UpstreamRow,
 } from "@/components/upstreams/shared";
 import { TransformsEditor } from "@/components/transforms/transforms-editor";
 import { Badge } from "@/components/ui/badge";
@@ -87,11 +87,10 @@ export function UpstreamDetailPage() {
   const [baseline, setBaseline] = useState<UpstreamDraft | null>(isNew ? draftOf(null) : null);
   const [pendingKeys, setPendingKeys] = useState<PendingKey[]>([]);
   const [activeTab, setActiveTab] = useState("connection");
-  const [tabConfirm, setTabConfirm] = useState<string | null>(null);
   const [leaveHref, setLeaveHref] = useState<string | null>(null);
   const [probe, setProbe] = useState<ProbeResultView | null>(null);
+  const [keyTests, setKeyTests] = useState<KeyTestResult | null>(null);
   const [discoverOpen, setDiscoverOpen] = useState(false);
-  const [anonConfirm, setAnonConfirm] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
 
   const upstream = upstreamQ.data ?? null;
@@ -148,11 +147,17 @@ export function UpstreamDetailPage() {
 
   const onDraftChange = (patch: Partial<UpstreamDraft>) => setDraft((prev) => ({ ...prev, ...patch }));
 
+  // 切页签不再弹确认（未保存状态由页签圆点与页头徽章提示，离页拦截兜底）。
   const requestTab = (key: string) => {
     if (key === activeTab) return;
-    if (dirty) setTabConfirm(key);
-    else setActiveTab(key);
+    setActiveTab(key);
   };
+
+  // 未保存页签琥珀圆点：连接与模型 Tab（草稿状态都挂在这个页签的表单上）。
+  const tabItems = useMemo(
+    () => TAB_ITEMS.map((item) => (item.key === "connection" ? { ...item, dot: dirty } : item)),
+    [dirty],
+  );
 
   // ── 保存：只写配置，不触发探测（探测走页头「测试连接」/「获取上游模型」） ──
   const save = useMutation({
@@ -179,6 +184,8 @@ export function UpstreamDetailPage() {
         base_url: draft.baseUrl.trim(),
         api_style: draft.apiStyle,
         enabled: draft.enabled,
+        // ADR-023 #6 改名路径：名称已解锁，随配置一起提交（重名 422 由全局错误提示展示）。
+        name: draft.name.trim(),
       });
       return { row, failedKeys: 0 };
     },
@@ -186,15 +193,17 @@ export function UpstreamDetailPage() {
       if (isNew) {
         toast.success("上游渠道已创建", {
           description: failedKeys > 0
-            ? "首把密钥已登记为主密钥；" + failedKeys + " 把备用密钥补录失败，可在源密钥面板重试。"
-            : "首把密钥已登记为主密钥。",
+            ? "首把密钥已随创建提交；" + failedKeys + " 把备用密钥补录失败，可在源密钥面板重试。"
+            : "首把密钥已随创建提交。",
         });
         void qc.invalidateQueries({ queryKey: ["upstreams"] });
         navigate("/upstreams/" + row.id, { replace: true });
         return;
       }
       toast.success("已保存", { description: "配置已写入；测试连接与获取模型使用页面最新填写的协议风格。" });
-      setBaseline({ ...draft });
+      // 以服务端行为准：空白名称按后端语义保持原名，回填避免草稿与服务端漂移。
+      setDraft(draftOf(row));
+      setBaseline(draftOf(row));
       void qc.invalidateQueries({ queryKey: ["upstream", id] });
       void qc.invalidateQueries({ queryKey: ["upstreams"] });
     },
@@ -208,31 +217,26 @@ export function UpstreamDetailPage() {
     },
   });
 
-  // ── 测试连接：对已存上游发起；协议风格用页面当前值，地址用已保存值（草稿差异会有提示） ──
+  // ── 测试连接：逐把测（ADR-026 ③），每把密钥按 base_url 发最小鉴权请求 ──
   const test = useMutation({
-    mutationFn: () => api.post<ProbeResultView>(ENDPOINTS.upstreamTest(id), { api_style: draft.apiStyle }),
+    mutationFn: () => api.post<KeyTestResult>(ENDPOINTS.upstreamKeysTest(id), { api_style: draft.apiStyle }),
     onSuccess: (result) => {
-      setProbe(result);
-      if (result.status === "ok") {
-        toast.success("连通性测试通过", { description: (result.model_count ?? 0) + " 个模型 · " + result.latency_ms + " ms" });
+      setKeyTests(result);
+      const okCount = result.items.filter((item) => item.ok).length;
+      const failCount = result.items.length - okCount;
+      if (result.items.length === 0) {
+        toast.info("没有可测试的密钥", { description: "请先在源密钥面板添加密钥。" });
+      } else if (failCount === 0) {
+        toast.success("全部密钥连通", { description: "成功 " + okCount + " 把 · 结果已标在密钥行与状态面板。" });
       } else {
-        toast.error("连通性测试未通过", { description: result.message || undefined });
+        toast.warning("逐把测试完成", { description: "成功 " + okCount + " 把 · 失效 " + failCount + " 把（已标红）。" });
       }
-      void qc.invalidateQueries({ queryKey: ["upstream", id] });
-      void qc.invalidateQueries({ queryKey: ["upstreams"] });
-    },
-    onError: (error) => {
-      const view = probeViewFromApiError(error);
-      if (view) setProbe(view);
+      void qc.invalidateQueries({ queryKey: ["upstream-keys", id] });
     },
   });
 
   const requestTest = () => {
     if (isNew || !upstream) return;
-    if (upstream.has_api_key === false) {
-      setAnonConfirm(true);
-      return;
-    }
     if (draft.baseUrl.trim() !== upstream.base_url) {
       toast.info("本次测试使用已保存的连接地址", { description: "连接地址有未保存修改；如需按新地址测试，请先保存。" });
     }
@@ -365,7 +369,7 @@ export function UpstreamDetailPage() {
         </div>
       </div>
 
-      <TabBar items={TAB_ITEMS} value={activeTab} onValueChange={requestTab} ariaLabel="上游渠道编辑器页签" />
+      <TabBar items={tabItems} value={activeTab} onValueChange={requestTab} ariaLabel="上游渠道编辑器页签" />
 
       {activeTab === "connection" ? (
         <ConnectionTab
@@ -377,6 +381,7 @@ export function UpstreamDetailPage() {
           pendingKeys={pendingKeys}
           onPendingKeysChange={setPendingKeys}
           probe={probe}
+          keyTests={keyTests}
           modelCount={modelCount}
           onGoModels={() => requestTab("models")}
         />
@@ -459,7 +464,7 @@ export function UpstreamDetailPage() {
               value={pendingKeys.length}
               icon={METRIC_ICONS.tokens.icon}
               tone="neutral"
-              hint="保存时第一把自动成为主密钥"
+              hint="保存时随创建提交，每把密钥展开为一个独立 AG 上游"
             />
           )}
         </div>
@@ -469,22 +474,8 @@ export function UpstreamDetailPage() {
         <DiscoverModelsDialog upstreamId={upstream.id} apiStyle={draft.apiStyle} onClose={() => setDiscoverOpen(false)} />
       ) : null}
 
-      {/* 四个确认框都按需挂载：同时常挂多个（open=false）Radix AlertDialog 会叠多层
+      {/* 确认框按需挂载：同时常挂多个（open=false）Radix AlertDialog 会叠多层
           DismissableLayer，长会话里出现过层栈残留导致页面输入被吞的迹象。 */}
-      {tabConfirm !== null ? (
-        <ConfirmDialog
-          open
-          onOpenChange={(open) => { if (!open) setTabConfirm(null); }}
-          title="有未保存修改，仍要切换标签页吗？"
-          description="修改保留在本页草稿中；离开页面（侧栏导航或刷新）会丢失，请先保存。"
-          confirmLabel="切换"
-          onConfirm={() => {
-            setActiveTab(tabConfirm);
-            setTabConfirm(null);
-          }}
-        />
-      ) : null}
-
       {leaveHref !== null ? (
         <ConfirmDialog
           open
@@ -498,17 +489,6 @@ export function UpstreamDetailPage() {
             setBaseline({ ...draft });
             window.location.assign(leaveHref);
           }}
-        />
-      ) : null}
-
-      {anonConfirm ? (
-        <ConfirmDialog
-          open
-          onOpenChange={(open) => { if (!open) setAnonConfirm(false); }}
-          title="尚无密钥，仍要匿名尝试？"
-          description="该上游没有可用密钥；测试连接会以匿名请求探测，部分上游会返回 401。"
-          confirmLabel="匿名尝试"
-          onConfirm={() => test.mutate()}
         />
       ) : null}
 

@@ -45,7 +45,8 @@ export function TabBar({
   ariaLabel,
   className,
 }: {
-  items: Array<{ key: string; label: string }>;
+  /** dot=true 时在 label 旁渲染 2px 琥珀圆点（未保存状态提示，title 说明）。 */
+  items: Array<{ key: string; label: string; dot?: boolean }>;
   value: string;
   onValueChange: (key: string) => void;
   ariaLabel: string;
@@ -57,6 +58,13 @@ export function TabBar({
         {items.map((item) => (
           <TabsPrimitive.Trigger key={item.key} value={item.key} className={TRIGGER_CLASS}>
             {item.label}
+            {item.dot ? (
+              <span
+                aria-hidden
+                title="该页签有未保存修改"
+                className="ml-1 inline-block h-0.5 w-0.5 rounded-full bg-warning"
+              />
+            ) : null}
           </TabsPrimitive.Trigger>
         ))}
       </TabsPrimitive.List>
