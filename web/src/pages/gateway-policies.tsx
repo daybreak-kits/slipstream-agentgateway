@@ -16,10 +16,13 @@ import {
 } from "@/components/governance/gateway-policies/helpers";
 import { ErrorState, PageToolbar } from "@/components/governance/panel";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TabBar } from "@/components/ui/tabs";
 import { api, ENDPOINTS } from "@/lib/api";
+import { ACTION_ICONS } from "@/lib/icons";
 import { usePermissions } from "@/lib/permissions";
+import { useDirtyGuard } from "@/lib/use-dirty-guard";
 import type {
   ApplyRevision,
   GuardrailConfig,
@@ -79,6 +82,8 @@ export function GatewayPoliciesPage() {
   const [validating, setValidating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // W4-G 确认校准：「保存并下发」先出影响摘要确认（写库 + 热加载数据面）。
+  const [saveConfirm, setSaveConfirm] = useState(false);
 
   const dirtyPolicies =
     policies.data === undefined ? 0 : countDirtyPolicies(policies.data.config, policyDraft);
@@ -92,6 +97,8 @@ export function GatewayPoliciesPage() {
   const busy = validating || saving;
   // ADR-024 成对规则的前端门禁：4xx codes + 不完整健康组时禁止校验/保存。
   const policyProblem = policyDraftProblem(policyDraft);
+  // W4-G：三份草稿都挂页级，改了没保存就点侧栏离开 → 出确认框（hook 拦 <a> 与刷新）。
+  const leaveGuard = useDirtyGuard(dirtyTotal > 0);
 
   const clearDrafts = () => {
     setPolicyDraft(null);
@@ -236,21 +243,22 @@ export function GatewayPoliciesPage() {
         </span>
         {canWrite && (
           <div className="ml-auto flex items-center gap-1.5">
+            <span className="hidden text-2xs text-faint xl:inline">保存并下发 = 写库 + 热加载数据面</span>
             <Button
               variant="outline"
               size="sm"
               onClick={() => void validateAll()}
               disabled={dirtyTotal === 0 || busy || policyProblem !== null}
             >
-              {validating ? "校验中…" : "试运行校验"}
+              <ACTION_ICONS.dryRun className="h-3.5 w-3.5" /> {validating ? "校验中…" : "试运行校验"}
             </Button>
             <Button
               variant="primary"
               size="sm"
-              onClick={() => void saveAll()}
+              onClick={() => setSaveConfirm(true)}
               disabled={dirtyTotal === 0 || busy || policyProblem !== null}
             >
-              {saving ? "保存并下发中…" : "保存并下发"}
+              <ACTION_ICONS.deploy className="h-3.5 w-3.5" /> {saving ? "保存并下发中…" : "保存并下发"}
             </Button>
           </div>
         )}
@@ -303,6 +311,26 @@ export function GatewayPoliciesPage() {
           dirtyCount={dirtyMcp}
         />
       </div>
+
+      {leaveGuard}
+
+      {/* 确认框按需挂载（见 upstream_detail 同款注释）；确认后才走保存链。 */}
+      {saveConfirm ? (
+        <ConfirmDialog
+          open
+          onOpenChange={(open) => { if (!open) setSaveConfirm(false); }}
+          title="保存并下发？"
+          description={
+            `影响摘要：流量策略 ${dirtyPolicies} 处 · 护栏 ${dirtyGuardrails} 处 · MCP ${dirtyMcp} 处将被写入，` +
+            "随后热加载数据面并生成配置修订留档；新配置立即对经网关的请求生效。"
+          }
+          confirmLabel="确认保存并下发"
+          onConfirm={() => {
+            setSaveConfirm(false);
+            void saveAll();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

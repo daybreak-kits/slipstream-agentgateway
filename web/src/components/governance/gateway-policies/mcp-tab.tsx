@@ -7,6 +7,7 @@ import { RawJsonEditor } from "@/components/governance/raw-json-editor";
 import { PageToolbar, SectionCard } from "@/components/governance/panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ACTION_ICONS } from "@/lib/icons";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -211,8 +212,12 @@ export function McpTab({ data, draft, onDraftChange, canWrite, dirtyCount }: {
         <div className="ml-auto flex items-center gap-1.5">
           {!editing && canWrite ? (
             <>
-              <Button variant="outline" size="sm" onClick={startRaw}>原始 JSON</Button>
-              <Button variant="primary" size="sm" onClick={startEdit}>编辑</Button>
+              <Button variant="outline" size="sm" onClick={startRaw}>
+                <ACTION_ICONS.rawJson className="h-3.5 w-3.5" /> 原始 JSON
+              </Button>
+              <Button variant="primary" size="sm" onClick={startEdit}>
+                <ACTION_ICONS.edit className="h-3.5 w-3.5" /> 编辑
+              </Button>
             </>
           ) : editing ? (
             <Button variant="ghost" size="sm" onClick={cancel}>取消</Button>
@@ -290,7 +295,7 @@ export function McpTab({ data, draft, onDraftChange, canWrite, dirtyCount }: {
                           <TD className="text-right">
                             <div className="flex justify-end gap-1.5">
                               <Button variant="outline" size="sm" onClick={() => openEditForm(index)}>
-                                编辑
+                                <ACTION_ICONS.edit className="h-3.5 w-3.5" /> 编辑
                               </Button>
                               <Button variant="ghost" size="sm" onClick={() => removeServer(index)}>
                                 移除

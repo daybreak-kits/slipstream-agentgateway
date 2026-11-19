@@ -96,6 +96,8 @@ function BatchPriceDialog({
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
   const [markup, setMarkup] = useState("");
+  // W4-G 弹窗草稿守卫：填了内容后 Esc/遮罩/取消不放行，先确认「放弃修改？」。
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const numeric = (raw: string): number | null => {
     const text = raw.trim();
     if (text === "") return null;
@@ -110,6 +112,11 @@ function BatchPriceDialog({
     Number.isNaN(outNum) || (outNum !== null && outNum < 0) ||
     Number.isNaN(markupNum) || (markupNum !== null && (markupNum <= 0 || markupNum > 100));
   const nothingFilled = input.trim() === "" && output.trim() === "" && markup.trim() === "";
+
+  const requestClose = () => {
+    if (!nothingFilled) setConfirmDiscard(true);
+    else onClose();
+  };
 
   const apply = useMutation({
     mutationFn: async () => {
@@ -138,7 +145,8 @@ function BatchPriceDialog({
   });
 
   return (
-    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+    <>
+    <Dialog open onOpenChange={(v) => { if (!v) requestClose(); }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>批量改价 · {ids.length} 个上游模型</DialogTitle>
@@ -158,7 +166,7 @@ function BatchPriceDialog({
           </Field>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>取消</Button>
+          <Button variant="outline" onClick={requestClose}>取消</Button>
           <Button
             disabled={invalid || nothingFilled || apply.isPending}
             onClick={() => apply.mutate()}
@@ -168,6 +176,21 @@ function BatchPriceDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {confirmDiscard ? (
+      <ConfirmDialog
+        open
+        onOpenChange={(v) => { if (!v) setConfirmDiscard(false); }}
+        title="放弃修改？"
+        description="弹窗内已填的批量价目不会写入任何模型，关闭后将丢失。"
+        confirmLabel="放弃修改"
+        destructive
+        onConfirm={() => {
+          setConfirmDiscard(false);
+          onClose();
+        }}
+      />
+    ) : null}
+    </>
   );
 }
 
@@ -608,6 +631,13 @@ function PublicModelCreateDialog({
     enabled: true,
   });
   const [members, setMembers] = useState<MemberDraft[]>([]);
+  // W4-G 弹窗草稿守卫：填了名称/备注/成员或改了默认项后，Esc/遮罩/取消先确认「放弃修改？」。
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const dirty = form.name !== "" || form.note !== "" || !form.enabled || form.routing_mode !== "failover" || members.length > 0;
+  const requestClose = () => {
+    if (dirty) setConfirmDiscard(true);
+    else onClose();
+  };
   const suggestions = useMemo(() => {
     const needle = form.name.trim().toLowerCase();
     if (!needle) return [];
@@ -643,7 +673,8 @@ function PublicModelCreateDialog({
     setMembers(members.filter((member) => member.upstream_model_id !== modelId));
   };
   return (
-    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+    <>
+    <Dialog open onOpenChange={(v) => { if (!v) requestClose(); }}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>新建公开模型</DialogTitle>
@@ -695,13 +726,28 @@ function PublicModelCreateDialog({
           </label>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>取消</Button>
+          <Button variant="outline" onClick={requestClose}>取消</Button>
           <Button disabled={save.isPending || form.name.trim() === "" || errors.length > 0} onClick={() => save.mutate()}>
             {save.isPending ? "保存中…" : "保存"}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {confirmDiscard ? (
+      <ConfirmDialog
+        open
+        onOpenChange={(v) => { if (!v) setConfirmDiscard(false); }}
+        title="放弃修改？"
+        description="弹窗内已填的公开模型草稿（名称、策略、成员）不会写入，关闭后将丢失。"
+        confirmLabel="放弃修改"
+        destructive
+        onConfirm={() => {
+          setConfirmDiscard(false);
+          onClose();
+        }}
+      />
+    ) : null}
+    </>
   );
 }
 

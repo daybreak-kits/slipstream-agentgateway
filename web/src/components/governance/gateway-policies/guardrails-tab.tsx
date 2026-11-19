@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Table, TableWrap, TD, TH, THead, TR } from "@/components/ui/table";
 import { api, ENDPOINTS } from "@/lib/api";
+import { ACTION_ICONS } from "@/lib/icons";
 import {
   parseJsonDocument,
   saveAndApply,
@@ -406,11 +407,15 @@ export function GuardrailsTab({ data, draft, onDraftChange, canWrite, dirtyCount
         <div className="ml-auto flex items-center gap-1.5">
           {!editing && canWrite ? (
             <>
-              <Button variant="outline" size="sm" onClick={startRaw}>原始 JSON</Button>
-              <Button variant="outline" size="sm" onClick={() => reset.mutate()} disabled={reset.isPending}>
-                恢复默认
+              <Button variant="outline" size="sm" onClick={startRaw}>
+                <ACTION_ICONS.rawJson className="h-3.5 w-3.5" /> 原始 JSON
               </Button>
-              <Button variant="primary" size="sm" onClick={startEdit}>编辑</Button>
+              <Button variant="outline" size="sm" onClick={() => reset.mutate()} disabled={reset.isPending}>
+                <ACTION_ICONS.restore className="h-3.5 w-3.5" /> 恢复默认
+              </Button>
+              <Button variant="primary" size="sm" onClick={startEdit}>
+                <ACTION_ICONS.edit className="h-3.5 w-3.5" /> 编辑
+              </Button>
             </>
           ) : editing ? (
             <Button variant="ghost" size="sm" onClick={cancel} disabled={reset.isPending}>取消</Button>

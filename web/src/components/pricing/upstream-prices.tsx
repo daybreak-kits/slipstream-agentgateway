@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -13,7 +14,9 @@ import { UNIT_HINT, deriveSpendMicro, fmtPrice, priceMicro } from "@/components/
 import { invalidatePricing, useUpstreamModels } from "@/components/pricing/queries";
 import { api, ENDPOINTS } from "@/lib/api";
 import { fmtMoney6 } from "@/lib/format";
+import { ACTION_ICONS } from "@/lib/icons";
 import { usePermissions } from "@/lib/permissions";
+import { useDirtyGuard } from "@/lib/use-dirty-guard";
 import type { UpstreamModel } from "@/types";
 
 /** 行内编辑草稿：空串表示「未配置」，保存时折算为 null 清空。 */
@@ -112,6 +115,15 @@ export function UpstreamPricesSection() {
     () => models.filter((model) => missingItems(model).length > 0).length,
     [models],
   );
+  // W4-G：任一行有未保存的价目草稿就算页面 dirty，离页（侧栏/刷新）先确认。
+  const rowsDirty = useMemo(
+    () => models.some((model) => {
+      const draft = drafts[model.id];
+      return draft !== undefined && isDirty(model, draft);
+    }),
+    [models, drafts],
+  );
+  const leaveGuard = useDirtyGuard(rowsDirty, "离开将丢失未保存的价目修改；Enter 或「保存」可先落盘。");
   const allSelected = filtered.length > 0 && filtered.every((model) => selected.has(model.id));
   const someSelected = selected.size > 0 && !allSelected;
 
@@ -377,14 +389,14 @@ export function UpstreamPricesSection() {
         return (
           <div className="flex items-center justify-end gap-1">
             <Button size="sm" variant="ghost" onClick={() => resetDraft(model.id)} disabled={saving}>
-              撤销
+              <ACTION_ICONS.undo className="h-3.5 w-3.5" /> 撤销
             </Button>
             <Button
               size="sm"
               onClick={() => save.mutate({ model, draft })}
               disabled={!draftValid(draft) || saving}
             >
-              {saving ? "保存中…" : "保存"}
+              <ACTION_ICONS.save className="h-3.5 w-3.5" /> {saving ? "保存中…" : "保存"}
             </Button>
           </div>
         );
@@ -398,7 +410,7 @@ export function UpstreamPricesSection() {
         已选 <span className="tnum font-medium text-title">{selected.size}</span>
       </span>
       <Button size="sm" disabled={save.isPending} onClick={() => setBatchOpen(true)}>
-        批量改价
+        <ACTION_ICONS.batchPrice className="h-3.5 w-3.5" /> 批量改价
       </Button>
     </>
   ) : null;
@@ -479,6 +491,7 @@ export function UpstreamPricesSection() {
           onDone={() => setSelected(new Set())}
         />
       ) : null}
+      {leaveGuard}
     </section>
   );
 }
@@ -495,6 +508,8 @@ function BatchPriceDialog({
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
   const [markup, setMarkup] = useState("");
+  // W4-G 弹窗草稿守卫：填了内容后 Esc/遮罩/取消不放行，先确认「放弃修改？」。
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const numericOf = (raw: string): number | null => {
     const text = raw.trim();
     if (text === "") return null;
@@ -509,6 +524,12 @@ function BatchPriceDialog({
     Number.isNaN(outNum) || (outNum !== null && outNum < 0) ||
     Number.isNaN(markupNum) || (markupNum !== null && (markupNum <= 0 || markupNum > 100));
   const nothingFilled = input.trim() === "" && output.trim() === "" && markup.trim() === "";
+  const dirty = !nothingFilled;
+
+  const requestClose = () => {
+    if (dirty) setConfirmDiscard(true);
+    else onClose();
+  };
 
   const apply = useMutation({
     mutationFn: async () => {
@@ -542,7 +563,8 @@ function BatchPriceDialog({
   });
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+    <>
+    <Dialog open onOpenChange={(open) => { if (!open) requestClose(); }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>批量改价 · {ids.length} 个上游模型</DialogTitle>
@@ -589,7 +611,7 @@ function BatchPriceDialog({
           <p className="text-2xs text-danger-text">成本必须是非负数，倍率需在 (0, 100]。</p>
         ) : null}
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>取消</Button>
+          <Button variant="outline" onClick={requestClose}>取消</Button>
           <Button
             onClick={() => apply.mutate()}
             disabled={invalid || nothingFilled || apply.isPending}
@@ -599,5 +621,20 @@ function BatchPriceDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {confirmDiscard ? (
+      <ConfirmDialog
+        open
+        onOpenChange={(open) => { if (!open) setConfirmDiscard(false); }}
+        title="放弃修改？"
+        description={"弹窗内已填的批量价目不会写入任何模型，关闭后将丢失。"}
+        confirmLabel="放弃修改"
+        destructive
+        onConfirm={() => {
+          setConfirmDiscard(false);
+          onClose();
+        }}
+      />
+    ) : null}
+    </>
   );
 }

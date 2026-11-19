@@ -25,7 +25,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableWrap, TD, TH, THead, TR } from "@/components/ui/table";
 import { api, ENDPOINTS } from "@/lib/api";
+import { ACTION_ICONS } from "@/lib/icons";
 import { usePermissions } from "@/lib/permissions";
+import { useDirtyGuard } from "@/lib/use-dirty-guard";
 import {
   CONNECTION_QUERY_KEY,
   effectiveBaseUrl,
@@ -118,7 +120,9 @@ function FieldTile({ field, value, missing, canWrite }: {
       }
       action={
         canWrite && !editing ? (
-          <Button variant="outline" size="sm" onClick={start}>编辑</Button>
+          <Button variant="outline" size="sm" onClick={start}>
+            <ACTION_ICONS.edit className="h-3.5 w-3.5" /> 编辑
+          </Button>
         ) : undefined
       }
     >
@@ -150,7 +154,7 @@ function FieldTile({ field, value, missing, canWrite }: {
           {error !== null && <p className="text-2xs text-danger-text">{error}</p>}
           <div className="flex gap-1.5">
             <Button variant="primary" size="sm" disabled={save.isPending} onClick={commit}>
-              {save.isPending ? "保存中…" : "保存"}
+              <ACTION_ICONS.save className="h-3.5 w-3.5" /> {save.isPending ? "保存中…" : "保存"}
             </Button>
             <Button variant="ghost" size="sm" disabled={save.isPending} onClick={() => setEditing(false)}>取消</Button>
           </div>
@@ -189,8 +193,11 @@ function ConnectionSection({ canWrite }: { canWrite: boolean }) {
   const address = effectiveBaseUrl(connection.data);
   const dirty = connection.data !== undefined && value !== connection.data.base_url;
   const clientError = validateBaseUrl(value);
+  // W4-G：连接地址改了没保存就点左侧子导航/侧栏离开 → 出确认框。
+  const leaveGuard = useDirtyGuard(dirty);
 
   return (
+    <>
     <SettingsGrid>
       <SettingsTile title="当前生效地址" hint="普通用户只能读，不能改。" className="md:col-span-3 xl:col-span-2">
         <p className="break-all font-mono text-2sm text-title">{address}</p>
@@ -233,10 +240,10 @@ function ConnectionSection({ canWrite }: { canWrite: boolean }) {
                   disabled={save.isPending || clientError !== null || !dirty}
                   onClick={() => save.mutate(value.trim())}
                 >
-                  {save.isPending ? "保存中…" : "保存"}
+                  <ACTION_ICONS.save className="h-3.5 w-3.5" /> {save.isPending ? "保存中…" : "保存"}
                 </Button>
                 <Button variant="outline" size="sm" disabled={save.isPending} onClick={() => save.mutate("")}>
-                  恢复默认
+                  <ACTION_ICONS.restore className="h-3.5 w-3.5" /> 恢复默认
                 </Button>
               </div>
             ) : (
@@ -252,6 +259,8 @@ function ConnectionSection({ canWrite }: { canWrite: boolean }) {
         </p>
       </SettingsTile>
     </SettingsGrid>
+    {leaveGuard}
+    </>
   );
 }
 

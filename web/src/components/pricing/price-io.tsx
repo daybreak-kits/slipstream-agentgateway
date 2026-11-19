@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Download, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableWrap, TD, TH, THead, TR } from "@/components/ui/table";
 import { invalidatePricing } from "@/components/pricing/queries";
@@ -96,6 +97,8 @@ function ImportDialog({ onClose, queryClient }: { onClose: () => void; queryClie
   const [parseError, setParseError] = useState<string | null>(null);
   const [rowErrors, setRowErrors] = useState<ImportErrorRow[] | null>(null);
   const [serverMessage, setServerMessage] = useState<string | null>(null);
+  // W4-G 确认校准：「开始导入」先出覆盖行数确认，再发请求。
+  const [importConfirm, setImportConfirm] = useState(false);
 
   function chooseFile(file: File) {
     setRowErrors(null);
@@ -142,6 +145,7 @@ function ImportDialog({ onClose, queryClient }: { onClose: () => void; queryClie
   });
 
   return (
+    <>
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
@@ -226,7 +230,7 @@ function ImportDialog({ onClose, queryClient }: { onClose: () => void; queryClie
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>取消</Button>
           <Button
-            onClick={() => parsed && importMutation.mutate(parsed)}
+            onClick={() => { if (parsed) setImportConfirm(true); }}
             disabled={!parsed || importMutation.isPending}
           >
             {importMutation.isPending ? "导入中…" : "开始导入"}
@@ -234,5 +238,22 @@ function ImportDialog({ onClose, queryClient }: { onClose: () => void; queryClie
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {importConfirm && parsed ? (
+      <ConfirmDialog
+        open
+        onOpenChange={(open) => { if (!open) setImportConfirm(false); }}
+        title={"确认导入价目？"}
+        description={
+          `文件含 ${parsed.upstream_models.length} 个上游模型条目：校验通过的行将覆盖对应模型的现行成本与倍率，` +
+          "历史账目不重算；任一行校验失败则整批不生效。"
+        }
+        confirmLabel="确认导入"
+        onConfirm={() => {
+          setImportConfirm(false);
+          importMutation.mutate(parsed);
+        }}
+      />
+    ) : null}
+    </>
   );
 }

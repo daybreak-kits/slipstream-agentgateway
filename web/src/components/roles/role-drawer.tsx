@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -49,20 +50,51 @@ export function RoleDrawer({
   const [key, setKey] = useState("");
   const [description, setDescription] = useState("");
   const [permissions, setPermissions] = useState<ReadonlySet<string>>(new Set());
+  // W4-G：关闭前与打开时的基线比较，dirty 时先确认再放弃（Esc/遮罩/取消都汇入 requestClose）。
+  const [baseline, setBaseline] = useState<{ name: string; key: string; description: string; permissions: ReadonlySet<string> } | null>(null);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
 
   const isOpen = open;
   const readOnly = role !== null && role.builtin;
   const isCreate = role === null;
 
   useEffect(() => {
-    if (!isOpen) return;
-    setName(role?.name ?? "");
-    setKey("");
-    setDescription(role?.description ?? "");
-    setPermissions(new Set(role?.permissions ?? []));
+    if (!isOpen) {
+      setBaseline(null);
+      setConfirmDiscard(false);
+      return;
+    }
+    const initial = {
+      name: role?.name ?? "",
+      key: "",
+      description: role?.description ?? "",
+      permissions: new Set<string>(role?.permissions ?? []),
+    };
+    setName(initial.name);
+    setKey(initial.key);
+    setDescription(initial.description);
+    setPermissions(initial.permissions);
+    setBaseline(initial);
   }, [isOpen, role]);
 
   const grantedCount = useMemo(() => permissions.size, [permissions]);
+
+  const dirty =
+    !readOnly &&
+    baseline !== null &&
+    (name !== baseline.name ||
+      key !== baseline.key ||
+      description !== baseline.description ||
+      permissions.size !== baseline.permissions.size ||
+      [...permissions].some((permission) => !baseline.permissions.has(permission)));
+
+  const requestClose = () => {
+    if (dirty) {
+      setConfirmDiscard(true);
+      return;
+    }
+    onClose();
+  };
 
   const submit = () => {
     if (readOnly) return;
@@ -77,10 +109,11 @@ export function RoleDrawer({
   };
 
   return (
+    <>
     <Sheet
       open={isOpen}
       onOpenChange={(next) => {
-        if (!next) onClose();
+        if (!next) requestClose();
       }}
     >
       <SheetContent className="flex flex-col gap-3 overflow-y-auto sm:max-w-xl">
@@ -171,7 +204,7 @@ export function RoleDrawer({
 
         {!readOnly && (
           <div className="mt-auto flex items-center justify-end gap-1.5 border-t border-border pt-3">
-            <Button variant="outline" onClick={onClose} disabled={pending}>
+            <Button variant="outline" onClick={requestClose} disabled={pending}>
               取消
             </Button>
             <Button onClick={submit} disabled={pending || name.trim().length === 0}>
@@ -181,5 +214,20 @@ export function RoleDrawer({
         )}
       </SheetContent>
     </Sheet>
+    {confirmDiscard ? (
+      <ConfirmDialog
+        open
+        onOpenChange={(next) => { if (!next) setConfirmDiscard(false); }}
+        title="放弃修改？"
+        description="抽屉内有未保存的修改（名称、描述或权限勾选），关闭后将丢失。"
+        confirmLabel="放弃修改"
+        destructive
+        onConfirm={() => {
+          setConfirmDiscard(false);
+          onClose();
+        }}
+      />
+    ) : null}
+    </>
   );
 }

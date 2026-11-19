@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Trash2 } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -21,6 +21,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { TabBar } from "@/components/ui/tabs";
 import { api, apiList, ENDPOINTS } from "@/lib/api";
+import { useDirtyGuard } from "@/lib/use-dirty-guard";
 import { formatDateTime, useTimezone } from "@/lib/time";
 import { METRIC_ICONS } from "@/lib/metric-icons";
 import { usePermissions } from "@/lib/permissions";
@@ -87,7 +88,9 @@ export function UpstreamDetailPage() {
   const [baseline, setBaseline] = useState<UpstreamDraft | null>(isNew ? draftOf(null) : null);
   const [pendingKeys, setPendingKeys] = useState<PendingKey[]>([]);
   const [activeTab, setActiveTab] = useState("connection");
-  const [leaveHref, setLeaveHref] = useState<string | null>(null);
+  // W4-G：改写编辑器的 dirty 上抛到页面级——页签圆点、切页签确认与离页守卫都要吃到它。
+  const [transformsDirty, setTransformsDirty] = useState(false);
+  const [pendingTab, setPendingTab] = useState<string | null>(null);
   const [probe, setProbe] = useState<ProbeResultView | null>(null);
   const [keyTests, setKeyTests] = useState<KeyTestResult | null>(null);
   const [discoverOpen, setDiscoverOpen] = useState(false);
@@ -106,57 +109,37 @@ export function UpstreamDetailPage() {
      
   }, [loadedId, isNew]);
 
-  const dirty = !isNew && baseline !== null && !draftEquals(draft, baseline);
+  // 连接表单 dirty：编辑态对照基线；新建态基线恒空导致 dirty 恒 false 的漏洞由
+  // newDraftDirty 补上（W4-G）：填了任何字段或挂了待保存密钥即视为未保存。
+  const draftDirty = !isNew && baseline !== null && !draftEquals(draft, baseline);
+  const newDraftDirty =
+    isNew && (pendingKeys.length > 0 || !draftEquals(draft, draftOf(null)));
+  const dirty = draftDirty || newDraftDirty || transformsDirty;
 
-  // ── 未保存离开拦截 ──────────────────────────────────────────────
-  // 应用用声明式 <BrowserRouter>，useBlocker 需要 data router（main.tsx 归骨架工位）；
-  // 这里用两条兜底：① beforeunload 拦刷新/关闭；② 捕获阶段拦截应用内 <a> 点击（侧栏/返回链接）。
-  // 用户在离开确认框里点「离开」后置位，beforeunload 与点击拦截同步让路（React 状态更新
-  // 是异步的，location.assign 同步触发 beforeunload，靠 ref 才能在事件回调里读到放行标记）。
-  const leavingRef = useRef(false);
-  useEffect(() => {
-    if (!dirty || leavingRef.current) return;
-    const onBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (leavingRef.current) return;
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", onBeforeUnload);
-    return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [dirty]);
-
-  useEffect(() => {
-    if (!dirty || leavingRef.current) return;
-    const onClick = (event: MouseEvent) => {
-      if (leavingRef.current) return;
-      if (event.defaultPrevented || event.button !== 0) return;
-      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-      const anchor = (event.target as HTMLElement | null)?.closest("a[href]");
-      if (!anchor) return;
-      const href = anchor.getAttribute("href") ?? "";
-      if (href.startsWith("#") || href === "") return;
-      event.preventDefault();
-      event.stopPropagation();
-      // 延后到本次点击事件派发结束再挂确认框：Radix AlertDialog 在打开它的那次
-      // pointerdown 派发过程中同步挂载会被自己的 interactOutside 判定立即关掉。
-      window.setTimeout(() => setLeaveHref(href), 0);
-    };
-    document.addEventListener("click", onClick, true);
-    return () => document.removeEventListener("click", onClick, true);
-  }, [dirty]);
+  // ── 未保存离开拦截（W4-G 抽到 lib/use-dirty-guard）────────────────
+  const leaveGuard = useDirtyGuard(dirty);
 
   const onDraftChange = (patch: Partial<UpstreamDraft>) => setDraft((prev) => ({ ...prev, ...patch }));
 
-  // 切页签不再弹确认（未保存状态由页签圆点与页头徽章提示，离页拦截兜底）。
+  // 切页签：改写草稿挂在 TransformsEditor 组件状态里，切走即丢（W4-G 起 dirty 时先确认）。
   const requestTab = (key: string) => {
     if (key === activeTab) return;
+    if (activeTab === "transforms" && transformsDirty) {
+      setPendingTab(key);
+      return;
+    }
     setActiveTab(key);
   };
 
-  // 未保存页签琥珀圆点：连接与模型 Tab（草稿状态都挂在这个页签的表单上）。
+  // 未保存页签琥珀圆点：连接与模型 Tab（草稿状态都挂在这个页签的表单上）与请求与响应 Tab。
   const tabItems = useMemo(
-    () => TAB_ITEMS.map((item) => (item.key === "connection" ? { ...item, dot: dirty } : item)),
-    [dirty],
+    () =>
+      TAB_ITEMS.map((item) => {
+        if (item.key === "connection") return { ...item, dot: draftDirty || newDraftDirty };
+        if (item.key === "transforms") return { ...item, dot: transformsDirty };
+        return item;
+      }),
+    [draftDirty, newDraftDirty, transformsDirty],
   );
 
   // ── 保存：只写配置，不触发探测（探测走页头「测试连接」/「获取上游模型」） ──
@@ -394,7 +377,11 @@ export function UpstreamDetailPage() {
         )
       ) : null}
       {activeTab === "transforms" ? (
-        isNew || !upstream ? <LockedTabNotice subject="请求与响应改写" /> : <TransformsEditor upstreamId={upstream.id} />
+        isNew || !upstream ? (
+          <LockedTabNotice subject="请求与响应改写" />
+        ) : (
+          <TransformsEditor upstreamId={upstream.id} onDirtyChange={setTransformsDirty} />
+        )
       ) : null}
       {activeTab === "settings" ? (
         <div className="grid gap-3 xl:grid-cols-2">
@@ -476,18 +463,20 @@ export function UpstreamDetailPage() {
 
       {/* 确认框按需挂载：同时常挂多个（open=false）Radix AlertDialog 会叠多层
           DismissableLayer，长会话里出现过层栈残留导致页面输入被吞的迹象。 */}
-      {leaveHref !== null ? (
+      {leaveGuard}
+
+      {pendingTab !== null ? (
         <ConfirmDialog
           open
-          onOpenChange={(open) => { if (!open) setLeaveHref(null); }}
-          title="有未保存修改，确定离开吗？"
-          description="离开页面将丢失未保存的修改。保存后再离开可保留配置。"
-          confirmLabel="离开"
+          onOpenChange={(open) => { if (!open) setPendingTab(null); }}
+          title="请求与响应改写有未保存修改"
+          description="切换页签将丢弃改写草稿；可先「保存全部」再切换。"
+          confirmLabel="放弃修改并切换"
+          destructive
           onConfirm={() => {
-            // 用户已确认放弃修改：同步放行 beforeunload / 点击拦截，再发起整页跳转。
-            leavingRef.current = true;
-            setBaseline({ ...draft });
-            window.location.assign(leaveHref);
+            setTransformsDirty(false);
+            setActiveTab(pendingTab);
+            setPendingTab(null);
           }}
         />
       ) : null}

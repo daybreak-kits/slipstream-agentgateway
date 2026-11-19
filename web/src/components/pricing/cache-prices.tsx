@@ -4,6 +4,7 @@ import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -314,6 +315,8 @@ function CachePriceDialog({
   const [modelId, setModelId] = useState("");
   const [read, setRead] = useState("");
   const [write, setWrite] = useState("");
+  // W4-G 弹窗草稿守卫：填了内容/选了模型后 Esc、遮罩、取消不放行，先确认「放弃修改？」。
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
 
   const selectedModel = models.find((model) => model.id === modelId) ?? null;
   const targetVendorId = mode === "edit" ? vendorId : selectedModel ? (upstreamVendor?.get(selectedModel.upstream_id) ?? "") : "";
@@ -327,6 +330,12 @@ function CachePriceDialog({
   const nothingFilled = read.trim() === "" && write.trim() === "";
   const canSubmit =
     !invalid && !nothingFilled && (mode === "edit" || (selectedModel && targetVendorId));
+
+  const dirty = !nothingFilled || (mode === "create" && modelId !== "");
+  const requestClose = () => {
+    if (dirty) setConfirmDiscard(true);
+    else onClose();
+  };
 
   const save = useMutation({
     mutationFn: async () => {
@@ -370,7 +379,8 @@ function CachePriceDialog({
   });
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+    <>
+    <Dialog open onOpenChange={(open) => { if (!open) requestClose(); }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>
@@ -426,7 +436,7 @@ function CachePriceDialog({
           缓存价按版本追加：保存生成新版本并从当前时间生效，历史版本保留，不计入 JSON 导入导出（v1）。
         </p>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>取消</Button>
+          <Button variant="outline" onClick={requestClose}>取消</Button>
           <Button
             onClick={() => save.mutate()}
             disabled={!canSubmit || save.isPending}
@@ -436,5 +446,20 @@ function CachePriceDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {confirmDiscard ? (
+      <ConfirmDialog
+        open
+        onOpenChange={(open) => { if (!open) setConfirmDiscard(false); }}
+        title="放弃修改？"
+        description="弹窗内已填的缓存价不会写入，关闭后将丢失。"
+        confirmLabel="放弃修改"
+        destructive
+        onConfirm={() => {
+          setConfirmDiscard(false);
+          onClose();
+        }}
+      />
+    ) : null}
+    </>
   );
 }
