@@ -1,0 +1,144 @@
+{
+  "config": {
+    "adminAddr": "127.0.0.1:3924",
+    "statsAddr": "127.0.0.1:3925",
+    "readinessAddr": "127.0.0.1:3926",
+    "database": {
+      "url": "sqlite://data.db"
+    },
+    "storage": {
+      "mode": "file"
+    },
+    "session": {
+      "key": "3a5dde678b895d76e244397deac58c4eac0199d751ee0c168e4ef022d62e9c2e"
+    }
+  },
+  "gateways": {
+    "default": {
+      "port": 3696,
+      "bindAddress": "127.0.0.1"
+    }
+  },
+  "frontendPolicies": {
+    "accessLog": {
+      "database": {
+        "llm": "full"
+      }
+    }
+  },
+  "llm": {
+    "gateways": "default",
+    "providers": [
+      {
+        "name": "up-ka",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8096/v1",
+          "apiKey": {
+            "file": "<gitignored-key-file>"
+          }
+        }
+      },
+      {
+        "name": "up-kb",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8096/v1",
+          "apiKey": {
+            "file": "<gitignored-key-file>"
+          }
+        }
+      }
+    ],
+    "models": [
+      {
+        "name": "glm-5.3#k1",
+        "provider": {
+          "reference": "up-ka"
+        },
+        "visibility": "internal",
+        "params": {
+          "model": "code-500"
+        },
+        "health": {
+          "unhealthyExpression": "response.code >= 400",
+          "eviction": {
+            "consecutiveFailures": 1
+          }
+        }
+      },
+      {
+        "name": "glm-5.3#k2",
+        "provider": {
+          "reference": "up-kb"
+        },
+        "visibility": "internal",
+        "params": {
+          "model": "ok-b"
+        },
+        "health": {
+          "unhealthyExpression": "response.code >= 400",
+          "eviction": {
+            "consecutiveFailures": 1
+          }
+        }
+      }
+    ],
+    "virtualModels": [
+      {
+        "name": "vm-e18kn",
+        "routing": {
+          "failover": {
+            "targets": [
+              {
+                "model": "glm-5.3#k1",
+                "priority": 1
+              },
+              {
+                "model": "glm-5.3#k2",
+                "priority": 1
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "policies": {
+      "apiKey": {
+        "mode": "strict",
+        "keys": [
+          {
+            "key": "sk-ss-lab-client-0001",
+            "metadata": {
+              "name": "lab-client"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "policies": [
+    {
+      "name": {
+        "name": "gateway-retry",
+        "namespace": "default"
+      },
+      "target": {
+        "route": {
+          "name": "llm:request",
+          "namespace": "internal"
+        }
+      },
+      "phase": "route",
+      "policy": {
+        "retry": {
+          "attempts": 2,
+          "codes": [
+            500
+          ],
+          "backoff": "100ms"
+        }
+      }
+    }
+  ]
+}

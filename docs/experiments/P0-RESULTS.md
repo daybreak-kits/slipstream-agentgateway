@@ -530,6 +530,72 @@ maxTokens=2、tokensPerFill=0、fillInterval=1h、type=requests：前 2 个请�
 
 原始证据：evidence/E17-T1-validate.json.md、E17-T1-shape.json.md、E17-T1-real.json.md、E17-T1-wrongkey.json.md、E17-T1-wrongkey2.json.md、E17-T1-clientauth.json.md、E17-T1-clientauth2.json.md、E17-T1-dial.json.md、E17-T1-openrouter.json.md；evidence/E17-T2-a.json.md、E17-T2-b.json.md、E17-T2-c.json.md；evidence/E17-T3-s1.json.md、E17-T3-s2.json.md；及 evidence/cfg-E17-*.yaml、evidence/ag-E17-*.log。脚本 e17_common.py（共享 harness）、e17_t1_auth.py、e17_t1_supp.py、e17_t2_stream_retry.py、e17_t3_real_failover.py；凭据读 .env.e15、临时 key 在 .e17-tmp（gitignored，已清理）。二进制同 E14–E16（bin-e14/agentgateway.exe，v1.7.0，sha256 909b93dc…ed3c）。
 
+## E18 · 多密钥分流探针：同名 llm.models 跨 provider 合法性 / 同组请求内切换裁决（ADR-026 前置）
+
+目的：ADR-026 已定每把上游密钥展开为一个独立 AG 上游（provider，名 `{upstream_id}#{key_seq}`，同 baseUrl 不同 key_file）。控制面渲染改造前必须钉死两个 AG 1.7 未测语义（E16/E17 未覆盖）：① `llm.models[]` **同名模型多条**（各自 provider.reference 指向不同 key-provider）是否合法、运行时是共存分流还是覆盖；② 同一 provider 组（同 baseUrl 不同 key_file）之间的**请求内 failover** 在混合形态（顶层 `policies[]` retry 挂 internal/llm:request + health 三件套，E16 口径）下是否与跨 upstream 切换行为一致。
+
+环境与配置（脚本 e18_multikey_probe.py；混合形态 = `gateways.default`(3696, bindAddress 127.0.0.1) + `llm.gateways: default` + `llm.providers/models/virtualModels` + 顶层 `policies[]` retry；自备端口 3696/3924-3926/8096-8097，不碰生产 3691/1900x/3700；mock_upstream.py 两实例（8096 主 / 8097 对照）；每个 key-provider 一把哑密钥 `.e18-tmp/keys/lab-key-{a,b,c}.key`，**不读 .env.e15、无任何真实凭据**；命中归因双通道——mock 记录的 Authorization 前缀（每 provider 密钥不同）+ 发给上游的模型名（params.model 可区分或恒同两形态都测）；每个配置先 `--validate-only`；二进制同 E14–E17 pin）。
+
+T1 合法性判定表（--validate-only）：
+
+| 配置 | 形状 | validate 结果 |
+| --- | --- | --- |
+| T1-dup2 | 同名×2（public，up-ka/up-kb 同 baseUrl 异 key_file） | exit=0 "Configuration is valid!"，无告警 |
+| T1-dup3 | 同名×3（public） | exit=0，无告警 |
+| T1-ctrl | 异名×3 对照 | exit=0，无告警 |
+| T1-dup2-vm | 同名×2 internal + virtualModel 单 target 引用该名（生产形状） | exit=0，无告警 |
+| T1-kn2-vm | `glm-5.3#k1`/`#k2` 异名 + vm 双 target 同 priority=1 | exit=0，无告警 |
+| T1-kn3-vm | `#kN`×3 + vm 三 target 同层 | exit=0，无告警 |
+
+T2 分流判定表（运行时，同名形态）：
+
+| 场景 | N | 客户端 | key-a : key-b 命中 | /v1/models | 判定 |
+| --- | --- | --- | --- | --- | --- |
+| T2-direct 同名×2 public 直连 | 60 | 60×200 | **60 : 0**（全 key-a/up-a） | glm-5.3 仅 1 条 | 同名不分流，首条独占 |
+| T2-vm 同名×2 internal + vm 单 target | 60 | 60×200 | **60 : 0** | 仅 vm-e18（internal 成员不外露） | 同上 |
+
+T1b 备选形态判定表（`#kN` 后缀别名 + virtualModel 同层 targets）：
+
+| 场景 | N | 客户端 | 分布（按上游密钥归因） | 判定 |
+| --- | --- | --- | --- | --- |
+| T1b-kn2（#k1/#k2 + vm 同层双 target，两 provider 上游模型名可区分 up-a/up-b） | 60 | 60×200 | 40 : 20（≈2:1） | 分流成立 |
+| T1b-kn2-faithful（两 provider **同一**上游模型名 glm-5.3，ADR-026 真实形状） | 20 | 20×200 | 13 : 7（按密钥归因） | 分流成立，不依赖上游模型名差异 |
+
+T3 请求内切换判定表（#kN 形态，provider-A 恒 500（params.model=code-500）、provider-B 恒 200（ok-b），retry codes=[500] attempts=2 backoff=100ms + 每条 model 挂 health.unhealthyExpression="response.code >= 400" + eviction.consecutiveFailures=1 三件套）：
+
+| 场景 | 客户端 | 命中矩阵 | duration |
+| --- | --- | --- | --- |
+| T3-s1 同组（两 provider 同 baseUrl 8096，异 key_file） | 10/10 200 | 2 trial 主命中（code-500, key-a）后**请求内切备**（ok-b, key-b），8 trial 直备；AG 日志 retry.attempt=1 ×2 | 切备 trial 115.4/135.3ms（含 100ms backoff），直备 1–26ms |
+| T3-s2 跨 upstream（A→8096 / B→8097 异 baseUrl） | 10/10 200 | 1 trial 主→切备，9 trial 直备；retry.attempt=1 ×1 | 120.7ms / 1–26ms |
+
+T4 平权声明复核（#k1/#k2/#k3 + vm 同层三 target，同 baseUrl 异 key_file）：
+
+| N | 客户端 | 分布 | 判定 |
+| --- | --- | --- | --- |
+| 60 | 60×200 | 29 : 12 : 19（0.48 : 0.20 : 0.32） | 非严格等权，E7 的 P2C 结论适用于 provider 维度 |
+
+观察细节：
+
+- **同名塌缩是完全静默的**：validate 输出 "Configuration is valid!"、AG 启动日志无任何 dup/conflict/warn 字样、/v1/models 去重只列一条、全部 60 请求进第一条（provider.reference=up-ka，key-a 60/60），第二条（up-kb）0 命中。public 直连与 internal+virtualModel 两条引用路径行为一致；×3 仅 validate（×2 运行时已证塌缩，方向为首条生效）。
+- request_logs 仍 1 客户端请求 1 行（10 trial 10 行 LLM + 1 行 /v1/models，gen_ai 模型列 NULL）；重试 trial 的 gen_ai_request/response_model 记**最终**上游模型名（ok-b），主尝试（code-500）不成行——主/备命中归因必须用上游侧命中日志（本轮 mock 命中日志按 Authorization 前缀归因），不能只看 request_logs。
+- T3 两场景 request_logs http_status=200、error=NULL；duration 与客户端计时一致（含 backoff）。
+- T3-s1 的驱逐+概率重选形状与 E16 A1a 一致：主失败被驱逐后连续直备，约 5 个 trial 后 P2C 重探主（trial 6/9 先打主再切备，仍 200）。
+- `#` 字符是模型名合法字符（validate + 运行时 + /v1/models 三面通过）。
+
+结论（回答 ADR-026 两问）：
+
+1. **渲染形态采用 `#kN` 后缀别名，不用同名多条**。同名 `llm.models[]` 多条（各自指向不同 provider）validate 静默通过且无运行时告警，但**首条独占全部流量、其余条目被静默丢弃**（60:0）且 /v1/models 去重——不可依赖的语义。`#kN` 别名（`{model}#k{seq}`）+ virtualModel targets 同层（同 priority）逐条引用在 validate、分流（含两 provider 同一上游模型名的真实形状）、failover、/v1/models 四个面全部成立。
+2. **请求内切换与跨 upstream 一致**。同 baseUrl 不同 key_file 的 key-provider 组内 failover（T3-s1）与跨 baseUrl 的 upstream 间 failover（T3-s2）命中矩阵同构：主 500 → retry（codes=[500]）→ health 驱逐 → 请求内切备 → 客户端 200（10/10），duration 含 backoff，retry.attempt 日志证据一致。ADR-024 三件套在 key-provider 维度原样成立，坏密钥按健康驱逐淘汰（ADR-026 Q2a 成立）。
+3. 平权声明复核（T4）：同层多 target（3 把 key-provider）非严格等权（29:12:19），E7 的 P2C 结论适用于 provider 维度；文案不得写「均匀分流」（与 ADR-012 一致）。
+
+对 D 波渲染设计的建议：
+
+- `llm.models[]` 展开规则：upstream model × key → 唯一名 `{model}#k{seq}` + provider `{upstream_id}#{key_seq}`（同 baseUrl 异 key_file）；virtualModel targets 每个 `#k` 条目一行（同 priority 平权层）。
+- 渲染层自检新增不变量：`llm.models[]` 内禁止同名条目（AG 静默塌缩不能当语义用，validate 抓不住，必须控制面把关）。
+- 账本归因边界：request_logs 只记最终上游模型名与最终 provider，密钥级用量归因不能依赖模型列；如需按密钥记账，需从 AG 日志或上游侧计数兜底（本轮 mock 命中日志即该角色）。
+
+原始证据：evidence/E18-T1-validate.json.md、E18-T2-direct.json.md、E18-T2-vm.json.md、E18-T1b-kn2.json.md、E18-T1b-kn2-faithful.json.md、E18-T3-s1-samegroup.json.md、E18-T3-s2-crossup.json.md、E18-T4-kn3.json.md；配置 evidence/cfg-E18-*.yaml（13 个，key file 路径脱敏为占位符）；mock 命中日志 evidence/mock-E18-*.jsonl；AG 运行日志 evidence/ag-E18-*.log（gitignored）。脚本 e18_multikey_probe.py（自备端口/哑密钥/不读 .env.e15）；运行期工作区 .e18-tmp（gitignored）。二进制同 E14–E17（bin-e14/agentgateway.exe，v1.7.0，sha256 909b93dc…ed3c）。
+
 ## 对 v1 设计的影响汇总
 
 1. 路由语义：priority 分层严格；同层随机（约 1/3:2/3 偏置）；失败不请求内重试，只影响后续选路。GLOSSARY/ADR-003 需补「非请求内重试」。
@@ -548,6 +614,7 @@ maxTokens=2、tokensPerFill=0、fillInterval=1h、type=requests：前 2 个请�
 14. 真实上游复验（E15）：NVIDIA/OpenRouter 真实 401/404 原样透传、0 次请求内切换；流式中途断连不切备 target（客户端拿截断 SSE，request_logs 记 200 + error）；weighted 3:1 实测 18:2 与 15:5（n=20 抽样噪声内）；route 层 retry 纯 HTTP 3 次/请求 vs LLM 5 请求 5 次命中——E14 结论在真实上游下成立。
 15. 完整形态（E16）：显式 route + backends[].ai 时 route 层 retry 真正作用于 LLM 流量并实现请求内组间 failover（主 5xx → 重试 → 组2 → 200，4/4）；4xx 需 codes 含 4xx + health.unhealthyExpression + eviction 三件套才请求内切组（单配 codes 时 3 次全打原组）；backend/provider 层无 retry 字段（validate 拒收）；health 必须表达式与 eviction 同配（只配表达式会让驱逐整体失效）；同组内切换是 P2C 概率行为非保证；request_logs 1 请求 1 行不变。→ v1 若保「客户端无感重试」产品语义，渲染层从简化 llm 模式迁完整形态即可，官方能力在 1.7 的完整形态 API 面（gateways/routes/policies.retry + backends[].ai）已具备。
 16. 鉴权通道与迁移可行性（E17）：完整形态真实上游鉴权可用——providers[].policies.backendAuth {key:{file}} 等价 "Authorization: Bearer <key>"，credentials 可自定义 header name/prefix；真实 NVIDIA 200，错误 key 403/401 与直连上游 body 全等透传；route policies.apiKey strict 可做客户端鉴权（上游只见 provider key）。流式+retry：首字节前失败切备并收完整 SSE（9 chunks），首字节后中断不切备（E14 语义在完整形态成立，chunked 上游时 AG 已感知 error 仍不 failover）；request_logs 的 tokens/ttft/tpot 列形状与简化模式完全一致。真实上游 401 组间 failover：仅 retry.codes 不换组（3/3 全打主组），codes+health+eviction 三件套下非流式/流式均 200 切备。→ 简化→完整形态迁移可立项；渲染层强制 backendAuth、host:port + backendTLS.hostname、4xx 三件套；OR :free 当日 429 且有 AG panic（outlierdetection SystemTime overflow）风险需跟踪。
+17. 多密钥展开语义（E18，ADR-026 前置）：同名 `llm.models[]` 多条（不同 provider.reference）validate 静默通过但运行时**首条独占、其余静默丢弃**（60:0，无告警，/v1/models 去重）——渲染必须用 `{model}#k{seq}` 唯一别名 + virtualModel 同层逐条 targets（validate/分流/failover//v1/models 四面全绿，两 provider 同一上游模型名的真实形状亦分流 13:7）。同 baseUrl 不同 key_file 的 key-provider 组内请求内 failover 与跨 upstream 一致（retry codes+health 三件套下 10/10 客户端 200、命中矩阵同构、duration 含 backoff）；同层 3 target 非均匀（29:12:19，P2C 适用于 provider 维度）。控制面须自检 llm.models 禁同名；密钥级用量归因不能依赖 request_logs 模型列（只记最终上游）。
 
 ## 与 Lead 第二轮决策的交叉
 
@@ -588,5 +655,6 @@ maxTokens=2、tokensPerFill=0、fillInterval=1h、type=requests：前 2 个请�
 - E15 脚本：slipstream/ops/experiments/ag-lab/e15_real_upstream.py（凭据读 .env.e15，key 写 .e15-tmp/*.key 并以 apiKey.file 引用；含 KillProxy 流中杀代理与计数代理）；证据 evidence/E15-S1-bad-key-primary.json.md、evidence/E15-S2-fabricated-model.json.md、evidence/E15-S3-stream-kill.json.md、evidence/E15-S4-weighted-3-1.json.md、evidence/E15-S5-retry-recheck.json.md、evidence/cfg-E15-*.yaml、evidence/ag-E15-*.log
 - E16 脚本：slipstream/ops/experiments/ag-lab/e16_full_form.py（完整形态 gateways/routes/backends[].ai，mock 上游，hostOverride 拨号 + pathPrefix 分计数）；证据 evidence/E16-A0-baseline.json.md、evidence/E16-A1-route-retry.json.md、evidence/E16-A1-401-health-failover.json.md、evidence/E16-A2-backend-retry.json.md、evidence/E16-A3-group-failover.json.md、evidence/E16-A4-health-4xx.json.md、evidence/E16-A5-same-group-switch.json.md、evidence/cfg-E16-*.yaml、evidence/ag-e16-*.log
 - E17 脚本：slipstream/ops/experiments/ag-lab/e17_common.py（共享 harness：配置构造、validate/start/stop、mock、计数/Kill 代理、request_logs 导出、密钥打码）+ e17_t1_auth.py、e17_t1_supp.py、e17_t2_stream_retry.py、e17_t3_real_failover.py；证据 evidence/E17-T1-*.json.md（9 个）、evidence/E17-T2-{a,b,c}.json.md、evidence/E17-T3-s{1,2}.json.md、evidence/cfg-E17-*.yaml、evidence/ag-E17-*.log；凭据读 .env.e15，临时 key 在 .e17-tmp（gitignored，已清理）。
+- E18 脚本：slipstream/ops/experiments/ag-lab/e18_multikey_probe.py（多密钥分流探针，ADR-024 混合形态；自备端口 3696/3924-3926/8096-8097，哑密钥 .e18-tmp/keys/*.key，不读 .env.e15，命中归因用 mock Authorization 前缀 + 上游模型名双通道）；证据 evidence/E18-T1-validate.json.md、E18-T2-direct.json.md、E18-T2-vm.json.md、E18-T1b-kn2.json.md、E18-T1b-kn2-faithful.json.md、E18-T3-s1-samegroup.json.md、E18-T3-s2-crossup.json.md、E18-T4-kn3.json.md、evidence/cfg-E18-*.yaml（13 个）、evidence/mock-E18-*.jsonl、evidence/ag-E18-*.log（gitignored）；运行期工作区 .e18-tmp（gitignored）。二进制同 E14–E17。
 - mock 上游新增 usage 变体：模型名含 usage-p100 时返回 prompt=100/completion=0，含 usage-c100 时返回 prompt=0/completion=100（mock_upstream.py 的 _usage_for）；响应头 x-ratelimit-* 与 429 证据见 E12 两组 JSON。
 - mock 上游 E14 新增端点：模型名 code-<N> 返回状态码 N、code-timeout-<s> 挂起、POST /plain/<spec>（纯数字恒定码、seq-<N>-200 首败后 200、slow-<ms>）、任意前缀 /embeddings、/images/generations、/systemone 返回合法 JSON（mock_upstream.py do_POST）。

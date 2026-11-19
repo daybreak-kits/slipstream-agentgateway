@@ -1,0 +1,109 @@
+{
+  "config": {
+    "adminAddr": "127.0.0.1:3924",
+    "statsAddr": "127.0.0.1:3925",
+    "readinessAddr": "127.0.0.1:3926",
+    "database": {
+      "url": "sqlite://data.db"
+    },
+    "storage": {
+      "mode": "file"
+    },
+    "session": {
+      "key": "3a5dde678b895d76e244397deac58c4eac0199d751ee0c168e4ef022d62e9c2e"
+    }
+  },
+  "gateways": {
+    "default": {
+      "port": 3696,
+      "bindAddress": "127.0.0.1"
+    }
+  },
+  "frontendPolicies": {
+    "accessLog": {
+      "database": {
+        "llm": "full"
+      }
+    }
+  },
+  "llm": {
+    "gateways": "default",
+    "providers": [
+      {
+        "name": "up-ka",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8096/v1",
+          "apiKey": {
+            "file": "<gitignored-key-file>"
+          }
+        }
+      },
+      {
+        "name": "up-kb",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8096/v1",
+          "apiKey": {
+            "file": "<gitignored-key-file>"
+          }
+        }
+      },
+      {
+        "name": "up-kc",
+        "provider": "openAI",
+        "params": {
+          "baseUrl": "http://127.0.0.1:8096/v1",
+          "apiKey": {
+            "file": "<gitignored-key-file>"
+          }
+        }
+      }
+    ],
+    "models": [
+      {
+        "name": "glm-5.3",
+        "provider": {
+          "reference": "up-ka"
+        },
+        "visibility": "public",
+        "params": {
+          "model": "up-a"
+        }
+      },
+      {
+        "name": "glm-5.3",
+        "provider": {
+          "reference": "up-kb"
+        },
+        "visibility": "public",
+        "params": {
+          "model": "up-b"
+        }
+      },
+      {
+        "name": "glm-5.3",
+        "provider": {
+          "reference": "up-kc"
+        },
+        "visibility": "public",
+        "params": {
+          "model": "up-c"
+        }
+      }
+    ],
+    "policies": {
+      "apiKey": {
+        "mode": "strict",
+        "keys": [
+          {
+            "key": "sk-ss-lab-client-0001",
+            "metadata": {
+              "name": "lab-client"
+            }
+          }
+        ]
+      }
+    }
+  }
+}
