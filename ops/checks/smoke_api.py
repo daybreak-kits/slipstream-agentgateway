@@ -292,8 +292,8 @@ def main() -> int:
 
         for path, expected, label in (
             ("/admin/vendors", 3, "厂商"),
-            ("/admin/upstreams", 6, "上游"),  # 每项须带 has_api_key bool（前端密钥列）
-            ("/admin/upstream-models", 20, "上游模型"),
+            ("/admin/upstreams", 4, "上游"),  # 每项须带 has_api_key bool（由密钥行数量派生）
+            ("/admin/upstream-models", 16, "上游模型"),
             ("/admin/public-models", 8, "对外模型"),
             ("/admin/model-targets", 16, "模型目标"),
             ("/admin/users", 6, "用户"),  # ticket 04 起 seed 含根用户 D

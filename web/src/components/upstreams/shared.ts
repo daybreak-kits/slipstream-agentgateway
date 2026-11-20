@@ -4,8 +4,8 @@
 import { ApiError } from "@/lib/api";
 import type { Upstream, UpstreamProbe } from "@/types";
 
-/** 后端 D：vendor_id 可空；详情带 api_style_source。ADR-026 后 has_api_key 只反映
- *  已退役的镜像列（恒为 false），前端不再读取。 */
+/** 后端 D：vendor_id 可空；详情带 api_style_source。ADR-026 后 has_api_key 由
+ *  密钥行数量派生（`key_count > 0`，不再读退役的 api_key_enc 镜像列），前端不再读取。 */
 export type UpstreamRow = Omit<Upstream, "vendor_id"> & {
   vendor_id?: string | null;
   has_api_key?: boolean;

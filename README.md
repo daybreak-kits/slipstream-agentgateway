@@ -72,11 +72,11 @@ python scripts/seed_demo.py
 默认 **DROP 重建**（会清空当前数据库，先停掉占用数据库的 API 进程）；成功输出包含：
 
 ```text
-写入: 厂商 3 / 上游 6 / 上游模型 20 / 公开模型 8 / 目标 16 / 用户 6 / 用量事件 252（其中未定价 3）
+写入: 厂商 3 / 上游 4 / 上游模型 16 / 公开模型 8 / 目标 16 / 用户 6 / 用量事件 252（其中未定价 3）
 登录账号: admin / admin（可用 ADMIN_USERNAME / ADMIN_PASSWORD 覆盖）← 首次登录后请立即修改
 ```
 
-旧库升级（可选）：`python scripts/migrate_priority_v2.py` 为 dry-run，加 `--apply` 写入并打 `priority_semantics=v2` 标记。
+旧库升级（可选，新库无需执行）：`python scripts/migrate_priority_v2.py` 与 `python scripts/migrate_multikey_v2.py` 均默认 dry-run，加 `--apply` 写入并打 `v2` 标记；多密钥迁移把退役的 `upstreams.api_key_enc` 镜像转成首把密钥行并清空镜像，之后 no-op。
 
 ### 3）起控制面（3700）
 
