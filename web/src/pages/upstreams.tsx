@@ -313,10 +313,10 @@ export function UpstreamsPage() {
       header: "操作",
       enableSorting: false,
       meta: {
+        // 操作列 = 最后一列 + 尾部冻结（DESIGN-AUDIT 四期 §2 / W5 D1）：align/sticky 由 lib/table-columns
+        // 统一给 th 与 td 上类（不透明底 + 左分割阴影 + 行悬浮同步），窄屏横向滚动时仍可见。
         hideable: false,
-        // 操作列 = 最后一列 + 水平冻结（DESIGN-AUDIT 四期 §2）：sticky right-0 + 不透明底色 + 分割阴影。
-        className: "sticky right-0 bg-surface shadow-[inset_1px_0_0_var(--border)]",
-        thClassName: "bg-surface-2",
+        sticky: "right",
       },
       cell: ({ row }) => {
         const item = row.original;

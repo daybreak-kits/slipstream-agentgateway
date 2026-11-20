@@ -135,6 +135,9 @@
   --surface-2: #f3f4f6;
   --border: #e5e7eb;
   --border-strong: #d1d5db;
+  /* 表格行悬浮色（W5 D1）：surface-2/40 叠在 surface 上的不透明等价色——冻结列要同步行背景，
+     必须用不透明色，否则横向滚动时下层内容会透出、hover 时出现色块断层。 */
+  --row-hover: #fafbfb;
   --text-title: #111827;
   --text-body: #1f2937;
   --text-muted: #5b6573;
@@ -215,6 +218,9 @@
 
   /* z-index 五档（旧标准另有两档：表格吸顶列 5、全局搜索 60） */
   --z-sticky: 10;
+  /* 表格冻结列分层（DESIGN-AUDIT 四期 §2）：冻结列表头 > 吸顶表头 > 冻结列单元格 > 表体内容 */
+  --z-sticky-column: 9;
+  --z-sticky-head: 11;
   --z-topbar: 30;
   --z-modal: 50;
   /* 弹层（Select/Dropdown/Popover/Tooltip）必须浮在 Dialog 之上：对话框内的
@@ -249,6 +255,7 @@
   --surface-2: #172033;
   --border: #273244;
   --border-strong: #374357;
+  --row-hover: #131b2c;
   --text-title: #f9fafb;
   --text-body: #e5e7eb;
   --text-muted: #9ca3af;

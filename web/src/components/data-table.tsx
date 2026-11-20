@@ -16,6 +16,11 @@ import { Input } from "@/components/ui/input";
 import { PAGE_SIZE_OPTIONS, Pagination } from "@/components/ui/pagination";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableWrap, TD, TH, THead, TR } from "@/components/ui/table";
+import {
+  tableColumnCellClass,
+  tableColumnHeaderClass,
+  type TableColumnLayoutMeta,
+} from "@/lib/table-columns";
 import { cn } from "@/lib/utils";
 
 /** 稳定的空数据引用：`data ?? []` 每次渲染都会新建数组，会让 TanStack Table
@@ -103,12 +108,11 @@ export type DataTablePaging =
       onPageSizeChange: (pageSize: number) => void;
     };
 
-/** 列定义 meta 契约：对齐/冻结类头身同用 + th 覆盖通道 + 列设置菜单信息（DESIGN-AUDIT 四期 §2/§6）。 */
-export interface DataTableMeta {
-  /** 同时上 th 与 td：数值列对齐（text-right tnum）、操作列冻结（sticky right-0 + 不透明底色 + 分割阴影）。 */
-  className?: string;
-  /** 仅上 th 的覆盖通道（如冻结列表头底色需跟随表头行而非表体行）。 */
-  thClassName?: string;
+/**
+ * 列定义 meta 契约：align/sticky 与 ModelsTable/PriceTable 共用 lib/table-columns（头身同用），
+ * 另带列设置菜单信息（DESIGN-AUDIT 四期 §2/§6）。
+ */
+export interface DataTableMeta extends TableColumnLayoutMeta {
   /** 列设置菜单的展示名（表头为函数/自定义节点时用它补充）。 */
   label?: string;
   /** false = 不进列设置菜单（勾选列等固定列）。 */
@@ -296,8 +300,7 @@ export function DataTable<T>({
                       className={cn(
                         "sticky top-0 z-[var(--z-sticky)] bg-surface-2",
                         canSort && "cursor-pointer hover:text-body",
-                        meta?.className,
-                        meta?.thClassName,
+                        tableColumnHeaderClass(meta),
                       )}
                     >
                       <span className="inline-flex items-center gap-1">
@@ -318,7 +321,7 @@ export function DataTable<T>({
                   {table.getVisibleLeafColumns().map((col) => (
                     <TD
                       key={col.id}
-                      className={(col.columnDef.meta as DataTableMeta | undefined)?.className}
+                      className={tableColumnCellClass(col.columnDef.meta as DataTableMeta | undefined)}
                     >
                       <Skeleton className="h-4 w-full max-w-40" />
                     </TD>
@@ -354,7 +357,7 @@ export function DataTable<T>({
                   {row.getVisibleCells().map((cell) => (
                     <TD
                       key={cell.id}
-                      className={(cell.column.columnDef.meta as DataTableMeta | undefined)?.className}
+                      className={tableColumnCellClass(cell.column.columnDef.meta as DataTableMeta | undefined)}
                     >
                       {flexRender(renderCell(cell.column.id), cell.getContext())}
                     </TD>

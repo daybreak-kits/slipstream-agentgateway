@@ -154,6 +154,7 @@ export function AdminsPage() {
     {
       id: "actions",
       header: "操作",
+      meta: { sticky: "right" },
       cell: (cell) => {
         const role = cell.row.original;
         return (
@@ -162,7 +163,7 @@ export function AdminsPage() {
               // 内置角色只读入口：不要求 roles:write（查看权限摘要不是写操作）
               <Button
                 variant="ghost"
-                size="sm"
+                size="dense"
                 onClick={() => {
                   setEditingRole(role);
                   setDrawerOpen(true);
@@ -174,7 +175,7 @@ export function AdminsPage() {
               canManageRoles && (
                 <Button
                   variant="ghost"
-                  size="sm"
+                  size="dense"
                   onClick={() => {
                     setEditingRole(role);
                     setDrawerOpen(true);
@@ -187,7 +188,7 @@ export function AdminsPage() {
             {!role.builtin && canManageRoles && (
               <Button
                 variant="ghost"
-                size="sm"
+                size="dense"
                 className="text-danger-text"
                 onClick={() => setDeleteTarget(role)}
               >

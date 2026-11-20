@@ -11,21 +11,23 @@ import { PAGE_SIZE_OPTIONS, Pagination } from "@/components/ui/pagination";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableWrap, TD, TH, THead, TR } from "@/components/ui/table";
+import {
+  tableColumnCellClass,
+  tableColumnHeaderClass,
+  type TableColumnLayoutMeta,
+} from "@/lib/table-columns";
 import { SELECT_ALL_VALUE } from "@/lib/select-sentinels";
 import { cn } from "@/lib/utils";
 import { ListFilter, Settings2 } from "lucide-react";
 
-/** 列定义：hideable 默认 true；勾选列/操作列等固定列传 false。 */
-export interface ModelColumn<T> {
+/** 列定义：align/sticky 与 DataTable/PriceTable 共用 lib/table-columns；hideable 默认 true。 */
+export interface ModelColumn<T> extends TableColumnLayoutMeta {
   key: string;
   /** 列设置菜单里的名称；表头默认渲染它，需要更复杂表头时用 header 覆盖。 */
   label: string;
   header?: ReactNode;
   cell: (row: T) => ReactNode;
-  /** 追加到 td 与 th 的类（对齐镜像，DESIGN-AUDIT 四期 §2：数值列 text-right tnum 头身同用）；行高紧凑由表格统一收紧到 py-1.5。 */
-  className?: string;
-  /** 仅追加到 th 的覆盖通道（宽度/对齐覆写）。 */
-  headerClassName?: string;
+  /** false = 勾选列/操作列等固定列，不进列设置菜单。 */
   hideable?: boolean;
 }
 
@@ -184,9 +186,8 @@ export function ModelsTable<T>({
                 <TH
                   key={col.key}
                   className={cn(
-                    "sticky top-0 z-[var(--z-sticky)] bg-surface-2",
-                    col.className,
-                    col.headerClassName,
+                    "sticky top-0 z-[var(--z-sticky)] bg-surface-2 h-8",
+                    tableColumnHeaderClass(col),
                   )}
                 >
                   {col.header ?? col.label}
@@ -199,7 +200,7 @@ export function ModelsTable<T>({
               Array.from({ length: 5 }, (_, i) => (
                 <TR key={i}>
                   {visibleColumns.map((col) => (
-                    <TD key={col.key} className={cn("py-1.5", col.className)}>
+                    <TD key={col.key} className={cn("h-8 py-0.5", tableColumnCellClass(col))}>
                       <Skeleton className="h-4 w-full max-w-40" />
                     </TD>
                   ))}
@@ -248,7 +249,7 @@ export function ModelsTable<T>({
                     : undefined}
                 >
                   {visibleColumns.map((col) => (
-                    <TD key={col.key} className={cn("py-1.5", col.className)}>
+                    <TD key={col.key} className={cn("h-8 py-0.5", tableColumnCellClass(col))}>
                       {col.cell(row)}
                     </TD>
                   ))}
