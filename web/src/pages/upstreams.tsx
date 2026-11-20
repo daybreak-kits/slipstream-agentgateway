@@ -15,6 +15,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { ActionButton } from "@/components/ui/action-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -323,36 +324,33 @@ export function UpstreamsPage() {
         // 阻止冒泡到行点击：按钮动作不触发整行进入编辑。
         return (
           <div className="flex flex-wrap gap-1" onClick={(event) => event.stopPropagation()}>
-            <Button
-              variant="ghost"
+            <ActionButton
+              action={item.enabled ? "disable" : "enable"}
               size="dense"
               disabled={toggle.isPending || !canWrite}
               onClick={() => toggle.mutate(item)}
             >
-              {item.enabled ? <ACTION_ICONS.disable className="h-3.5 w-3.5" /> : <ACTION_ICONS.enable className="h-3.5 w-3.5" />}
               {item.enabled ? "关闭" : "启用"}
-            </Button>
-            <Button
-              variant="ghost"
+            </ActionButton>
+            <ActionButton
+              action="testConnection"
               size="dense"
               disabled={test.isPending || !canWrite}
               onClick={() => test.mutate(item)}
             >
-              <ACTION_ICONS.testConnection className="h-3.5 w-3.5" />
               {test.isPending && test.variables?.id === item.id ? "测试中…" : "测试连接"}
-            </Button>
-            <Button variant="ghost" size="dense" onClick={() => openEditor(item)}>
-              <ACTION_ICONS.edit className="h-3.5 w-3.5" /> 编辑
-            </Button>
-            <Button
-              variant="ghost"
+            </ActionButton>
+            <ActionButton action="edit" size="dense" onClick={() => openEditor(item)}>
+              编辑
+            </ActionButton>
+            <ActionButton
+              action="delete"
               size="dense"
-              className="text-danger-text"
               disabled={!canWrite}
               onClick={() => setDeleting(item)}
             >
-              <ACTION_ICONS.delete className="h-3.5 w-3.5" /> 删除
-            </Button>
+              删除
+            </ActionButton>
           </div>
         );
       },
@@ -387,15 +385,29 @@ export function UpstreamsPage() {
           {selected.size > 0 ? (
             <>
               <span className="text-2xs text-faint">已选 <span className="tnum font-medium text-title">{selected.size}</span></span>
-              <Button variant="outline" size="sm" disabled={batch.isPending || !canWrite} onClick={() => batch.mutate({ ids: Array.from(selected), action: "enable" })}>
-                <ACTION_ICONS.enable className="h-3.5 w-3.5" /> 批量启用
-              </Button>
-              <Button variant="outline" size="sm" disabled={batch.isPending || !canWrite} onClick={() => batch.mutate({ ids: Array.from(selected), action: "disable" })}>
-                <ACTION_ICONS.disable className="h-3.5 w-3.5" /> 批量关闭
-              </Button>
-              <Button variant="ghost" size="sm" className="text-danger-text" disabled={batch.isPending || !canWrite} onClick={() => setBatchDelete(true)}>
-                <ACTION_ICONS.delete className="h-3.5 w-3.5" /> 批量删除
-              </Button>
+              <ActionButton
+                action="enable"
+                variant="outline"
+                disabled={batch.isPending || !canWrite}
+                onClick={() => batch.mutate({ ids: Array.from(selected), action: "enable" })}
+              >
+                批量启用
+              </ActionButton>
+              <ActionButton
+                action="disable"
+                variant="outline"
+                disabled={batch.isPending || !canWrite}
+                onClick={() => batch.mutate({ ids: Array.from(selected), action: "disable" })}
+              >
+                批量关闭
+              </ActionButton>
+              <ActionButton
+                action="delete"
+                disabled={batch.isPending || !canWrite}
+                onClick={() => setBatchDelete(true)}
+              >
+                批量删除
+              </ActionButton>
               <Button variant="ghost" size="sm" disabled={batch.isPending} onClick={() => setSelected(new Set())}>
                 <ACTION_ICONS.clear className="h-3.5 w-3.5" /> 清除选择
               </Button>

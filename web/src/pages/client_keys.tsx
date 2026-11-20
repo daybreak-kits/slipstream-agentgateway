@@ -6,6 +6,7 @@ import { toast } from "@/lib/notify";
 import { CopyKeyButton } from "@/components/keys/copy-key-button";
 import { RenameKeyDialog } from "@/components/keys/rename-key-dialog";
 import { DataTable } from "@/components/data-table";
+import { ActionButton } from "@/components/ui/action-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -177,36 +178,23 @@ export function ClientKeysPage() {
         const active = key.status === "active";
         return (
           <div className="flex flex-wrap items-center gap-1.5">
-            <Button
-              variant="ghost"
+            <ActionButton
+              action={active ? "disable" : "enable"}
               size="dense"
               disabled={setStatus.isPending}
               onClick={() => setStatus.mutate({ keyId: key.id, status: active ? "disabled" : "active" })}
             >
-              {active ? (
-                <>
-                  <ACTION_ICONS.disable className="h-3.5 w-3.5" /> 关闭
-                </>
-              ) : (
-                <>
-                  <ACTION_ICONS.enable className="h-3.5 w-3.5" /> 启用
-                </>
-              )}
-            </Button>
-            <Button variant="ghost" size="dense" onClick={() => setRenameTarget(key)}>
-              <ACTION_ICONS.rename className="h-3.5 w-3.5" /> 重命名
-            </Button>
-            <Button variant="ghost" size="dense" onClick={() => setRotateTarget(key)}>
-              <ACTION_ICONS.resetKey className="h-3.5 w-3.5" /> 重置
-            </Button>
-            <Button
-              variant="ghost"
-              size="dense"
-              className="text-danger-text"
-              onClick={() => setDeleteTarget(key)}
-            >
-              <ACTION_ICONS.delete className="h-3.5 w-3.5" /> 删除
-            </Button>
+              {active ? "关闭" : "启用"}
+            </ActionButton>
+            <ActionButton action="rename" size="dense" onClick={() => setRenameTarget(key)}>
+              重命名
+            </ActionButton>
+            <ActionButton action="resetKey" size="dense" onClick={() => setRotateTarget(key)}>
+              重置
+            </ActionButton>
+            <ActionButton action="delete" size="dense" onClick={() => setDeleteTarget(key)}>
+              删除
+            </ActionButton>
           </div>
         );
       },

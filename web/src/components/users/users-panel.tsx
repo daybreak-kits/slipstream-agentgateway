@@ -5,6 +5,7 @@ import { toast } from "@/lib/notify";
 
 import { DataTable } from "@/components/data-table";
 import { ErrorState } from "@/components/governance/panel";
+import { ActionButton } from "@/components/ui/action-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -350,37 +351,31 @@ export function UsersPanel({
               </Button>
             )}
             {canUpdate && (
-              <Button
-                variant="ghost"
+              <ActionButton
+                action={disabledNow ? "enable" : "disable"}
                 size="dense"
                 disabled={patchStatus.isPending || (isRoot && !disabledNow)}
                 title={isRoot && !disabledNow ? "根用户不可关闭" : undefined}
                 onClick={() => patchStatus.mutate({ id: user.id, status: disabledNow ? "active" : "disabled" })}
               >
-                {disabledNow ? (
-                  <ACTION_ICONS.enable className="h-3.5 w-3.5" />
-                ) : (
-                  <ACTION_ICONS.disable className="h-3.5 w-3.5" />
-                )}
                 {disabledNow ? "启用" : "关闭"}
-              </Button>
+              </ActionButton>
             )}
             {canUpdate && (
-              <Button variant="ghost" size="dense" onClick={() => setEditing(user)}>
-                <ACTION_ICONS.edit className="h-3.5 w-3.5" /> 编辑
-              </Button>
+              <ActionButton action="edit" size="dense" onClick={() => setEditing(user)}>
+                编辑
+              </ActionButton>
             )}
             {canDelete && (
-              <Button
-                variant="ghost"
+              <ActionButton
+                action="delete"
                 size="dense"
-                className="text-danger-text"
                 disabled={isRoot}
                 title={isRoot ? "根用户不可删除" : undefined}
                 onClick={() => setDeleteTarget(user)}
               >
-                <ACTION_ICONS.delete className="h-3.5 w-3.5" /> 删除
-              </Button>
+                删除
+              </ActionButton>
             )}
           </div>
         );
