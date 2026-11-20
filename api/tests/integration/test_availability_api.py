@@ -8,7 +8,23 @@ PATCH/DELETE, so those rules are now created (and enforced) instead of rejected.
 
 from __future__ import annotations
 
+import pytest
 from tests.conftest import seed_channel
+
+
+@pytest.fixture(autouse=True)
+def _pin_operations_timezone_to_utc(engine_and_sessionmaker):
+    """_window_around_now builds HH:MM from the UTC wall clock; keep the
+    evaluator's operations timezone (app_settings) at UTC for these ticket-02
+    mutual-exclusion cases. Timezone handling itself is covered in test_availability."""
+    _, factory = engine_and_sessionmaker
+    from l01_core.timeutil import now_ms
+    from l04_repo.repository import put_setting
+
+    with factory() as session:
+        put_setting(session, "timezone", '"UTC"', now_ms())
+        session.commit()
+
 
 DAILY_WINDOWS = '{"windows": [{"start": "02:00", "end": "04:00", "days": [1, 2, 3, 4, 5]}]}'
 
@@ -221,3 +237,255 @@ def test_viewer_cannot_create_rule(client, login_cookies, engine_and_sessionmake
     )
     assert response.status_code == 403
     assert response.json()["code"] == "FORBIDDEN"
+
+
+# ------------------------------------------- ticket 02: 互斥、解除、公开模型禁区
+
+
+def _window_around_now(minutes_before: int = 2, minutes_after: int = 30) -> str:
+    """Daily window that certainly contains the real wall clock (UTC-pinned suite)."""
+    import json
+    from datetime import UTC, datetime, timedelta
+
+    from l01_core.timeutil import now_ms
+
+    moment = datetime.fromtimestamp(now_ms() / 1000, tz=UTC)
+    start = moment - timedelta(minutes=minutes_before)
+    end = moment + timedelta(minutes=minutes_after)
+    return json.dumps(
+        {
+            "windows": [
+                {
+                    "start": f"{start.hour:02d}:{start.minute:02d}",
+                    "end": f"{end.hour:02d}:{end.minute:02d}",
+                }
+            ]
+        }
+    )
+
+
+def test_periodic_rule_conflicts_with_an_active_single_cooldown(
+    client, engine_and_sessionmaker
+):
+    from l05_service.availability import row_cooldown_rule_id
+
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    url = f"/admin/upstream-models/{ids['upstream_model_id']}"
+    deadline = _future_ms()
+    assert client.patch(url, json={"cooldown_until_ms": deadline}).status_code == 200
+
+    blocked = _post(
+        client,
+        {
+            "kind": "cooldown",
+            "scope": "upstream_model",
+            "scope_id": ids["upstream_model_id"],
+            "recurrence": "daily",
+            "schedule_json": DAILY_WINDOWS,
+        },
+    )
+    assert blocked.status_code == 409, blocked.text
+    body = blocked.json()
+    assert body["code"] == "CONFLICT"
+    assert body["details"]["blocking_rule_ids"] == [
+        row_cooldown_rule_id("upstream_model", ids["upstream_model_id"])
+    ]
+    assert body["details"]["cooldown_until_ms"] == deadline
+    assert body["details"]["window_end_ms"] == 0
+
+
+def test_once_cooldown_conflicts_with_an_open_periodic_window(
+    client, engine_and_sessionmaker
+):
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    url = f"/admin/upstream-models/{ids['upstream_model_id']}"
+    created = _post(
+        client,
+        {
+            "kind": "cooldown",
+            "scope": "upstream_model",
+            "scope_id": ids["upstream_model_id"],
+            "recurrence": "daily",
+            "schedule_json": _window_around_now(),
+        },
+    )
+    assert created.status_code == 201, created.text
+    window_end_ms = created.json()["id"]
+
+    blocked = client.patch(url, json={"cooldown_until_ms": _future_ms()})
+    assert blocked.status_code == 409, blocked.text
+    details = blocked.json()["details"]
+    assert details["blocking_rule_ids"] == [window_end_ms]
+    assert details["window_end_ms"] > 0
+    assert details["cooldown_until_ms"] == 0
+
+    once = _post(
+        client,
+        {
+            "kind": "cooldown",
+            "scope": "upstream_model",
+            "scope_id": ids["upstream_model_id"],
+            "recurrence": "once",
+            "expires_at_ms": _future_ms(),
+        },
+    )
+    assert once.status_code == 409, once.text
+    assert once.json()["details"]["window_end_ms"] == details["window_end_ms"]
+
+
+def test_single_cooldown_is_allowed_outside_and_after_skipping_the_window(
+    client, engine_and_sessionmaker
+):
+    import json
+    from datetime import UTC, datetime
+
+    from l01_core.timeutil import now_ms
+
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    url = f"/admin/upstream-models/{ids['upstream_model_id']}"
+    today = datetime.fromtimestamp(now_ms() / 1000, tz=UTC).isoweekday()
+    other_day = today % 7 + 1
+    created = _post(
+        client,
+        {
+            "kind": "cooldown",
+            "scope": "upstream_model",
+            "scope_id": ids["upstream_model_id"],
+            "recurrence": "weekly",
+            "schedule_json": json.dumps(
+                {"windows": [{"start": "02:00", "end": "04:00", "days": [other_day]}]}
+            ),
+        },
+    )
+    assert created.status_code == 201, created.text
+    # Window outside: a single cooldown is allowed.
+    allowed = client.patch(url, json={"cooldown_until_ms": _future_ms()})
+    assert allowed.status_code == 200, allowed.text
+    assert allowed.json()["availability"]["state"] == "cooling"
+    # And once that single is active, another periodic rule is rejected.
+    assert (
+        _post(
+            client,
+            {
+                "kind": "cooldown",
+                "scope": "upstream_model",
+                "scope_id": ids["upstream_model_id"],
+                "recurrence": "daily",
+                "schedule_json": DAILY_WINDOWS,
+            },
+        ).status_code
+        == 409
+    )
+
+
+def test_single_cooldown_is_allowed_after_enable_skips_the_window(
+    client, engine_and_sessionmaker
+):
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    url = f"/admin/upstream-models/{ids['upstream_model_id']}"
+    assert client.patch(url, json={"enabled": False}).status_code == 200
+    created = _post(
+        client,
+        {
+            "kind": "cooldown",
+            "scope": "upstream_model",
+            "scope_id": ids["upstream_model_id"],
+            "recurrence": "daily",
+            "schedule_json": _window_around_now(),
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    # 启用 inside the window writes a one-shot skip; the window no longer blocks.
+    skipped = client.patch(url, json={"enabled": True})
+    assert skipped.status_code == 200, skipped.text
+    assert skipped.json()["window_skip"]["rule_ids"] == [created.json()["id"]]
+    assert skipped.json()["availability"]["state"] == "normal"
+
+    single = client.patch(url, json={"cooldown_until_ms": _future_ms()})
+    assert single.status_code == 200, single.text
+    assert single.json()["availability"]["state"] == "cooling"
+
+
+def test_rule_update_skips_conflict_validation_for_note_only(
+    client, engine_and_sessionmaker
+):
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    url = f"/admin/upstream-models/{ids['upstream_model_id']}"
+    created = _post(
+        client,
+        {
+            "kind": "cooldown",
+            "scope": "upstream_model",
+            "scope_id": ids["upstream_model_id"],
+            "recurrence": "daily",
+            "schedule_json": _window_around_now(),
+        },
+    )
+    rule_id = created.json()["id"]
+    assert client.patch(url, json={"enabled": True}).status_code == 200
+    deadline = _future_ms()
+    assert (
+        client.patch(url, json={"cooldown_until_ms": deadline}).status_code == 200
+    )
+
+    noted = client.patch(f"/admin/availability-rules/{rule_id}", json={"note": "例行维护"})
+    assert noted.status_code == 200, noted.text
+    assert noted.json()["note"] == "例行维护"
+
+    blocked = client.patch(
+        f"/admin/availability-rules/{rule_id}",
+        json={"schedule_json": DAILY_WINDOWS},
+    )
+    assert blocked.status_code == 409, blocked.text
+    details = blocked.json()["details"]
+    assert details["cooldown_until_ms"] == deadline
+    assert len(details["blocking_rule_ids"]) == 1
+
+
+def test_public_model_cooldown_writes_are_rejected(client, engine_and_sessionmaker):
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+
+    rule = _post(
+        client,
+        {
+            "kind": "cooldown",
+            "scope": "public_model",
+            "scope_id": ids["public_id"],
+            "recurrence": "once",
+            "expires_at_ms": _future_ms(),
+        },
+    )
+    assert rule.status_code == 422, rule.text
+    assert rule.json()["code"] == "VALIDATION_ERROR"
+    assert "上游模型" in rule.json()["message"]
+
+    patched = client.patch(
+        f"/admin/public-models/{ids['public_id']}",
+        json={"cooldown_until_ms": _future_ms()},
+    )
+    assert patched.status_code == 422, patched.text
+    assert "上游模型" in patched.json()["message"]
+
+    batch = client.patch(
+        "/admin/public-models/batch",
+        json={
+            "ids": [ids["public_id"]],
+            "action": "cooldown",
+            "cooldown_until_ms": _future_ms(),
+        },
+    )
+    assert batch.status_code == 422, batch.text
+
+    # A ban on a public model stays first-class.
+    banned = _post(
+        client, {"kind": "ban", "scope": "public_model", "scope_id": ids["public_id"]}
+    )
+    assert banned.status_code == 201, banned.text
+
