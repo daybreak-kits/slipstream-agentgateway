@@ -381,15 +381,15 @@ def test_close_enable_cooldown_release(client, engine_and_sessionmaker):
     assert past.status_code == 422
     assert past.json()["code"] == "VALIDATION_ERROR"
 
-    # Public models carry the same row-level availability.
+    # Public models have no cooldown concept (ADR-025): the write is refused with
+    # an explicit explanation instead of silently cooling the public alias.
     public_url = f"/admin/public-models/{ids['public_id']}"
     public_cooling = client.patch(public_url, json={"cooldown_until_ms": _future_ms()})
-    assert public_cooling.status_code == 200
-    assert public_cooling.json()["availability"]["state"] == "cooling"
+    assert public_cooling.status_code == 422, public_cooling.text
+    assert public_cooling.json()["code"] == "VALIDATION_ERROR"
+    assert "上游模型" in public_cooling.json()["message"]
     assert (
-        client.patch(public_url, json={"cooldown_until_ms": 0})
-        .json()["availability"]["state"]
-        == "normal"
+        client.patch(public_url, json={"cooldown_until_ms": 0}).status_code == 422
     )
 
 
@@ -397,8 +397,8 @@ def test_enable_inside_schedule_window_skips_only_current_window(
     client, engine_and_sessionmaker
 ):
     """GLOSSARY §3 (2026-11-19 ruling): 启用 inside a periodic window skips
-    THAT window only — the rule stays listed, 解除冷却 clears the exception
-    and the still-open window cools the row again."""
+    THAT window only — the rule stays listed and keeps cooling later windows;
+    解除 does not undo the anchored exception (ticket 02)."""
     engine, factory = engine_and_sessionmaker
     ids = seed_channel(engine, factory)
     url = f"/admin/upstream-models/{ids['upstream_model_id']}"
@@ -440,14 +440,14 @@ def test_enable_inside_schedule_window_skips_only_current_window(
         assert row.skip_until_ms == skip["skip_until_ms"]
         assert row.schedule_json == created.json()["schedule_json"]
 
-    # 解除冷却 = clear the exception; the rule re-applies inside its window.
+    # 解除 keeps the anchored exception: the row stays usable for this window
+    # and the periodic rule is not deleted.
     released = client.patch(url, json={"cooldown_until_ms": 0})
     assert released.status_code == 200, released.text
     assert released.json()["window_skip"] is None
     state = released.json()["availability"]
-    assert state["state"] == "cooling"
-    assert state["cooldown_until_ms"] == skip["skip_until_ms"]
-    assert state["window_skip_until_ms"] == 0
+    assert state["state"] == "normal"
+    assert state["window_skip_until_ms"] == skip["skip_until_ms"]
 
 
 def test_enable_outside_schedule_window_does_not_skip(client, engine_and_sessionmaker):
@@ -482,11 +482,15 @@ def test_enable_outside_schedule_window_does_not_skip(client, engine_and_session
     assert body["availability"]["state"] == "normal"
 
 
-def test_public_model_enable_skips_window_too(client, engine_and_sessionmaker):
+def test_public_model_enable_never_skips_because_public_cooldowns_are_illegal(
+    client, engine_and_sessionmaker
+):
+    """ADR-025: cooldown belongs to upstream models, so a public model can only
+    be closed/opened — an enable has no window exception to write."""
     engine, factory = engine_and_sessionmaker
     ids = seed_channel(engine, factory)
     url = f"/admin/public-models/{ids['public_id']}"
-    created = client.post(
+    rejected = client.post(
         "/admin/availability-rules",
         json={
             "kind": "cooldown",
@@ -496,23 +500,67 @@ def test_public_model_enable_skips_window_too(client, engine_and_sessionmaker):
             "schedule_json": _window_around_now(),
         },
     )
-    assert created.status_code == 201, created.text
-    rule_id = created.json()["id"]
+    assert rejected.status_code == 422, rejected.text
+    assert "上游模型" in rejected.json()["message"]
 
-    cooling = client.get("/admin/public-models").json()[0]
-    assert cooling["availability"]["state"] == "cooling"
-
+    assert client.patch(url, json={"enabled": False}).status_code == 200
     enabled = client.patch(url, json={"enabled": True})
     assert enabled.status_code == 200, enabled.text
     body = enabled.json()
-    assert body["window_skip"]["rule_ids"] == [rule_id]
+    assert body["window_skip"] is None
     assert body["availability"]["state"] == "normal"
-    # Members stay blocked while the window rule is active, so the skip brings
-    # the public model's targets back to the data plane.
+
+
+def test_release_inside_a_window_skips_only_that_window_and_keeps_the_rule(
+    client, engine_and_sessionmaker
+):
+    """ticket 02「解除」: delete the once rule; hit a periodic window -> skip."""
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    url = f"/admin/upstream-models/{ids['upstream_model_id']}"
+    created = client.post(
+        "/admin/availability-rules",
+        json={
+            "kind": "cooldown",
+            "scope": "upstream_model",
+            "scope_id": ids["upstream_model_id"],
+            "recurrence": "daily",
+            "schedule_json": _window_around_now(),
+        },
+    )
+    assert created.status_code == 201, created.text
+    rule_id = created.json()["id"]
+
+    cooling = _find(
+        client.get("/admin/upstream-models?page_size=200").json(),
+        ids["upstream_model_id"],
+    )
+    assert cooling["availability"]["state"] == "cooling"
+
+    released = client.patch(url, json={"cooldown_until_ms": 0})
+    assert released.status_code == 200, released.text
+    body = released.json()
+    assert body["window_skip"]["rule_ids"] == [rule_id]
+    assert body["window_skip"]["skip_until_ms"] > now_ms()
+    assert body["availability"]["state"] == "normal"
+    assert (
+        body["availability"]["window_skip_until_ms"]
+        == body["window_skip"]["skip_until_ms"]
+    )
+
+    # The periodic rule survives, only this window is skipped.
+    listed = [
+        rule
+        for rule in client.get("/admin/availability-rules").json()
+        if rule["id"] == rule_id
+    ]
+    assert listed and listed[0]["recurrence"] == "daily"
+
+    # The target returns to the rendered data plane while the window is skipped.
     from l05_service.rendering import build_render_plan
 
     with factory() as session:
-        ir, _keys = build_render_plan(session, revision="rev_pm_skip")
+        ir, _keys = build_render_plan(session, revision="rev_release_skip")
     # ADR-026: one expanded target per key ({target}#k{seq}) shares the layer.
     assert "mt_test#k1" in {t.id for spec in ir.public_models for t in spec.targets}
 
@@ -645,3 +693,217 @@ def test_batch_availability_and_delete_partial_success(client, engine_and_sessio
     assert body["missing"] == ["does_not_exist"]
     assert [item["id"] for item in body["failed"]] == [ids["upstream_model_id"]]
     assert body["failed"][0]["code"] == "CONFLICT"
+
+
+# ------------------------------------- ticket 02: 批量冲突 failed 与写后下发
+
+
+def _revision_count(factory) -> int:
+    from sqlalchemy import select
+
+    from l04_repo.orm import ConfigRevisionORM
+
+    with factory() as session:
+        return len(list(session.scalars(select(ConfigRevisionORM)).all()))
+
+
+def _last_reason(factory) -> str:
+    from sqlalchemy import select
+
+    from l04_repo.orm import ConfigRevisionORM
+
+    with factory() as session:
+        rows = list(
+            session.scalars(
+                select(ConfigRevisionORM).order_by(
+                    ConfigRevisionORM.created_at_ms.desc()
+                )
+            ).all()
+        )
+    return rows[0].reason if rows else ""
+
+
+def _window_on_another_day() -> str:
+    """A daily window on a weekday that is not today: inactive at test time."""
+    from datetime import UTC, datetime
+
+    today = datetime.now(tz=UTC).weekday() + 1
+    other = (today + 2) % 7 + 1
+    return json.dumps({"windows": [{"start": "02:00", "end": "04:00", "days": [other]}]})
+
+
+def _keep_renderable(factory) -> None:
+    """Add a spare public model/target.
+
+    Ticket 02 applies after every availability write; a config with no renderable
+    public model is refused by the renderer ("nothing to render"), so the apply is
+    skipped.  Cooldown/disable tests therefore keep one spare route alive and can
+    still assert that the write pushed a new revision.
+    """
+    from l04_repo.orm import ModelTargetORM, PublicModelORM, UpstreamModelORM
+
+    with factory() as session:
+        session.add(
+            UpstreamModelORM(
+                id="umdl_spare_apply",
+                upstream_id="ups_test",
+                name="spare-apply",
+                model_type="chat",
+                created_at_ms=0,
+            )
+        )
+        session.add(
+            PublicModelORM(id="pmdl_spare_apply", name="spare-apply-pm", created_at_ms=0)
+        )
+        session.add(
+            ModelTargetORM(
+                id="mt_spare_apply",
+                public_model_id="pmdl_spare_apply",
+                upstream_model_id="umdl_spare_apply",
+                priority=1,
+                created_at_ms=0,
+            )
+        )
+        session.commit()
+
+
+def test_batch_cooldown_reports_conflicts_as_failed_items(client, engine_and_sessionmaker):
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    free = _create_upstream_model(client, ids["upstream_id"], name="free-batch")
+    windowed = _create_upstream_model(client, ids["upstream_id"], name="windowed-batch")
+    created = client.post(
+        "/admin/availability-rules",
+        json={
+            "kind": "cooldown",
+            "scope": "upstream_model",
+            "scope_id": windowed["id"],
+            "recurrence": "daily",
+            "schedule_json": _window_around_now(),
+        },
+    )
+    assert created.status_code == 201, created.text
+    rule_id = created.json()["id"]
+
+    result = client.patch(
+        "/admin/upstream-models/batch",
+        json={
+            "ids": [free["id"], windowed["id"], ids["upstream_model_id"]],
+            "action": "cooldown",
+            "cooldown_until_ms": _future_ms(),
+        },
+    )
+    assert result.status_code == 200, result.text
+    body = result.json()
+    # Partial success: the conflict is reported per id, the batch is not failed.
+    assert body["changed"] == [free["id"], ids["upstream_model_id"]]
+    assert [item["id"] for item in body["failed"]] == [windowed["id"]]
+    failure = body["failed"][0]
+    assert failure["code"] == "CONFLICT"
+    assert failure["details"]["blocking_rule_ids"] == [rule_id]
+    assert failure["details"]["window_end_ms"] > 0
+
+    from l04_repo.orm import AvailabilityRuleORM
+    from l05_service.availability import row_cooldown_rule_id
+
+    with factory() as session:
+        assert (
+            session.get(
+                AvailabilityRuleORM, row_cooldown_rule_id("upstream_model", windowed["id"])
+            )
+            is None
+        )
+    windowed_row = _find(
+        client.get("/admin/upstream-models?page_size=200").json(), windowed["id"]
+    )
+    assert windowed_row["availability"]["state"] == "cooling"
+    assert (
+        windowed_row["availability"]["cooldown_until_ms"]
+        == failure["details"]["window_end_ms"]
+    )
+
+
+def test_availability_rule_writes_apply_a_revision(client, engine_and_sessionmaker):
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    # Inactive window: the rule exists (and its writes apply) without taking the
+    # only route out of the rendered config.
+    before = _revision_count(factory)
+    created = client.post(
+        "/admin/availability-rules",
+        json={
+            "kind": "cooldown",
+            "scope": "upstream_model",
+            "scope_id": ids["upstream_model_id"],
+            "recurrence": "daily",
+            "schedule_json": _window_on_another_day(),
+        },
+    )
+    assert created.status_code == 201, created.text
+    assert _revision_count(factory) == before + 1
+    assert _last_reason(factory) == "availability-rule-create"
+
+    rule_id = created.json()["id"]
+    assert (
+        client.patch(
+            f"/admin/availability-rules/{rule_id}", json={"note": "维护窗口"}
+        ).status_code
+        == 200
+    )
+    assert _revision_count(factory) == before + 2
+    assert _last_reason(factory) == "availability-rule-update"
+
+    assert client.delete(f"/admin/availability-rules/{rule_id}").status_code == 204
+    assert _revision_count(factory) == before + 3
+    assert _last_reason(factory) == "availability-rule-delete"
+
+
+def test_model_availability_writes_apply_a_revision(client, engine_and_sessionmaker):
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    _keep_renderable(factory)
+    url = f"/admin/upstream-models/{ids['upstream_model_id']}"
+
+    before = _revision_count(factory)
+    assert client.patch(url, json={"cooldown_until_ms": _future_ms()}).status_code == 200
+    assert _revision_count(factory) == before + 1
+    assert _last_reason(factory) == "model-cooldown"
+
+    assert client.patch(url, json={"enabled": False}).status_code == 200
+    assert _revision_count(factory) == before + 2
+    assert _last_reason(factory) == "model-disable"
+
+    assert client.patch(url, json={"enabled": True}).status_code == 200
+    assert _revision_count(factory) == before + 3
+    assert _last_reason(factory) == "model-enable"
+
+
+def test_public_model_enable_applies_a_revision(client, engine_and_sessionmaker):
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    _keep_renderable(factory)
+    url = f"/admin/public-models/{ids['public_id']}"
+    before = _revision_count(factory)
+    assert client.patch(url, json={"enabled": False}).status_code == 200
+    assert _revision_count(factory) == before + 1
+    assert _last_reason(factory) == "model-disable"
+    assert client.patch(url, json={"enabled": True}).status_code == 200
+    assert _revision_count(factory) == before + 2
+    assert _last_reason(factory) == "model-enable"
+
+
+def test_batch_availability_writes_apply_one_revision(client, engine_and_sessionmaker):
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    free = _create_upstream_model(client, ids["upstream_id"], name="free-apply")
+    before = _revision_count(factory)
+    assert (
+        client.patch(
+            "/admin/upstream-models/batch",
+            json={"ids": [free["id"]], "action": "cooldown", "cooldown_until_ms": _future_ms()},
+        ).status_code
+        == 200
+    )
+    assert _revision_count(factory) == before + 1
+    assert _last_reason(factory) == "models-batch-cooldown"
+

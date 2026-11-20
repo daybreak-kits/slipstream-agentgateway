@@ -13,6 +13,7 @@ import pytest
 from sqlalchemy import func, select
 from tests.conftest import seed_channel
 
+from l01_core.errors import AppError, ErrorCode
 from l01_core.timeutil import now_ms
 from l04_repo.orm import (
     AvailabilityRuleORM,
@@ -24,6 +25,7 @@ from l05_service.availability import (
     LEGACY_NOTE,
     AvailabilityState,
     create_rule,
+    delete_rule,
     enable_model_availability,
     evaluate,
     migrate_legacy_cooldowns,
@@ -465,10 +467,25 @@ def test_enable_releases_managed_cooldown_and_skips_window(
 
     with factory() as session:
         row = session.get(UpstreamModelORM, ids["upstream_model_id"])
-        set_model_cooldown(
-            session, scope="upstream_model", scope_id=row.id, until_ms=now_ms() + 3_600_000
+        # Legacy stacked state, written directly (new writes are mutually
+        # exclusive): an active once cooldown AND a periodic rule.
+        rule = _periodic("daily", start="02:00", end="04:00", scope_id=row.id)
+        session.add(rule)
+        managed_id = row_cooldown_rule_id("upstream_model", row.id)
+        session.add(
+            AvailabilityRuleORM(
+                id=managed_id,
+                kind="cooldown",
+                scope="upstream_model",
+                scope_id=row.id,
+                recurrence="once",
+                expires_at_ms=now_ms() + 3_600_000,
+                schedule_json=None,
+                note="",
+                created_at_ms=0,
+            )
         )
-        rule = _daily_rule(session, row.id)
+        row.cooldown_until_ms = now_ms() + 3_600_000
         session.flush()
 
         info = _enable(session, row.id, _at(2, 3, 0))
@@ -483,7 +500,14 @@ def test_enable_releases_managed_cooldown_and_skips_window(
         assert view.state is AvailabilityState.NORMAL
 
 
-def test_release_clears_the_window_skip(engine_and_sessionmaker, frozen_service_clock) -> None:
+def test_release_keeps_the_anchored_window_exception(
+    engine_and_sessionmaker, frozen_service_clock
+) -> None:
+    """ticket 02: 解除 clears cooling, not the one-shot window exception.
+
+    A row already skipped by 启用 stays usable for the rest of the window; the
+    periodic rule keeps cooling again in the next window.
+    """
     engine, factory = engine_and_sessionmaker
     ids = seed_channel(engine, factory)
     with factory() as session:
@@ -498,11 +522,12 @@ def test_release_clears_the_window_skip(engine_and_sessionmaker, frozen_service_
         rule = session.scalars(
             select(AvailabilityRuleORM).where(AvailabilityRuleORM.scope_id == row.id)
         ).one()
-        assert (rule.skip_until_ms, rule.skip_set_at_ms) == (0, 0)
+        assert (rule.skip_until_ms, rule.skip_set_at_ms) == (_at(2, 4, 0), _at(2, 3, 0))
         view = evaluate(session, _at(2, 3, 30)).upstream_model_view(row)
-        assert view.state is AvailabilityState.COOLING
-        assert view.cooldown_until_ms == _at(2, 4, 0)
-        assert view.window_skip_until_ms == 0
+        assert view.state is AvailabilityState.NORMAL
+        assert view.window_skip_until_ms == _at(2, 4, 0)
+        later = evaluate(session, _at(3, 3, 0)).upstream_model_view(row)
+        assert later.state is AvailabilityState.COOLING
 
 
 def test_reapplying_the_rule_clears_the_window_skip(
@@ -651,3 +676,328 @@ def test_skipped_window_returns_the_target_to_the_rendered_ir(
         assert info is not None and info["skip_until_ms"] > now_ms()
         ir, _keys = build_render_plan(session, revision="rev_skip_ok")
         assert {model.name for model in ir.public_models} == {"flagship", "spare-pm"}
+
+
+# --------------------------------------- ticket 02: 单次/周期互斥与「解除」语义
+
+
+@pytest.fixture
+def freeze_clock(monkeypatch):
+    """Freeze the availability service clock at an arbitrary instant."""
+    import l05_service.availability as availability_module
+
+    def _freeze(moment: int) -> None:
+        monkeypatch.setattr(availability_module, "utc_now_ms", lambda: moment)
+
+    return _freeze
+
+
+def _windows(start: str, end: str) -> str:
+    return json.dumps({"windows": [{"start": start, "end": end}]})
+
+
+def _managed_id(scope_id: str) -> str:
+    return row_cooldown_rule_id("upstream_model", scope_id)
+
+
+def test_periodic_create_conflicts_with_an_active_once_cooldown(
+    engine_and_sessionmaker,
+) -> None:
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    row_id = ids["upstream_model_id"]
+    deadline = now_ms() + 3_600_000
+    with factory() as session:
+        set_model_cooldown(
+            session, scope="upstream_model", scope_id=row_id, until_ms=deadline
+        )
+        with pytest.raises(AppError) as raised:
+            create_rule(
+                session,
+                kind="cooldown",
+                scope="upstream_model",
+                scope_id=row_id,
+                recurrence="daily",
+                schedule_json=_windows("02:00", "04:00"),
+            )
+        error = raised.value
+        assert error.code is ErrorCode.CONFLICT
+        assert error.status_code == 409
+        assert error.details["blocking_rule_ids"] == [_managed_id(row_id)]
+        assert error.details["cooldown_until_ms"] == deadline
+        assert error.details["window_end_ms"] == 0
+        # Nothing was persisted: the rejected rule must not exist.
+        assert [r.id for r in session.scalars(select(AvailabilityRuleORM)).all()] == [
+            _managed_id(row_id)
+        ]
+
+
+def test_once_create_conflicts_inside_a_periodic_window(
+    engine_and_sessionmaker, freeze_clock
+) -> None:
+    freeze_clock(_at(2, 3, 0))
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    with factory() as session:
+        row = session.get(UpstreamModelORM, ids["upstream_model_id"])
+        rule = _daily_rule(session, row.id)
+        session.flush()
+
+        with pytest.raises(AppError) as raised:
+            create_rule(
+                session,
+                kind="cooldown",
+                scope="upstream_model",
+                scope_id=row.id,
+                recurrence="once",
+                expires_at_ms=_at(2, 3, 30),
+            )
+        error = raised.value
+        assert error.code is ErrorCode.CONFLICT
+        assert error.status_code == 409
+        assert error.details["blocking_rule_ids"] == [rule.id]
+        assert error.details["window_end_ms"] == _at(2, 4, 0)
+        assert error.details["cooldown_until_ms"] == 0
+
+
+def test_once_create_is_allowed_outside_and_after_skipping_the_window(
+    engine_and_sessionmaker, freeze_clock
+) -> None:
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    with factory() as session:
+        row = session.get(UpstreamModelORM, ids["upstream_model_id"])
+        _daily_rule(session, row.id)  # 02:00-04:00 daily
+        session.flush()
+
+        freeze_clock(_at(2, 5, 0))  # outside the window
+        outside = create_rule(
+            session,
+            kind="cooldown",
+            scope="upstream_model",
+            scope_id=row.id,
+            recurrence="once",
+            expires_at_ms=_at(2, 6, 0),
+        )
+        assert outside.expires_at_ms == _at(2, 6, 0)
+        delete_rule(session, outside.id)
+
+        freeze_clock(_at(2, 3, 0))  # inside, but 启用 skipped this window
+        assert _enable(session, row.id, _at(2, 3, 0)) is not None
+        after_skip = create_rule(
+            session,
+            kind="cooldown",
+            scope="upstream_model",
+            scope_id=row.id,
+            recurrence="once",
+            expires_at_ms=_at(2, 3, 30),
+        )
+        assert after_skip.recurrence == "once"
+        assert after_skip.expires_at_ms == _at(2, 3, 30)
+
+
+def test_once_create_reports_the_cross_midnight_window_end(
+    engine_and_sessionmaker, freeze_clock
+) -> None:
+    freeze_clock(_at(2, 0, 30))  # inside a 23:00-01:00 window that began yesterday
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    with factory() as session:
+        row = session.get(UpstreamModelORM, ids["upstream_model_id"])
+        rule = create_rule(
+            session,
+            kind="cooldown",
+            scope="upstream_model",
+            scope_id=row.id,
+            recurrence="daily",
+            schedule_json=_windows("23:00", "01:00"),
+        )
+        session.flush()
+
+        with pytest.raises(AppError) as raised:
+            create_rule(
+                session,
+                kind="cooldown",
+                scope="upstream_model",
+                scope_id=row.id,
+                recurrence="once",
+                expires_at_ms=_at(2, 0, 45),
+            )
+        assert raised.value.details["blocking_rule_ids"] == [rule.id]
+        assert raised.value.details["window_end_ms"] == _at(2, 1, 0)
+
+
+def test_window_conflict_check_uses_the_operations_timezone(
+    engine_and_sessionmaker, freeze_clock
+) -> None:
+    """02:00-04:00 is local time: at 18:30 UTC (02:30 Shanghai) the window is open."""
+    from l01_core.timeutil import now_ms as _now
+    from l04_repo.repository import put_setting
+
+    freeze_clock(_at(2, 18, 30))
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    with factory() as session:
+        put_setting(session, "timezone", '"Asia/Shanghai"', _now())
+        row = session.get(UpstreamModelORM, ids["upstream_model_id"])
+        rule = _daily_rule(session, row.id)
+        session.flush()
+
+        with pytest.raises(AppError) as raised:
+            create_rule(
+                session,
+                kind="cooldown",
+                scope="upstream_model",
+                scope_id=row.id,
+                recurrence="once",
+                expires_at_ms=_at(2, 18, 45),
+            )
+        assert raised.value.details["blocking_rule_ids"] == [rule.id]
+        assert raised.value.details["window_end_ms"] == _at(2, 20, 0)
+
+
+def test_set_model_cooldown_is_rejected_inside_a_periodic_window(
+    engine_and_sessionmaker, freeze_clock
+) -> None:
+    freeze_clock(_at(2, 3, 0))
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    with factory() as session:
+        row = session.get(UpstreamModelORM, ids["upstream_model_id"])
+        rule = _daily_rule(session, row.id)
+        session.flush()
+
+        with pytest.raises(AppError) as raised:
+            set_model_cooldown(
+                session,
+                scope="upstream_model",
+                scope_id=row.id,
+                until_ms=_at(2, 3, 30),
+            )
+        error = raised.value
+        assert error.code is ErrorCode.CONFLICT
+        assert error.details["blocking_rule_ids"] == [rule.id]
+        assert error.details["window_end_ms"] == _at(2, 4, 0)
+        assert session.get(AvailabilityRuleORM, _managed_id(row.id)) is None
+
+        # Outside the window the same write is allowed.
+        freeze_clock(_at(2, 5, 0))
+        assert (
+            set_model_cooldown(
+                session,
+                scope="upstream_model",
+                scope_id=row.id,
+                until_ms=_at(2, 6, 0),
+            )
+            == _at(2, 6, 0)
+        )
+
+
+def test_rule_update_conflict_checks_only_structural_changes(
+    engine_and_sessionmaker, freeze_clock
+) -> None:
+    freeze_clock(_at(2, 5, 0))
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    row_id = ids["upstream_model_id"]
+    deadline = _at(2, 6, 0)
+    with factory() as session:
+        periodic = create_rule(
+            session,
+            kind="cooldown",
+            scope="upstream_model",
+            scope_id=row_id,
+            recurrence="daily",
+            schedule_json=_windows("02:00", "04:00"),
+        )
+        session.flush()
+        set_model_cooldown(session, scope="upstream_model", scope_id=row_id, until_ms=deadline)
+
+        # note-only 放行: no conflict validation even while a single cooldown is active.
+        assert update_rule(session, periodic.id, {"note": "例行维护"}).note == "例行维护"
+        # Re-sending an unchanged structural field is not a change either.
+        assert update_rule(session, periodic.id, {"recurrence": "daily"}).recurrence == "daily"
+
+        with pytest.raises(AppError) as raised:
+            update_rule(session, periodic.id, {"recurrence": "weekly"})
+        assert raised.value.code is ErrorCode.CONFLICT
+        assert raised.value.details["blocking_rule_ids"] == [_managed_id(row_id)]
+        assert raised.value.details["cooldown_until_ms"] == deadline
+
+        # 改期单次 during an active window is the same conflict, self-excluded:
+        # the new deadline is rejected because the periodic window is open.
+        freeze_clock(_at(2, 3, 0))
+        with pytest.raises(AppError) as postponed:
+            update_rule(session, _managed_id(row_id), {"expires_at_ms": _at(2, 7, 0)})
+        assert postponed.value.code is ErrorCode.CONFLICT
+        assert postponed.value.details["blocking_rule_ids"] == [periodic.id]
+        assert postponed.value.details["window_end_ms"] == _at(2, 4, 0)
+        # note-only 放行 even then.
+        note_only = update_rule(session, _managed_id(row_id), {"note": "顺延申请中"})
+        assert note_only.note == "顺延申请中"
+
+
+def test_release_deletes_the_once_rule_and_skips_the_active_window(
+    engine_and_sessionmaker, freeze_clock
+) -> None:
+    """Legacy stacked data: 解除 removes the once rule and skips only this window."""
+    freeze_clock(_at(2, 5, 0))
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    with factory() as session:
+        row = session.get(UpstreamModelORM, ids["upstream_model_id"])
+        periodic = _daily_rule(session, row.id)  # 02:00-04:00
+        session.flush()
+        set_model_cooldown(
+            session, scope="upstream_model", scope_id=row.id, until_ms=_at(2, 6, 0)
+        )
+
+        freeze_clock(_at(2, 3, 0))  # now inside the periodic window
+        info = release_model_cooldown(
+            session, scope="upstream_model", scope_id=row.id
+        )
+        assert info is not None
+        assert info["rule_ids"] == [periodic.id]
+        assert info["skip_until_ms"] == _at(2, 4, 0)
+        assert session.get(AvailabilityRuleORM, _managed_id(row.id)) is None
+        assert session.get(AvailabilityRuleORM, periodic.id) is not None
+        assert periodic.skip_until_ms == _at(2, 4, 0)
+        assert periodic.skip_set_at_ms == _at(2, 3, 0)
+
+        view = evaluate(session, _at(2, 3, 30)).upstream_model_view(row)
+        assert view.state is AvailabilityState.NORMAL
+        assert view.window_skip_until_ms == _at(2, 4, 0)
+        later = evaluate(session, _at(3, 3, 0)).upstream_model_view(row)
+        assert later.state is AvailabilityState.COOLING
+
+
+def test_public_model_cooldown_writes_are_rejected(engine_and_sessionmaker) -> None:
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    deadline = now_ms() + 3_600_000
+    with factory() as session:
+        with pytest.raises(AppError) as raised:
+            set_model_cooldown(
+                session, scope="public_model", scope_id=ids["public_id"], until_ms=deadline
+            )
+        assert raised.value.code is ErrorCode.VALIDATION_ERROR
+        assert "上游模型" in raised.value.message
+
+        with pytest.raises(AppError) as raised_rule:
+            create_rule(
+                session,
+                kind="cooldown",
+                scope="public_model",
+                scope_id=ids["public_id"],
+                recurrence="once",
+                expires_at_ms=deadline,
+            )
+        assert raised_rule.value.code is ErrorCode.VALIDATION_ERROR
+        # A ban on a public model is still a first-class measure.
+        assert (
+            create_rule(
+                session, kind="ban", scope="public_model", scope_id=ids["public_id"]
+            ).kind
+            == "ban"
+        )
+
