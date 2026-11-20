@@ -25,14 +25,13 @@ from l04_repo.orm import (
     GatewayUsageEventORM,
     ModelTargetORM,
     PublicModelORM,
-    RequestAttemptORM,
     UpstreamModelORM,
     UpstreamORM,
     UserORM,
 )
 from l04_repo.repository import get_setting, put_setting
 from l05_service import auth, client_keys
-from l05_service.attempts import attempts_for_event
+from l05_service.attempts import attempt_summaries, attempts_for_event
 from l06_api import field_filter
 from l06_api.deps import page_params, require, session_of
 from l06_api.schemas import LogAttemptOut, LogAttemptsOut, PlaygroundRequest
@@ -608,19 +607,6 @@ def _model_reference_maps(session: Session):
     return upstream_ids_by_name, public_ids_by_name, priorities
 
 
-def _attempt_counts(session: Session, correlation_keys: list[str]) -> dict[str, int]:
-    """Count normalized attempts for a page in one grouped query."""
-    keys = [key for key in correlation_keys if key]
-    if not keys:
-        return {}
-    rows = session.execute(
-        select(RequestAttemptORM.correlation_key, func.count())
-        .where(RequestAttemptORM.correlation_key.in_(keys))
-        .group_by(RequestAttemptORM.correlation_key)
-    ).all()
-    return {key: int(count) for key, count in rows}
-
-
 def _log_page_items(
     session: Session,
     rows: list[GatewayUsageEventORM],
@@ -649,13 +635,15 @@ def _log_page_items(
     if identities is None:
         identities = _identity_tables_for_rows(session, rows)
     upstream_ids_by_name, public_ids_by_name, priorities = _model_reference_maps(session)
-    attempt_counts = _attempt_counts(session, [row.trace_id for row in rows])
+    # Ticket 04: one grouped request_attempts read for the whole page (never N+1).
+    attempts_by_key = attempt_summaries(session, [row.trace_id for row in rows])
     items = []
     for row in rows:
         public_id = public_ids_by_name.get(row.public_model, "")
         upstream_id = upstream_ids_by_name.get(row.upstream_model, "")
         cost = cost_by_event.get(row.event_id)
         charge = charge_by_event.get(row.event_id)
+        attempts = attempts_by_key.get(row.trace_id or "")
         items.append(
             _log_item(
                 row,
@@ -668,7 +656,8 @@ def _log_page_items(
                 cost_micro=cost.amount_micro if cost else None,
                 charge_micro=charge.amount_micro if charge else None,
                 currency=(charge.currency if charge else (cost.currency if cost else "")),
-                attempts_count=attempt_counts.get(row.trace_id or "", 0),
+                attempts_count=attempts.count if attempts is not None else 0,
+                attempts_error=attempts.error_summary if attempts is not None else "",
             )
         )
     return items
@@ -712,11 +701,17 @@ def _log_item(
     charge_micro: int | None,
     currency: str,
     attempts_count: int = 0,
+    attempts_error: str = "",
 ) -> dict:
     """One record as the UI consumes it; the drawer reuses this exact shape."""
     user_id, user_name, api_key_label = identity
     stream = _is_stream(raw, row.time_to_first_token_ms or 0)
     error = str(raw.get("error") or "")
+    # Ticket 04: a failed upstream (4xx/5xx) with attempts but no raw error text
+    # borrows the last failed attempt as the row-level error summary. Without
+    # attempts the summary stays empty instead of inventing a chain.
+    if not error and attempts_error and (row.http_status or 0) >= 400:
+        error = attempts_error
     margin = (
         charge_micro - cost_micro
         if charge_micro is not None and cost_micro is not None
@@ -921,6 +916,9 @@ def log_detail(
         if public is not None and umodel is not None
         else None
     )
+    # Same row-level error summary as the list so the drawer does not drop it
+    # once the detail payload replaces the selected list row.
+    attempts = attempt_summaries(session, [row.trace_id or ""]).get(row.trace_id or "")
     body = _log_item(
         row,
         raw,
@@ -930,6 +928,7 @@ def log_detail(
         cost_micro=cost.amount_micro if cost else None,
         charge_micro=charge.amount_micro if charge else None,
         currency=(charge.currency if charge else (cost.currency if cost else "")),
+        attempts_error=attempts.error_summary if attempts is not None else "",
     )
     if include_payload:
         # AG strips bodies unless has_payload; scrub before serialising so a
