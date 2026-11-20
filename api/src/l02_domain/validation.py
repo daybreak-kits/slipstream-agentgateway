@@ -69,6 +69,9 @@ def validate_gateway_ir(ir: GatewayIR) -> ValidationResult:
     model_set = set(model_ids)
     model_upstream_by_id = {m.id: m.upstream_id for m in ir.models}
     for upstream in ir.upstreams:
+        # Ticket 16: the id is rendered into provider names and keys/{id}#{seq}.key.
+        _validate_render_id(upstream.id, "上游 id", _KEY_EXPANDED_PROVIDER, errors)
+        _validate_key_file(upstream, errors)
         # E17 安全红线：without a per-provider credential AG forwards the
         # client's Authorization header to the upstream verbatim.
         if not upstream.key_file:
@@ -86,6 +89,8 @@ def validate_gateway_ir(ir: GatewayIR) -> ValidationResult:
                 "llm.models[].tls.hostname）"
             )
     for model in ir.models:
+        # Ticket 16: one model expands into {model_id}#k{seq} llm.models entries.
+        _validate_render_id(model.id, "上游模型 id", _KEY_EXPANDED_MODEL, errors)
         if model.upstream_id not in upstream_set:
             errors.append(f"上游模型 {model.id} 指向不存在的上游 {model.upstream_id}")
         if model.visibility not in VISIBILITIES:
@@ -233,6 +238,64 @@ def provider_base_id(provider: str) -> str:
     are not key-expanded ids pass through unchanged.
     """
     return _PROVIDER_SEQ_SUFFIX.sub("", provider or "")
+
+
+#: Ticket 16: Windows forbids these characters in a file name, and ADR-026 puts
+#: the upstream id into the managed key file path (keys/{id}#{seq}.key), so an id
+#: carrying one either fails the OS call or escapes the keys/ directory.
+_UNSAFE_FILE_NAME_CHARS = frozenset('<>:"/\\|?*')
+
+#: ADR-026 expanded names: provider = {base}#{seq}, model alias = {base}#k{seq}.
+#: A '#' in an id may only be that renderer-assigned key-sequence suffix.
+_KEY_EXPANDED_PROVIDER = re.compile(r"^[^#]+#\d+$")
+_KEY_EXPANDED_MODEL = re.compile(r"^[^#]+#k\d+$")
+
+
+def _validate_render_id(
+    name: str, label: str, expanded: re.Pattern[str], errors: list[str]
+) -> None:
+    """T16: ids become provider names AND key file names, so they must be safe.
+
+    Rejects path separators / Windows-reserved characters / control characters
+    (the renderer would write keys/{id}#{seq}.key), '.'/'..' and any '#' that is
+    not the renderer's key-sequence suffix (otherwise the ADR-026 naming
+    protocol is ambiguous: provider_base_id could strip a user-supplied tail).
+    """
+    if not name:
+        errors.append(f"{label}不能为空")
+        return
+    unsafe = sorted(
+        {
+            character
+            for character in name
+            if character in _UNSAFE_FILE_NAME_CHARS
+            or ord(character) < 0x20
+            or ord(character) == 0x7F
+        }
+    )
+    if unsafe:
+        shown = "".join(unsafe).encode("unicode_escape").decode("ascii")
+        errors.append(
+            f"{label} {name!r} 含跨平台不安全的文件名字符 {shown!r}：ADR-026 会把它渲染成"
+            " provider 名与 keys/ 下的密钥文件名（Windows 禁止 < > : \" / \\ | ? * 与控制字符）"
+        )
+    if name in (".", ".."):
+        errors.append(f"{label} {name!r} 不能是 . 或 ..（会破坏受管密钥文件路径）")
+    if "#" in name and not expanded.match(name):
+        errors.append(
+            f"{label} {name!r} 的 # 只允许 ADR-026 密钥序号后缀"
+            "（上游 id 形如 base#1、上游模型别名形如 base#k1；# 由渲染层分配）"
+        )
+
+
+def _validate_key_file(upstream, errors: list[str]) -> None:
+    """T16: the key file path must stay inside the managed keys/ directory."""
+    segments = re.split(r"[\\/]", upstream.key_file)
+    if ".." in segments:
+        errors.append(
+            f"上游 {upstream.id} key_file 不得包含 .. 路径段（必须位于受管 keys/ 目录内）: "
+            f"{upstream.key_file!r}"
+        )
 
 
 def _conditional_multikey_warning(

@@ -17,8 +17,11 @@ target 只渲染第一把密钥的一条，无 when 兜底因此天然单条（A
 from __future__ import annotations
 
 import logging
+from pathlib import PurePath
 
+from conftest import seed_channel
 from l01_core.settings import reset_settings_cache
+from l01_core.timeutil import now_ms
 from l02_domain.ir import (
     ClientKeySpec,
     GatewayIR,
@@ -27,13 +30,10 @@ from l02_domain.ir import (
     UpstreamModelSpec,
     UpstreamSpec,
 )
-from l03_adapters.agentgateway.render import render_config
+from l03_adapters.agentgateway.render import render_artifact, render_config
 from l03_adapters.mock import MockAdapter
 from l04_repo.orm import ModelTargetORM, PublicModelORM, UpstreamKeyORM
 from l05_service.rendering import build_render_plan, model_alias, provider_id
-from l01_core.timeutil import now_ms
-
-from conftest import seed_channel
 
 
 def _add_second_key(engine, factory) -> None:
@@ -239,3 +239,38 @@ def test_keyless_enabled_upstream_blocks_the_rollout(engine_and_sessionmaker):
         else:  # pragma: no cover
             raise AssertionError("keyless upstream must block the rollout")
     engine.dispose()
+
+def test_hash_names_and_key_file_paths_survive_yaml_rendering(engine_and_sessionmaker):
+    """Ticket 16 跨平台回归：'#' 是 YAML 注释起始符、也是 Windows 合法文件名字符。
+
+    provider/模型名与 key 文件路径都必须被引号包住，否则 AG 读到截断值（"ups_test"）；
+    文件名本身必须保留 '#{seq}' 形态、且是 keys/ 下的单层文件名（无分隔符歧义）。
+    """
+    engine, factory = engine_and_sessionmaker
+    seed_channel(engine, factory)
+    _add_second_key(engine, factory)
+    reset_settings_cache()
+    with factory() as session:
+        ir, _ = build_render_plan(session, revision="rev_hash_yaml", adapter=MockAdapter())
+    engine.dispose()
+
+    # 文件名层面：'#' 原样保留，PurePath.name 在 Windows/POSIX 一致
+    assert [PurePath(u.key_file).name for u in ir.upstreams] == [
+        "ups_test#1.key",
+        "ups_test#2.key",
+    ]
+
+    content = render_artifact(ir, llm_port=3600).content
+    # 值层面：引号内的 '#' 不会被当成注释；无引号形态则说明渲染丢字符
+    assert 'name: "ups_test#1"' in content
+    assert 'name: "ups_test#2"' in content
+    assert 'name: "umdl_test#k1"' in content
+    assert "name: ups_test#1" not in content
+    key_lines = [line for line in content.splitlines() if ".key" in line]
+    assert len(key_lines) == 2, key_lines
+    for line in key_lines:
+        value = line.split("file:", 1)[1].strip()
+        assert value.startswith('"') and value.endswith('"'), line
+    assert 'ups_test#1.key"' in content
+    assert 'ups_test#2.key"' in content
+

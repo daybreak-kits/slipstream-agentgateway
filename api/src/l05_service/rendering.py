@@ -23,7 +23,8 @@ from __future__ import annotations
 import json
 import logging
 import os
-from dataclasses import replace
+from dataclasses import dataclass, replace
+from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -314,6 +315,72 @@ def write_key_files(key_files: dict[str, str]) -> list[str]:
         os.replace(tmp_path, path)
         written.append(path)
     return written
+
+
+@dataclass(frozen=True, slots=True)
+class KeyFilePruneResult:
+    """Audit of one key-file prune pass (ticket 16: dry-run first, then delete)."""
+
+    dry_run: bool
+    stale: tuple[str, ...]
+    deleted: tuple[str, ...]
+    failed: tuple[str, ...]
+
+
+def _path_identity(path: str) -> str:
+    """Comparison key for the key-file whitelist (Windows is case-insensitive)."""
+    return os.path.normcase(os.path.abspath(path))
+
+
+def prune_key_files(
+    key_files: dict[str, str], *, dry_run: bool = False
+) -> KeyFilePruneResult:
+    """Delete stale managed key files so a new apply leaves no dead credentials.
+
+    Managed surface = regular ``*.key`` files directly inside
+    ``<ag_config_dir>/keys``. The whitelist is this render's ``key_files`` (the
+    files the new configuration references), so the previous revision's files
+    and pre-multikey ``{upstream_id}.key`` leftovers become stale. Everything
+    else is out of scope by construction: non-key files, subdirectories,
+    symlinks and anything outside the managed directory are never touched.
+    ``dry_run=True`` returns the auditable plan without deleting; per-file
+    failures are collected instead of raised (the rollout logs and continues).
+    """
+    settings = get_settings()
+    keys_dir = Path(settings.ag_config_dir) / "keys"
+    whitelist = {_path_identity(path) for path in key_files}
+    stale: list[str] = []
+    if keys_dir.is_dir():
+        # Sorted for a stable audit log; '#' in names is literal, never a glob.
+        for entry in sorted(keys_dir.iterdir(), key=lambda item: item.name):
+            if entry.is_symlink() or not entry.is_file() or not entry.name.endswith(".key"):
+                continue
+            path = str(entry)
+            if _path_identity(path) in whitelist:
+                continue
+            stale.append(path)
+    if stale:
+        logger.info(
+            "key 文件清理%s：%d 个陈旧文件不在本次下发白名单内：%s",
+            " dry-run（未删除）" if dry_run else "",
+            len(stale),
+            ", ".join(stale),
+        )
+    if dry_run:
+        return KeyFilePruneResult(dry_run=True, stale=tuple(stale), deleted=(), failed=())
+    deleted: list[str] = []
+    failed: list[str] = []
+    for path in stale:
+        try:
+            os.remove(path)
+        except OSError as exc:  # pragma: no cover - OS/permission edge
+            logger.warning("key 文件清理失败，文件保留：%s（%s）", path, exc)
+            failed.append(path)
+        else:
+            deleted.append(path)
+    return KeyFilePruneResult(
+        dry_run=False, stale=tuple(stale), deleted=tuple(deleted), failed=tuple(failed)
+    )
 
 
 def apply_configuration(

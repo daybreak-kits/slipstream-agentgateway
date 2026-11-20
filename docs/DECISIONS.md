@@ -454,6 +454,8 @@
 
 **后果**：upstream_ops.py 重写密钥 CRUD（去 mirror/rotate/set_primary）；rendering/render.py 加密钥维度展开；contract.ts 重生成（UpstreamKey 形状变化）；keys-panel UI 重做（失效标红+批量删除+去主密钥标记）；迁移脚本清空 api_key_enc；E18 实验先行。
 
+**补记（ticket 16，2026-11-20）**：① is_primary 死列收口——ORM 字段已删，init_db 对旧库执行幂等的 `ALTER TABLE upstream_keys DROP COLUMN is_primary`（列不存在则跳过），不再「保留一版」；② 每轮成功下发后按当前 key_files 白名单清理受管 keys/ 目录内陈旧密钥文件（dry-run 可审计；目录外、非 .key、子目录不碰；失败只告警不阻断应用），历史遗留文件与「主密钥时代」文件名随之收口；③ E20 裁决（P0-RESULTS §E20）：AG 对 conditional targets 按 first-match 首条独占，多密钥若展开只有第一把有流量，故 conditional 每目标只展开首把密钥并打 warning（渲染日志 + 成员编辑器提示 + DELIVERY 已注明）——这是既定裁决而非遗漏，密钥平权/容错仅在 failover/weighted 生效；④ provider/上游模型 id 进入 provider 名与 keys/{id}#{seq}.key，validate 拒绝路径分隔符、Windows 保留字符、控制字符与非密钥序号形态的 #，保证跨平台文件名安全。
+
 ## ADR-028 追踪归适配层：系统只存归一化请求尝试，不定义 OTel/接收器/span 表
 
 - 状态：已定（2026-11-20 用户裁决；取代 M5-a 的系统级 OTLP 接收器与 trace_spans 设计）
