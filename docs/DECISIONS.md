@@ -351,7 +351,7 @@
 - 术语：词元（token）、花费（spend）、连接密钥（原客户端密钥）、公开模型（原对外模型）、模型试验（原游乐场）；价目管理归「系统」组。
 - 表格少分列：成本与花费合列、公开模型只读价合列，避免横向溢出。
 - 可用性并入模型管理行内操作（关闭/启用/一次性冷却/解除）；**UI 提供紧凑的周期冷却编辑（重复方式+时间窗），不做完整排期日历；后端周期冷却（daily/weekly/monthly）完整保留**。旧 `/admin/availability-rules` 提供 POST/GET/PATCH/DELETE，周期规则由 API/规则层与模型页「周期」按钮管理，以 ADR-004 为准（2026-11-18 评审 #8 修正）。
-- 登录默认 `admin / admin`（`.env` 的 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 引导，ADR-019）；演示数据禁用 qax/qianxin（用青岚云/nebula）。
+- 登录默认 `admin / admin`（`.env` 的 `SLIPSTREAM_ADMIN_USERNAME` / `SLIPSTREAM_ADMIN_PASSWORD` 引导，ADR-019；2026-11-20 起加 `SLIPSTREAM_` 前缀）；演示数据禁用 qax/qianxin（用青岚云/nebula）。
 - 看板三标签（柱形/面积/分流）+ 右侧成员详情 + 底部 7D/30D/365D 热力图。
 
 ## ADR-019 统一用户表：admin_users 并入 users
@@ -360,11 +360,11 @@
 
 **背景**：现行 `users`（API 消费者：余额/密钥/层级树）与 `admin_users`（控制台登录：username/密码/角色）两张表，靠 `users.admin_user_id` 关联。用户裁定：管理用户、代理用户、普通用户都是用户，只是赋予的权限不同才有角色之分。
 
-**决策**：只保留一张 `users` 表——username（唯一、**不可修改**）、密码哈希、role、余额、层级、状态同在一行；角色沿用内置 admin/agent/user + 自定义角色；控制台访问 = 有角色且有密码。系统初始化只建一个全权限管理员，账号密码取 `.env` 的 `ADMIN_USERNAME` / `ADMIN_PASSWORD`，此后在界面修改即持久化，env 默认值不再生效。`admin_users` 表与 `users.admin_user_id` 关联退役。密码**必填**：本期不做注册/邀请页，用户统一在用户管理页创建，创建时生成 12 位随机默认密码（大小写+数字+符号），弹窗明文展示一次可复制；改密权限——管理员改所有人、代理用户改子树内用户、所有人可自助改自己（验旧密码），接口按 RBAC 权限键 + 用户层级双重校验。
+**决策**：只保留一张 `users` 表——username（唯一、**不可修改**）、密码哈希、role、余额、层级、状态同在一行；角色沿用内置 admin/agent/user + 自定义角色；控制台访问 = 有角色且有密码。系统初始化只建一个全权限管理员，账号密码取 `.env` 的 `SLIPSTREAM_ADMIN_USERNAME` / `SLIPSTREAM_ADMIN_PASSWORD`，此后在界面修改即持久化，env 默认值不再生效。`admin_users` 表与 `users.admin_user_id` 关联退役。密码**必填**：本期不做注册/邀请页，用户统一在用户管理页创建，创建时生成 12 位随机默认密码（大小写+数字+符号），弹窗明文展示一次可复制；改密权限——管理员改所有人、代理用户改子树内用户、所有人可自助改自己（验旧密码），接口按 RBAC 权限键 + 用户层级双重校验。
 
 **理由**：一个用户不该因为「权限多」就变成两种实体；分表导致登录、充值、密钥、审计处处做两表 join。
 
-**后果**：登录/会话/审计 actor 改指 `users`；41 权限键与字段级删键（ADR-016）机制不变；迁移脚本合并两表（username 冲突以 admin_users 为准）；ADR-018 的「登录默认」改为 .env 引导（`ADMIN_USERNAME` / `ADMIN_PASSWORD`）。
+**后果**：登录/会话/审计 actor 改指 `users`；41 权限键与字段级删键（ADR-016）机制不变；迁移脚本合并两表（username 冲突以 admin_users 为准）；ADR-018 的「登录默认」改为 .env 引导（`SLIPSTREAM_ADMIN_USERNAME` / `SLIPSTREAM_ADMIN_PASSWORD`，系统环境变量优先于 `.env`）。
 
 ## ADR-020 价格单源：模型行是现行权威
 

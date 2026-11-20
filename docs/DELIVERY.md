@@ -105,7 +105,7 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 
 ### 6.3 部署注意（生产必读）
 
-- **必须覆盖 `ADMIN_USERNAME` / `ADMIN_PASSWORD`**（ADR-019 引导，无 `SLIPSTREAM_` 前缀）：默认 `admin / admin` 仅本地演示；生产首次启动前必须设置，否则控制台入口是公开弱口令。`seed_demo` 的演示账号密码另由 `SLIPSTREAM_DEMO_ADMIN_PASSWORD` 控制（默认 `admin12345`）。
+- **必须覆盖 `SLIPSTREAM_ADMIN_USERNAME` / `SLIPSTREAM_ADMIN_PASSWORD`**（ADR-019 引导）：默认 `admin / admin` 仅本地演示；生产首次启动前必须设置，否则控制台入口是公开弱口令。配置可写在系统环境变量或仓库根/启动目录的 `.env`，优先级为系统环境变量 > `.env` > 默认值。`seed_demo` 的演示账号密码另由 `SLIPSTREAM_DEMO_ADMIN_PASSWORD` 控制（默认 `admin12345`）。
 - 控制台会话绝对过期 12h（无滑动续期）；生产置 `SLIPSTREAM_COOKIE_SECURE=1` 并置于 TLS 之后，管理台与 API 必须同主机名。
 - 单端口：先 `cd web && npm run build` 再启动控制面 3700（spa.py 同源托管 `web/dist`，深链回退 index.html）。
 - **后台任务随 app 启动**（`l07_jobs`，进程内 `JobRunner`）：增量用量拉取 / 冷却到期重渲染 / 账本对账三项共享默认间隔 `SLIPSTREAM_JOBS_INTERVAL_SECONDS=60`；请求日志留存清理（ADR-021）每日执行一次，按 `log_retention_days` 删除数据面 `request_logs`/`request_log_payloads` 旧行（控制面账本与控制面数据一律不删）。**启动命令用组合根入口**：`cd api && uvicorn server:create_app --factory --port 3700`（ADR-010 禁止 l06 import l07，接线在 `api/src/server.py` 组合层完成；`l06_api.app:create_app --factory` 仍可用但不带任务）。置 `SLIPSTREAM_JOBS_ENABLED=0` 可整体停用（例如任务改由独立 worker 跑：在 worker 入口里调用 `l07_jobs.wiring.build_runner(session_factory).run_forever()`）。多副本部署时只应有一个进程开启任务，否则同一游标被重复拉取（幂等，但浪费）。

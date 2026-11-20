@@ -1,4 +1,4 @@
-"""Settings 归一化：agentgateway 配置里的资源路径必须能按配置文件目录解析。"""
+"""Settings 归一化：agentgateway 配置路径与 .env 加载优先级。"""
 
 from __future__ import annotations
 
@@ -51,15 +51,17 @@ _ADMIN_KEYS = (
 )
 
 
-def test_bootstrap_admin_env_has_no_slipstream_prefix() -> None:
-    """ADR-019 引导：ADMIN_USERNAME/ADMIN_PASSWORD 去前缀，旧 SLIPSTREAM_ 名不再生效。"""
+def test_bootstrap_admin_env_uses_slipstream_prefix() -> None:
+    """引导账号只认 SLIPSTREAM_ 前缀，旧的去前缀变量不再生效。"""
     previous = {key: os.environ.get(key) for key in _ADMIN_KEYS}
     try:
+        for key in _ADMIN_KEYS:
+            os.environ.pop(key, None)
         os.environ.update(
-            ADMIN_USERNAME="root",
-            ADMIN_PASSWORD="s3cret",
-            SLIPSTREAM_ADMIN_USERNAME="ignored",
-            SLIPSTREAM_ADMIN_PASSWORD="ignored",
+            ADMIN_USERNAME="ignored-root",
+            ADMIN_PASSWORD="ignored-secret",
+            SLIPSTREAM_ADMIN_USERNAME="root",
+            SLIPSTREAM_ADMIN_PASSWORD="s3cret",
         )
         reset_settings_cache()
         settings = get_settings()
@@ -72,3 +74,29 @@ def test_bootstrap_admin_env_has_no_slipstream_prefix() -> None:
             else:
                 os.environ[key] = value
         reset_settings_cache()
+
+
+def test_dotenv_file_supplies_settings(tmp_path: Path, monkeypatch: object) -> None:
+    """没有进程环境变量时，从 CWD 的 .env 读取配置。"""
+    monkeypatch.chdir(tmp_path)  # type: ignore[attr-defined]
+    (tmp_path / ".env").write_text(
+        "SLIPSTREAM_PORT=3111\nSLIPSTREAM_ADMIN_PASSWORD=dotenv-pass\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("SLIPSTREAM_PORT", raising=False)  # type: ignore[attr-defined]
+    monkeypatch.delenv("SLIPSTREAM_ADMIN_PASSWORD", raising=False)  # type: ignore[attr-defined]
+    reset_settings_cache()
+    settings = get_settings()
+    assert settings.port == 3111
+    assert settings.admin_password == "dotenv-pass"
+    reset_settings_cache()
+
+
+def test_environment_wins_over_dotenv(tmp_path: Path, monkeypatch: object) -> None:
+    """优先级：真实进程环境变量 > .env。"""
+    monkeypatch.chdir(tmp_path)  # type: ignore[attr-defined]
+    (tmp_path / ".env").write_text("SLIPSTREAM_PORT=3111\n", encoding="utf-8")
+    monkeypatch.setenv("SLIPSTREAM_PORT", "3222")  # type: ignore[attr-defined]
+    reset_settings_cache()
+    assert get_settings().port == 3222
+    reset_settings_cache()

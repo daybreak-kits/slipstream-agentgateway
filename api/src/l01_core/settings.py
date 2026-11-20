@@ -1,12 +1,18 @@
-"""Application settings (pydantic-settings); every knob is an SLIPSTREAM_* env var
-except the bootstrap admin pair (ADMIN_USERNAME / ADMIN_PASSWORD)."""
+"""Application settings (pydantic-settings).
+
+Every knob is an SLIPSTREAM_* environment variable, including the bootstrap
+admin pair (SLIPSTREAM_ADMIN_USERNAME / SLIPSTREAM_ADMIN_PASSWORD).
+Configuration may also come from a .env file: the repository-root .env is
+loaded first, then the current working directory .env (the closer file wins).
+Real process environment variables always win over .env values.
+"""
 
 from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, model_validator
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 #: File name of the agentgateway log SQLite DB inside ag_config_dir. AG resolves the
@@ -17,17 +23,49 @@ DEFAULT_AG_DB_FILENAME = "ag-data.db"
 #: Fallback retention window when the operator setting is absent/invalid.
 DEFAULT_LOG_RETENTION_DAYS = 30
 
+#: Repository root, derived from this file (api/src/l01_core/settings.py).
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def dotenv_candidates() -> tuple[Path, ...]:
+    """Return existing .env files in precedence order (lowest priority first).
+
+    BaseSettings gives later files priority, so the CWD file is last. The real
+    process environment is still consulted before any dotenv value, which is
+    pydantic-settings default and is what the "system env > .env" rule requires.
+    """
+    candidates = [_REPO_ROOT / ".env", Path.cwd() / ".env"]
+    seen: set[Path] = set()
+    resolved: list[Path] = []
+    for candidate in candidates:
+        try:
+            normalized = candidate.resolve()
+        except OSError:
+            continue
+        if normalized in seen or not normalized.is_file():
+            continue
+        seen.add(normalized)
+        resolved.append(normalized)
+    return tuple(resolved)
+
 
 class Settings(BaseSettings):
-    """Control-plane settings; defaults match docs/PLAN.md §3 (control plane on 3700)."""
+    """Control-plane settings; defaults match docs/PLAN.md section 3 (control plane on 3700)."""
 
-    model_config = SettingsConfigDict(env_prefix="SLIPSTREAM_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="SLIPSTREAM_", extra="ignore")
+
+    def __init__(self, **data: object) -> None:
+        # Load .env from the repo root and the process CWD. Passing an explicit
+        # _env_file also makes direct Settings(...) calls in tests honour dotenv;
+        # environment variables keep their higher priority.
+        data.setdefault("_env_file", dotenv_candidates())
+        super().__init__(**data)
 
     host: str = "127.0.0.1"
     port: int = 3700
     log_level: str = "INFO"
 
-    # 本地数据根目录（gitignored）：SQLite 库与 agentgateway 配置都在 .data_store 下。
+    # Local data root (gitignored): SQLite DB and agentgateway config live under .data_store.
     database_url: str = "sqlite:///./.data_store/slipstream.db"
 
     # Data plane adapter selection and its deployment knobs. The control plane only
@@ -41,28 +79,26 @@ class Settings(BaseSettings):
     # auto-detects the pinned path, "" disables the gate (recorded on apply).
     ag_binary: str | None = None
 
-    # 单端口部署：管理台静态资源目录；空 = 自动探测 <repo>/web/dist。
+    # Single-port deployment: admin UI static assets; empty = auto-detect <repo>/web/dist.
     web_dist_dir: str = ""
 
     # At-rest encryption master secret; MUST be overridden in real deployments.
     secret_key: str = "dev-only-change-me"
 
-    # Console auth (ticket 02): DB-backed session + httpOnly cookie. Session
+    # Console auth: DB-backed session + httpOnly cookie. Session
     # lifetime is absolute (no sliding renewal); secure must be on behind TLS.
     session_ttl_seconds: int = 43_200  # 12h
     cookie_secure: bool = False
     login_rate_limit_attempts: int = 5
     login_rate_limit_window_seconds: int = 60
 
-    # ADR-019 bootstrap: the initial full-permission admin is created from .env
+    # ADR-019 bootstrap: the initial full-permission admin is created from env
     # ONLY while no admin-role user with a password exists; afterwards the
     # account lives in the database and these values are never consulted again.
     # The defaults keep the local demo working (previously hardcoded in seed);
-    # real deployments MUST override ADMIN_PASSWORD. These two are the only
-    # un-prefixed knobs (validation_alias bypasses env_prefix): a single
-    # account/password pair needs no SLIPSTREAM_ namespace.
-    admin_username: str = Field(default="admin", validation_alias="ADMIN_USERNAME")
-    admin_password: str = Field(default="admin", validation_alias="ADMIN_PASSWORD")
+    # real deployments MUST override SLIPSTREAM_ADMIN_PASSWORD.
+    admin_username: str = "admin"
+    admin_password: str = "admin"
 
     # Client keys: sk- + N chars; canonical lengths use uppercase A-Z0-9._-.
     client_key_prefix: str = "sk-"

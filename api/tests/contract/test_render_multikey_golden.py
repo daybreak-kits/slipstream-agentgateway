@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import logging
 
+from conftest import seed_channel
 from l01_core.settings import reset_settings_cache
+from l01_core.timeutil import now_ms
 from l02_domain.ir import (
     ClientKeySpec,
     GatewayIR,
@@ -31,9 +33,6 @@ from l03_adapters.agentgateway.render import render_config
 from l03_adapters.mock import MockAdapter
 from l04_repo.orm import ModelTargetORM, PublicModelORM, UpstreamKeyORM
 from l05_service.rendering import build_render_plan, model_alias, provider_id
-from l01_core.timeutil import now_ms
-
-from conftest import seed_channel
 
 
 def _add_second_key(engine, factory) -> None:
