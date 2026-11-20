@@ -39,7 +39,7 @@ from l04_repo.repository import (
     PUBLIC_MODEL_REPO,
     UPSTREAM_MODEL_REPO,
 )
-from l05_service import crud, models_dev, pricing
+from l05_service import crud, models_dev, pricing, rbac
 from l05_service.availability import (
     PUBLIC_MODEL_COOLDOWN_MESSAGE,
     SCOPE_PUBLIC_MODEL,
@@ -67,7 +67,6 @@ from l06_api.schemas import (
     ModelTargetUpdate,
     PublicModelCreate,
     PublicModelPatch,
-    PublicModelTargets,
     UpstreamModelCreate,
     UpstreamModelPatch,
 )
@@ -584,27 +583,6 @@ def batch_public_models(
     return result
 
 
-@router.put("/admin/public-models/{public_model_id}/targets")
-def replace_public_model_targets(
-    public_model_id: str,
-    payload: PublicModelTargets,
-    session: Session = Depends(session_of),
-    principal=Depends(require("model_targets:write")),
-) -> list[dict]:
-    """Replace all members in one transaction; the renderer's rules are enforced."""
-    rows = crud.replace_public_model_targets(
-        session,
-        public_model_id,
-        [draft.model_dump() for draft in payload.targets],
-        actor=principal.admin_id,
-    )
-    session.commit()
-    names = _model_names(session)
-    return [
-        _mt_body(row, names) for row in sorted(rows, key=lambda r: (r.priority, r.id))
-    ]
-
-
 @router.patch("/admin/public-models/{public_model_id}")
 def update_public_model(
     public_model_id: str,
@@ -613,10 +591,22 @@ def update_public_model(
     adapter: DataPlaneAdapter = Depends(get_adapter),
     principal=Depends(require("public_models:write")),
 ) -> dict:
+    """One atomic save: basic fields, routing_mode, enabled and (optional) members.
+
+    Ticket 12: targets rides this PATCH, so the console can never half-save (basic
+    fields landed, members did not). The member-write grant is required only when
+    targets is part of the request; the final member state is validated and the
+    whole save is committed once, so a rejected request rolls everything back. The
+    old PUT .../targets endpoint is gone with no alias.
+    """
     row = PUBLIC_MODEL_REPO.get(session, public_model_id)
     if row is None:
         raise AppError(ErrorCode.NOT_FOUND, f"public model not found: {public_model_id}")
     provided = payload.model_fields_set
+    if "targets" in provided:
+        # Replacing the routing plan needs its own grant, independent of the
+        # alias-edit public_models:write gate above (spec §5).
+        rbac.require_permission(principal.permissions, "model_targets:write")
     if "cooldown_until_ms" in provided:
         # 冷却只属于上游模型（ADR-025 / ticket 02）：明确拒绝而不是静默忽略。
         raise AppError(ErrorCode.VALIDATION_ERROR, PUBLIC_MODEL_COOLDOWN_MESSAGE)
@@ -630,7 +620,14 @@ def update_public_model(
     if "routing_mode" in provided:
         if payload.routing_mode is None:
             raise AppError(ErrorCode.VALIDATION_ERROR, "routing_mode 不能为空")
-        crud.set_public_model_routing_mode(session, row, payload.routing_mode)
+        # With members in the same save the incoming list is the final state to
+        # validate; without it the existing rows must still fit the new mode.
+        crud.set_public_model_routing_mode(
+            session,
+            row,
+            payload.routing_mode,
+            validate_members="targets" not in provided,
+        )
     if "note" in provided:
         row.note = payload.note or ""
     window_skip = None
@@ -644,6 +641,20 @@ def update_public_model(
                 session, scope=SCOPE_PUBLIC_MODEL, scope_id=row.id
             )
         apply_reason = "model-enable" if payload.enabled else "model-disable"
+    if "targets" in provided:
+        drafts = (
+            []
+            if payload.targets is None
+            else [draft.model_dump() for draft in payload.targets]
+        )
+        # require_members: the final state must keep at least one member.
+        crud.replace_public_model_targets(
+            session,
+            row.id,
+            drafts,
+            actor=principal.admin_id,
+            require_members=True,
+        )
     session.commit()
     if apply_reason:
         # 写后立即下发（ticket 02）。

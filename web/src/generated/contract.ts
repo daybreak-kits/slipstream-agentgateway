@@ -280,10 +280,7 @@ export interface PublicModelPatch {
   note?: string | null;
   enabled?: boolean | null;
   cooldown_until_ms?: number | null;
-}
-
-export interface PublicModelTargets {
-  targets?: TargetDraft[];
+  targets?: TargetDraft[] | null;
 }
 
 export interface RecomputeIn {

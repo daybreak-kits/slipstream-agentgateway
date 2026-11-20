@@ -103,6 +103,13 @@ class PublicModelCreate(BaseModel):
 
 
 class PublicModelPatch(BaseModel):
+    """One save for the alias row and (optionally) its whole member list (ticket 12).
+
+    targets rides the same PATCH so basic fields, routing_mode, enabled and the
+    member re-declaration commit in ONE transaction and validate against the
+    final state; omitting it leaves the members untouched.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     name: str | None = Field(default=None, min_length=1, max_length=255)
@@ -110,18 +117,11 @@ class PublicModelPatch(BaseModel):
     note: str | None = None
     enabled: bool | None = None
     cooldown_until_ms: int | None = Field(default=None, ge=0)
+    targets: list[TargetDraft] | None = None
 
 
 #: Legacy name used by earlier callers.
 PublicModelUpdate = PublicModelPatch
-
-
-class PublicModelTargets(BaseModel):
-    """Replace-all payload for the member editor; the service re-sorts by priority."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    targets: list[TargetDraft] = Field(default_factory=list)
 
 
 class ModelTargetCreate(BaseModel):

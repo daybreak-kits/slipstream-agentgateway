@@ -22,7 +22,10 @@ import type { PublicModel, RoutingMode, UpstreamModel } from "@/types";
 
 /**
  * 公开模型整页编辑器（W4-C，路由 /models/public/:id；编辑+成员合并入口，ADR-025）。
- * Tab1 基本信息+策略；Tab2 双栏成员编排（保存 = 整批替换，现有 PUT 语义不变）。
+ * Tab1 基本信息+策略；Tab2 双栏成员编排。
+ * Ticket 12：整页保存只发一个 PATCH /admin/public-models/{id}（可选 targets），
+ * 服务端在同一事务内完成基本字段 + routing_mode + enabled + 成员整批替换；
+ * 两个 Tab 的「保存」提交同一份整页草稿，不再有半成功（单页合并归 ticket 13）。
  * 未保存改动按现行弹窗草稿处理（离开即丢，改写守卫归 G 波）。
  */
 export function PublicModelEditor({ id }: { id: string }) {
@@ -70,24 +73,19 @@ export function PublicModelEditor({ id }: { id: string }) {
 
   const memberErrors = validateMembers(members, form.routing_mode);
 
-  const saveBasic = useMutation({
+  // Ticket 12：一个 PATCH 保存整页（基本字段 + 策略 + 启用 + targets 整批替换），
+  // 服务端单事务提交，失败整体回滚——不再出现「基本信息已改、成员未改」。
+  const save = useMutation({
     mutationFn: () =>
       api.patch<PublicModel>(ENDPOINTS.publicModelUpdate(id), {
         name: form.name.trim(),
         routing_mode: form.routing_mode,
         note: form.note.trim(),
         enabled: form.enabled,
+        targets: targetsPayload(members),
       }),
     onSuccess: () => {
-      toast.success("公开模型已更新");
-      void qc.invalidateQueries({ queryKey: ["public-models"] });
-    },
-    onError: (e: Error) => toast.error("保存失败", { description: e.message }),
-  });
-  const saveMembers = useMutation({
-    mutationFn: () => api.put(ENDPOINTS.publicModelTargets(id), { targets: targetsPayload(members) }),
-    onSuccess: () => {
-      toast.success("成员已保存");
+      toast.success("公开模型已保存");
       void qc.invalidateQueries({ queryKey: ["public-models"] });
     },
     onError: (e: Error) => toast.error("保存失败", { description: e.message }),
@@ -121,7 +119,7 @@ export function PublicModelEditor({ id }: { id: string }) {
       </div>
       <PageHeader
         title="编辑公开模型"
-        description={<>公开模型「{model.name}」。保存整页生效；成员保存是整批替换。</>}
+        description={<>公开模型「{model.name}」。保存整页生效：基本信息、策略、启用与成员在一次事务里提交。</>}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Badge tone="primary">{ROUTING_LABELS[form.routing_mode].label}</Badge>
@@ -161,11 +159,13 @@ export function PublicModelEditor({ id }: { id: string }) {
                 </label>
                 <div className="flex items-center gap-2">
                   <Button
-                    disabled={saveBasic.isPending || form.name.trim() === ""}
-                    onClick={() => saveBasic.mutate()}
+                    disabled={save.isPending || form.name.trim() === "" || memberErrors.length > 0}
+                    onClick={() => save.mutate()}
+                    title="一次保存基本信息、策略、启用状态与成员（服务端单事务）"
                   >
-                    {saveBasic.isPending ? "保存中…" : "保存基本信息"}
+                    {save.isPending ? "保存中…" : "保存整页"}
                   </Button>
+                  {memberErrors.length > 0 ? <span className="text-2xs text-danger-text">成员编排有误，整页无法保存</span> : null}
                 </div>
               </div>
             ),
@@ -175,7 +175,7 @@ export function PublicModelEditor({ id }: { id: string }) {
             label: "成员编排",
             content: (
               <div className="space-y-3">
-                <p className="text-2xs text-faint">{ROUTING_LABELS[form.routing_mode].desc}。保存是整批替换；后端按 priority 升序校验，被引用的上游模型不能删除。</p>
+                <p className="text-2xs text-faint">{ROUTING_LABELS[form.routing_mode].desc}。保存整页时成员整批替换；后端按 priority 升序校验，被引用的上游模型不能删除。</p>
                 <MemberBoard
                   members={members}
                   upstreamModels={upstreamModels}
@@ -184,8 +184,12 @@ export function PublicModelEditor({ id }: { id: string }) {
                   onChange={setMembers}
                 />
                 {memberErrors.length > 0 ? <p className="text-2xs text-danger-text">{memberErrors.join("；")}</p> : null}
-                <Button disabled={saveMembers.isPending || memberErrors.length > 0} onClick={() => saveMembers.mutate()}>
-                  {saveMembers.isPending ? "保存中…" : "保存成员"}
+                <Button
+                  disabled={save.isPending || memberErrors.length > 0}
+                  onClick={() => save.mutate()}
+                  title="成员随整页一起提交（服务端单事务）"
+                >
+                  {save.isPending ? "保存中…" : "保存整页"}
                 </Button>
               </div>
             ),

@@ -383,6 +383,7 @@ AG 1.7 拒绝（`mcp.transport.http=false`），保存即 422。渲染到顶层 
 | --- | --- | --- | --- |
 | GET/POST | /admin/upstream-models | upstream_models:read/write | 上游模型列表/创建 |
 | GET/POST | /admin/public-models | public_models:read/write | 对外模型（别名层） |
+| PATCH | /admin/public-models/{id} | public_models:write；body 含 targets 时另需 model_targets:write | **单事务整页保存**（W5 票 12）：基本字段 + routing_mode + enabled + 可选 targets 整批替换，按最终状态校验（至少一个成员、去重、conditional 兜底末位、priority 顺序）；校验失败整体回滚。旧 `PUT /admin/public-models/{id}/targets` 已删除，不保留别名 |
 | GET | /admin/model-targets | model_targets:read | 目标（priority/weight/enabled） |
 | PATCH/DELETE | /admin/model-targets/{target_id} | model_targets:write | 改 priority / enabled，或删除（PATCH 不接受 weight，weight 只在创建时给定） |
 | PATCH | /admin/upstream-models/batch | upstream_models:write | body `{ids:[...], action:"enable"\|"disable"\|"delete"}` → `{changed:[id], missing:[id], action}` |
