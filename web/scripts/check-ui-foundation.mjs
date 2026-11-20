@@ -789,6 +789,129 @@ check("日志：费用列两行（金额 + 明细），金额两位、毛利一�
   expect(!detail.includes("fmtMoney6"), "日志详情不得再用 6 位小数");
 });
 
+// ---------- 日志：请求尝试路由链（ticket 04） ----------
+const ATTEMPT_LONG_ERROR = "upstream connection reset by peer while reading the response stream";
+
+check("日志路由链：每行上游/模型/状态/耗时/错误摘要，展开可看上游地址与错误全文", async () => {
+  const { RequestAttemptChain } = await load("/src/components/logs/request-attempt-chain.tsx");
+  const html = render(
+    createElement(RequestAttemptChain, {
+      attempts: [
+        {
+          attempt: 1,
+          upstream_ref: "ups_zai",
+          upstream_name: "zai-01",
+          model: "glm-5.3",
+          status_code: 500,
+          error_type: "500",
+          error_message: ATTEMPT_LONG_ERROR,
+          duration_ms: 60,
+          outcome: "error",
+          started_at_ms: 1_800_000_000_012,
+        },
+        {
+          attempt: 2,
+          upstream_ref: "ups_or",
+          upstream_name: "or-01",
+          model: "glm-5.3",
+          status_code: 200,
+          error_type: "",
+          error_message: "",
+          duration_ms: 85,
+          outcome: "ok",
+          started_at_ms: 1_800_000_000_085,
+        },
+      ],
+      totalDurationMs: 145,
+    }),
+  );
+  includesAll(
+    html,
+    [
+      "路由链 · 2 次尝试",
+      "总耗时",
+      "0.15s",
+      "第 1 轮",
+      "第 2 轮",
+      "zai-01",
+      "or-01",
+      "glm-5.3",
+      "0.06s",
+      "0.09s",
+      "upstream 500: upstream connection reset",
+      "ups_zai",
+      "ups_or",
+      "上游地址",
+      "错误全文",
+      ATTEMPT_LONG_ERROR,
+    ],
+    "路由链行",
+  );
+  expect(html.includes("<details"), "每次尝试必须能展开详情行（details）");
+  expect(
+    !html.includes("upstream 500: " + ATTEMPT_LONG_ERROR),
+    "折叠行的错误摘要必须截断，不能整段铺开",
+  );
+});
+
+check("日志路由链：无 attempts 显示「无链路记录」，不伪造链路", async () => {
+  const { RequestAttemptChain } = await load("/src/components/logs/request-attempt-chain.tsx");
+  const html = render(createElement(RequestAttemptChain, { attempts: [] }));
+  expect(html.includes("无链路记录"), "无 attempts 必须显示「无链路记录」");
+  expect(!html.includes("次尝试"), "无 attempts 不得渲染尝试轮数或伪造链路");
+  expect(!html.includes("<details"), "无 attempts 不得渲染尝试详情");
+});
+
+check("日志页：模型旁「N 次尝试」按钮打开 popover（ticket 04 接线）", async () => {
+  const { RequestAttemptChainPopover } = await load("/src/components/logs/request-attempt-chain.tsx");
+  const trigger = render(
+    createElement(RequestAttemptChainPopover, {
+      eventId: "mev_1005",
+      attemptsCount: 3,
+      totalDurationMs: 180,
+    }),
+  );
+  includesAll(trigger, ["3 次尝试", "查看 3 次尝试的路由链"], "尝试按钮");
+  const page = read("src/pages/logs.tsx");
+  includesAll(
+    page,
+    ["RequestAttemptChainPopover", 'id: "attempts"', "无链路记录", "has_attempts"],
+    "日志页尝试列接线",
+  );
+  const drawer = read("src/components/logs/log-detail-drawer.tsx");
+  includesAll(
+    drawer,
+    ["request-attempt-chain", "RequestAttemptChain", "NoChainRecord", "use-log-attempts"],
+    "详情抽屉复用路由链组件",
+  );
+  expect(
+    !drawer.includes('queryKey: ["log-attempts"'),
+    "抽屉不得自己再拉一份路由链数据，必须复用共享 hook",
+  );
+  expect(!drawer.includes("attemptDotClass"), "抽屉不得再维护第二套尝试行渲染");
+});
+
+check("mock：多尝试失败行与行级错误摘要可用于演示路由链", async () => {
+  const { mockRequest } = await load("/src/lib/mock.ts");
+  const page = await mockRequest("/admin/logs?page_size=200", { method: "GET" });
+  const withChain = page.items.find((item) => item.has_attempts && item.http_status >= 400);
+  expect(Boolean(withChain), "mock 必须有一行上游失败但带 attempts 的日志");
+  expect(withChain.attempts_count > 0, "失败行的 attempts_count 必须 > 0");
+  const chain = await mockRequest("/admin/logs/" + withChain.event_id + "/attempts", {
+    method: "GET",
+  });
+  expect(chain.attempts.length === withChain.attempts_count, "mock 尝试链长度必须与 attempts_count 一致");
+  const lastFailed = [...chain.attempts].reverse().find((attempt) => attempt.status_code >= 400);
+  expect(Boolean(lastFailed), "mock 尝试链必须包含失败尝试");
+  expect(
+    withChain.error.startsWith("upstream " + lastFailed.status_code),
+    "失败行的行级错误摘要必须与最后一次失败尝试一致，实际：" + withChain.error,
+  );
+  const noChain = page.items.find((item) => !item.has_attempts);
+  expect(Boolean(noChain), "mock 必须保留无 attempts 的历史行（显示无链路记录）");
+  expect(noChain.attempts_count === 0, "无 attempts 行的 attempts_count 必须是 0");
+});
+
 check("金额：全站组件不再出现 6 位小数格式化", () => {
   const bad = [];
   for (const file of sourceFiles()) {
