@@ -12,7 +12,7 @@ import { PriceTable, type PriceColumn } from "@/components/pricing/table";
 import { UNIT_HINT, priceMicro } from "@/components/pricing/money";
 import { invalidatePricing, pricingKeys, useUpstreamModels, useUpstreams, useVendors } from "@/components/pricing/queries";
 import { api, apiList, ENDPOINTS } from "@/lib/api";
-import { fmtMoney6 } from "@/lib/format";
+import { fmtUnitPriceMicro } from "@/lib/format";
 import { formatDateTime, useTimezone } from "@/lib/time";
 import { usePermissions } from "@/lib/permissions";
 import type { UpstreamModel } from "@/types";
@@ -173,7 +173,7 @@ export function CachePricesSection() {
       headerClassName: "text-right",
       cell: (pair) => (
         <span className="tnum text-body">
-          {fmtMoney6(pair.read?.unit_price_micro ?? null, pair.read?.currency ?? "CNY")}
+          {fmtUnitPriceMicro(pair.read?.unit_price_micro ?? null, pair.read?.currency ?? "CNY")}
         </span>
       ),
     },
@@ -192,7 +192,7 @@ export function CachePricesSection() {
       headerClassName: "text-right",
       cell: (pair) => (
         <span className="tnum text-body">
-          {fmtMoney6(pair.write?.unit_price_micro ?? null, pair.write?.currency ?? "CNY")}
+          {fmtUnitPriceMicro(pair.write?.unit_price_micro ?? null, pair.write?.currency ?? "CNY")}
         </span>
       ),
     },
@@ -405,7 +405,7 @@ function CachePriceDialog({
           </label>
         ) : (
           <p className="text-2xs text-faint">
-            现价：读 {fmtMoney6(currentRead, currency)} · 写 {fmtMoney6(currentWrite, currency)}
+            现价：读 {fmtUnitPriceMicro(currentRead, currency)} · 写 {fmtUnitPriceMicro(currentWrite, currency)}
           </p>
         )}
         <div className="grid grid-cols-2 gap-2">

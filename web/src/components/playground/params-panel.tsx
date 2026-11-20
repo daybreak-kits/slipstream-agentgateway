@@ -36,6 +36,7 @@ import {
   type ParamHintKey,
   type ThinkingMode,
 } from "@/lib/playground";
+import { fmtInt } from "@/lib/format";
 import type { PlaygroundParamsState } from "@/lib/playground-params";
 import { cn } from "@/lib/utils";
 import type { MyModelOut } from "@/types";
@@ -159,9 +160,9 @@ function ModelInfoBlock({ modelInfo }: { modelInfo: MyModelOut }) {
     <ParamGroup title="模型参数" count={4}>
       <div className="space-y-1.5 text-2xs leading-relaxed">
         <div className="tnum">
-          上下文窗口 {p.max_input_tokens > 0 ? p.max_input_tokens.toLocaleString() : "未声明"}
+          上下文窗口 {p.max_input_tokens > 0 ? fmtInt(p.max_input_tokens) : "未声明"}
           <span className="mx-1.5 text-faint">·</span>
-          最大输出 {p.max_output_tokens > 0 ? p.max_output_tokens.toLocaleString() : "未声明"}
+          最大输出 {p.max_output_tokens > 0 ? fmtInt(p.max_output_tokens) : "未声明"}
         </div>
         <div>
           输入 {p.input_types.join(" / ")}

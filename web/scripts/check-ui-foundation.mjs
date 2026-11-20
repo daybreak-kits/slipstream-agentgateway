@@ -536,6 +536,191 @@ check("表格行节奏：表头/正文同高且垂直居中，行悬浮色与冻
   expect((css.match(/--row-hover:/g) ?? []).length >= 2, "行悬浮色必须浅/深各一套");
 });
 
+// ---------- 7. 数字与格式化单一来源（ticket 08） ----------
+// 本仓前端没有测试运行器：数字口径的边界值在这里用 vite SSR 加载真实模块断言，
+// 「不得再出现本地 formatter」用源码扫描兜住，避免口径再次分裂。
+const NUM_FORMATTER_NAMES = [
+  "fmtInt", "fmtCount", "fmtRpm", "fmtPct", "fmtPctPoint", "fmtMoney", "fmtMoneyAvg",
+  "fmtMoney6", "fmtFixed", "formatCount", "fmtCny", "fmtYuan", "fmtMicroYuan",
+  "fmtPrice", "fmtPricePerM", "fmtPriceAmount", "fmtUnitPriceMicro", "fmtThroughput",
+  "fmtCachePct", "fmtSignedMicro", "compactMoney", "formatDuration", "fmtSeconds",
+  "formatSize", "fmtFileSize",
+];
+
+check("数字格式：整数一律千分位、四舍五入到整数（计数/词元/TPM/尝试次数）", async () => {
+  const fmt = await load("/src/lib/format.ts");
+  expect(fmt.fmtInt(0) === "0", "fmtInt(0) 应为 0");
+  expect(fmt.fmtInt(565920) === "565,920", "fmtInt(565920) 应为 565,920（不得出现 565.92K 紧凑格式）");
+  expect(fmt.fmtInt(1234567) === "1,234,567", "fmtInt(1234567) 应为千分位整数");
+  expect(fmt.fmtInt(565920.4) === "565,920", "fmtInt 必须先取整再千分位");
+  expect(fmt.fmtInt(-1234.6) === "-1,235", "fmtInt 负数也要千分位且四舍五入");
+  expect(fmt.fmtInt(null) === "—" && fmt.fmtInt(Number.NaN) === "—", "fmtInt 缺值/非有限值应显示「—」");
+  expect(fmt.formatCount === undefined, "formatCount 旧别名必须删除（统一用 fmtInt）");
+});
+
+check("数字格式：图表轴紧凑计数只保留整数（无 K/M/B 小数）", async () => {
+  const fmt = await load("/src/lib/format.ts");
+  expect(fmt.fmtCount(999) === "999", "千位以内仍用千分位整数");
+  expect(fmt.fmtCount(565920) === "566K", "565920 应四舍五入为 566K，不得有小数");
+  expect(fmt.fmtCount(1_500_000) === "2M", "1.5M 应取整为 2M");
+  expect(fmt.fmtCount(999_999) === "1M", "进位到 1000K 时必须升到 M");
+  expect(fmt.fmtCount(Number.NaN) === "—", "fmtCount 非有限值应显示「—」");
+});
+
+check("数字格式：RPM 两位小数、百分比一位小数", async () => {
+  const fmt = await load("/src/lib/format.ts");
+  expect(fmt.fmtRpm(2572.014583) === "2,572.01", "RPM 必须固定两位小数（整数部分千分位）");
+  expect(fmt.fmtRpm(0) === "0.00", "RPM 0 也要两位小数");
+  expect(fmt.fmtRpm(null) === "—", "RPM 缺值显示「—」");
+  expect(fmt.fmtPct(0.4148) === "41.5%", "比例（0–1）必须一位小数百分比");
+  expect(fmt.fmtPct(0) === "0.0%" && fmt.fmtPct(1) === "100.0%", "百分比边界值固定一位小数");
+  expect(fmt.fmtPct(null) === "—", "百分比缺值显示「—」");
+  expect(fmt.fmtPctPoint(41.48) === "41.5%", "已是百分数的值（如 cache_ratio）直接一位小数");
+});
+
+check("数字格式：金额表格两位、单请求均值四位、取消六位小数", async () => {
+  const fmt = await load("/src/lib/format.ts");
+  expect(fmt.fmtMoney(2_000_000, "CNY") === "¥2.00", "金额默认两位小数");
+  expect(fmt.fmtMoney(-1_500_000, "CNY") === "-¥1.50", "负数符号必须在货币符号之前");
+  expect(fmt.fmtMoney(1_500_000, "USD") === "$1.50", "币种符号按 currency 选择");
+  expect(fmt.fmtMoney(null) === "—", "金额缺值显示「—」，不渲染 0");
+  expect(fmt.fmtMoneyAvg(3_400, "CNY") === "¥0.0034", "单请求金额/均值必须四位小数");
+  expect(fmt.fmtMoneyAvg(1_234_567) === "¥1.2346", "单请求金额四位小数四舍五入");
+  expect(fmt.fmtMoney6 === undefined && fmt.fmtYuan === undefined && fmt.fmtMicroYuan === undefined, "6 位小数与旧别名必须删除");
+  expect(fmt.fmtCny(2_000_000) === "¥2.00", "fmtCny 仍走两位小数");
+});
+
+check("数字格式：单价 2 位、不足 0.01 升 4 位；单价统一从 lib/format 出", async () => {
+  const fmt = await load("/src/lib/format.ts");
+  expect(fmt.fmtPricePerM("2") === "¥2.00/M", "模型行进价两位小数 + /M");
+  expect(fmt.fmtPricePerM("0.005") === "¥0.0050/M", "不足 0.01 的单价必须升到 4 位");
+  expect(fmt.fmtPricePerM(null) === "—", "未配置单价显示「—」");
+  expect(fmt.fmtPriceAmount("2", "USD") === "$2.00", "公开模型售价按币种两位小数");
+  expect(fmt.fmtUnitPriceMicro(2_000_000, "CNY") === "¥2.00", "微单位单价按两位小数展示");
+  expect(fmt.fmtUnitPriceMicro(5_000, "CNY") === "¥0.0050", "微单位小单价升到四位");
+});
+
+check("数字格式：吞吐与文件大小格式化也收敛到 lib/format", async () => {
+  const fmt = await load("/src/lib/format.ts");
+  expect(fmt.fmtThroughput(42.34) === "42.3", "吞吐 <100 保留一位小数");
+  expect(fmt.fmtThroughput(1234.5) === "1,235", "吞吐 >=100 取整并千分位（不得用 toLocaleString 自拼）");
+  expect(fmt.fmtThroughput(0) === "—", "无吞吐显示「—」");
+  expect(fmt.fmtFileSize(800) === "800 B", "文件大小 B 档");
+  expect(fmt.fmtFileSize(1536) === "1.5 KB", "文件大小 KB 档一位小数");
+  expect(fmt.fmtFileSize(2 * 1024 * 1024) === "2.0 MB", "文件大小 MB 档一位小数");
+});
+
+check("数字格式：组件/页面不得重复实现数字 formatter（lib/format 单一来源）", () => {
+  const offenders = [];
+  for (const file of sourceFiles()) {
+    if (rel(file) === "src/lib/format.ts") continue;
+    const text = readFileSync(file, "utf8");
+    for (const name of NUM_FORMATTER_NAMES) {
+      if (new RegExp("function\\s+" + name + "\\s*\\(").test(text)) offenders.push(rel(file) + "：" + name);
+    }
+  }
+  expect(offenders.length === 0, "仍有本地数字 formatter：\n       " + offenders.join("\n       "));
+});
+
+check("数字格式：不得用 toLocaleString 自拼千分位（统一走 fmtInt）", () => {
+  const bad = [];
+  for (const file of sourceFiles()) {
+    if (rel(file) === "src/lib/format.ts") continue;
+    if (/\.toLocaleString\(\s*(?:"en-US")?\s*\)/.test(readFileSync(file, "utf8"))) bad.push(rel(file));
+  }
+  expect(bad.length === 0, "以下文件绕过 fmtInt 自拼千分位：\n       " + bad.join("\n       "));
+});
+
+check("数字格式：K/M/B 紧凑计数只允许图表轴使用（trend-panel）", () => {
+  const allowed = new Set(["src/lib/format.ts", "src/components/dashboard/trend-panel.tsx"]);
+  const bad = [];
+  for (const file of sourceFiles()) {
+    const path = rel(file);
+    if (allowed.has(path)) continue;
+    if (/\bfmtCount\b/.test(readFileSync(file, "utf8"))) bad.push(path);
+  }
+  expect(bad.length === 0, "K/M/B 紧凑格式只留给图表轴，其余应为 fmtInt：" + bad.join("、"));
+});
+
+check("数字格式：图表与价目模块只做 re-export/换算，不再包 formatter", () => {
+  const chart = read("src/components/dashboard/chart-format.ts");
+  expect(!/function\s+(?:fmt|format)/.test(chart), "chart-format 不得再定义 formatter，只能从 lib/format re-export");
+  expect(chart.includes('from "@/lib/format"'), "chart-format 必须从 lib/format 转发");
+  const money = read("src/components/pricing/money.ts");
+  expect(!/function\s+fmt/.test(money), "pricing/money 只保留 micro 换算，展示函数统一在 lib/format");
+  const logsFormat = read("src/components/logs/format.ts");
+  expect(!/function\s+fmtThroughput|function\s+fmtCachePct/.test(logsFormat), "吞吐/缓存比例 formatter 必须上收 lib/format");
+});
+
+check("看板 KPI：计数/TPM 千分位整数、RPM 两位、百分比一位（不再用 K/M/B）", () => {
+  const text = read("src/components/dashboard/metric-cards.tsx");
+  includesAll(
+    text,
+    ["fmtInt(requests)", "fmtInt(errorCount)", "fmtInt(totalTokens)", "fmtInt(tpm)", "fmtRpm(rpm)", "fmtRpm(peakRpm)", "fmtInt(peakTpm)", "fmtPct(cacheFraction)", "fmtPct(marginRate)"],
+    "看板 KPI 数字口径",
+  );
+  expect(!/\bfmtCount\(/.test(text), "KPI 不得再使用 K/M/B 紧凑计数");
+});
+
+check("看板 KPI 渲染：大数走千分位整数，RPM 两位、百分比一位", async () => {
+  const { DashboardKpis } = await load("/src/components/dashboard/metric-cards.tsx");
+  const data = {
+    currency: "CNY",
+    totals: {
+      requests: 1_234_567,
+      error_count: 12,
+      input_tokens: 400_000,
+      cache_read_tokens: 150_000,
+      cache_write_tokens: 15_920,
+      output_tokens: 0,
+      tokens: 565_920,
+      active_minutes: 480,
+      peak_rpm: 123.456,
+      peak_tpm: 4567.89,
+    },
+  };
+  const latency = { total: { p50_ms: 234.5, p95_ms: 890 }, paired_samples: 120, min_samples: 5 };
+  const html = render(createElement(DashboardKpis, { data, latency, loading: false, error: null, onRetry: () => {} }));
+  expect(html.includes("565,920"), "词元必须千分位整数（不得 565.92K）");
+  expect(html.includes("1,234,567"), "请求量必须千分位整数");
+  expect(html.includes("2,572.01"), "RPM 必须两位小数");
+  expect(html.includes("123.46"), "最高峰 RPM 必须两位小数");
+  expect(html.includes("1,179"), "TPM 必须千分位整数");
+  expect(html.includes("41.5%"), "缓存命中率必须一位小数百分比");
+  expect(!/[0-9]+\.[0-9]+[KMB]/.test(html), "KPI 不得出现带小数的 K/M/B 紧凑格式");
+});
+
+check("日志：费用列两行（金额 + 明细），金额两位、毛利一位", () => {
+  const text = read("src/pages/logs.tsx");
+  includesAll(text, ["fmtMoney(item.charge_micro", "fmtMoney(item.cost_micro", "利 ", "fmtPct(marginPct)"], "日志费用列");
+  expect(!text.includes("fmtMoney6"), "日志费用列不得再用 6 位小数");
+  const detail = read("src/components/logs/log-detail-drawer.tsx");
+  expect(detail.includes("fmtMoneyAvg("), "单请求金额必须四位小数（fmtMoneyAvg）");
+  expect(!detail.includes("fmtMoney6"), "日志详情不得再用 6 位小数");
+});
+
+check("金额：全站组件不再出现 6 位小数格式化", () => {
+  const bad = [];
+  for (const file of sourceFiles()) {
+    const path = rel(file);
+    if (!path.startsWith("src/components/") && !path.startsWith("src/pages/")) continue;
+    const text = readFileSync(file, "utf8");
+    if (text.includes("fmtMoney6") || /\.toFixed\(6\)/.test(text)) bad.push(path);
+  }
+  expect(bad.length === 0, "仍在使用 6 位小数：" + bad.join("、"));
+});
+
+check("设计审计 §5：数字口径更新为千分位整数 / RPM 2 位 / 百分比 1 位 / 金额 2 位、单请求 4 位", () => {
+  const text = read("../docs/DESIGN-AUDIT.md");
+  includesAll(text, ["千分位整数", "RPM", "2 位小数", "1 位小数", "单请求", "图表轴"], "DESIGN-AUDIT §5");
+  expect(!/6 位小数/.test(text), "DESIGN-AUDIT 不得再保留金额 6 位小数的旧规则");
+});
+
+check("术语表 §5：RPM 2 位、TPM 整数、缓存命中率 1 位", () => {
+  const text = read("../docs/GLOSSARY.md");
+  includesAll(text, ["RPM", "TPM", "千分位整数", "1 位小数"], "GLOSSARY §5 数字口径");
+});
+
 // ---------- run ----------
 const failures = [];
 server = await createServer({

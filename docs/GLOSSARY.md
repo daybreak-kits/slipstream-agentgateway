@@ -61,8 +61,8 @@
 | 倍率 Markup | `upstream_models.markup` | 花费 = 成本 × 倍率（ADR-017 口径，2026-11-19 重申）；公开模型售价 = 成员加权只读派生，**对外价不独立维护**；`charge_prices` 的 markup 行冗余退役 | 不是毛利率；毛利率=(花费−成本)÷花费 |
 | 价格版本 price_version | `ledger_entries.price_version` | 计价时使用的价格快照标识 | 价格调整不重算历史账 |
 | 日聚合 DailyAggregate | `daily_aggregates` | 按天预聚合，看板只读它 | 不扫明细 |
-| 速率 RPM / TPM | 报表 totals | RPM = 请求数 ÷ 活跃分钟；TPM = 词元总数 ÷ 活跃分钟；活跃分钟 = 有请求的独立分钟数（报表时区）。均保留 2 位小数；「最高峰」= 窗口内单分钟最大值 | 不是瞬时速率；分母是活跃分钟不是时间窗长度 |
-| 缓存命中率 Cache Hit | 派生（GLOSSARY §5 词元口径） | 缓 ÷（入 + 缓），入为扣除缓存后的净输入；展示 2 位小数百分比；无缓存显示「无缓存」 | 分母不含出词元 |
+| 速率 RPM / TPM | 报表 totals | RPM = 请求数 ÷ 活跃分钟；TPM = 词元总数 ÷ 活跃分钟；活跃分钟 = 有请求的独立分钟数（报表时区）。RPM 保留 2 位小数、TPM 为千分位整数（`fmtRpm` / `fmtInt`）；「最高峰」= 窗口内单分钟最大值 | 不是瞬时速率；分母是活跃分钟不是时间窗长度 |
+| 缓存命中率 Cache Hit | 派生（GLOSSARY §5 词元口径） | 缓 ÷（入 + 缓），入为扣除缓存后的净输入；展示 1 位小数百分比（`fmtPct` / `fmtPctPoint`）；无缓存显示「无缓存」 | 分母不含出词元 |
 
 金额一律整数 micro（1 CNY = 1_000_000 micro），字段后缀 `_micro`；货币 `currency` 取 CNY/USD，
 v1 主币种 CNY。

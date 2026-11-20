@@ -98,13 +98,16 @@ grep -rn "bg-gradient\|text-gradient\|drop-shadow\|blur-\|hover:scale\|animate-p
 
 | 场景 | 规则 |
 |---|---|
-| 计数（卡片/图表 tooltip） | K/M/B 自适应，2 位小数（错误次数同） |
-| 计数（表格明细） | 千分位 |
-| 词元 | 入/出/缓分别格式化；无缓存显示「无缓存」 |
-| 金额 | 6 位小数；未配置显示「—」，不渲染 0 |
-| 比例/毛利率/错误率 | 2 位小数 |
+| 计数 / 词元 / TPM / 尝试次数 | 千分位整数（`fmtInt`，如 1,234,567）；卡片、表格、tooltip 一律不缩写 |
+| 图表轴 | 只有坐标轴允许 K/M/B 紧凑格式，且只留整数（`fmtCount`，如 566K） |
+| RPM | 2 位小数（`fmtRpm`） |
+| 百分比 / 比率 | 1 位小数（`fmtPct` 收 0–1 比例，`fmtPctPoint` 收已是百分数的值）；缓存命中率口径见 GLOSSARY §5 |
+| 金额（表格 / 汇总 / KPI） | 2 位小数（`fmtMoney`）；未配置显示「—」，不渲染 0 |
+| 单请求金额 / 均值 | 4 位小数（`fmtMoneyAvg`），避免单次请求被舍成 ¥0.00 |
+| 单价（元 / 1M 词元） | 2 位小数；< 0.01 升 4 位（`fmtPriceAmount` / `fmtPricePerM` / `fmtUnitPriceMicro`） |
 | 延迟 | 秒（s）2 位小数 |
 | 缓存比例 | 缓 ÷（入+缓），见 GLOSSARY §5 |
+| 已取消的旧口径 | 六位小数金额、带小数的 K/M/B 紧凑计数 |
 
 ### 6. 动效
 

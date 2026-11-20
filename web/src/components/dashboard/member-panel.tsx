@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 
 import { Button } from "@/components/ui/button";
-import { fmtCount, fmtPct } from "@/lib/format";
+import { fmtInt, fmtPct } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 import { fmtMoney } from "./chart-format";
@@ -25,7 +25,7 @@ function memberValue(member: TimeseriesMember, metric: TrendMetric, currency: st
     const value = member.totals?.charge_micro ?? member.charge_micro ?? member.totals?.cost_micro ?? member.cost_micro;
     return value === undefined ? "—" : fmtMoney(value, currency);
   }
-  return fmtCount(member.total);
+  return fmtInt(member.total);
 }
 
 /**

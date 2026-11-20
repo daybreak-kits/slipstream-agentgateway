@@ -14,7 +14,7 @@ import {
 import { Empty } from "@/components/ui/empty";
 import { TabBar } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { fmtCount } from "@/lib/format";
+import { fmtCount, fmtInt } from "@/lib/format";
 import { usePermissions } from "@/lib/permissions";
 
 import { ChartCard } from "./chart-card";
@@ -53,7 +53,8 @@ interface SeriesTooltipProps {
 }
 
 function formatMetric(value: number, metric: TrendMetric, currency: string | undefined): string {
-  return metric === "money" ? fmtMoney(value, currency) : fmtCount(value);
+  // tooltip 是用户直接读数的位置（W5-D2）：计数走千分位整数；K/M/B 只留给坐标轴刻度。
+  return metric === "money" ? fmtMoney(value, currency) : fmtInt(value);
 }
 
 /** 工具提示：固定深色（两主题同值），空桶写「该时段无数据」。 */

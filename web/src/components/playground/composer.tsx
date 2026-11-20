@@ -4,16 +4,11 @@ import { Boxes, ChevronDown, Paperclip, Send, Square, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { fmtFileSize } from "@/lib/format";
 import type { PlaygroundAttachment } from "@/lib/playground";
 
 const ACCEPT =
   ".txt,.md,.markdown,.json,.jsonl,.csv,.tsv,.log,.yaml,.yml,.xml,.html,.css,.js,.jsx,.ts,.tsx,.py,.go,.rs,.sh,.sql,.toml,.ini,text/*";
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return bytes + " B";
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
-  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
-}
 
 export interface ComposerProps {
   value: string;
@@ -59,7 +54,7 @@ export function Composer({
               <Badge key={file.name + "-" + index} tone="neutral" className="gap-1 pr-0.5">
                 <Paperclip className="h-3 w-3" />
                 <span className="max-w-40 truncate">{file.name}</span>
-                <span className="tnum text-faint">{formatSize(file.size)}</span>
+                <span className="tnum text-faint">{fmtFileSize(file.size)}</span>
                 <Button
                   variant="ghost"
                   size="icon"

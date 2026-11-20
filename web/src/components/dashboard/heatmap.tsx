@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type UIEvent } from "react";
 
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { fmtCount } from "@/lib/format";
+import { fmtInt } from "@/lib/format";
 import { usePermissions } from "@/lib/permissions";
 
 import { ChartCard } from "./chart-card";
@@ -193,7 +193,7 @@ export function HeatmapCard() {
   };
 
   const formatValue = (value: number): string =>
-    isMoney ? fmtMoney(value, data?.currency) : fmtCount(value);
+    isMoney ? fmtMoney(value, data?.currency) : fmtInt(value);
   const cellTitle = (rowLabel: string, columnLabel: string, value: number): string =>
     `${rowLabel} ${columnLabel}:00 · ${value > 0 ? formatValue(value) + (isMoney ? "" : " 词元") : "无请求"}`;
   const aggCellTitle = (row: AggregatedRow, columnLabel: string, value: number): string =>

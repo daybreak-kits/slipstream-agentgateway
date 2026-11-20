@@ -23,19 +23,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import type { LogAttemptsOut } from "@/generated/contract";
 import { api, ApiError, ENDPOINTS } from "@/lib/api";
-import { fmtInt, fmtMoney6, fmtSeconds } from "@/lib/format";
+import { fmtInt, fmtMoneyAvg, fmtPctPoint, fmtSeconds, fmtThroughput } from "@/lib/format";
 import { usePermissions } from "@/lib/permissions";
 import { formatDateTime } from "@/lib/time";
 import type { IntervalTimezone } from "@/lib/time-range";
 import { cn } from "@/lib/utils";
 
-import {
-  fmtCachePct,
-  fmtThroughput,
-  statusLabel,
-  statusTone,
-  upstreamLabel,
-} from "./format";
+import { statusLabel, statusTone, upstreamLabel } from "./format";
 import type { LogDetail, LogPayload, LogRow } from "./types";
 
 interface LogDetailDrawerProps {
@@ -138,7 +132,7 @@ export function LogDetailDrawer({ open, row, timezone, onOpenChange }: LogDetail
     ["总词元", fmtInt(view.total_tokens)],
     ["缓存读词元", fmtInt(view.cache_read_tokens)],
     ["缓存写词元", fmtInt(view.cache_write_tokens)],
-    ["缓存命中比例", fmtCachePct(view.cache_ratio)],
+    ["缓存命中比例", fmtPctPoint(view.cache_ratio)],
   ];
 
   const traceFields: Array<[string, ReactNode]> = [
@@ -182,7 +176,7 @@ export function LogDetailDrawer({ open, row, timezone, onOpenChange }: LogDetail
             <span className="text-faint">→</span>
             <span className="text-sm text-body">{upstreamLabel(view)}</span>
             {view.is_stream ? <Badge tone="info">流式</Badge> : null}
-            {view.cache_ratio ? <Badge tone="info">缓存 {fmtCachePct(view.cache_ratio)}</Badge> : null}
+            {view.cache_ratio ? <Badge tone="info">缓存 {fmtPctPoint(view.cache_ratio)}</Badge> : null}
             <span className="ml-auto text-2xs text-faint">{formatDateTime(view.started_at_ms, timezone)}</span>
           </div>
 
@@ -235,7 +229,7 @@ export function LogDetailDrawer({ open, row, timezone, onOpenChange }: LogDetail
                 <p className="text-2xs text-faint">
                   毛利{" "}
                   <span className="tnum text-body">
-                    {margin === undefined || margin === null ? "—" : fmtMoney6(margin, currency)}
+                    {margin === undefined || margin === null ? "—" : fmtMoneyAvg(margin, currency)}
                   </span>{" "}
                   · 花费 − 成本
                 </p>
@@ -360,7 +354,7 @@ function TraceChainSection({
             总耗时 <span className="tnum text-body">{fmtSeconds(fallbackDurationMs || totalMs)}</span>
           </span>
           <span>
-            上游尝试 <span className="tnum text-body">{attempts.length}</span> 轮
+            上游尝试 <span className="tnum text-body">{fmtInt(attempts.length)}</span> 轮
           </span>
         </p>
         <ol className="space-y-2">
@@ -511,6 +505,7 @@ function MoneyCard({
   currency: string;
   estimate: boolean;
 }) {
+  // W5-D2：单请求金额 4 位小数（表格/汇总才是 2 位，见 fmtMoney）。
   return (
     <div className="rounded-lg border border-border bg-surface-2 p-3">
       <p className="text-2xs text-faint">{label}</p>
@@ -520,7 +515,7 @@ function MoneyCard({
         </div>
       ) : (
         <p className="mt-1 text-lg font-semibold tabular-nums text-title">
-          {fmtMoney6(micro, currency)}
+          {fmtMoneyAvg(micro, currency)}
         </p>
       )}
       <p className="mt-1 text-2xs text-faint">

@@ -7,7 +7,7 @@ import { Link, NavLink, useParams } from "react-router-dom";
 import { toast } from "@/lib/notify";
 
 import { roleHint, roleLabel } from "@/components/governance/roles";
-import { fmtMs } from "@/lib/format";
+import { fmtCny, fmtInt, fmtMs } from "@/lib/format";
 import { SettingsGrid, SettingsTile } from "@/components/settings/tile";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,7 +18,6 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Textarea } from "@/components/ui/textarea";
 import { api, apiList, ENDPOINTS } from "@/lib/api";
 import { AUTH_ME_QUERY_KEY, fetchMe } from "@/lib/auth";
-import { fmtCny, fmtInt } from "@/lib/format";
 import { usePermissions } from "@/lib/permissions";
 import {
   useConnection,

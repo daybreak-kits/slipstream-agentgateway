@@ -124,7 +124,7 @@ export function AdminsPage() {
       meta: { className: "text-right tnum" },
       cell: (cell) => {
         const role = cell.row.original;
-        if (!canBrowseUsers) return <span className="tnum">{role.member_count}</span>;
+        if (!canBrowseUsers) return <span className="tnum">{fmtInt(role.member_count)}</span>;
         return (
           <Button
             variant="ghost"
@@ -133,7 +133,7 @@ export function AdminsPage() {
             title="查看使用该角色的控制台账号"
             onClick={() => navigate("/users?role=" + encodeURIComponent(role.key))}
           >
-            {role.member_count}
+            {fmtInt(role.member_count)}
           </Button>
         );
       },

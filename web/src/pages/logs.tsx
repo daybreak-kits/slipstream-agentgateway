@@ -54,7 +54,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { api, apiList, ENDPOINTS } from "@/lib/api";
-import { fmtInt, fmtMoney6, fmtPct, fmtSeconds } from "@/lib/format";
+import { fmtInt, fmtMoney, fmtPct, fmtSeconds } from "@/lib/format";
 import { ACTION_ICONS } from "@/lib/icons";
 import { useMock } from "@/lib/mock";
 import { usePermissions } from "@/lib/permissions";
@@ -610,19 +610,18 @@ function buildLogColumns(spec: LogColumnSpec): ColumnDef<LogRow, unknown>[] {
         const item = row.original;
         const marginPct = marginFraction(item.margin_micro, item.charge_micro);
         return (
+          // W5-D2：费用列两行（金额 + 明细），金额表格 2 位小数；毛利百分比 1 位。
           <div className="whitespace-nowrap tnum">
             {canSpend ? (
               <p className="text-2sm text-body" title="花费（向用户计费）">
-                {fmtMoney6(item.charge_micro, item.currency)}
+                {fmtMoney(item.charge_micro, item.currency)}
               </p>
             ) : null}
             {canCost ? (
               <p className="mt-0.5 text-2xs text-faint" title="成本（付上游进价）">
-                本 {fmtMoney6(item.cost_micro, item.currency)}
+                本 {fmtMoney(item.cost_micro, item.currency)}
+                {canSpend ? " · 利 " + (marginPct === null ? "—" : fmtPct(marginPct)) : null}
               </p>
-            ) : null}
-            {canCost && canSpend ? (
-              <p className="mt-0.5 text-2xs text-faint">利 {marginPct === null ? "—" : fmtPct(marginPct)}</p>
             ) : null}
           </div>
         );

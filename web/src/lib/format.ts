@@ -1,26 +1,40 @@
 const intFmt = new Intl.NumberFormat("zh-CN");
+// RPM 固定两位小数，整数部分仍带千分位（2572.01 → 2,572.01），与计数列对齐。
+const rpmFmt = new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-/** 整数/千分位展示（表格明细、词元计数等）。 */
-export function fmtInt(n: number): string {
-  return intFmt.format(n);
-}
-
-/** 兼容旧名：整数千分位。 */
-export function formatCount(n: number): string {
-  return intFmt.format(n);
+/**
+ * 整数千分位（DESIGN-AUDIT §5 / W5-D2）：计数、词元、TPM、尝试次数、输入/输出词元一律
+ * 「千分位整数」—— 先四舍五入到整数再编号，避免 565,920.4 这类小数漏出。
+ * 缺值/非有限值回「—」。
+ */
+export function fmtInt(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return "—";
+  return intFmt.format(Math.round(n));
 }
 
 /**
- * 计数紧凑口径（DESIGN-AUDIT 三期规范 §5：卡片主数与图表 tooltip 用）：
- * K/M/B 自适应，2 位小数；千位以内退千分位。表格明细仍用 fmtInt。
+ * 图表轴紧凑计数（DESIGN-AUDIT §5：只有坐标轴可以用 K/M/B）：K/M/B 自适应但**不留小数**
+ * （565920 → 566K，1.5M → 2M）；千位以内退千分位整数，999999 进位后升到 M。
+ * 卡片、表格、tooltip 等用户直接读数的位置一律用 fmtInt。
  */
-export function fmtCount(n: number): string {
-  if (!Number.isFinite(n)) return "—";
+export function fmtCount(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return "—";
   const abs = Math.abs(n);
-  if (abs >= 1_000_000_000) return (n / 1_000_000_000).toFixed(2) + "B";
-  if (abs >= 1_000_000) return (n / 1_000_000).toFixed(2) + "M";
-  if (abs >= 1_000) return (n / 1_000).toFixed(2) + "K";
-  return intFmt.format(n);
+  if (abs >= 1_000_000_000) {
+    const billions = Math.round(n / 1_000_000_000);
+    if (billions !== 0) return billions + "B";
+  }
+  if (abs >= 1_000_000) {
+    const millions = Math.round(n / 1_000_000);
+    if (millions !== 0) return millions + "M";
+  }
+  if (abs >= 1_000) {
+    const thousands = Math.round(n / 1_000);
+    // 999,500 一路进位到 1000K 时直接升 M，避免出现「1000K」。
+    if (thousands >= 1000) return Math.round(thousands / 1000) + "M";
+    return thousands + "K";
+  }
+  return intFmt.format(Math.round(n));
 }
 
 function pad2(value: number): string {
@@ -59,14 +73,43 @@ export function formatDurationAdaptive(ms: number | null | undefined): string {
   return Math.floor(seconds / 86400) + "d" + pad2(Math.floor((seconds % 86400) / 3600)) + "h";
 }
 
-/** 通用定点小数（均价、RPM/TPM、比例等派生数）；非有限值回「—」。 */
+/** 通用定点小数（均价、成本倍率等派生数）；非有限值回「—」。 */
 export function fmtFixed(n: number, digits = 2): string {
   if (!Number.isFinite(n)) return "—";
   return n.toFixed(digits);
 }
 
-export function fmtPct(n: number): string {
-  return (n * 100).toFixed(2) + "%";
+/**
+ * RPM（DESIGN-AUDIT §5 / W5-D2）：固定 2 位小数；值域缺失回「—」。
+ * TPM 属于词元计数，走 fmtInt，不要用本函数。
+ */
+export function fmtRpm(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return "—";
+  return rpmFmt.format(n);
+}
+
+/**
+ * 百分比（DESIGN-AUDIT §5 / W5-D2）：入参是 0–1 的比例，固定 1 位小数。
+ * 例如 0.4148 → 41.5%；缺值/非有限值回「—」。
+ */
+export function fmtPct(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return "—";
+  return (n * 100).toFixed(1) + "%";
+}
+
+/**
+ * 已是百分数的数值（如日志 cache_ratio 0–100、trend.delta 12.5）：固定 1 位小数。
+ * 0–1 比例请用 fmtPct，避免重复乘 100。
+ */
+export function fmtPctPoint(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return "—";
+  return n.toFixed(1) + "%";
+}
+
+/** 吞吐（词元/s）：≥100 取整并千分位，<100 保留 1 位小数；无输出回「—」。 */
+export function fmtThroughput(tps: number | null | undefined): string {
+  if (tps === null || tps === undefined || !Number.isFinite(tps) || tps <= 0) return "—";
+  return tps >= 100 ? fmtInt(Math.round(tps)) : tps.toFixed(1);
 }
 
 export function fmtTime(iso: string | null): string {
@@ -115,8 +158,7 @@ export function currencySymbol(currency?: string | null): string {
   return CURRENCY_SYMBOLS[code] ?? code + " ";
 }
 
-/** 金额一律整数微单位（micro = 1e-6 币）；金额统一 2 位小数，负数符号在货币符号之前。 */
-export function fmtMoney(micro: number | null | undefined, currency?: string | null, digits = 2): string {
+function moneyText(micro: number | null | undefined, currency: string | null | undefined, digits: number): string {
   if (micro === null || micro === undefined || !Number.isFinite(micro)) return "—";
   const value = micro / 1_000_000;
   const sign = value < 0 ? "-" : "";
@@ -124,29 +166,27 @@ export function fmtMoney(micro: number | null | undefined, currency?: string | n
 }
 
 /**
- * 单笔金额 6 位小数（DESIGN-AUDIT 三期规范 §5：日志/账单明细用）；
- * micro 缺失（未配置价/无权限）回「—」，负数（毛利为负）符号在货币符号之前。
+ * 金额（DESIGN-AUDIT §5 / W5-D2）：表格、汇总、KPI 一律 2 位小数，负数符号在货币符号之前；
+ * 缺值回「—」，不把未配置渲染成 0。
  */
-export function fmtMoney6(micro: number | null | undefined, currency: string): string {
-  return fmtMoney(micro, currency, 6);
+export function fmtMoney(micro: number | null | undefined, currency?: string | null): string {
+  return moneyText(micro, currency, 2);
+}
+
+/**
+ * 单请求金额/均值（DESIGN-AUDIT §5 / W5-D2）：单次请求的金额量级很小，固定 4 位小数，
+ * 避免 2 位小数把每一次请求都显示成 ¥0.00；缺值回「—」。
+ */
+export function fmtMoneyAvg(micro: number | null | undefined, currency?: string | null): string {
+  return moneyText(micro, currency, 4);
 }
 
 /** 人民币 2 位小数（汇总/余额口径）。 */
 export function fmtCny(micro: number): string {
-  return fmtMoney(micro, "CNY", 2);
+  return fmtMoney(micro, "CNY");
 }
 
-/** 人民币 2 位小数（兼容旧名）。 */
-export function fmtYuan(micro: number): string {
-  return fmtMoney(micro, "CNY", 2);
-}
-
-/** 兼容旧调用：无币种信息时按人民币展示。 */
-export function fmtMicroYuan(micro: number): string {
-  return fmtMoney(micro, "CNY", 2);
-}
-
-/** 金额的紧凑刻度（y 轴）：1.2K / 3.4M 元。 */
+/** 金额的紧凑刻度（y 轴）：1.2K → 1K / 3.4M → 3M 元（轴标签只留整数）。 */
 export function compactMoney(micro: number, currency?: string | null): string {
   if (!Number.isFinite(micro)) return "—";
   return currencySymbol(currency) + fmtCount(Math.round(micro / 1_000));
@@ -180,16 +220,32 @@ export function yuanInput(micro: number): string {
 }
 
 /**
- * 模型行进价文本（W4-C）：入参是十进制字符串（元 / 1M 词元），统一 2 位小数（¥2.00/M）；
- * 值 < 0.01 时升到 4 位（避免 ¥0.00 掩盖真实单价，含 0 = 明示零价）；未配置回「—」。
- * 解析失败的原样回显（编辑弹窗会另行校验）。
+ * 单价金额（DESIGN-AUDIT §5 / W5-D2）：2 位小数；绝对值 < 0.01 时升到 4 位，
+ * 避免 ¥0.00 掩盖真实单价（含 0 = 明示零价）；未配置回「—」。
+ * 入参可以是十进制字符串（价目表）或数字（已从 micro 折算的元）。
+ */
+export function fmtPriceAmount(value: string | number | null | undefined, currency?: string | null): string {
+  const text = value === null || value === undefined ? "" : String(value).trim();
+  if (text === "") return "—";
+  const symbol = currencySymbol(currency);
+  const n = Number(text);
+  if (!Number.isFinite(n)) return symbol + text;
+  return symbol + n.toFixed(Math.abs(n) < 0.01 ? 4 : 2);
+}
+
+/**
+ * 模型行进价文本（W4-C）：入参是十进制字符串（元 / 1M 词元），
+ * 统一 2 位小数（¥2.00/M）；值 < 0.01 时升到 4 位；未配置回「—」。
  */
 export function fmtPricePerM(value: string | null | undefined): string {
-  const text = (value ?? "").trim();
-  if (text === "") return "—";
-  const n = Number(text);
-  if (!Number.isFinite(n)) return "¥" + text + "/M";
-  return "¥" + n.toFixed(n < 0.01 ? 4 : 2) + "/M";
+  const amount = fmtPriceAmount(value, "CNY");
+  return amount === "—" ? amount : amount + "/M";
+}
+
+/** 微单位单价（元 / 1M 词元，micro）按 2 位小数展示；不足 0.01 升 4 位；缺值回「—」。 */
+export function fmtUnitPriceMicro(micro: number | null | undefined, currency?: string | null): string {
+  if (micro === null || micro === undefined || !Number.isFinite(micro)) return "—";
+  return fmtPriceAmount(micro / 1_000_000, currency);
 }
 
 /** 成本倍率文本（W4-C）：2 位小数（×1.20）；值 < 0.01 升 4 位；未配置回「—」。 */
@@ -199,4 +255,11 @@ export function fmtMarkup(value: string | null | undefined): string {
   const n = Number(text);
   if (!Number.isFinite(n)) return "×" + text;
   return "×" + n.toFixed(n < 0.01 ? 4 : 2);
+}
+
+/** 附件大小（B/KB/MB）：KB/MB 保留 1 位小数，和表格里的等宽数字对齐。 */
+export function fmtFileSize(bytes: number): string {
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
