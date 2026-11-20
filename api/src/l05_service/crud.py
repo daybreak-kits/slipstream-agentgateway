@@ -42,7 +42,7 @@ from l05_service import availability
 from l05_service.model_params import canonical_parameters, validate_type_source
 from l05_service.upstream_ops import (
     create_initial_key,
-    primary_key_plaintext,
+    probe_key_plaintext,
     resolve_auto_style,
 )
 
@@ -230,7 +230,7 @@ def update_upstream(
                 f"unknown api_style: {fields['api_style']}",
             ) from None
     if fields.get("api_style") == ApiStyle.AUTO:
-        api_key = primary_key_plaintext(session, upstream, secret_box=secret_box)
+        api_key = probe_key_plaintext(session, upstream, secret_box=secret_box)
         fields["api_style"] = resolve_auto_style(
             session,
             upstream_id=upstream.id,

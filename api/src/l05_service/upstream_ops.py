@@ -800,15 +800,19 @@ def latest_probe(session: Session, upstream_id: str) -> UpstreamProbeORM | None:
     return session.scalars(stmt).first()
 
 
-def primary_key_plaintext(
+def probe_key_plaintext(
     session: Session,
     upstream: UpstreamORM,
     *,
     secret_box: SecretBox,
     key_id: str | None = None,
 ) -> str:
-    """The probe credential: the named key, else the first key row (ADR-026 ③:
-    probing uses any one credential; there is no primary row anymore)."""
+    """The credential used for one probe (ADR-026 ③: any one credential works).
+
+    Named "probe_*" on purpose: ADR-026 retired the "primary key" concept, and
+    keys are equal peers. This helper only picks the credential for a
+    connectivity/discovery probe - the named key row, else the first row.
+    """
     rows = _ensure_rows(session, upstream, secret_box)
     if not rows:
         return ""
@@ -833,7 +837,7 @@ def probe(
     The response adds protocol / protocol_source / probe_steps on top of the
     historical probe_view keys.
     """
-    api_key = primary_key_plaintext(session, upstream, secret_box=secret_box, key_id=key_id)
+    api_key = probe_key_plaintext(session, upstream, secret_box=secret_box, key_id=key_id)
     requested = api_style_override or upstream.api_style
     try:
         ApiStyle(requested)

@@ -50,12 +50,41 @@ def init_db(engine: Engine) -> None:
 
     The project has no alembic yet; this additive fallback keeps an existing
     demo DB usable (ticket 08 adds config_revisions.error_detail and
-    config_revisions.validation_note). It never alters or drops a column.
+    config_revisions.validation_note). It never alters a column; ticket 16 also
+    drops columns the ORM retired after a database was created.
     """
     Base.metadata.create_all(engine)
     _ensure_additive_columns(engine)
+    _drop_retired_columns(engine)
     _ensure_username_index(engine)
     _ensure_model_markup_default(engine)
+
+
+#: Ticket 16: columns that left the ORM mapping (ADR-026 retired the key-level
+#: primary flag) but still sit in old SQLite files. Dropping them keeps the
+#: mapping honest: no dead column, no accidental read/write of a retired field.
+_RETIRED_COLUMNS: tuple[tuple[str, str], ...] = (("upstream_keys", "is_primary"),)
+
+
+def _drop_retired_columns(engine: Engine) -> None:
+    """Drop ORM columns that were retired after an existing DB was created.
+
+    ALTER TABLE ... DROP COLUMN needs SQLite >= 3.35 (the project's supported
+    Python 3.12 runtime bundles a newer one); non-SQLite backends support it too.
+    """
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    for table_name, column_name in _RETIRED_COLUMNS:
+        if not inspector.has_table(table_name):
+            continue
+        existing = {column["name"] for column in inspector.get_columns(table_name)}
+        if column_name not in existing:
+            continue
+        with engine.begin() as connection:
+            connection.execute(
+                text(f"ALTER TABLE {table_name} DROP COLUMN {column_name}")
+            )
 
 
 def _ensure_model_markup_default(engine: Engine) -> None:
