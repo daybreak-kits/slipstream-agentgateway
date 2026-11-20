@@ -1062,6 +1062,32 @@ check("模型探测展示：失败行红色错误、超时琥珀、进度 N/M �
   expect(html.includes("bg-info") || html.includes("bg-primary"), "进度条必须用信息蓝/主色");
 });
 
+// ---------- 8. 公开模型成员编排术语：上游渠道/模型（W5 ticket 14） ----------
+check("成员编排：展示名统一「上游渠道/模型」，术语不单用「渠道」", async () => {
+  const { memberChipLabel } = await load("/src/components/models/member-chip.ts");
+  expect(memberChipLabel("zai-01", "glm-5.3") === "zai-01/glm-5.3", "成员展示名必须是「上游渠道/模型」");
+  expect(memberChipLabel(undefined, "glm-5.3") === "glm-5.3", "上游渠道缺失时只显示模型名");
+  const page = read("src/components/models/public-model-page.tsx");
+  includesAll(page, ["MemberChipFlow"], "公开模型单页成员段必须用分层 chip 流");
+  expect(!page.includes("MemberBoard"), "成员段必须替换掉一行一模型的 MemberBoard（ticket 13 遗留）");
+  const flow = read("src/components/models/member-chip-flow.tsx");
+  includesAll(
+    flow,
+    ["第 ", "搜索上游渠道或模型", 'data-slot="member-layer"', 'data-slot="member-chip"', 'data-slot="candidate-group"', "末位兜底"],
+    "成员 chip 流结构",
+  );
+  for (const file of [
+    "src/components/models/member-chip.ts",
+    "src/components/models/member-chip-flow.tsx",
+    "src/components/models/member-editor.tsx",
+    "src/components/models/public-model-page.tsx",
+  ]) {
+    const text = read(file);
+    expect(!text.includes('" · "'), file + " 仍在用「模型名 · 上游名」拼接成员名");
+    expect(!/(?<!上游)渠道/.test(text), file + " 出现单用「渠道」，UI 文案必须写「上游渠道」");
+  }
+});
+
 // ---------- run ----------
 const failures = [];
 server = await createServer({

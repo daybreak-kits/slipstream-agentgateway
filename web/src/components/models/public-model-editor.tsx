@@ -30,7 +30,8 @@ import type { PublicModel, UpstreamModel } from "@/types";
  * 页头 h1 + 状态 + 脏标记，底部唯一「保存」。一次保存只发一个
  * PATCH /admin/public-models/{id}（含 targets 整批替换），服务端在同一事务里
  * 提交基本字段、策略、启用与成员——不会出现基本信息已改、成员未改的半成功
- * （ticket 12 契约）。成员 chip 流归 ticket 14，本票仍复用 MemberBoard。
+ * （ticket 12 契约）。成员编排是 ticket 14 的分层 chip 流（MemberChipFlow），
+ * 保存语义不变：草稿里的 members 与其他字段一起进入同一个 PATCH。
  */
 export function PublicModelEditor({ id }: { id: string }) {
   const qc = useQueryClient();
