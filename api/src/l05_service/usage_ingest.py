@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from l01_core.ids import new_id
 from l01_core.timeutil import now_ms
 from l02_domain.models import UsageEvent
+from l02_domain.validation import provider_base_id
 from l04_repo.orm import (
     ApiKeyORM,
     ChargeEntryORM,
@@ -386,10 +387,15 @@ def _resolve_cost_target(
     gen_ai_response_model names the actual upstream model; when several of our
     upstreams expose the same model name the event's provider is preferred,
     else the first enabled match wins (documented v1 approximation).
+
+    ADR-026 expands each upstream key into its own provider and AG records that
+    expanded name ("{upstream_id}#{seq}") in gen_ai_provider_name, so the raw
+    value never equals an upstream id - compare the base id (ticket 15).
     """
     name = row.upstream_model
     if not name:
         return None, None, None
+    provider_base = provider_base_id(row.provider)
     candidates = cache.models_by_name.get(name, [])
     upstreams = cache.upstreams
     chosen = None
@@ -400,7 +406,7 @@ def _resolve_cost_target(
         # empty vendor_id only means no cache-price lookup can match.
         if upstream is None or not upstream.enabled:
             continue
-        if row.provider and row.provider == candidate.upstream_id:
+        if provider_base and provider_base == candidate.upstream_id:
             chosen = candidate
             break
         if chosen is None:

@@ -21,16 +21,16 @@ import {
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
-import type { LogAttemptsOut } from "@/generated/contract";
-import { api, ApiError, ENDPOINTS } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { fmtInt, fmtMoneyAvg, fmtPctPoint, fmtSeconds, fmtThroughput } from "@/lib/format";
 import { usePermissions } from "@/lib/permissions";
 import { formatDateTime } from "@/lib/time";
 import type { IntervalTimezone } from "@/lib/time-range";
-import { cn } from "@/lib/utils";
 
 import { statusLabel, statusTone, upstreamLabel } from "./format";
+import { NoChainRecord, RequestAttemptChain } from "./request-attempt-chain";
 import type { LogDetail, LogPayload, LogRow } from "./types";
+import { useLogAttempts } from "./use-log-attempts";
 
 interface LogDetailDrawerProps {
   open: boolean;
@@ -199,9 +199,11 @@ export function LogDetailDrawer({ open, row, timezone, onOpenChange }: LogDetail
             </Alert>
           ) : null}
 
-          {view.has_attempts ? (
-            <TraceChainSection eventId={view.event_id} fallbackDurationMs={view.duration_ms} />
-          ) : null}
+          <TraceChainSection
+            eventId={view.event_id}
+            hasAttempts={row.has_attempts}
+            totalDurationMs={view.duration_ms}
+          />
 
           {showMoney ? (
             <div className="space-y-2">
@@ -310,95 +312,40 @@ export function LogDetailDrawer({ open, row, timezone, onOpenChange }: LogDetail
   );
 }
 
-function attemptTone(status: number | null | undefined): ReturnType<typeof statusTone> {
-  return status === null || status === undefined ? "neutral" : statusTone(status);
-}
-
-function attemptDotClass(status: number | null | undefined): string {
-  const tone = attemptTone(status);
-  if (tone === "success") return "bg-success";
-  if (tone === "warning") return "bg-warning";
-  if (tone === "danger") return "bg-danger";
-  return "bg-border-strong";
-}
-
 /**
- * 日志详情「路由链」区（ADR-028）：行带尝试数据才挂载，只拉系统尝试事实；
- * 上游名、模型、状态均由 API 归一化返回，前端不再猜 baseUrl 前缀。
+ * 日志详情「路由链」区（ADR-028 / ticket 04）：与列表 popover 共用
+ * request-attempt-chain 的查询与展示组件，两处数据一致；没有尝试记录时明确
+ * 显示「无链路记录」而不是留空。
  */
 function TraceChainSection({
   eventId,
-  fallbackDurationMs,
+  hasAttempts,
+  totalDurationMs,
 }: {
   eventId: string;
-  fallbackDurationMs: number;
+  /** 列表行的 has_attempts：false 时无需再请求，直接给出降级文案。 */
+  hasAttempts?: boolean;
+  totalDurationMs?: number;
 }) {
-  const attemptsQuery = useQuery({
-    queryKey: ["log-attempts", eventId],
-    queryFn: ({ signal }) =>
-      api.get<LogAttemptsOut>(ENDPOINTS.logAttempts(eventId), { signal }),
-    enabled: eventId.length > 0,
-    staleTime: 30_000,
-    retry: false,
-  });
-
+  const attemptsQuery = useLogAttempts(eventId, hasAttempts !== false);
   const attempts = attemptsQuery.data?.attempts ?? [];
-  if (attempts.length === 0) return null;
-  const totalMs = attempts.reduce((sum, attempt) => sum + (attempt.duration_ms ?? 0), 0);
-
   return (
     <CollapsibleSection title="路由链" defaultOpen>
-      <div className="space-y-2">
-        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-faint">
-          <span>
-            总耗时 <span className="tnum text-body">{fmtSeconds(fallbackDurationMs || totalMs)}</span>
-          </span>
-          <span>
-            上游尝试 <span className="tnum text-body">{fmtInt(attempts.length)}</span> 轮
-          </span>
+      {hasAttempts === false ? (
+        <NoChainRecord />
+      ) : attemptsQuery.isPending ? (
+        <p className="flex items-center gap-2 text-2xs text-faint">
+          <Spinner size="sm" />
+          正在加载路由链
         </p>
-        <ol className="space-y-2">
-          {attempts.map((attempt) => (
-            <li
-              key={`${attempt.attempt}-${attempt.started_at_ms ?? 0}`}
-              className="relative border-l border-border pl-3"
-            >
-              <span
-                aria-hidden="true"
-                className={cn(
-                  "absolute -left-[3px] top-1.5 h-1.5 w-1.5 rounded-full",
-                  attemptDotClass(attempt.status_code),
-                )}
-              />
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-2xs">
-                <span className="font-medium text-title">第 {attempt.attempt} 轮</span>
-                <span className="text-faint">→</span>
-                <span className="text-body" title={attempt.upstream_ref}>
-                  {attempt.upstream_name || attempt.upstream_ref || "—"}
-                </span>
-                {attempt.model ? (
-                  <>
-                    <span className="text-faint">·</span>
-                    <span className="font-mono text-body">{attempt.model}</span>
-                  </>
-                ) : null}
-                <span className="text-faint">·</span>
-                <Badge tone={attemptTone(attempt.status_code)}>
-                  {attempt.status_code === null ? "无状态" : attempt.status_code}
-                </Badge>
-                <span className="text-faint">·</span>
-                <span className="tnum text-body">{fmtSeconds(attempt.duration_ms ?? 0)}</span>
-                {attempt.error_type ? (
-                  <>
-                    <span className="text-faint">·</span>
-                    <span className="text-danger-text">错误类型 {attempt.error_type}</span>
-                  </>
-                ) : null}
-              </div>
-            </li>
-          ))}
-        </ol>
-      </div>
+      ) : attemptsQuery.isError ? (
+        <p className="text-2xs text-danger-text">
+          路由链加载失败：
+          {attemptsQuery.error instanceof Error ? attemptsQuery.error.message : "未知错误"}
+        </p>
+      ) : (
+        <RequestAttemptChain attempts={attempts} totalDurationMs={totalDurationMs} />
+      )}
     </CollapsibleSection>
   );
 }

@@ -15,6 +15,7 @@ logs, usage events and the ledger are never touched here.
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import delete, select
@@ -99,6 +100,90 @@ def get_attempts(session: Session, correlation_key: str) -> list[RequestAttemptO
     )
 
 
+@dataclass(frozen=True, slots=True)
+class AttemptChainSummary:
+    """Per-request attempt aggregate for a whole log page (one grouped read)."""
+
+    count: int = 0
+    failed: bool = False
+    last_failure_status: int | None = None
+    last_failure_error_type: str = ""
+    last_failure_error_message: str = ""
+
+    @property
+    def error_summary(self) -> str:
+        """Last failed attempt as a row-level error summary; empty when none.
+
+        Adapters usually fill error.type with the status code itself, so the
+        detail is only appended when it adds information beyond the status.
+        """
+        if not self.failed:
+            return ""
+        detail = self.last_failure_error_message.strip()
+        status = self.last_failure_status
+        if not detail:
+            error_type = self.last_failure_error_type.strip()
+            if error_type and error_type != str(status):
+                detail = error_type
+        head = f"upstream {status}" if status is not None else "upstream 请求失败"
+        return f"{head}: {detail}" if detail else head
+
+
+def attempt_summaries(
+    session: Session, correlation_keys: Sequence[str]
+) -> dict[str, AttemptChainSummary]:
+    """Read request_attempts for one page in ONE query and aggregate per request.
+
+    Returns count + the last failed attempt (highest attempt_no whose outcome is
+    error or whose status is 4xx/5xx) keyed by correlation_key. Callers derive
+    attempts_count/has_attempts and the row-level error summary from it, so the
+    log list never degrades into one attempts query per row (N+1).
+    """
+    keys = list(dict.fromkeys(key for key in correlation_keys if key))
+    if not keys:
+        return {}
+    rows = session.execute(
+        select(
+            RequestAttemptORM.correlation_key,
+            RequestAttemptORM.attempt_no,
+            RequestAttemptORM.status_code,
+            RequestAttemptORM.error_type,
+            RequestAttemptORM.error_message,
+            RequestAttemptORM.outcome,
+        )
+        .where(RequestAttemptORM.correlation_key.in_(keys))
+        .order_by(RequestAttemptORM.correlation_key, RequestAttemptORM.attempt_no)
+    ).all()
+    counts: dict[str, int] = {}
+    failures: dict[str, tuple[int, int | None, str, str]] = {}
+    for key, attempt_no, status_code, error_type, error_message, outcome in rows:
+        counts[key] = counts.get(key, 0) + 1
+        failed = outcome == "error" or (
+            status_code is not None and status_code >= 400
+        )
+        if not failed:
+            continue
+        previous = failures.get(key)
+        if previous is None or attempt_no >= previous[0]:
+            failures[key] = (
+                attempt_no,
+                status_code,
+                error_type or "",
+                error_message or "",
+            )
+    summaries: dict[str, AttemptChainSummary] = {}
+    for key, count in counts.items():
+        failure = failures.get(key)
+        summaries[key] = AttemptChainSummary(
+            count=count,
+            failed=failure is not None,
+            last_failure_status=failure[1] if failure is not None else None,
+            last_failure_error_type=failure[2] if failure is not None else "",
+            last_failure_error_message=failure[3] if failure is not None else "",
+        )
+    return summaries
+
+
 def attempts_for_event(
     session: Session, event_id: str
 ) -> tuple[str, list[RequestAttemptORM]] | None:
@@ -135,6 +220,8 @@ def cleanup_expired_attempts(
 
 
 __all__ = [
+    "AttemptChainSummary",
+    "attempt_summaries",
     "attempts_for_event",
     "build_attempt_sink",
     "cleanup_expired_attempts",

@@ -72,11 +72,11 @@ python scripts/seed_demo.py
 默认 **DROP 重建**（会清空当前数据库，先停掉占用数据库的 API 进程）；成功输出包含：
 
 ```text
-写入: 厂商 3 / 上游 6 / 上游模型 20 / 公开模型 8 / 目标 16 / 用户 6 / 用量事件 252（其中未定价 3）
-登录账号: admin / admin（可用 ADMIN_USERNAME / ADMIN_PASSWORD 覆盖）← 首次登录后请立即修改
+写入: 厂商 3 / 上游 4 / 上游模型 16 / 公开模型 8 / 目标 16 / 用户 6 / 用量事件 252（其中未定价 3）
+登录账号: admin / admin12345（可用 SLIPSTREAM_DEMO_ADMIN_PASSWORD 覆盖）← 首次登录后请立即修改
 ```
 
-旧库升级（可选）：`python scripts/migrate_priority_v2.py` 为 dry-run，加 `--apply` 写入并打 `priority_semantics=v2` 标记。
+旧库升级（可选，新库无需执行）：`python scripts/migrate_priority_v2.py` 与 `python scripts/migrate_multikey_v2.py` 均默认 dry-run，加 `--apply` 写入并打 `v2` 标记；多密钥迁移把退役的 `upstreams.api_key_enc` 镜像转成首把密钥行并清空镜像，之后 no-op。
 
 ### 3）起控制面（3700）
 
@@ -102,7 +102,7 @@ npm run dev
 
 ### 5）登录并改密码
 
-用 `admin / admin`（或部署时 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 指定的账号）登录，在「用户设置 → 安全」自助修改密码；管理员重置他人密码在「用户管理」。
+用 seed 演示账号 `admin / admin12345`（未跑 seed、由引导创建时默认为 `admin / admin`，可用 `SLIPSTREAM_ADMIN_USERNAME` / `SLIPSTREAM_ADMIN_PASSWORD` 覆盖）登录，在「用户设置 → 安全」自助修改密码；管理员重置他人密码在「用户管理」。
 
 ### 数据面（可选）
 
@@ -161,7 +161,7 @@ slipstream-agentgateway/
 
 ## 常用配置
 
-全部为 `SLIPSTREAM_*` 环境变量（pydantic-settings，默认值见 `api/src/l01_core/settings.py` 与 `docs/PLAN.md` §3）：
+全部为 `SLIPSTREAM_*` 环境变量（pydantic-settings，默认值见 `api/src/l01_core/settings.py` 与 `docs/PLAN.md` §3）。也可以写进仓库根目录或启动目录的 `.env`（模板见 `.env.example`）；优先级：系统环境变量 > `.env` > 默认值。
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
@@ -172,7 +172,7 @@ slipstream-agentgateway/
 | `SLIPSTREAM_SECRET_KEY` | `dev-only-change-me` | 落库加密主密钥，生产必须覆盖 |
 | `SLIPSTREAM_COOKIE_SECURE` | `false` | 生产 HTTPS 下设为 `1` |
 | `SLIPSTREAM_JOBS_ENABLED` | `true` | `0` 关闭进程内定时任务（测试/独立 worker） |
-| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | `admin` / `admin` | 仅首次无管理员时用于 bootstrap（ADR-019），之后只认 DB |
+| `SLIPSTREAM_ADMIN_USERNAME` / `SLIPSTREAM_ADMIN_PASSWORD` | `admin` / `admin` | 仅首次无管理员时用于 bootstrap（ADR-019），之后只认 DB |
 
 ## 验证
 
@@ -265,7 +265,7 @@ node ops/checks/acceptance_browser.mjs --strict   # Playwright 全站验收
 - MCP 仅支持 `sse/stdio`；AG 1.7 不支持 http 变体与带路径 webhook，保存时 422、前端置灰。
 - 可用性并入模型管理（启停 / 一次性冷却 / 解除 + 周期冷却编辑），不含完整排期日历（ADR-004）。
 - 控制台登录为 DB 会话（httpOnly + SameSite=Lax cookie，12h 绝对过期）；生产必须设 `SLIPSTREAM_COOKIE_SECURE=1` 并使用 HTTPS。
-- 演示账号与默认密钥仅用于本地开发；生产覆盖 `SLIPSTREAM_SECRET_KEY`、`ADMIN_PASSWORD` 并轮换所有密钥。
+- 演示账号与默认密钥仅用于本地开发；生产覆盖 `SLIPSTREAM_SECRET_KEY`、`SLIPSTREAM_ADMIN_PASSWORD` 并轮换所有密钥。
 
 ## License
 

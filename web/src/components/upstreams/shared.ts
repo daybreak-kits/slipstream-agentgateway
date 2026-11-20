@@ -4,8 +4,8 @@
 import { ApiError } from "@/lib/api";
 import type { Upstream, UpstreamProbe } from "@/types";
 
-/** 后端 D：vendor_id 可空；详情带 api_style_source。ADR-026 后 has_api_key 只反映
- *  已退役的镜像列（恒为 false），前端不再读取。 */
+/** 后端 D：vendor_id 可空；详情带 api_style_source。ADR-026 后 has_api_key 由
+ *  密钥行数量派生（`key_count > 0`，不再读退役的 api_key_enc 镜像列），前端不再读取。 */
 export type UpstreamRow = Omit<Upstream, "vendor_id"> & {
   vendor_id?: string | null;
   has_api_key?: boolean;
@@ -208,6 +208,28 @@ export function parseKeyLines(
     entries.push({ label: "", apiKey: line });
   }
   return { entries, duplicates };
+}
+
+/* ── 上游详情四页签（W5 D7 / W3.2）：Tab 文案与 deep-link 的单一来源 ── */
+
+/** 详情页四页签，顺序即 TabBar 展示顺序；routing 承载模型探测（路由与模型）。 */
+export const UPSTREAM_TABS = [
+  { key: "connection", label: "连接与模型" },
+  { key: "routing", label: "路由与模型" },
+  { key: "transforms", label: "请求与响应" },
+  { key: "settings", label: "其他设置" },
+] as const;
+
+export type UpstreamTabKey = (typeof UPSTREAM_TABS)[number]["key"];
+
+/** 列表页「测试」的快速跳转目标：详情页「路由与模型」Tab（?tab=routing）。 */
+export function upstreamRoutingHref(upstreamId: string): string {
+  return "/upstreams/" + upstreamId + "?tab=routing";
+}
+
+/** URL ?tab= 解析：只接受已知页签；缺省/非法值回落到「连接与模型」。 */
+export function resolveUpstreamTab(value: string | null | undefined): UpstreamTabKey {
+  return UPSTREAM_TABS.some((item) => item.key === value) ? (value as UpstreamTabKey) : "connection";
 }
 
 /** 保存/探测选 auto 失败（422，details 带 probe_steps）时，还原一个可展示的探测视图。 */
