@@ -79,4 +79,3 @@
 - **ADR-027 冷却互斥**：单次与周期互斥（409，details 恒三键 `{blocking_rule_ids, cooldown_until_ms, window_end_ms}` 两形状）；note-only PATCH 放行；结构变更清窗口例外；关闭不参与互斥；公开模型冷却写操作 422；解除只删一次性托管规则（周期窗口只写 skip，规则保留）；写后立即 `Rollout.apply`（reason model-cooldown/model-release/model-enable/model-disable）。
 - 多密钥：渲染 provider 名 `{model}#k{seq}`、密钥文件名 `{id}#{seq}.key`；conditional 模式每目标只展开首把（E20 既定裁决）。
 - UI：上游详情四 Tab 第二 Tab 改名「路由与模型」（模型并入、健康并入「连接与模型」）；公开模型单页三段 + 分层成员 chip；分流图图例隐藏阶段；日志模型列两行 +「N 次尝试」；KPI 八卡；上游模型 100vh 抽屉；操作列 sticky 与头身对齐；语义色五档/脏标记/toast 统一。
-
