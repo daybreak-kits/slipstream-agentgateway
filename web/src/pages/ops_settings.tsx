@@ -20,6 +20,7 @@ import {
 import { SettingsGrid, SettingsTile } from "@/components/settings/tile";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DirtyField, DirtyFooter, DirtySaveButton } from "@/components/ui/dirty-field";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -27,6 +28,7 @@ import { Table, TableWrap, TD, TH, THead, TR } from "@/components/ui/table";
 import { api, ENDPOINTS } from "@/lib/api";
 import { ACTION_ICONS } from "@/lib/icons";
 import { usePermissions } from "@/lib/permissions";
+import { useDirtyFields } from "@/lib/use-dirty-fields";
 import { useDirtyGuard } from "@/lib/use-dirty-guard";
 import {
   CONNECTION_QUERY_KEY,
@@ -192,10 +194,18 @@ function ConnectionSection({ canWrite }: { canWrite: boolean }) {
   }, [connection.data]);
 
   const address = effectiveBaseUrl(connection.data);
-  const dirty = connection.data !== undefined && value !== connection.data.base_url;
+  // baseline = 服务端当前值；保存成功 invalidate 后 fetch 回填，脏标记自然清零。
+  const baseline = connection.data !== undefined ? { baseUrl: connection.data.base_url } : null;
+  const { dirtyCount, isDirty, isDirtyField } = useDirtyFields(baseline, { baseUrl: value });
   const clientError = validateBaseUrl(value);
   // W4-G：连接地址改了没保存就点左侧子导航/侧栏离开 → 出确认框。
-  const leaveGuard = useDirtyGuard(dirty);
+  const leaveGuard = useDirtyGuard(isDirty);
+
+  const resetField = () => {
+    if (!baseline) return;
+    setValue(baseline.baseUrl);
+    setError(null);
+  };
 
   return (
     <>
@@ -221,32 +231,36 @@ function ConnectionSection({ canWrite }: { canWrite: boolean }) {
           <p className="text-2xs text-danger-text">连接设置加载失败：{connection.error.message}</p>
         ) : (
           <>
-            <Input
-              className="h-8 font-mono"
-              placeholder={defaultBaseUrl(connection.data?.default_port ?? 3600)}
-              value={value}
-              disabled={!canWrite}
-              onChange={(event) => {
-                setValue(event.target.value);
-                setError(null);
-              }}
-            />
-            {clientError !== null && <p className="text-2xs text-danger-text">{clientError}</p>}
-            {error !== null && <p className="text-2xs text-danger-text">保存失败：{error}</p>}
+            <DirtyField dirty={isDirtyField("baseUrl")} onReset={resetField} resetLabel="恢复连接地址">
+              <div className="space-y-1.5">
+                <Input
+                  className="h-8 font-mono"
+                  placeholder={defaultBaseUrl(connection.data?.default_port ?? 3600)}
+                  value={value}
+                  disabled={!canWrite}
+                  onChange={(event) => {
+                    setValue(event.target.value);
+                    setError(null);
+                  }}
+                />
+                {clientError !== null && <p className="text-2xs text-danger-text">{clientError}</p>}
+                {error !== null && <p className="text-2xs text-danger-text">保存失败：{error}</p>}
+              </div>
+            </DirtyField>
             {canWrite ? (
-              <div className="flex flex-wrap gap-1.5">
-                <Button
-                  variant="primary"
-                  size="sm"
-                  disabled={save.isPending || clientError !== null || !dirty}
-                  onClick={() => save.mutate(value.trim())}
-                >
-                  <ACTION_ICONS.save className="h-3.5 w-3.5" /> {save.isPending ? "保存中…" : "保存"}
-                </Button>
+              <DirtyFooter count={dirtyCount} onResetAll={resetField} saving={save.isPending}>
                 <Button variant="outline" size="sm" disabled={save.isPending} onClick={() => save.mutate("")}>
                   <ACTION_ICONS.restore className="h-3.5 w-3.5" /> 恢复默认
                 </Button>
-              </div>
+                <DirtySaveButton
+                  dirty={isDirty}
+                  pending={save.isPending}
+                  onClick={() => save.mutate(value.trim())}
+                  disabled={clientError !== null}
+                >
+                  保存
+                </DirtySaveButton>
+              </DirtyFooter>
             ) : (
               <p className="text-2xs text-faint">只读（缺少 settings:write）</p>
             )}

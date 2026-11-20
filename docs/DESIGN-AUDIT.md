@@ -92,7 +92,7 @@ grep -rn "bg-gradient\|text-gradient\|drop-shadow\|blur-\|hover:scale\|animate-p
 
 - 三档确认（`ui/confirm-dialog`，取消在左、危险在右，正文写明不可逆后果）：① 删除（单条/批量）红色确认；② 重置密钥确认 + 新密钥仅明文展示一次；③ 批量删除 >10 条需手动输入「删除」二字。
 - 启用/关闭/冷却/解除等可逆操作**不弹确认**。
-- toast：sonner 单一 Toaster（bottom-right）；复制成功统一「已复制」；success/info 5200ms、warning 6500ms；API 错误统一 `describeApiError` 文案。
+- toast：sonner 单一 Toaster（top-right，下移 80px 避开 64px 顶栏与页面操作行）；**统一 3 秒自动消失**（`lib/toast-policy` 强制，调用方不可延长）且关闭按钮常驻；每条 toast 同时写入顶栏通知中心，需要持续可见的反馈回看历史；复制成功统一「已复制」；API 错误统一 `describeApiError` 文案。
 
 ### 5. 数字与格式化（`lib/format` 单一来源，禁止页面自写）
 
@@ -176,3 +176,9 @@ grep -rn "bg-gradient\|text-gradient\|drop-shadow\|blur-\|hover:scale\|animate-p
 
 ### 16. 上游密钥状态可视化
 - 逐把「测试连接」的结果落在密钥行：**失效密钥标红**（danger 语义色），成功标绿，未测为中性；与 ADR-026 的逐把测试配套。
+
+### 17. W5 语义色、脏标记与 toast 原语（ticket 09）
+- 语义色五档 = 成功绿 / 警示琥珀 / 信息蓝 / 危险红 / 中性灰；token 三件套 `--{tone}` / `--{tone}-text` / `--{tone}-soft`（index.css）。`lib/semantic-tone` 提供 tone → 文字/浅底/描边工具类映射，页面不得自拼裸色。
+- 动作语义色单一来源 `lib/icons.ACTION_TONES`：启用=success、关闭/冷却=warning、解除=success、测试=info、删除=danger、编辑=neutral；行内操作统一用 `ui/action-button`（图标 + 文字双编码，不只靠颜色）。
+- 脏标记原语：`lib/dirty-fields`（diffFields/sameArray/sameSet/sameJson）+ `lib/use-dirty-fields` + `ui/dirty-field`（DirtyField 字段 2px 警示条/浅底/「已修改」点/恢复该项；DirtyCountBadge 区块计数；DirtySummary/DirtyFooter 底部「未保存 N 项 + 恢复全部」；DirtySaveButton 脏=主按钮、干净=中性 disabled、保存中进度）。只标变更字段，保存成功由父级回填 baseline 清标记，失败保留标记与输入。
+- toast 策略集中 `lib/toast-policy`：统一 3 秒、右上（offset top 80）避开顶栏/表格底部/sticky 操作列；持续反馈进通知中心（`lib/notification-store`）。

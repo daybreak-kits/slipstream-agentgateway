@@ -6,6 +6,7 @@ import { toast } from "@/lib/notify";
 import { UpstreamModelDialog } from "@/components/models/upstream-model-dialog";
 import { parameterSummary } from "@/components/models/model-vocab";
 import { DataTable } from "@/components/data-table";
+import { ActionButton } from "@/components/ui/action-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -110,23 +111,26 @@ export function UpstreamModelsPanel({ upstream }: { upstream: UpstreamRow }) {
         if (!canWrite) return null;
         return (
           <div className="flex flex-wrap gap-1">
-            <Button variant="ghost" size="dense" onClick={() => setDialog({ open: true, initial: row })}>
-              <ACTION_ICONS.edit className="h-3.5 w-3.5" /> 编辑
-            </Button>
-            <Button variant="ghost" size="dense" disabled={toggle.isPending} onClick={() => toggle.mutate(row)}>
-              {row.enabled ? <ACTION_ICONS.disable className="h-3.5 w-3.5" /> : <ACTION_ICONS.enable className="h-3.5 w-3.5" />}
-              {row.enabled ? "关闭" : "启用"}
-            </Button>
-            <Button
-              variant="ghost"
+            <ActionButton action="edit" size="dense" onClick={() => setDialog({ open: true, initial: row })}>
+              编辑
+            </ActionButton>
+            <ActionButton
+              action={row.enabled ? "disable" : "enable"}
               size="dense"
-              className="text-danger-text"
+              disabled={toggle.isPending}
+              onClick={() => toggle.mutate(row)}
+            >
+              {row.enabled ? "关闭" : "启用"}
+            </ActionButton>
+            <ActionButton
+              action="delete"
+              size="dense"
               disabled={(row.target_count ?? 0) > 0}
               title={(row.target_count ?? 0) > 0 ? "被公开模型成员引用，先移除成员再删除" : undefined}
               onClick={() => setDeleting(row)}
             >
-              <ACTION_ICONS.delete className="h-3.5 w-3.5" /> 删除
-            </Button>
+              删除
+            </ActionButton>
           </div>
         );
       },

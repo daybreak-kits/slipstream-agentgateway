@@ -4,6 +4,7 @@ import { toast } from "@/lib/notify";
 
 import { isCooling, availabilityText } from "@/components/models/availability";
 import { Field } from "@/components/models/field";
+import { ActionButton } from "@/components/ui/action-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -17,7 +18,6 @@ import {
 } from "@/components/models/availability";
 import { api, ENDPOINTS } from "@/lib/api";
 import { formatDateTime, useTimezone } from "@/lib/time";
-import { ACTION_ICONS } from "@/lib/icons";
 import type { AvailabilityRule, CooldownRecurrence, ModelAvailability } from "@/types";
 
 /**
@@ -253,14 +253,14 @@ export function CooldownManageDialog({
             <Badge tone={cooling ? "warning" : row.enabled ? "success" : "warning"}>{availabilityText(row)}</Badge>
           </span>
           {cooling ? (
-            <Button
+            <ActionButton
+              action="releaseCooldown"
               variant="outline"
-              size="sm"
               disabled={pending}
               onClick={onRelease}
             >
-              <ACTION_ICONS.releaseCooldown className="h-3.5 w-3.5" /> 解除冷却
-            </Button>
+              解除冷却
+            </ActionButton>
           ) : null}
         </div>
         <Tabs
