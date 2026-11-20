@@ -14,7 +14,7 @@ import {
   type TrendMetric,
 } from "@/components/dashboard/report-types";
 import { TrendPanel } from "@/components/dashboard/trend-panel";
-import { useReportsFlow, useReportsLatency, useReportsTimeseries } from "@/components/dashboard/use-reports";
+import { useReportsLatency, useReportsTimeseries } from "@/components/dashboard/use-reports";
 import { TimeRangePicker, type TimeWindow } from "@/components/time-range-picker";
 import { Button } from "@/components/ui/button";
 
@@ -33,11 +33,6 @@ export function DashboardPage() {
 
   const series = useReportsTimeseries({ window: timeWindow, dimension, metric });
   // 分流只接受 requests/tokens：指标是费用时回落到请求量。
-  const flow = useReportsFlow({
-    window: timeWindow,
-    metric: metric === "tokens" ? "tokens" : "requests",
-    enabled: view === "flow",
-  });
   const latency = useReportsLatency(timeWindow);
 
   const setView = useCallback(
@@ -110,10 +105,6 @@ export function DashboardPage() {
         seriesLoading={series.isPending}
         seriesError={series.isError ? series.error : undefined}
         onSeriesRetry={() => void series.refetch()}
-        flow={flow.data}
-        flowLoading={flow.isPending}
-        flowError={flow.isError ? flow.error : undefined}
-        onFlowRetry={() => void flow.refetch()}
       />
       </div>
 

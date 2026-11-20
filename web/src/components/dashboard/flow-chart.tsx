@@ -12,7 +12,7 @@ import { usePermissions } from "@/lib/permissions";
 
 import { fmtMoney } from "./chart-format";
 import { useChartPalette, type ChartPalette } from "./chart-theme";
-import type { FlowLink, FlowReport } from "./report-types";
+import { FLOW_STAGES, type FlowReport } from "./report-types";
 
 echarts.use([SankeyChart, TooltipComponent, CanvasRenderer]);
 
@@ -35,101 +35,8 @@ function shortLabel(value: string): string {
 
 function stageColor(id: string, data: FlowReport, palette: ChartPalette): string {
   const stage = data.node_meta[id]?.stage ?? "channel";
-  const index = data.stages.findIndex((item) => item.id === stage);
+  const index = FLOW_STAGES.findIndex((item) => item.id === stage);
   return palette.series[(index < 0 ? 0 : index) % palette.series.length] ?? palette.primary;
-}
-
-/** 跨接中的边：金额字段与后端契约一致——没有金额的边保持缺键（tooltip 不显示 0 元行）。 */
-interface SpliceEdge {
-  source: string;
-  target: string;
-  value: number;
-  requests: number;
-  tokens: number;
-  cost_micro?: number;
-  charge_micro?: number;
-}
-
-function mergeMoney(left: number | undefined, right: number | undefined): number | undefined {
-  if (left === undefined && right === undefined) return undefined;
-  return (left ?? 0) + (right ?? 0);
-}
-
-/** 跨接后同 (source,target) 对可能成对撞出多条新边：值/请求数/词元/金额逐对求和。 */
-function sumDuplicateEdges(edges: SpliceEdge[]): SpliceEdge[] {
-  const byPair = new Map<string, SpliceEdge>();
-  for (const edge of edges) {
-    const key = `${edge.source}\u0000${edge.target}`;
-    const kept = byPair.get(key);
-    if (!kept) {
-      byPair.set(key, { ...edge });
-      continue;
-    }
-    kept.value += edge.value;
-    kept.requests += edge.requests;
-    kept.tokens += edge.tokens;
-    const cost = mergeMoney(kept.cost_micro, edge.cost_micro);
-    if (cost !== undefined) kept.cost_micro = cost;
-    const charge = mergeMoney(kept.charge_micro, edge.charge_micro);
-    if (charge !== undefined) kept.charge_micro = charge;
-  }
-  return [...byPair.values()];
-}
-
-/**
- * 隐藏段的迭代式跨接（W4-B）：对每个隐藏段，入边×出边两两拼新边（值/请求数/词元/金额
- * 合并，重复 (a,b) 对求和），直到图中不含隐藏段——此前对隐藏段整条删链路会把图截成
- * 互不连通的两块（「图分成上下两块」bug 的可见症状）。金额随原承载边守恒：花费只在
- * 用户→密钥边、成本只在 上游模型→渠道 边，跨接时并入合成边。边界段（首段无入边 /
- * 末段无出边）没有跨接对象，移除触及边后其余链路自然连通。按 stages 顺序逐段处理，
- * 合成边只触及未处理的隐藏段，因此每段一轮即收敛。
- */
-function spliceHiddenStages(
-  links: FlowLink[],
-  stageIds: string[],
-  stageOf: (id: string) => string | undefined,
-  hiddenSet: Set<string>,
-): SpliceEdge[] {
-  let edges: SpliceEdge[] = links.map((link) => ({ ...link }));
-  for (const stage of stageIds) {
-    if (!hiddenSet.has(stage)) continue;
-    const incoming = edges.filter((edge) => stageOf(edge.target) === stage);
-    const outgoing = edges.filter((edge) => stageOf(edge.source) === stage);
-    const untouched = edges.filter(
-      (edge) => stageOf(edge.source) !== stage && stageOf(edge.target) !== stage,
-    );
-    if (incoming.length === 0 || outgoing.length === 0) {
-      edges = untouched;
-      continue;
-    }
-    const bridged: SpliceEdge[] = [];
-    for (const into of incoming) {
-      for (const out of outgoing) {
-        bridged.push({
-          source: into.source,
-          target: out.target,
-          value: into.value + out.value,
-          requests: into.requests + out.requests,
-          tokens: into.tokens + out.tokens,
-          cost_micro: mergeMoney(into.cost_micro, out.cost_micro),
-          charge_micro: mergeMoney(into.charge_micro, out.charge_micro),
-        });
-      }
-    }
-    edges = sumDuplicateEdges([...untouched, ...bridged].filter((edge) => edge.value > 0));
-  }
-  edges.sort((left, right) =>
-    left.source < right.source
-      ? -1
-      : left.source > right.source
-        ? 1
-        : left.target < right.target
-          ? -1
-          : left.target > right.target
-            ? 1
-            : 0,
-  );
-  return edges;
 }
 
 export interface FlowChartProps {
@@ -158,18 +65,21 @@ export function FlowChart({ data, hiddenStages, onToggleStage }: FlowChartProps)
   const canCost = can("billing:cost");
   const canSpend = can("billing:spend");
   const hiddenSet = useMemo(() => new Set(hiddenStages), [hiddenStages]);
+  const visibleStages = FLOW_STAGES.filter((stage) => !hiddenSet.has(stage.id)).map(
+    (stage) => stage.id,
+  );
+  // 至少保留两个可见阶段：再隐藏会拿到无法解释的空图，因此禁止继续隐藏并明确提示；
+  // 后端 422 是同一规则的最后防线（这里不发出会 422 的请求）。
+  const canHideMore = visibleStages.length > 2;
+  const chartBlocked = visibleStages.length < 2;
+  const canHideMoreRef = useRef(canHideMore);
+  canHideMoreRef.current = canHideMore;
 
   const option = useMemo(() => {
     if (!data) return null;
     const meta = data.node_meta;
-    const stageOf = (id: string): string | undefined => meta[id]?.stage;
-    // 隐藏段不再整条删链路：入边×出边跨接成合成边（tooltip 显示合并值），图保持连通单图。
-    const links = spliceHiddenStages(
-      data.links,
-      data.stages.map((stage) => stage.id),
-      stageOf,
-      hiddenSet,
-    );
+    // 隐藏段由后端按完整路径投影：返回的 links 已重连，前端只负责渲染。
+    const links = data.links;
     if (links.length === 0) return null;
 
     const used = new Set<string>();
@@ -209,7 +119,7 @@ export function FlowChart({ data, hiddenStages, onToggleStage }: FlowChartProps)
           if (!node) return escapeHtml(String(payload.name ?? ""));
           return [
             escapeHtml(node.label),
-            data.stages.find((stage) => stage.id === node.stage)?.label ?? node.stage,
+            FLOW_STAGES.find((stage) => stage.id === node.stage)?.label ?? node.stage,
             (data.metric === "tokens" ? "词元：" : "请求：") + fmtCount(node.value),
           ].join("<br/>");
         },
@@ -240,7 +150,7 @@ export function FlowChart({ data, hiddenStages, onToggleStage }: FlowChartProps)
         },
       ],
     };
-  }, [data, palette, canCost, canSpend, hiddenSet]);
+  }, [data, palette, canCost, canSpend]);
 
   // 实例只随容器挂载/卸载创建销毁一次；点击事件与 resize 观察也只绑一次。
   useEffect(() => {
@@ -250,6 +160,7 @@ export function FlowChart({ data, hiddenStages, onToggleStage }: FlowChartProps)
     // 节点点击 = 隐藏该节点所在段（竖轴）；恢复走顶部芯片或底部轴名行。
     const handleClick = (params: { dataType?: string; name?: unknown }) => {
       if (params.dataType !== "node") return;
+      if (!canHideMoreRef.current) return;
       const stage = dataRef.current?.node_meta[String(params.name ?? "")]?.stage;
       if (stage) toggleRef.current(stage);
     };
@@ -278,14 +189,14 @@ export function FlowChart({ data, hiddenStages, onToggleStage }: FlowChartProps)
     };
   }, []);
 
-  const stages = data?.stages ?? [];
-  const visibleStages = stages.filter((stage) => !hiddenSet.has(stage.id)).map((stage) => stage.id);
+  const stages = FLOW_STAGES;
 
   const toggleViaGroup = (next: string[]) => {
     for (const stage of stages) {
       const wasVisible = !hiddenSet.has(stage.id);
       const nowVisible = next.includes(stage.id);
       if (wasVisible !== nowVisible) {
+        if (wasVisible && !canHideMore) return; // 再隐藏会少于两段：禁止
         onToggleStage(stage.id);
         return;
       }
@@ -314,12 +225,22 @@ export function FlowChart({ data, hiddenStages, onToggleStage }: FlowChartProps)
             ))}
         </div>
       )}
-      <div
-        ref={setElement}
-        className="h-[320px] w-full min-w-0"
-        role="img"
-        aria-label="调用流向桑基图：用户到连接密钥、公开模型、上游模型、上游渠道"
-      />
+      <div className="relative">
+        <div
+          ref={setElement}
+          className="h-[320px] w-full min-w-0"
+          role="img"
+          aria-label="调用流向桑基图：用户到连接密钥、公开模型、上游模型、上游渠道"
+        />
+        {chartBlocked && (
+          <div
+            role="status"
+            className="absolute inset-0 flex items-center justify-center rounded-card border border-dashed border-border bg-card px-6 text-center text-sm text-muted-foreground"
+          >
+            至少保留两个可见阶段：请先恢复一个已隐藏阶段，再查看分流图
+          </div>
+        )}
+      </div>
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-2xs text-faint">阶段轴（点击隐藏 / 恢复）</span>
         <ToggleGroup
@@ -333,6 +254,7 @@ export function FlowChart({ data, hiddenStages, onToggleStage }: FlowChartProps)
             <ToggleGroupItem
               key={stage.id}
               value={stage.id}
+              disabled={!hiddenSet.has(stage.id) && !canHideMore}
               className={
                 "h-6 rounded-control px-2 text-2xs data-[state=on]:text-body " +
                 (hiddenSet.has(stage.id) ? "text-faint line-through opacity-60" : "text-body")
@@ -342,6 +264,11 @@ export function FlowChart({ data, hiddenStages, onToggleStage }: FlowChartProps)
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
+        {!canHideMore && !chartBlocked && (
+          <span role="status" className="text-2xs text-faint">
+            已到下限：至少保留两个可见阶段，恢复一段后可继续隐藏
+          </span>
+        )}
       </div>
     </div>
   );

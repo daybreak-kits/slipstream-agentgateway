@@ -339,7 +339,9 @@ const FLOW_UMODELS = ["umodel:glm-5.3", "umodel:claude-sonnet-4.5", "umodel:gpt-
 const FLOW_CHANNELS = ["channel:智谱", "channel:OpenRouter", "channel:青岚云"];
 
 /** mock 分流：五段 用户 → 连接密钥 → 公开模型 → 上游模型 → 上游渠道。 */
-export function mockFlow(metric: "requests" | "tokens"): FlowReport {
+export function mockFlow(metric: "requests" | "tokens", collapse: string[] = []): FlowReport {
+  // mock 层不重算投影：隐藏轴的真实重连由后端 collapse 完成，浏览器冒烟走真实 API。
+  void collapse;
   const rand = seeded(metric.length * 20261117);
   const links: FlowLink[] = [];
   const node_meta: FlowReport["node_meta"] = {};
@@ -350,7 +352,7 @@ export function mockFlow(metric: "requests" | "tokens"): FlowReport {
     if (id.startsWith("user:")) return "user";
     if (id.startsWith("key:")) return "key";
     if (id.startsWith("model:")) return "model";
-    if (id.startsWith("umodel:")) return "umodel";
+    if (id.startsWith("umodel:")) return "upstream";
     return "channel";
   };
   const register = (id: string) => {
@@ -413,8 +415,8 @@ export function mockFlow(metric: "requests" | "tokens"): FlowReport {
       { id: "user", label: "用户" },
       { id: "key", label: "连接密钥" },
       { id: "model", label: "公开模型" },
-      { id: "umodel", label: "上游模型" },
-      { id: "channel", label: "上游渠道" },
+      { id: "upstream", label: "上游模型" },
+      { id: "channel", label: "上游" },
     ],
     totals,
     currency: CURRENCY,

@@ -21,13 +21,14 @@ import { ChartCard } from "./chart-card";
 import { compactMoney, fmtMoney, shortBucketLabel } from "./chart-format";
 import { seriesVar, useChartPalette } from "./chart-theme";
 import { FlowChart } from "./flow-chart";
+import { useReportsFlow } from "./use-reports";
 import { MemberPanel } from "./member-panel";
 import {
   CHART_VIEWS,
+  FLOW_STAGES,
   TREND_DIMENSIONS,
   TREND_METRICS,
   type ChartView,
-  type FlowReport,
   type TimeseriesReport,
   type TrendDimension,
   type TrendMetric,
@@ -273,10 +274,6 @@ export interface TrendPanelProps {
   seriesLoading: boolean;
   seriesError: unknown;
   onSeriesRetry: () => void;
-  flow: FlowReport | undefined;
-  flowLoading: boolean;
-  flowError: unknown;
-  onFlowRetry: () => void;
 }
 
 /**
@@ -296,10 +293,6 @@ export function TrendPanel({
   seriesLoading,
   seriesError,
   onSeriesRetry,
-  flow,
-  flowLoading,
-  flowError,
-  onFlowRetry,
 }: TrendPanelProps) {
   const { can } = usePermissions();
   const [hidden, setHidden] = useState<string[]>([]);
@@ -313,13 +306,22 @@ export function TrendPanel({
   }, [dimension, windowKey]);
 
   // 分流五段轴的隐藏集合：换区间后重置，点击节点/芯片/底部轴名都可切换。
+  // 至少保留两个可见阶段：状态层再兜一次底，任何入口都不能把可见段减到两段以下。
   const toggleStage = useCallback((stageId: string) => {
-    setHiddenStages((prev) =>
-      prev.includes(stageId) ? prev.filter((item) => item !== stageId) : [...prev, stageId],
-    );
+    setHiddenStages((prev) => {
+      if (prev.includes(stageId)) return prev.filter((item) => item !== stageId);
+      if (FLOW_STAGES.length - prev.length <= 2) return prev;
+      return [...prev, stageId];
+    });
   }, []);
 
   const isFlow = view === "flow";
+  const flow = useReportsFlow({
+    window,
+    metric: metric === "tokens" ? "tokens" : "requests",
+    collapse: hiddenStages,
+    enabled: isFlow && FLOW_STAGES.length - hiddenStages.length >= 2,
+  });
   const allowedMetrics = TREND_METRICS.filter((option) => !option.permission || can(option.permission));
   const metricOptions = isFlow
     ? allowedMetrics.filter((option) => option.value === "requests" || option.value === "tokens")
@@ -337,10 +339,10 @@ export function TrendPanel({
       : "按成员分层不堆叠；费用指标为成本/花费双系列，P95 分位见下方「延迟分位」卡片";
 
   const hasSeries = Boolean(series && series.members.length > 0);
-  const hasFlow = Boolean(flow && flow.links.length > 0);
-  const loading = isFlow ? flowLoading : seriesLoading;
-  const error = isFlow ? flowError : seriesError;
-  const onRetry = isFlow ? onFlowRetry : onSeriesRetry;
+  const hasFlow = Boolean(flow.data && flow.data.links.length > 0);
+  const loading = isFlow ? flow.isPending : seriesLoading;
+  const error = isFlow ? flow.error : seriesError;
+  const onRetry = isFlow ? () => void flow.refetch() : onSeriesRetry;
   const emptyText =
     !loading && !error && !(isFlow ? hasFlow : hasSeries)
       ? isFlow
@@ -391,7 +393,7 @@ export function TrendPanel({
               ))}
             </ToggleGroup>
           </div>
-          <FlowChart data={flow} hiddenStages={hiddenStages} onToggleStage={toggleStage} />
+          <FlowChart data={flow.data} hiddenStages={hiddenStages} onToggleStage={toggleStage} />
         </div>
       ) : (
         <div className="space-y-3">

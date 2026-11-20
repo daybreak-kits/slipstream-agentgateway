@@ -40,6 +40,7 @@ from __future__ import annotations
 import json
 import math
 from bisect import bisect_right
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -82,6 +83,7 @@ _FLOW_STAGES: tuple[tuple[str, str], ...] = (
     ("channel", "上游"),
 )
 _STAGE_INDEX = {stage: index for index, (stage, _label) in enumerate(_FLOW_STAGES)}
+FLOW_STAGE_IDS: tuple[str, ...] = tuple(stage for stage, _label in _FLOW_STAGES)
 ESTIMATE_NOTE = "token amounts fold cache into input (stage B pending)"
 
 _UNIT_MS = {"hour": 3_600_000, "day": 86_400_000}
@@ -1046,7 +1048,12 @@ def _heatmap_row(mode: str, day_key: int, row_index: dict) -> int | None:
 
 
 def build_flow(
-    session: Session, *, from_ms: int, to_ms: int, metric: str = "requests"
+    session: Session,
+    *,
+    from_ms: int,
+    to_ms: int,
+    metric: str = "requests",
+    collapse: Sequence[str] | None = None,
 ) -> dict:
     """Five-stage Sankey: 用户 -> 连接密钥 -> 公开模型 -> 上游模型 -> 上游.
 
@@ -1056,10 +1063,24 @@ def build_flow(
     money total appears exactly once. The GROUP BY returns one row per distinct
     five-stage path; the four edges per path are folded in Python over that
     small aggregated set.
+
+    A 'collapse' set hides stages by projecting every aggregated five-tuple
+    path onto the visible stages: hidden stages are removed from the path and
+    the remaining neighbours are linked in order, so nodes/edges stay
+    conserved, charge anchors on the first visible edge, cost on the last, and
+    totals fold the full path once. With no collapse the payload is the legacy
+    five-stage output unchanged.
     """
     canonical = canonical_metric(metric)
     if canonical not in ("requests", "tokens"):
         canonical = "requests"
+    hidden = set(collapse or ())
+    unknown = hidden - set(_STAGE_INDEX)
+    if unknown:
+        raise ValueError(f"未知的 flow 阶段：{', '.join(sorted(unknown))}")
+    visible = [index for index in range(len(_FLOW_STAGES)) if _FLOW_STAGES[index][0] not in hidden]
+    if len(visible) < 2:
+        raise ValueError("collapse 后至少保留 2 个阶段")
     ensure_report_indexes(session)
     params = _window_params(from_ms, to_ms)
     _report_currency, rates = _fx_rates(session)
@@ -1115,17 +1136,22 @@ def build_flow(
         model_node = f"model:{public_name}"
         upstream_node = f"umodel:{upstream_name}"
         channel_node = f"channel:{channel_name}"
-        node(user_node, users.get(user_id, "未登录") if user_id else "未登录", "user")
-        node(key_node, keys.get(key_id, "无密钥") if key_id else "无密钥", "key")
-        node(model_node, public_name, "model")
-        node(upstream_node, upstream_name, "upstream")
-        node(channel_node, channel_name, "channel")
-        edges = (
-            (user_node, key_node),
-            (key_node, model_node),
-            (model_node, upstream_node),
-            (upstream_node, channel_node),
+        all_nodes = (user_node, key_node, model_node, upstream_node, channel_node)
+        all_labels = (
+            users.get(user_id, "未登录") if user_id else "未登录",
+            keys.get(key_id, "无密钥") if key_id else "无密钥",
+            public_name,
+            upstream_name,
+            channel_name,
         )
+        # Path projection: hiding a stage reconnects the remaining stages; it
+        # never drops or invents an edge. The aggregated five-tuple row is the
+        # smallest unit a path has, so projection is exact and conserved.
+        visible_pairs = [(index, all_nodes[index], all_labels[index]) for index in visible]
+        for index, visible_id, label in visible_pairs:
+            node(visible_id, label, _FLOW_STAGES[index][0])
+        visible_nodes = [item[1] for item in visible_pairs]
+        edges = tuple(zip(visible_nodes, visible_nodes[1:], strict=False))
         for position, (source, target) in enumerate(edges):
             slot = links.setdefault(
                 (source, target),
@@ -1142,8 +1168,8 @@ def build_flow(
         totals["cost_micro"] += cost_micro
         totals["charge_micro"] += charge_micro
         step = requests if canonical == "requests" else tokens
-        for node_id in (user_node, key_node, model_node, upstream_node, channel_node):
-            node_values[node_id] = node_values.get(node_id, 0) + step
+        for visible_id in visible_nodes:
+            node_values[visible_id] = node_values.get(visible_id, 0) + step
 
     link_rows = []
     for (source, target), slot in links.items():
@@ -1174,7 +1200,9 @@ def build_flow(
         "nodes": nodes,
         "node_meta": node_meta,
         "links": link_rows,
-        "stages": [{"id": stage, "label": label} for stage, label in _FLOW_STAGES],
+        "stages": [
+            {"id": _FLOW_STAGES[index][0], "label": _FLOW_STAGES[index][1]} for index in visible
+        ],
         "totals": totals,
         "currency": _report_currency,
         "fx_missing": _fx_missing(session, from_ms, to_ms, rates),

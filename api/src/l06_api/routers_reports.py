@@ -404,6 +404,7 @@ def flow(
     from_ms: int | None = None,
     to_ms: int | None = None,
     tz: str = "",
+    collapse: str = "",
 ) -> dict:
     """Five-stage Sankey: 用户 → 连接密钥 → 公开模型 → 上游模型 → 上游.
 
@@ -418,6 +419,21 @@ def flow(
     """
     if metric not in ("requests", "tokens"):
         metric = "requests"
+    hidden = [part.strip() for part in collapse.split(",") if part.strip()]
+    unknown = [stage for stage in hidden if stage not in aggregates.FLOW_STAGE_IDS]
+    if unknown:
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR,
+            "collapse 含未知阶段",
+            details={"collapse": unknown, "allowed": list(aggregates.FLOW_STAGE_IDS)},
+        )
+    hidden = list(dict.fromkeys(hidden))
+    if len(hidden) > len(aggregates.FLOW_STAGE_IDS) - 2:
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR,
+            "collapse 后至少保留 2 个阶段",
+            details={"collapse": hidden},
+        )
     zone = _timezone(session, tz)
     override = _window_override(from_ms, to_ms)
     if override is not None:
@@ -428,7 +444,13 @@ def flow(
         range_key = range
     else:
         window_from, window_to, range_key = 0, now_ms() + 1, ""
-    payload = aggregates.build_flow(session, from_ms=window_from, to_ms=window_to, metric=metric)
+    payload = aggregates.build_flow(
+        session,
+        from_ms=window_from,
+        to_ms=window_to,
+        metric=metric,
+        collapse=hidden or None,
+    )
     payload["range"] = range_key or "all"
     payload["from_ms"] = window_from
     payload["to_ms"] = window_to
