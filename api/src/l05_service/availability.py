@@ -290,18 +290,41 @@ def _assert_cooldown_scope_supported(*, scope: str, kind: str) -> None:
         raise AppError(ErrorCode.VALIDATION_ERROR, PUBLIC_MODEL_COOLDOWN_MESSAGE)
 
 
-def reject_periodic_while_single_active(
+def _reject_stacking_cooldown(
     session: Session,
     *,
+    recurrence: str | None,
     scope: str,
     scope_id: str,
     exclude_rule_id: str | None = None,
     now_ms: int | None = None,
 ) -> None:
-    """Creating/changing a periodic cooldown must not stack on a single one."""
+    """Single and periodic cooldowns never stack on the same scope.
+
+    One entry for both directions: a one-shot cooldown refuses to open while a
+    periodic window is active, and a periodic rule refuses to be created or
+    rescheduled while a single cooldown is in force. Both raise 409 CONFLICT
+    with the blocking rule ids and the relevant deadline.
+    """
     moment = int(now_ms if now_ms is not None else utc_now_ms())
     zone = report_timezone(session)
-    blocking = active_single_cooldown(
+    if (recurrence or "once") == "once":
+        windows = active_periodic_window(
+            session,
+            scope=scope,
+            scope_id=scope_id,
+            now_ms=moment,
+            tz=zone,
+            exclude_rule_id=exclude_rule_id,
+        )
+        if windows:
+            raise AppError(
+                ErrorCode.CONFLICT,
+                "周期冷却窗口生效期间不能设置单次冷却；请等窗口结束或先跳过本窗口",
+                details=_window_conflict_details(windows),
+            )
+        return
+    actives = active_single_cooldown(
         session,
         scope=scope,
         scope_id=scope_id,
@@ -309,38 +332,11 @@ def reject_periodic_while_single_active(
         tz=zone,
         exclude_rule_id=exclude_rule_id,
     )
-    if blocking:
+    if actives:
         raise AppError(
             ErrorCode.CONFLICT,
             "单次冷却生效期间不能创建或改期周期冷却；请先解除单次冷却",
-            details=_single_conflict_details(blocking),
-        )
-
-
-def reject_single_while_window_active(
-    session: Session,
-    *,
-    scope: str,
-    scope_id: str,
-    exclude_rule_id: str | None = None,
-    now_ms: int | None = None,
-) -> None:
-    """Creating/changing a single cooldown must not stack on an open window."""
-    moment = int(now_ms if now_ms is not None else utc_now_ms())
-    zone = report_timezone(session)
-    blocking = active_periodic_window(
-        session,
-        scope=scope,
-        scope_id=scope_id,
-        now_ms=moment,
-        tz=zone,
-        exclude_rule_id=exclude_rule_id,
-    )
-    if blocking:
-        raise AppError(
-            ErrorCode.CONFLICT,
-            "周期冷却窗口生效期间不能设置单次冷却；请等窗口结束或先跳过本窗口",
-            details=_window_conflict_details(blocking),
+            details=_single_conflict_details(actives),
         )
 
 
@@ -355,21 +351,19 @@ def assert_cooldown_mode_available(
 ) -> None:
     """One entry point for the mutual-exclusion gate of a cooldown write.
 
-    Bans are a separate measure and never conflict; a one-shot cooldown checks
-    against open periodic windows, a periodic rule checks against active single
-    cooldowns. Both raise 409 CONFLICT with the blocking rule ids and deadline.
+    Bans are a separate measure and never conflict; cooldown writes go through
+    _reject_stacking_cooldown so the single/periodic rule lives in one place.
     """
     if kind != "cooldown":
         return
     _assert_cooldown_scope_supported(scope=scope, kind=kind)
-    if (recurrence or "once") == "once":
-        reject_single_while_window_active(
-            session, scope=scope, scope_id=scope_id, exclude_rule_id=exclude_rule_id
-        )
-    else:
-        reject_periodic_while_single_active(
-            session, scope=scope, scope_id=scope_id, exclude_rule_id=exclude_rule_id
-        )
+    _reject_stacking_cooldown(
+        session,
+        recurrence=recurrence,
+        scope=scope,
+        scope_id=scope_id,
+        exclude_rule_id=exclude_rule_id,
+    )
 
 
 def _skip_active_periodic_windows(
@@ -628,9 +622,15 @@ def set_model_cooldown(
     _require_scope_id(session, scope, scope_id)
     if deadline:
         # 冷却只属于上游模型（ADR-025）; setting a row cooldown is a单次 write and
-        # must not stack on an open periodic window (ticket 02).
-        _assert_cooldown_scope_supported(scope=scope, kind="cooldown")
-        reject_single_while_window_active(session, scope=scope, scope_id=scope_id)
+        # must not stack on an open periodic window (ticket 02). The same entry
+        # also keeps the public-model scope rejection next to the write path.
+        assert_cooldown_mode_available(
+            session,
+            kind="cooldown",
+            scope=scope,
+            scope_id=scope_id,
+            recurrence="once",
+        )
     managed_id = row_cooldown_rule_id(scope, scope_id)
     rule = session.get(AvailabilityRuleORM, managed_id)
     if deadline:

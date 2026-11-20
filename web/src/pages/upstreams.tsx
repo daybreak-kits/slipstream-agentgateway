@@ -268,7 +268,22 @@ export function UpstreamsPage() {
       header: "密钥数",
       enableSorting: false,
       meta: { className: "text-right" },
-      cell: ({ row }) => <span className="tnum text-2sm">{row.original.key_count ?? 0}</span>,
+      cell: ({ row }) => {
+        const keyCount = row.original.key_count ?? 0;
+        if (keyCount > 0) return <span className="tnum text-2sm">{keyCount}</span>;
+        // 旧库未迁移：密钥仍在退役列 api_key_enc，读取路径不再回退伪造「默认密钥」行（item 7）。
+        return (
+          <span className="inline-flex flex-col items-end gap-0.5">
+            <span className="tnum text-2sm">0</span>
+            <span
+              className="text-2xs text-warning-text"
+              title="旧库未迁移密钥行：运行 api/scripts/migrate_multikey_v2.py 后可在此管理密钥"
+            >
+              旧库需运行 migrate_multikey_v2
+            </span>
+          </span>
+        );
+      },
     },
     {
       id: "modelCount",

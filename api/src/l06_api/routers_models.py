@@ -56,7 +56,7 @@ from l05_service.model_params import (
     decode_parameters,
     validate_type_source,
 )
-from l05_service.rollout import Rollout
+from l05_service.rollout import apply_rollout
 from l06_api.deps import get_adapter, page_params, require, session_of
 from l06_api.schemas import (
     AdoptModelsDevBatchResult,
@@ -307,12 +307,13 @@ def batch_upstream_models(
     )
     if result["changed"] and payload.action in {"enable", "disable", "cooldown", "release"}:
         # 可用性批量写后立即下发（ticket 02）。
-        Rollout(session, adapter).apply(
+        apply_rollout(
+            session,
+            adapter,
             principal.username,
             reason=f"models-batch-{payload.action}",
             on_failure="keep-booked",
         )
-        session.commit()
     return result
 
 
@@ -388,10 +389,9 @@ def update_upstream_model(
     session.commit()
     if apply_reason:
         # 写后立即下发（ticket 02），不等 job/人工 apply。
-        Rollout(session, adapter).apply(
-            principal.username, reason=apply_reason, on_failure="keep-booked"
+        apply_rollout(
+            session, adapter, principal.username, reason=apply_reason, on_failure="keep-booked"
         )
-        session.commit()
     availability = evaluate(session)
     upstream_name, vendor_name = _um_names(session, row)
     target_count = int(
@@ -574,12 +574,13 @@ def batch_public_models(
         cooldown_error=PUBLIC_MODEL_COOLDOWN_MESSAGE,
     )
     if result["changed"] and payload.action in {"enable", "disable"}:
-        Rollout(session, adapter).apply(
+        apply_rollout(
+            session,
+            adapter,
             principal.username,
             reason=f"models-batch-{payload.action}",
             on_failure="keep-booked",
         )
-        session.commit()
     return result
 
 
@@ -658,10 +659,9 @@ def update_public_model(
     session.commit()
     if apply_reason:
         # 写后立即下发（ticket 02）。
-        Rollout(session, adapter).apply(
-            principal.username, reason=apply_reason, on_failure="keep-booked"
+        apply_rollout(
+            session, adapter, principal.username, reason=apply_reason, on_failure="keep-booked"
         )
-        session.commit()
     targets = _targets_by_public(session, [row.id]).get(row.id, [])
     body = _pm_body(
         row,

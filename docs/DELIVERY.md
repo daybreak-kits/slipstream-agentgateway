@@ -30,6 +30,7 @@ $env:PYTHONPATH="src"; python scripts/seed_demo.py
 python scripts/migrate_priority_v2.py --database-url sqlite:///./.data_store/slipstream.db
 # 旧库多密钥迁移：把退役的 upstreams.api_key_enc 镜像转成首把密钥行并清空镜像，写 multikey_semantics=v2
 #（新库无需执行：init_db 建库即带 upstream_keys，seed/CRUD 只写密钥行；旧库执行一次后 no-op）
+# 读取路径只认 upstream_keys：未迁移的旧库 has_api_key=false / key_count=0 / keys 空列表，前端提示运行本脚本。
 python scripts/migrate_multikey_v2.py --database-url sqlite:///./.data_store/slipstream.db
 
 # 2) 控制面（管理台后端）
@@ -67,7 +68,7 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 3. **MCP 支持 sse/stdio**：顶层 `mcp.targets` 已实测通过 pinned AG 1.7 `--validate-only`；http 变体与 `url` 字段被二进制拒绝，后端 422、前端置灰。
 4. **`/admin/reports/trend` 是遗留日桶端点**（`metric + range` 7d/30d/90d，未知值回退 30d）；v2 看板与报表走 `/admin/reports/timeseries` 等端点，支持任意区间（today/24h/7d/30d/365d）与 `from_ms/to_ms` 自定义窗口、`bucket=auto` 小时/日桶；桑基 flow 与 overview 金额已跟随时间窗。
 5. **前端包体**：已做路由级 code-split，五期基线首包 gzip **212.9 KB**、**75** 个 JS chunk；最大 chunk 为 echarts（gzip 148.2 KB），后续可继续按页面细化拆包（playground/params-panel.tsx 常量外移）。二期当时的 193.8 KB/66 chunk 已过时。
-6. **上游密钥不回显**：`GET /admin/upstreams/{id}/keys` 只回 masked/key_suffix，明文只在创建/轮换时返回一次；上游列表用 `has_api_key` 与 `key_count`。连接密钥（旧称客户端密钥，后端 `/admin/api-keys`）才有 `sk-…abcd` 掩码 + 审计化 reveal。
+6. **上游密钥不回显**：`GET /admin/upstreams/{id}/keys` 只回 masked/key_suffix，明文只在创建/轮换时返回一次；上游列表用 `has_api_key` 与 `key_count`（只统计 `upstream_keys` 行，不读退役的 `api_key_enc`；旧库未迁移时为 0，前端提示运行 `migrate_multikey_v2`）。连接密钥（旧称客户端密钥，后端 `/admin/api-keys`）才有 `sk-…abcd` 掩码 + 审计化 reveal。
 7. **控制台会话是绝对过期（12h，无滑动续期）**；生产必须设 `SLIPSTREAM_COOKIE_SECURE=1` 并置于 TLS 之后，开发环境默认允许 http。
 8. **字段级权限是“缺键”不是 null**：无 `billing:cost` 时成本/毛利键消失，无 `billing:spend` 时花费/余额键消失；前端必须按键存在性判断，不能把 null 当无权限。
 9. **策略/护栏/MCP 保存不等于下发**：保存只写 `app_settings`，还要点一次 `POST /admin/config/apply` 才会产生新配置版本。
@@ -144,7 +145,7 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 
 - **01 看板分流**：分流桑基图支持图例隐藏阶段，隐藏由后端 `collapse` 按完整五段路径投影重算（守恒、至少 2 段），前端删除旧 splice。
 - **02 可用性**：上游模型行内单按钮「冷却」双模式（单次/周期）；单次与周期互斥 409（ADR-027）；解除只删一次性规则、周期窗口只跳过当前窗口；公开模型无冷却（写操作 422）；写后立即下发。
-- **03/04 日志**：模型列两行（公开模型 / 请求模型 → 上游模型），新增「N 次尝试」popover 与尝试链（ADR-028）；费用两行（计费/成本）；日志行新增 `requested_model / attempts_count / has_attempts / attempts_error`。
+- **03/04 日志**：模型列两行（公开模型 / 请求模型 → 上游模型），新增「N 次尝试」popover 与尝试链（ADR-028）；费用两行（计费/成本）；日志行新增 `requested_model / attempts_count / has_attempts / last_failure_status / last_failure_error_type / last_failure_error_message`（服务层只回事实字段，错误摘要由前端唯一拼装）。
 - **05 模型探测**：上游模型逐模型主动探测（串行、单模型 20s、不落库）；与「模型拉取」`discover-models` 术语分工。
 - **06 表格**：操作列 `sticky right-0` 冻结、头身对齐一致、行节奏统一（`lib/table-columns.ts` 单一来源）。
 - **08 数字口径**：计数/词元/TPM/尝试次数千分位整数、RPM 两位、百分比一位、金额两位（`lib/format.ts` 单一来源）。
@@ -168,7 +169,7 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 - `POST /admin/upstreams/{id}/models/probe`：模型探测（权限 `upstream_models:write`；串行 20s；不落库）。
 - `GET /admin/logs/{event_id}/attempts`：请求尝试链（升序 attempt；空记录 200 空列表）。
 - `GET /admin/reports/flow?collapse=...`：分流隐藏阶段后端投影（422 未知阶段/不足 2 段）。
-- 日志列表行：`requested_model`、`attempts_count`、`has_attempts`、`attempts_error`（动态 dict，不进入 `contract.ts`，由 pytest 与文档字段表约束）。
+- 日志列表行：`requested_model`、`attempts_count`、`has_attempts`、`last_failure_status`、`last_failure_error_type`、`last_failure_error_message`（动态 dict，不进入 `contract.ts`，由 pytest 与文档字段表约束；摘要由前端 `components/logs/error-summary.ts` 拼装）。
 - 公开模型 PATCH：响应顶层 `window_skip`；批量启用：`window_skipped[]`。
 
 ### 7.4 五期门禁基线（2026-11-21 实测）

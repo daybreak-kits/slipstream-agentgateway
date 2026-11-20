@@ -233,3 +233,23 @@ class Rollout:
                 .order_by(ConfigRevisionORM.created_at_ms.desc())
             ).all()
         )
+
+
+def apply_rollout(
+    session: Session,
+    adapter: DataPlaneAdapter,
+    principal: str,
+    reason: str = "",
+    *,
+    on_failure: FailurePolicy = "raise",
+) -> ConfigRevisionORM | None:
+    """Apply one render plan and commit the business rows with its revision.
+
+    Every console write that triggers a data-plane apply needs the same two
+    steps in the same order: apply once, then commit once. Keeping the pair here
+    stops each route from re-spelling it and forgetting the commit (the archived
+    revision and the business rows must land in one transaction).
+    """
+    row = Rollout(session, adapter).apply(principal, reason, on_failure=on_failure)
+    session.commit()
+    return row

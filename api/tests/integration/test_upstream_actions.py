@@ -197,11 +197,17 @@ def test_key_test_reports_and_persists_per_key(client, monkeypatch):
     assert seen == ["sk-bad-9999", "sk-good-0001"]
 
 
-def test_legacy_inline_key_can_be_renamed_before_the_first_extra_key(
+def test_pre_migration_inline_key_is_not_surfaced_as_a_synthetic_row(
     client, engine_and_sessionmaker
 ):
-    """A pre-upstream_keys database (inline credential, no rows) shows the
-    synthetic legacy row; the first write materializes it as a real row."""
+    """A pre-upstream_keys database reports no keys until the migration runs.
+
+    Ticket 09 review: read paths no longer fall back to the retired
+    upstreams.api_key_enc mirror, so the console shows key_count 0 and tells the
+    operator to run scripts/migrate_multikey_v2.py instead of inventing a
+    synthetic row. The first write still materializes the inline credential so
+    the legacy key is never orphaned.
+    """
     from l01_core.crypto import SecretBox
     from l01_core.timeutil import now_ms
     from l04_repo.orm import UpstreamORM
@@ -221,26 +227,29 @@ def test_legacy_inline_key_can_be_renamed_before_the_first_extra_key(
         session.commit()
     assert seed_channel  # conftest import guard: the fixture stays wired
 
-    keys = _keys(client, upstream.id)["items"]
-    assert [key["id"] for key in keys] == ["legacy"]
-    assert keys[0]["masked"] == "…7777"
-    # The list view must keep reporting the pre-migration credential: key_count
-    # falls back to the mirror row and has_api_key derives from that count.
+    assert _keys(client, upstream.id)["items"] == []
     row = next(
         item
         for item in client.get("/admin/upstreams").json()
         if item["id"] == upstream.id
     )
-    assert row["key_count"] == 1
-    assert row["has_api_key"] is True
-    renamed = client.patch(
+    assert row["key_count"] == 0
+    assert row["has_api_key"] is False
+    # No synthetic row means "legacy" is not a resolvable key id any more.
+    unknown = client.patch(
         f"/admin/upstreams/{upstream.id}/keys/legacy", json={"label": "首把密钥"}
     )
-    assert renamed.status_code == 200, renamed.text
-    assert renamed.json()["label"] == "首把密钥"
-    assert renamed.json()["id"] != "legacy"
+    assert unknown.status_code == 404, unknown.text
+    # Write path (kept from ADR-026): the first key action materializes the old
+    # inline credential, so adding a backup key yields two real rows.
+    added = client.post(
+        f"/admin/upstreams/{upstream.id}/keys",
+        json={"label": "backup", "api_key": "sk-backup-7777"},
+    )
+    assert added.status_code == 201, added.text
     after = _keys(client, upstream.id)["items"]
-    assert len(after) == 1 and "is_primary" not in after[0]
+    assert [key["label"] for key in after] == ["默认密钥", "backup"]
+    assert "is_primary" not in after[0]
 
 
 def test_key_cap_is_twenty_and_last_key_is_protected(client):

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Field } from "@/components/models/field";
 import {
   buildScheduleJson, COOLDOWN_PRESETS, DEFAULT_COOLDOWN_HOURS, ruleSummary, WEEKDAY_OPTIONS,
@@ -31,43 +32,6 @@ const MODE_META: Record<CooldownMode, { label: string; hint: string; Icon: typeo
     Icon: CalendarClock,
   },
 };
-
-function ModeCard({
-  value, selected, disabled, reason, hint, onSelect,
-}: {
-  value: CooldownMode;
-  selected: boolean;
-  disabled: boolean;
-  reason: string;
-  hint: string;
-  onSelect: (mode: CooldownMode) => void;
-}) {
-  const meta = MODE_META[value];
-  const Icon = meta.Icon;
-  return (
-    <button
-      type="button"
-      data-mode={value}
-      data-selected={selected ? "true" : "false"}
-      aria-pressed={selected}
-      disabled={disabled}
-      onClick={() => onSelect(value)}
-      className={cn(
-        "flex flex-col items-start gap-1 rounded-control border px-3 py-2 text-left transition-colors",
-        selected ? "border-primary bg-primary/10 ring-1 ring-primary" : "border-border bg-surface hover:bg-surface-2",
-        disabled && "cursor-not-allowed opacity-70",
-      )}
-    >
-      <span className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-title">
-        <Icon aria-hidden="true" className="h-4 w-4 text-body" />
-        {meta.label}
-        {selected && !disabled ? <Check aria-hidden="true" className="h-3.5 w-3.5 text-success-text" /> : null}
-        {disabled ? <Badge tone="warning">不可用</Badge> : null}
-      </span>
-      <span className="text-2xs text-faint">{disabled ? reason : hint}</span>
-    </button>
-  );
-}
 
 export interface CooldownControlPanelProps {
   /** cooldownModeState 的派生结果（互斥/截止/阻塞说明）。 */
@@ -124,19 +88,48 @@ export function CooldownControlPanel({
           当前账号缺少 availability:read，无法预判冷却规则；若与已有冷却互斥，提交时会返回 409 并给出阻塞规则与窗口结束时间。
         </p>
       ) : null}
-      <div role="group" aria-label="冷却模式" className="grid gap-2 sm:grid-cols-2">
-        {(Object.keys(MODE_META) as CooldownMode[]).map((value) => (
-          <ModeCard
-            key={value}
-            value={value}
-            selected={mode === value}
-            disabled={value === "single" ? state.blockedSingle : state.blockedPeriodic}
-            reason={value === "single" ? state.singleBlockReason : state.periodicBlockReason}
-            hint={MODE_META[value].hint}
-            onSelect={onModeChange}
-          />
-        ))}
-      </div>
+      {/* 模式卡用 ToggleGroup type="single" 承担单选语义（aria-pressed/data-state 由原语提供），
+          视觉保持与手写卡一致：选中=主色边框+浅底+勾选图标，禁用=降透明+不可用徽标。 */}
+      <ToggleGroup
+        type="single"
+        value={mode}
+        onValueChange={(next) => {
+          if (next) onModeChange(next as CooldownMode);
+        }}
+        aria-label="冷却模式"
+        className="grid gap-2 sm:grid-cols-2"
+      >
+        {(Object.keys(MODE_META) as CooldownMode[]).map((value) => {
+          const meta = MODE_META[value];
+          const Icon = meta.Icon;
+          const selected = mode === value;
+          const disabled = value === "single" ? state.blockedSingle : state.blockedPeriodic;
+          const reason = value === "single" ? state.singleBlockReason : state.periodicBlockReason;
+          return (
+            <ToggleGroupItem
+              key={value}
+              value={value}
+              data-mode={value}
+              data-selected={selected ? "true" : "false"}
+              disabled={disabled}
+              className={cn(
+                "flex h-auto flex-col items-start gap-1 rounded-control border px-3 py-2 text-left text-2xs font-normal transition-colors",
+                "data-[state=on]:border-primary data-[state=on]:bg-primary/10 data-[state=on]:ring-1 data-[state=on]:ring-primary",
+                "data-[state=off]:border-border data-[state=off]:bg-surface data-[state=off]:hover:bg-surface-2",
+                disabled && "cursor-not-allowed opacity-70",
+              )}
+            >
+              <span className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-title">
+                <Icon aria-hidden="true" className="h-4 w-4 text-body" />
+                {meta.label}
+                {selected && !disabled ? <Check aria-hidden="true" className="h-3.5 w-3.5 text-success-text" /> : null}
+                {disabled ? <Badge tone="warning">不可用</Badge> : null}
+              </span>
+              <span className="text-2xs text-faint">{disabled ? reason : meta.hint}</span>
+            </ToggleGroupItem>
+          );
+        })}
+      </ToggleGroup>
       {conflict ? (
         <Alert variant="warning" data-slot="cooldown-conflict">
           <AlertTitle>冷却模式互斥</AlertTitle>

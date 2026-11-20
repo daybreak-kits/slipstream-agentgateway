@@ -1,7 +1,9 @@
-"""Ticket 04：日志请求尝试链——批量字段、一页一次聚合查询与行级错误摘要。
+"""Ticket 04：日志请求尝试链——批量字段、一页一次聚合查询与失败事实字段。
 
 只从 HTTP API seam 断言控制台真正消费的形状：列表行的 attempts_count /
-has_attempts / error，以及一页里 request_attempts 只被聚合查询一次。
+has_attempts 与最后一次失败的事实字段（last_failure_status / error_type /
+error_message），以及一页里 request_attempts 只被聚合查询一次。行级错误文案
+由前端唯一拼装，服务层不再产出 UI 摘要。
 请求尝试由适配器归一化后写入同一个 request_attempts 表（ADR-028），这里用
 record_attempts 写入真实事实，不做内部实现模拟。
 """
@@ -72,13 +74,13 @@ def _items(client) -> dict[str, dict]:
     return {item["event_id"]: item for item in response.json()["items"]}
 
 
-def test_row_error_summary_is_backfilled_from_the_last_failed_attempt(
+def test_row_exposes_last_failed_attempt_facts_without_a_server_side_summary(
     client, engine_and_sessionmaker
 ):
-    """上游 5xx 且 attempts 可用：行级 error 用最后一次失败尝试补齐。
+    """上游 5xx 且 attempts 可用：行只带最后一次失败的事实字段。
 
-    适配器把 error.type 归一化成状态码字符串时，摘要不重复成
-    「upstream 502: 502」，只保留 upstream 状态头。
+    适配器把 error.type 归一化成状态码字符串，服务层不再拼 UI 文案；
+    列表行的 error 保持原始日志文本（此处为空），摘要由前端唯一拼装。
     """
     _, factory = engine_and_sessionmaker
     _seed(
@@ -94,13 +96,23 @@ def test_row_error_summary_is_backfilled_from_the_last_failed_attempt(
     item = _items(client)["evt_retry_failed"]
     assert item["attempts_count"] == 3
     assert item["has_attempts"] is True
-    assert item["error"] == "upstream 502"
+    assert item["error"] == ""
+    assert item["last_failure_status"] == 502
+    assert item["last_failure_error_type"] == "502"
+    assert item["last_failure_error_message"] == ""
+
+    # 详情抽屉复用同一 _log_item 形状：失败事实字段必须一致。
+    detail = client.get("/admin/logs/evt_retry_failed").json()
+    assert detail["attempts_count"] == 3
+    assert detail["last_failure_status"] == 502
+    assert detail["last_failure_error_type"] == "502"
+    assert detail["last_failure_error_message"] == ""
 
 
-def test_attempt_error_summary_prefers_the_adapter_error_message(
+def test_failure_facts_keep_the_adapter_error_message_and_type(
     client, engine_and_sessionmaker
 ):
-    """错误摘要保留适配器给的错误细节，而不是只回显状态码。"""
+    """失败事实保留适配器给的 error_message / error_type，前端据此拼摘要。"""
     _, factory = engine_and_sessionmaker
     _seed(
         factory,
@@ -118,13 +130,16 @@ def test_attempt_error_summary_prefers_the_adapter_error_message(
     )
 
     item = _items(client)["evt_quota"]
-    assert item["error"] == "upstream 429: upstream quota exhausted"
+    assert item["error"] == ""
+    assert item["last_failure_status"] == 429
+    assert item["last_failure_error_type"] == "rate_limited"
+    assert item["last_failure_error_message"] == "upstream quota exhausted"
 
 
-def test_attempt_error_summary_uses_error_type_when_message_is_missing(
+def test_failure_facts_keep_error_type_when_message_is_missing(
     client, engine_and_sessionmaker
 ):
-    """error_message 为空时用 error_type 补齐（适配器通常只给 error.type）。"""
+    """error_message 为空时 error_type 单独保留（适配器通常只给 error.type）。"""
     _, factory = engine_and_sessionmaker
     _seed(
         factory,
@@ -133,13 +148,17 @@ def test_attempt_error_summary_uses_error_type_when_message_is_missing(
     )
 
     item = _items(client)["evt_timeout"]
-    assert item["error"] == "upstream 504: upstream_timeout"
+    assert item["error"] == ""
+    assert item["last_failure_status"] == 504
+    assert item["last_failure_error_type"] == "upstream_timeout"
+    assert item["last_failure_error_message"] == ""
+
 
 
 def test_row_error_stays_empty_when_no_attempts_are_recorded(
     client, engine_and_sessionmaker
 ):
-    """无 attempts 时行级错误摘要保持为空，不伪造链路信息。"""
+    """无 attempts 时失败事实字段为空，不伪造链路信息。"""
     _, factory = engine_and_sessionmaker
     _seed(factory, [_event("evt_no_chain", status=500)], [])
 
@@ -147,12 +166,15 @@ def test_row_error_stays_empty_when_no_attempts_are_recorded(
     assert item["attempts_count"] == 0
     assert item["has_attempts"] is False
     assert item["error"] == ""
+    assert item["last_failure_status"] is None
+    assert item["last_failure_error_type"] == ""
+    assert item["last_failure_error_message"] == ""
 
 
 def test_raw_log_error_is_not_replaced_by_the_attempt_summary(
     client, engine_and_sessionmaker
 ):
-    """原始日志已有错误文本时保留原文，attempts 只做「补齐」不覆盖。"""
+    """原始日志已有错误文本时保留原文；失败事实字段仍照实返回。"""
     _, factory = engine_and_sessionmaker
     _seed(
         factory,
@@ -169,6 +191,9 @@ def test_raw_log_error_is_not_replaced_by_the_attempt_summary(
 
     item = _items(client)["evt_raw_error"]
     assert item["error"] == "all upstreams failed"
+    assert item["last_failure_status"] == 500
+    assert item["last_failure_error_type"] == "500"
+    assert item["last_failure_error_message"] == ""
 
 
 def test_successful_request_with_failed_attempts_keeps_error_empty(
@@ -189,6 +214,8 @@ def test_successful_request_with_failed_attempts_keeps_error_empty(
     assert item["attempts_count"] == 2
     assert item["has_attempts"] is True
     assert item["error"] == ""
+    # 失败事实照实返回；是否展示摘要由前端按 http_status 判断，不在服务层裁决。
+    assert item["last_failure_status"] == 500
 
 
 def test_list_page_batches_attempt_counts_per_row(client, engine_and_sessionmaker):

@@ -18,7 +18,7 @@
 
 二期同步（历史）：真实认证、三角色 RBAC、字段级金额权限、上游多密钥、策略/护栏/MCP 可编辑（ticket 02/03/09/11）；计费/价目/看板/日志/设置/账单/用户层级（ticket 04/05/06/10/12/13/14/16/17）；seed 与 priority 迁移（ticket 19）。
 
-五期同步（W5，2026-11-21）：模型探测 `POST /admin/upstreams/{id}/models/probe` 与「模型拉取」`discover-models` 术语分工（ticket 05）；请求尝试链 `GET /admin/logs/{event_id}/attempts` 与日志行 `requested_model/attempts_count/has_attempts/attempts_error`（ADR-028、ticket 03/04）；公开模型单事务整页保存（ticket 12，旧 `PUT /admin/public-models/{id}/targets` 删除）；报表分流隐藏阶段后端 `collapse` 投影（ticket 01）；冷却单次/周期互斥 409（ticket 02，ADR-027）；多密钥 `keys/*.key` 白名单清理（ticket 16，ADR-026 补记）。
+五期同步（W5，2026-11-21）：模型探测 `POST /admin/upstreams/{id}/models/probe` 与「模型拉取」`discover-models` 术语分工（ticket 05）；请求尝试链 `GET /admin/logs/{event_id}/attempts` 与日志行 `requested_model/attempts_count/has_attempts/last_failure_status/last_failure_error_type/last_failure_error_message`（ADR-028、ticket 03/04）；公开模型单事务整页保存（ticket 12，旧 `PUT /admin/public-models/{id}/targets` 删除）；报表分流隐藏阶段后端 `collapse` 投影（ticket 01）；冷却单次/周期互斥 409（ticket 02，ADR-027）；多密钥 `keys/*.key` 白名单清理（ticket 16，ADR-026 补记）。
 
 ## 0. 通用约定
 
@@ -340,7 +340,7 @@ AG 1.7 拒绝（`mcp.transport.http=false`），保存即 422。渲染到顶层 
 ### 3.2 上游 upstreams
 | 方法 | 路径 | 权限 | 说明 |
 | --- | --- | --- | --- |
-| GET | /admin/upstreams | upstreams:read | 列表；每项含 `has_api_key`（由密钥行数量派生，`has_api_key == key_count > 0`）、`key_count`、`model_count`、`last_probe` |
+| GET | /admin/upstreams | upstreams:read | 列表；每项含 `has_api_key`（由密钥行数量派生，`has_api_key == key_count > 0`；只统计 `upstream_keys` 行，**不再回退退役的 `upstreams.api_key_enc` 镜像**，未迁移旧库返回 false/0，前端提示运行 `scripts/migrate_multikey_v2.py`）、`key_count`、`model_count`、`last_probe` |
 | POST | /admin/upstreams | upstreams:write | body {vendor_id?, name?, base_url, api_style, api_key, transforms?, max_buffer_bytes?}；命名规则见下 |
 | GET | /admin/upstreams/{upstream_id} | upstreams:read | 详情（含密钥数、模型数、最近探测、`api_style_source`） |
 | PATCH | /admin/upstreams/{upstream_id} | upstreams:write | 可改 name/base_url/api_style/enabled；`name` 可选（缺省或空白=不改名，显式改名重名 422）；api_style 同创建一样接受 `auto`，落库前解析为具体风格 |
@@ -603,7 +603,7 @@ AES-GCM 密文 + sk-...abcd 掩码。
 | trace_id | 适配器遥测关联键（ADR-028）；日志→`/admin/logs/{event_id}/attempts` 的 join 键。历史日志或适配器无遥测时为空串 |
 | requested_model | 客户端请求的公开模型名（来自 AG 属性 `attributes_json.agw.ai.original_model`）；旧行/属性缺失时为空串，UI 显示「—」，**不以 `public_model` 回填**（ticket 03） |
 | attempts_count / has_attempts | 该请求归一化后的上游尝试次数；0/false 表示无路由链（ADR-028；仅列表出参，详情不重复） |
-| attempts_error | 行级 `error` 为空且 `http_status ≥ 400` 时，用最近一次尝试的错误摘要补位（仅列表出参；ticket 04） |
+| last_failure_status / last_failure_error_type / last_failure_error_message | 最近一次失败尝试的事实字段（HTTP 状态码 / 上游错误类型 / 上游错误文案）；无失败尝试时依次为 null / 空串 / 空串。服务层只回事实、不拼 UI 摘要：行级错误文案由前端 `web/src/components/logs/error-summary.ts` 的 `rowErrorText` 唯一拼装（列表与详情抽屉同形；ticket 04） |
 | duration_ms / time_to_first_token_ms | 总耗时与首字延迟（AG 三延迟字段，ingest 时写入） |
 | http_status / public_model / upstream_model / provider | 请求与路由（`public_model` 为实际命中的公开模型名，可能不等于 `requested_model`） |
 | upstream_model_id / target_priority | 上游模型行 id 与成员优先级 |
@@ -611,11 +611,11 @@ AES-GCM 密文 + sk-...abcd 掩码。
 | input_tokens / output_tokens / total_tokens / cache_read_tokens / cache_write_tokens | 词元五列（缓存列原始值，未并入输入） |
 | cache_ratio | 缓存命中率（%，containment 口径：cached ≤ input 时分母=input） |
 | throughput_tps / is_stream | 输出速度与是否流式（流式=显式标志或 ttft>0；吞吐仅流式且有生成窗口时给值） |
-| has_error / has_payload / error | 失败标记 / 正文存档标记 / 错误文本 |
+| has_error / has_payload / error | 失败标记 / 正文存档标记 / **原始**错误文本（只含日志原文，不再由服务层回填尝试摘要；摘要见 `last_failure_*` 与前端拼装） |
 | cost_micro / margin_micro / charge_micro / currency | 三账金额 + 币种（受 §0.5 字段级权限约束，缺权限键缺失） |
 | estimate | true：token 数为估算口径（cache 折叠进 input，stage B 待核） |
 
-注意：`GET /admin/logs` 的列表行是**动态 dict**，`requested_model / attempts_count / has_attempts / attempts_error` 不进入 `web/src/generated/contract.ts`（gen_ts 只覆盖 Pydantic 响应模型）；这些字段由本表 + pytest（`api/tests/integration/test_logs_requested_model.py` 等）与实际响应约束，不要声称契约生成检查覆盖了它们。
+注意：`GET /admin/logs` 的列表行是**动态 dict**，`requested_model / attempts_count / has_attempts / last_failure_status / last_failure_error_type / last_failure_error_message` 不进入 `web/src/generated/contract.ts`（gen_ts 只覆盖 Pydantic 响应模型）；这些字段由本表 + pytest（`api/tests/integration/test_logs_requested_model.py` 等）与实际响应约束，不要声称契约生成检查覆盖了它们。
 
 ### 4.5 配置下发
 | 方法 | 路径 | 说明 |
@@ -680,7 +680,7 @@ settings 六个可编辑键均已有值：base_currency=CNY、timezone=Asia/Shan
 log_retention_days=30、audit_retention_days=180、default_tokens_per_minute=60000、default_concurrency=8。
 另有策略/护栏/MCP 三份可编辑样例（policy_config / guardrail_config / mcp_config）与
 `priority_semantics=v2` 标记。旧库升级：priority 语义用 `PYTHONPATH=src python scripts/migrate_priority_v2.py`，
-多密钥（`upstreams.api_key_enc` 镜像 → `upstream_keys` 行）用 `scripts/migrate_multikey_v2.py`；两者均先 dry-run
+多密钥（`upstreams.api_key_enc` 镜像 → `upstream_keys` 行）用 `scripts/migrate_multikey_v2.py`；该脚本是旧库密钥可用的唯一路径：读取路径（`key_count`/`list_keys`/`has_api_key`）只认 `upstream_keys` 行，未迁移旧库返回 0 / 空列表（不再合成「默认密钥」行），前端据此提示运行迁移。两者均先 dry-run
 再 `--apply`，已有 v2 标记时是 no-op。新库无需执行多密钥迁移（`init_db` 建库即带 `upstream_keys`，
 seed/CRUD 只写密钥行），跑脚本只会补 `multikey_semantics=v2` 标记。
 

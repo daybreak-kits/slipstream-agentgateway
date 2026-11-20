@@ -28,6 +28,7 @@ import { formatDateTime } from "@/lib/time";
 import type { IntervalTimezone } from "@/lib/time-range";
 
 import { statusLabel, statusTone, upstreamLabel } from "./format";
+import { rowErrorText } from "./error-summary";
 import { NoChainRecord, RequestAttemptChain } from "./request-attempt-chain";
 import type { LogDetail, LogPayload, LogRow } from "./types";
 import { useLogAttempts } from "./use-log-attempts";
@@ -192,10 +193,10 @@ export function LogDetailDrawer({ open, row, timezone, onOpenChange }: LogDetail
             </span>
           </div>
 
-          {view.error ? (
+          {rowErrorText(view) ? (
             <Alert variant="destructive">
               <AlertTitle>请求失败</AlertTitle>
-              <AlertDescription className="break-all font-mono text-2xs">{view.error}</AlertDescription>
+              <AlertDescription className="break-all font-mono text-2xs">{rowErrorText(view)}</AlertDescription>
             </Alert>
           ) : null}
 

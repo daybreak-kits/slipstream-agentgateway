@@ -1,8 +1,9 @@
 import type { ComponentProps, HTMLAttributes, ReactNode } from "react";
-import { Loader2, Undo2 } from "lucide-react";
+import { Undo2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { ACTION_ICONS } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 
@@ -104,7 +105,7 @@ export function DirtySummary({ count, onResetAll, saving = false, className, ...
         aria-live="polite"
         {...rest}
       >
-        <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" />
+        <Spinner size="sm" aria-hidden="true" />
         保存中…
       </span>
     );
@@ -167,7 +168,7 @@ export function DirtySaveButton({
     >
       {pending ? (
         <>
-          <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" />
+          <Spinner size="sm" aria-hidden="true" />
           {savingLabel}
         </>
       ) : (
@@ -193,7 +194,7 @@ export function DirtyFooter({ count, onResetAll, saving = false, children, class
     <div
       data-slot="dirty-footer"
       className={cn(
-        "sticky bottom-0 z-[var(--z-sticky)] -mx-1 mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-border bg-surface/95 px-1 pb-1 pt-2 backdrop-blur",
+        "sticky bottom-0 z-[var(--z-sticky)] -mx-1 mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-border bg-surface px-1 pb-1 pt-2",
         className,
       )}
       {...rest}

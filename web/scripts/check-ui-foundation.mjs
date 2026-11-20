@@ -901,11 +901,14 @@ check("mock：多尝试失败行与行级错误摘要可用于演示路由链", 
     method: "GET",
   });
   expect(chain.attempts.length === withChain.attempts_count, "mock 尝试链长度必须与 attempts_count 一致");
+  const { rowErrorText } = await load("/src/components/logs/error-summary.ts");
   const lastFailed = [...chain.attempts].reverse().find((attempt) => attempt.status_code >= 400);
   expect(Boolean(lastFailed), "mock 尝试链必须包含失败尝试");
+  expect(withChain.error === "", "带尝试链的失败行 error 只保留原始日志文本，UI 摘要由前端拼装");
+  const composed = rowErrorText(withChain);
   expect(
-    withChain.error.startsWith("upstream " + lastFailed.status_code),
-    "失败行的行级错误摘要必须与最后一次失败尝试一致，实际：" + withChain.error,
+    composed === "upstream " + lastFailed.status_code + ": " + lastFailed.error_message,
+    "行级错误摘要必须由前端从 last_failure_* 事实字段拼装，实际：" + composed,
   );
   const noChain = page.items.find((item) => !item.has_attempts);
   expect(Boolean(noChain), "mock 必须保留无 attempts 的历史行（显示无链路记录）");
@@ -960,6 +963,13 @@ check("列表页「测试」：只跳转详情「路由与模型」Tab，不再�
   const shared = await load("/src/components/upstreams/shared.ts");
   const href = shared.upstreamRoutingHref("up_01");
   expect(href === "/upstreams/up_01?tab=routing", "跳转地址必须带 ?tab=routing，实际 " + href);
+});
+
+check("密钥数：旧库未迁移时提示运行 migrate_multikey_v2（has_api_key 不再回退 api_key_enc）", () => {
+  const page = read("src/pages/upstreams.tsx");
+  includesAll(page, ["migrate_multikey_v2", "旧库"], "旧库密钥迁移提示");
+  const types = read("src/types.ts");
+  expect(!types.includes("legacy?: boolean"), "UpstreamKey.legacy 已不再由后端返回，必须删除");
 });
 
 check("详情页 URL 参数：?tab=routing 定位「路由与模型」，非法值回落连接与模型", async () => {
@@ -1062,6 +1072,16 @@ check("模型探测展示：失败行红色错误、超时琥珀、进度 N/M �
   expect(html.includes("bg-info") || html.includes("bg-primary"), "进度条必须用信息蓝/主色");
 });
 
+check("原语复用：脏表单底栏不透明、进度用 ui/spinner；冷却模式卡用 ToggleGroup 单选", () => {
+  const dirty = read("src/components/ui/dirty-field.tsx");
+  expect(!dirty.includes("backdrop-blur") && !dirty.includes("bg-surface/95"), "脏表单底栏必须不透明（不做半透明 + 背景模糊）");
+  expect(!dirty.includes("animate-spin") && !dirty.includes("Loader2"), "脏表单进度必须复用 ui/spinner，不手写旋转动画");
+  includesAll(dirty, ["@/components/ui/spinner", "<Spinner"], "脏表单进度指示器");
+  const cooldown = read("src/components/models/cooldown-panel.tsx");
+  includesAll(cooldown, ["ToggleGroup", "ToggleGroupItem", 'type="single"'], "冷却模式卡必须复用 ui/toggle-group 单选");
+  expect(!cooldown.includes("function ModeCard"), "冷却模式不得再手写 aria-pressed 按钮");
+});
+
 // ---------- 8. 公开模型成员编排术语：上游渠道/模型（W5 ticket 14） ----------
 check("成员编排：展示名统一「上游渠道/模型」，术语不单用「渠道」", async () => {
   const { memberChipLabel } = await load("/src/components/models/member-chip.ts");
@@ -1073,7 +1093,7 @@ check("成员编排：展示名统一「上游渠道/模型」，术语不单用
   const flow = read("src/components/models/member-chip-flow.tsx");
   includesAll(
     flow,
-    ["第 ", "搜索上游渠道或模型", 'data-slot="member-layer"', 'data-slot="member-chip"', 'data-slot="candidate-group"', "末位兜底"],
+    ["第 ", "搜索上游渠道或模型", 'data-slot="member-layer"', 'data-slot="member-chip"', 'data-slot="member-candidate-add"', "@/components/ui/combobox", "@/components/ui/button", "末位兜底"],
     "成员 chip 流结构",
   );
   for (const file of [

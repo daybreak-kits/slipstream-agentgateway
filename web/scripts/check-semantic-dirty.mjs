@@ -224,6 +224,10 @@ check("DirtyCountBadge/DirtySummary/DirtySaveButton/DirtyFooter：计数、保�
   expect(cleanBtn.includes("bg-surface-2"), "干净状态下保存按钮必须是中性色，实际：" + cleanBtn);
   const pendingBtn = render(createElement(DirtySaveButton, { dirty: true, pending: true }, "保存"));
   expect(pendingBtn.includes(' disabled=""') && pendingBtn.includes("保存中"), "保存中必须禁用并显示进度");
+  expect(
+    pendingBtn.includes('data-slot="spinner"') && pendingBtn.includes("motion-reduce:animate-none"),
+    "保存中必须复用 ui/spinner（自带 motion-reduce 降级），不得手写 Loader2 + animate-spin",
+  );
 
   const footer = render(
     createElement(
@@ -233,6 +237,13 @@ check("DirtyCountBadge/DirtySummary/DirtySaveButton/DirtyFooter：计数、保�
     ),
   );
   includesAll(footer, ["sticky", "bottom-0", "未保存 2 项", "恢复全部", "保存"], "脏表单底部动作条");
+  expect(
+    !footer.includes("backdrop-blur") && !footer.includes("bg-surface/95"),
+    "底栏必须不透明（DESIGN-AUDIT：不做半透明 + 背景模糊）",
+  );
+  const dirtySource = read("src/components/ui/dirty-field.tsx");
+  expect(!dirtySource.includes("Loader2") && !dirtySource.includes("animate-spin"), "进度必须走 ui/spinner，不得手写旋转动画");
+  includesAll(dirtySource, ["@/components/ui/spinner", "<Spinner"], "脏表单进度指示器");
 });
 
 // ---------- 5. toast 统一策略 ----------
@@ -400,6 +411,9 @@ check("CooldownControlPanel：模式禁用/互斥说明/唯一解除/选中态",
     const match = html.match(new RegExp("<button[^>]*" + marker + "[^>]*>"));
     return match ? match[0] : "";
   };
+  const source = read("src/components/models/cooldown-panel.tsx");
+  includesAll(source, ["ToggleGroup", "ToggleGroupItem", 'type="single"'], "模式卡必须复用 ui/toggle-group 单选原语");
+  expect(!source.includes("function ModeCard"), "手写 ModeCard（button + aria-pressed）必须删除，改由 ToggleGroupItem 承担单选语义");
 
   // 1) 常态：两种模式都可选，无互斥提示、无解除入口；单次模式选中态明显且只渲染当前表单。
   const normal = panel(baseState);
@@ -408,9 +422,14 @@ check("CooldownControlPanel：模式禁用/互斥说明/唯一解除/选中态",
   expect(!normal.includes('data-slot="cooldown-release"'), "常态不应出现解除入口");
   const normalSingle = tagOf(normal, 'data-mode="single"');
   const normalPeriodic = tagOf(normal, 'data-mode="periodic"');
-  expect(normalSingle.includes('aria-pressed="true"') && normalSingle.includes("border-primary"), "选中的单次模式必须有明显选中态：" + normalSingle);
-  expect(normalPeriodic.includes('aria-pressed="false"'), "未选中的周期模式 aria-pressed 必须为 false");
-  expect(!normalSingle.includes("disabled") && !normalPeriodic.includes("disabled"), "常态两种模式都不应禁用");
+  // Radix ToggleGroup type="single" 用 radio 语义（role="radio" + aria-checked），不手写 aria-pressed。
+  const pressed = (tag) => tag.includes('aria-checked="true"') || tag.includes('aria-pressed="true"');
+  const unpressed = (tag) => tag.includes('aria-checked="false"') || tag.includes('aria-pressed="false"');
+  expect(pressed(normalSingle) && normalSingle.includes("border-primary"), "选中的单次模式必须有明显选中态：" + normalSingle);
+  expect(unpressed(normalPeriodic), "未选中的周期模式必须暴露未选中态（aria-checked=false）");
+  // 原语基类自带 disabled: 变体类名，这里只匹配布尔 disabled 属性，避免误判。
+  const hasDisabledAttr = (tag) => /\sdisabled(?:=|\s|>)/.test(tag);
+  expect(!hasDisabledAttr(normalSingle) && !hasDisabledAttr(normalPeriodic), "常态两种模式都不应禁用");
   expect(normal.includes("单次冷却表单") && !normal.includes("周期冷却表单"), "只渲染当前选中模式表单");
 
   // 2) 周期窗口生效：单次模式禁用 + 互斥说明（含窗口结束时间）+ 唯一解除。
@@ -438,7 +457,7 @@ check("CooldownControlPanel：模式禁用/互斥说明/唯一解除/选中态",
 
   // 4) 选中周期模式：换表单、切换态正确。
   const periodicMode = panel(baseState, { mode: "periodic" });
-  expect(tagOf(periodicMode, 'data-mode="periodic"').includes('aria-pressed="true"'), "周期模式选中态");
+  expect(pressed(tagOf(periodicMode, 'data-mode="periodic"')), "周期模式选中态");
   expect(periodicMode.includes("周期冷却表单") && !periodicMode.includes("单次冷却表单"), "切换模式后只渲染周期表单");
 });
 
@@ -559,6 +578,13 @@ for (const [file, actions] of actionFiles) {
     }
   });
 }
+
+check("用户关闭：可逆操作不弹确认（DESIGN-AUDIT §4），当前登录账号禁用并说明", () => {
+  const text = read("src/components/users/users-panel.tsx");
+  includesAll(text, ["usePermissions", "me?.id", "不能关闭当前登录账号"], "当前账号关闭按钮的禁用说明");
+  expect(!text.includes("disableTarget"), "关闭/重新启用是可逆操作，不得再弹二次确认弹窗（可逆操作直接执行）");
+  expect(!/关闭用户「/.test(text), "用户关闭确认弹窗必须删除");
+});
 
 // ---------- 8. 公开模型单页编辑器（W5 ticket 13） ----------
 const publicModelFixture = (patch = {}) => ({
@@ -846,7 +872,7 @@ check("MemberChipFlow：分层 chip、conditional 顺序/兜底与候选分组�
   }));
   includesAll(
     html,
-    ['data-slot="member-chip-flow"', 'data-slot="member-layer"', 'data-slot="member-chip"', 'data-slot="member-candidates"', "第 1 层", "第 2 层", "同层 P2C 平权", "zai-01/glm-5.3", "zai-01/glm-5.3-flash", "nebula-01/nebula-chat-1"],
+    ['data-slot="member-chip-flow"', 'data-slot="member-layer"', 'data-slot="member-chip"', 'data-slot="member-candidates"', 'data-slot="member-candidate-add"', "第 1 层", "第 2 层", "同层 P2C 平权", "zai-01/glm-5.3", "zai-01/glm-5.3-flash", "nebula-01/nebula-chat-1"],
     "成员 chip 流",
   );
   expect(!html.includes("glm-5.3 · zai-01") && !html.includes("zai-01 · glm-5.3"), "chip 命名不能再用「模型名 · 上游名」");
@@ -854,10 +880,8 @@ check("MemberChipFlow：分层 chip、conditional 顺序/兜底与候选分组�
   expect((html.match(/<button[^>]*data-slot="member-chip"/g) ?? []).length === 3, "chip 本体必须是「编辑成员」按钮（点 chip 即编辑）");
   expect((html.match(/data-slot="member-chip-remove"/g) ?? []).length === 3, "每个 chip 一个移除按钮");
   includesAll(html, ["移除 zai-01/glm-5.3", "移除 nebula-01/nebula-chat-1"], "移除按钮必须点名成员");
-  expect((html.match(/data-slot="candidate-group"/g) ?? []).length === 2, "候选必须按上游渠道分组");
-  includesAll(html, ["上游渠道 nebula-01", "上游渠道 zai-01", "搜索上游渠道或模型", "已加入，点击移除", "点击加入"], "候选分组与搜索");
-  expect((html.match(/data-joined="true"/g) ?? []).length === 3, "已加入成员必须明确标示");
-  expect((html.match(/data-joined="false"/g) ?? []).length === 1, "未加入候选必须可加入");
+  expect(html.includes('role="combobox"'), "候选区必须用 ui/Combobox 原语选择上游模型");
+  includesAll(html, ["加入成员"], "候选区要有「加入成员」动作");
 
   const conditional = render(createElement(flowView.MemberChipFlow, {
     members: conditionalMembers, upstreamModels: chipUpstreamModels, fallbackNames: new Map(), mode: "conditional", onChange: () => {},
@@ -931,9 +955,11 @@ check("接线：成员 chip 流替换 MemberBoard，创建弹窗同样用「上�
   const flow = read("src/components/models/member-chip-flow.tsx");
   includesAll(
     flow,
-    ['data-slot="member-chip"', 'data-slot="member-candidates"', 'data-slot="candidate-group"', 'data-slot="member-chip-editor"', "搜索上游渠道或模型", "末位兜底"],
+    ['data-slot="member-chip"', 'data-slot="member-candidates"', 'data-slot="member-candidate-add"', 'data-slot="member-chip-editor"', "搜索上游渠道或模型", "末位兜底"],
     "chip 流结构契约",
   );
+  includesAll(flow, ["@/components/ui/button", "@/components/ui/combobox"], "chip 流必须复用 Button/Combobox 原语");
+  expect(!flow.includes("<button"), "chip 流不得再手写 <button>（chip、移除、候选都走原语）");
   const chip = read("src/components/models/member-chip.ts");
   includesAll(chip, ["memberChipLabel", "memberLayers", "conditionalFallback", "candidateGroups", "filterCandidateGroups"], "纯函数契约");
 });

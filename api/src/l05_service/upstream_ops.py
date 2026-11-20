@@ -44,7 +44,6 @@ from l04_repo.repository import (
 
 MAX_UPSTREAM_KEYS = 20
 PROBE_TIMEOUT_SECONDS = 8.0
-LEGACY_KEY_ID = "legacy"
 
 # ADR-023 #6: auto-probing order; openai_responses is the disambiguation probe
 # that only runs after the openai family /models check succeeded.
@@ -133,36 +132,19 @@ def _decrypt(secret_box: SecretBox, ciphertext: str) -> str:
         return ""
 
 
-def list_keys(
-    session: Session, upstream: UpstreamORM, secret_box: SecretBox
-) -> list[dict[str, Any]]:
-    """Masked keys; an upstream created before this table gets a synthetic row."""
-    rows = _key_rows(session, upstream.id)
-    if rows:
-        return [key_view(row) for row in rows]
-    if not upstream.api_key_enc:
-        return []
-    suffix = _suffix(_decrypt(secret_box, upstream.api_key_enc))
-    return [
-        {
-            "id": LEGACY_KEY_ID,
-            "label": "默认密钥",
-            "masked": _mask(suffix),
-            "key_suffix": suffix,
-            "created_at_ms": upstream.created_at_ms,
-            "legacy": True,
-            "last_test": None,
-            "last_test_at_ms": 0,
-        }
-    ]
+def list_keys(session: Session, upstream: UpstreamORM) -> list[dict[str, Any]]:
+    """Masked rows from upstream_keys only; the retired mirror is never faked.
+
+    A database that predates this table keeps its credential in
+    upstreams.api_key_enc, but the console must see 0 keys and prompt the
+    operator to run scripts/migrate_multikey_v2.py (review fix, ticket 09).
+    """
+    return [key_view(row) for row in _key_rows(session, upstream.id)]
 
 
 def key_count(session: Session, upstream: UpstreamORM) -> int:
-    """Row count including the pre-table credential (no write on list)."""
-    rows = _key_rows(session, upstream.id)
-    if rows:
-        return len(rows)
-    return 1 if upstream.api_key_enc else 0
+    """Number of real key rows; 0 on an un-migrated legacy database."""
+    return len(_key_rows(session, upstream.id))
 
 
 def _ensure_rows(
@@ -170,10 +152,11 @@ def _ensure_rows(
 ) -> list[UpstreamKeyORM]:
     """Persist the legacy inline credential as the first key row when needed.
 
-    ADR-026 retired the mirror, but a database created before ``upstream_keys``
-    still carries the credential in ``upstreams.api_key_enc``; materializing it
-    here (write paths only) keeps that one inline key from being orphaned by the
-    first key-panel action. The bulk path is scripts/migrate_multikey_v2.py.
+    ADR-026 retired the mirror, but a database created before upstream_keys
+    still carries the credential in upstreams.api_key_enc; materializing it here
+    (write paths only, never on read) keeps that one inline key from being
+    orphaned by the first key-panel action. The bulk path is
+    scripts/migrate_multikey_v2.py.
     """
     rows = _key_rows(session, upstream.id)
     if rows or not upstream.api_key_enc:
@@ -212,10 +195,6 @@ def create_initial_key(
 
 
 def _resolve(rows: list[UpstreamKeyORM], key_id: str) -> UpstreamKeyORM:
-    # The synthetic id from a pre-table upstream becomes a real row on first
-    # write (_ensure_rows), so map it to that row instead of 404ing.
-    if key_id == LEGACY_KEY_ID and len(rows) == 1:
-        return rows[0]
     for row in rows:
         if row.id == key_id:
             return row

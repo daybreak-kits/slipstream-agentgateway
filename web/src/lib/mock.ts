@@ -174,6 +174,9 @@ interface MockLogRow {
   throughput_tps: number | null;
   attempts_count: number;
   has_attempts: boolean;
+  last_failure_status: number | null;
+  last_failure_error_type: string;
+  last_failure_error_message: string;
   is_stream: boolean;
   has_error: boolean;
   has_payload: boolean;
@@ -224,16 +227,22 @@ const mockLogs: MockLogRow[] = Array.from({ length: 36 }, (_, i) => {
         : "";
   const attempts_count =
     trace_id === "tr_m5b_three" || trace_id === "tr_m5b_failed" ? 3 : trace_id ? 2 : 0;
+  // ticket 04：带尝试链的失败行不再由 mock 拼 UI 摘要，只给 rowErrorText 所需的事实字段。
+  const failedStatus = failed ? (i % 2 === 0 ? 500 : 502) : 200;
+  const chainFailure = trace_id === "tr_m5b_failed";
   return {
     event_id: "mev_" + String(1000 + i),
     trace_id,
     attempts_count,
     has_attempts: trace_id.length > 0,
+    last_failure_status: chainFailure ? failedStatus : null,
+    last_failure_error_type: chainFailure ? String(failedStatus) : "",
+    last_failure_error_message: chainFailure ? (failedStatus === 502 ? "bad gateway" : "internal error") : "",
     started_at_ms,
     completed_at_ms: started_at_ms + duration_ms,
     duration_ms,
     time_to_first_token_ms: is_stream ? 220 + ((i * 149) % 700) : 0,
-    http_status: failed ? (i % 2 === 0 ? 500 : 502) : 200,
+    http_status: failedStatus,
     public_model: model,
     // 混合形态 AG 日志才有请求模型；i%6===0 的行模拟历史/直连行，展示「—」降级。
     requested_model: i % 6 === 0 ? "" : model,
@@ -255,7 +264,8 @@ const mockLogs: MockLogRow[] = Array.from({ length: 36 }, (_, i) => {
     is_stream,
     has_error: failed,
     has_payload: !failed && i % 5 === 0,
-    error: failed ? (i % 2 === 0 ? "upstream 500: internal error" : "upstream 502: bad gateway") : "",
+    // 带尝试链的失败行只保留原始日志文本（mock 无原文 → 空串），摘要由前端 rowErrorText 拼装。
+    error: failed && !chainFailure ? (i % 2 === 0 ? "upstream 500: internal error" : "upstream 502: bad gateway") : "",
     cost_micro,
     margin_micro: cost_micro === null || charge_micro === null ? null : charge_micro - cost_micro,
     charge_micro,

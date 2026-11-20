@@ -101,32 +101,30 @@ def get_attempts(session: Session, correlation_key: str) -> list[RequestAttemptO
 
 
 @dataclass(frozen=True, slots=True)
+class AttemptFailure:
+    """Facts of the last failed attempt, without any display text.
+
+    The console owns the row-level wording (it also renders each attempt), so the
+    service keeps only what happened: which attempt failed and with what status,
+    error type and message. Adapters usually mirror the status into error.type.
+    """
+
+    attempt_no: int
+    status_code: int | None
+    error_type: str
+    error_message: str
+
+
+@dataclass(frozen=True, slots=True)
 class AttemptChainSummary:
     """Per-request attempt aggregate for a whole log page (one grouped read)."""
 
     count: int = 0
-    failed: bool = False
-    last_failure_status: int | None = None
-    last_failure_error_type: str = ""
-    last_failure_error_message: str = ""
+    last_failure: AttemptFailure | None = None
 
     @property
-    def error_summary(self) -> str:
-        """Last failed attempt as a row-level error summary; empty when none.
-
-        Adapters usually fill error.type with the status code itself, so the
-        detail is only appended when it adds information beyond the status.
-        """
-        if not self.failed:
-            return ""
-        detail = self.last_failure_error_message.strip()
-        status = self.last_failure_status
-        if not detail:
-            error_type = self.last_failure_error_type.strip()
-            if error_type and error_type != str(status):
-                detail = error_type
-        head = f"upstream {status}" if status is not None else "upstream 请求失败"
-        return f"{head}: {detail}" if detail else head
+    def failed(self) -> bool:
+        return self.last_failure is not None
 
 
 def attempt_summaries(
@@ -135,9 +133,9 @@ def attempt_summaries(
     """Read request_attempts for one page in ONE query and aggregate per request.
 
     Returns count + the last failed attempt (highest attempt_no whose outcome is
-    error or whose status is 4xx/5xx) keyed by correlation_key. Callers derive
-    attempts_count/has_attempts and the row-level error summary from it, so the
-    log list never degrades into one attempts query per row (N+1).
+    error or whose status is 4xx/5xx) keyed by correlation_key. Callers expose
+    count + those failure facts, so the log list never degrades into one attempts
+    query per row (N+1) and the service layer never composes UI copy.
     """
     keys = list(dict.fromkeys(key for key in correlation_keys if key))
     if not keys:
@@ -155,7 +153,7 @@ def attempt_summaries(
         .order_by(RequestAttemptORM.correlation_key, RequestAttemptORM.attempt_no)
     ).all()
     counts: dict[str, int] = {}
-    failures: dict[str, tuple[int, int | None, str, str]] = {}
+    failures: dict[str, AttemptFailure] = {}
     for key, attempt_no, status_code, error_type, error_message, outcome in rows:
         counts[key] = counts.get(key, 0) + 1
         failed = outcome == "error" or (
@@ -164,24 +162,17 @@ def attempt_summaries(
         if not failed:
             continue
         previous = failures.get(key)
-        if previous is None or attempt_no >= previous[0]:
-            failures[key] = (
-                attempt_no,
-                status_code,
-                error_type or "",
-                error_message or "",
+        if previous is None or attempt_no >= previous.attempt_no:
+            failures[key] = AttemptFailure(
+                attempt_no=attempt_no,
+                status_code=status_code,
+                error_type=error_type or "",
+                error_message=error_message or "",
             )
-    summaries: dict[str, AttemptChainSummary] = {}
-    for key, count in counts.items():
-        failure = failures.get(key)
-        summaries[key] = AttemptChainSummary(
-            count=count,
-            failed=failure is not None,
-            last_failure_status=failure[1] if failure is not None else None,
-            last_failure_error_type=failure[2] if failure is not None else "",
-            last_failure_error_message=failure[3] if failure is not None else "",
-        )
-    return summaries
+    return {
+        key: AttemptChainSummary(count=count, last_failure=failures.get(key))
+        for key, count in counts.items()
+    }
 
 
 def attempts_for_event(
@@ -221,6 +212,7 @@ def cleanup_expired_attempts(
 
 __all__ = [
     "AttemptChainSummary",
+    "AttemptFailure",
     "attempt_summaries",
     "attempts_for_event",
     "build_attempt_sink",

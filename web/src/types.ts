@@ -64,8 +64,6 @@ export interface UpstreamKey {
     error: string;
   } | null;
   last_test_at_ms: number;
-  /** 迁移前内联密钥的合成行，首次写操作后落表 */
-  legacy?: boolean;
 }
 
 export interface UpstreamKeyList {

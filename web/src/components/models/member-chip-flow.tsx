@@ -1,17 +1,15 @@
 import { useMemo, useState } from "react";
-import { ChevronDown } from "lucide-react";
 
 import { Field } from "@/components/models/field";
 import {
-  candidateGroups,
   conditionalMultiKeyHint,
-  filterCandidateGroups,
   memberLabeler,
   memberLayers,
 } from "@/components/models/member-chip";
 import { type MemberDraft, nextPriority } from "@/components/models/member-drafts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { ACTION_ICONS } from "@/lib/icons";
 import { useUpstreams } from "@/lib/use-upstreams";
@@ -111,8 +109,8 @@ export interface MemberChipFlowProps {
 /**
  * 成员编排 chip 流（W5 ticket 14）：按 priority 分层展示为「第 N 层」chip，
  * 同层 P2C 平权；conditional 每个 chip 带顺序徽标、末位兜底有独立标签。
- * 点击 chip 展开内联编辑器改 priority/weight/when；候选区按上游渠道分组、
- * 可折叠、可按上游渠道名或模型名搜索，已加入的成员明确标示。
+ * 点击 chip 展开内联编辑器改 priority/weight/when；候选区用 Combobox 搜索
+ * 上游渠道/模型后「加入成员」，已加入的成员不再出现在候选里。
  *
  * 不引入拖拽库：priority 就是层的唯一来源，改 priority 即换层，兜底由
  * 排序 + 末位校验保证（见 member-drafts.validateMembers）。
@@ -125,20 +123,27 @@ export function MemberChipFlow({
   onChange,
 }: MemberChipFlowProps) {
   const upstreams = useUpstreams();
-  const [needle, setNeedle] = useState("");
+  const [pick, setPick] = useState("");
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
 
   const labelOf = useMemo(() => memberLabeler(upstreamModels, fallbackNames), [upstreamModels, fallbackNames]);
   const layers = useMemo(() => memberLayers(members, labelOf, mode), [members, labelOf, mode]);
-  const groups = useMemo(
-    () => filterCandidateGroups(candidateGroups(upstreamModels), needle),
-    [upstreamModels, needle],
-  );
   const e20Hint = useMemo(
     () => (mode === "conditional" ? conditionalMultiKeyHint(members, upstreamModels, upstreams) : null),
     [mode, members, upstreamModels, upstreams],
   );
   const joinedIds = useMemo(() => new Set(members.map((member) => member.upstream_model_id)), [members]);
+  const candidateOptions = useMemo(
+    () =>
+      upstreamModels
+        .filter((model) => !joinedIds.has(model.id))
+        .map((model) => ({
+          value: model.id,
+          label: labelOf(model.id),
+          description: "上游渠道 " + model.upstream_name,
+        })),
+    [upstreamModels, joinedIds, labelOf],
+  );
   const editing = editingIndex === null ? null : members[editingIndex] ?? null;
 
   const updateByIndex = (index: number, patch: Partial<MemberDraft>) => {
@@ -190,15 +195,15 @@ export function MemberChipFlow({
               {layer.chips.map((chip) => (
                 <div key={chip.index} data-slot="member-chip-group" className="inline-flex max-w-full items-stretch">
                   {/* chip 本体就是「编辑该成员」按钮：点名字、顺序徽标、weight/when 都展开编辑器；移除是相邻的独立按钮（避免按钮嵌套）。 */}
-                  <button
-                    type="button"
+                  <Button
+                    variant="ghost"
                     data-slot="member-chip"
                     data-upstream-model-id={chip.member.upstream_model_id}
                     data-fallback={chip.fallback ? "true" : "false"}
                     className={cn(
-                      "inline-flex max-w-full items-center gap-1 rounded-l-full border border-r-0 px-2 py-1 text-left text-2sm transition-colors",
+                      "inline-flex h-auto max-w-full min-w-0 items-center justify-start gap-1 overflow-hidden rounded-l-full rounded-r-none border border-r-0 px-2 py-1 text-left text-2sm font-normal",
                       chip.fallback
-                        ? "border-info/50 bg-info-soft text-info-text hover:border-info"
+                        ? "border-info/50 bg-info-soft text-info-text hover:border-info hover:bg-info-soft"
                         : "border-border bg-surface text-body hover:border-border-strong hover:bg-surface-2",
                       editingIndex === chip.index && "ring-1 ring-primary",
                     )}
@@ -233,12 +238,12 @@ export function MemberChipFlow({
                         末位兜底
                       </Badge>
                     ) : null}
-                  </button>
-                  <button
-                    type="button"
+                  </Button>
+                  <Button
+                    variant="ghost"
                     data-slot="member-chip-remove"
                     className={cn(
-                      "inline-flex items-center rounded-r-full border px-1.5 transition-colors",
+                      "inline-flex h-auto items-center rounded-l-none rounded-r-full border border-l-0 px-1.5 py-1",
                       chip.fallback
                         ? "border-info/50 bg-info-soft/60 text-info-text hover:bg-danger-soft hover:text-danger-text"
                         : "border-border bg-surface text-faint hover:bg-danger-soft hover:text-danger-text",
@@ -248,7 +253,7 @@ export function MemberChipFlow({
                     onClick={() => removeById(chip.member.upstream_model_id)}
                   >
                     <ACTION_ICONS.clear aria-hidden="true" className="h-3 w-3" />
-                  </button>
+                  </Button>
                 </div>
               ))}
             </div>
@@ -268,60 +273,32 @@ export function MemberChipFlow({
       ) : null}
 
       <div data-slot="member-candidates" className="space-y-2 rounded-md border border-border bg-surface p-2">
-        <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <h4 className="text-2sm font-medium text-title">候选成员</h4>
-          <Input
-            value={needle}
-            onChange={(event) => setNeedle(event.target.value)}
-            placeholder="搜索上游渠道或模型"
-            aria-label="搜索上游渠道或模型"
-            className="h-8 w-56"
+          <Combobox
+            className="w-64"
+            ariaLabel="搜索上游渠道或模型"
+            placeholder="选择上游模型加入"
+            searchPlaceholder="搜索上游渠道或模型"
+            emptyText="没有匹配的上游模型"
+            value={pick}
+            options={candidateOptions}
+            onChange={setPick}
           />
-        </div>
-        <div className="max-h-72 space-y-1.5 overflow-auto pr-1">
-          {groups.map((group) => (
-            <details
-              key={group.key}
-              data-slot="candidate-group"
-              open
-              className="group rounded-control border border-border/60 bg-surface-2/30"
-            >
-              <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2 py-1.5 text-2sm [&::-webkit-details-marker]:hidden">
-                <ChevronDown
-                  aria-hidden="true"
-                  className="h-3.5 w-3.5 shrink-0 text-faint transition-transform group-open:rotate-180"
-                />
-                <span className="font-medium text-title">上游渠道 {group.name}</span>
-                <span className="text-2xs text-faint">{group.models.length} 个模型</span>
-              </summary>
-              <div className="space-y-0.5 px-1 pb-1">
-                {group.models.map((model) => {
-                  const joined = joinedIds.has(model.id);
-                  return (
-                    <button
-                      key={model.id}
-                      type="button"
-                      data-slot="candidate-model"
-                      data-joined={joined ? "true" : "false"}
-                      onClick={() => (joined ? removeById(model.id) : addModel(model.id))}
-                      className={cn(
-                        "flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-left text-2sm transition-colors",
-                        joined ? "bg-primary-soft text-primary-text" : "text-body hover:bg-surface-2",
-                      )}
-                    >
-                      <span className="min-w-0 flex-1 truncate font-mono">{model.name}</span>
-                      {joined ? (
-                        <span className="shrink-0 text-2xs text-primary-text">已加入，点击移除</span>
-                      ) : (
-                        <span className="shrink-0 text-2xs text-faint">点击加入</span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </details>
-          ))}
-          {groups.length === 0 ? <p className="p-2 text-2xs text-faint">没有匹配的上游模型。</p> : null}
+          <Button
+            data-slot="member-candidate-add"
+            variant="outline"
+            size="sm"
+            disabled={pick === ""}
+            onClick={() => {
+              if (pick === "") return;
+              addModel(pick);
+              setPick("");
+            }}
+          >
+            <ACTION_ICONS.add aria-hidden="true" className="h-3.5 w-3.5" /> 加入成员
+          </Button>
+          <span className="text-2xs text-faint">已加入 {members.length} 个成员；priority / weight / when 在 chip 上编辑。</span>
         </div>
       </div>
 

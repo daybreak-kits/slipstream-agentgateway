@@ -31,7 +31,7 @@ from l04_repo.orm import (
 )
 from l04_repo.repository import get_setting, put_setting
 from l05_service import auth, client_keys
-from l05_service.attempts import attempt_summaries, attempts_for_event
+from l05_service.attempts import AttemptChainSummary, attempt_summaries, attempts_for_event
 from l06_api import field_filter
 from l06_api.deps import page_params, require, session_of
 from l06_api.schemas import LogAttemptOut, LogAttemptsOut, PlaygroundRequest
@@ -656,8 +656,7 @@ def _log_page_items(
                 cost_micro=cost.amount_micro if cost else None,
                 charge_micro=charge.amount_micro if charge else None,
                 currency=(charge.currency if charge else (cost.currency if cost else "")),
-                attempts_count=attempts.count if attempts is not None else 0,
-                attempts_error=attempts.error_summary if attempts is not None else "",
+                attempts=attempts,
             )
         )
     return items
@@ -700,18 +699,16 @@ def _log_item(
     cost_micro: int | None,
     charge_micro: int | None,
     currency: str,
-    attempts_count: int = 0,
-    attempts_error: str = "",
+    attempts: AttemptChainSummary | None = None,
 ) -> dict:
     """One record as the UI consumes it; the drawer reuses this exact shape."""
     user_id, user_name, api_key_label = identity
     stream = _is_stream(raw, row.time_to_first_token_ms or 0)
     error = str(raw.get("error") or "")
-    # Ticket 04: a failed upstream (4xx/5xx) with attempts but no raw error text
-    # borrows the last failed attempt as the row-level error summary. Without
-    # attempts the summary stays empty instead of inventing a chain.
-    if not error and attempts_error and (row.http_status or 0) >= 400:
-        error = attempts_error
+    # Ticket 04: the error field is the raw log text only. The row also carries
+    # the last failed attempt's facts; the console composes any fallback wording
+    # so the service layer does not own UI copy.
+    failure = attempts.last_failure if attempts is not None else None
     margin = (
         charge_micro - cost_micro
         if charge_micro is not None and cost_micro is not None
@@ -750,8 +747,11 @@ def _log_item(
         "has_error": bool(error),
         "has_payload": bool(raw.get("has_payload")),
         "error": error,
-        "attempts_count": attempts_count,
-        "has_attempts": attempts_count > 0,
+        "attempts_count": attempts.count if attempts is not None else 0,
+        "has_attempts": attempts is not None and attempts.count > 0,
+        "last_failure_status": failure.status_code if failure is not None else None,
+        "last_failure_error_type": failure.error_type if failure is not None else "",
+        "last_failure_error_message": failure.error_message if failure is not None else "",
         "cost_micro": cost_micro,
         "margin_micro": margin,
         "charge_micro": charge_micro,
@@ -916,8 +916,8 @@ def log_detail(
         if public is not None and umodel is not None
         else None
     )
-    # Same row-level error summary as the list so the drawer does not drop it
-    # once the detail payload replaces the selected list row.
+    # Same attempts facts as the list so the drawer does not drop them once the
+    # detail payload replaces the selected list row.
     attempts = attempt_summaries(session, [row.trace_id or ""]).get(row.trace_id or "")
     body = _log_item(
         row,
@@ -928,7 +928,7 @@ def log_detail(
         cost_micro=cost.amount_micro if cost else None,
         charge_micro=charge.amount_micro if charge else None,
         currency=(charge.currency if charge else (cost.currency if cost else "")),
-        attempts_error=attempts.error_summary if attempts is not None else "",
+        attempts=attempts,
     )
     if include_payload:
         # AG strips bodies unless has_payload; scrub before serialising so a

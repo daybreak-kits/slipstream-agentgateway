@@ -8,6 +8,10 @@ export interface LogRow {
   /** 该请求归一化后的上游尝试次数（0 = 不展示路由链）。 */
   attempts_count?: number;
   has_attempts?: boolean;
+  /** 最近一次失败尝试的事实字段（服务层不再拼 UI 文案；摘要由 rowErrorText 拼装）。 */
+  last_failure_status?: number | null;
+  last_failure_error_type?: string;
+  last_failure_error_message?: string;
   started_at_ms: number;
   completed_at_ms: number;
   duration_ms: number;

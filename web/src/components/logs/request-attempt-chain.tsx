@@ -10,11 +10,9 @@ import { fmtInt, fmtSeconds } from "@/lib/format";
 import { formatDateTime, useTimezone } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
+import { attemptFailureSummary } from "./error-summary";
 import { statusTone } from "./format";
 import { useLogAttempts } from "./use-log-attempts";
-
-/** 折叠行错误摘要的最大长度：摘要只用来扫读，全文在展开详情里。 */
-const ERROR_SUMMARY_MAX_CHARS = 60;
 
 /** 无尝试记录时的统一降级文案（列表、popover、抽屉三处一致）。 */
 const NO_CHAIN_RECORD_TEXT = "无链路记录";
@@ -35,17 +33,9 @@ function attemptFailed(attempt: LogAttemptOut): boolean {
   return attempt.outcome === "error" || (attempt.status_code ?? 0) >= 400;
 }
 
-/** 折叠行错误摘要：最后一次尝试的错误类型/文案压成一行，全文留在展开详情。 */
+/** 折叠行错误摘要：最后一次尝试的错误类型/文案压成一行（拼装规则见 error-summary）。 */
 function attemptErrorSummary(attempt: LogAttemptOut): string {
-  const status = attempt.status_code;
-  const head = status === null || status === undefined ? "上游失败" : "upstream " + status;
-  const message = (attempt.error_message ?? "").trim();
-  const errorType = (attempt.error_type ?? "").trim();
-  const detail = message || errorType;
-  const summary = detail && detail !== String(status) ? head + ": " + detail : head;
-  return summary.length > ERROR_SUMMARY_MAX_CHARS
-    ? summary.slice(0, ERROR_SUMMARY_MAX_CHARS - 1) + "…"
-    : summary;
+  return attemptFailureSummary(attempt.status_code, attempt.error_type, attempt.error_message);
 }
 
 function outcomeLabel(outcome: string | undefined): string {

@@ -55,8 +55,9 @@ def _probe_summary(row) -> dict | None:
 
 def _body(session: Session, upstream: UpstreamORM) -> dict:
     probe = upstream_ops.latest_probe(session, upstream.id)
-    # ADR-026: keys are rows now; the retired api_key_enc mirror is only a
-    # pre-migration fallback inside key_count, so derive has_api_key from it.
+    # ADR-026: keys are rows now. key_count only counts upstream_keys rows, so
+    # an un-migrated legacy database reports 0 and the console prompts for the
+    # migration instead of pretending the retired mirror is a live key.
     key_count = upstream_ops.key_count(session, upstream)
     model_count = session.scalar(
         select(func.count())
@@ -125,7 +126,7 @@ def list_upstreams(
 def list_keys(upstream_id: str, session: Session = Depends(session_of)) -> dict:
     upstream = _load(session, upstream_id)
     return {
-        "items": upstream_ops.list_keys(session, upstream, _secret_box()),
+        "items": upstream_ops.list_keys(session, upstream),
         "limit": upstream_ops.MAX_UPSTREAM_KEYS,
     }
 

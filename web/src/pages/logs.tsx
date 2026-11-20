@@ -29,6 +29,7 @@ import {
   LATENCY_TONE_BAR_CLASS, LATENCY_TONE_TEXT_CLASS, latencyTone,
 } from "@/components/logs/latency-tone";
 import { LogDetailDrawer } from "@/components/logs/log-detail-drawer";
+import { rowErrorText } from "@/components/logs/error-summary";
 import {
   NoChainRecord,
   RequestAttemptChainPopover,
@@ -504,23 +505,24 @@ function buildLogColumns(spec: LogColumnSpec): ColumnDef<LogRow, unknown>[] {
       id: "datetime",
       header: () => <SortHeader label="日期时间" field="started_at" sort={sort} onSort={onSort} />,
       enableSorting: false,
-      cell: ({ row }) => (
-        <div className="min-w-0 whitespace-nowrap">
-          <p className="tnum text-2sm text-body">{formatDateTime(row.original.started_at_ms, mode)}</p>
-          <p className="mt-0.5">
-            <Badge tone={statusTone(row.original.http_status)}>{statusLabel(row.original.http_status)}</Badge>
-          </p>
-          {/* ticket 04：失败行的错误摘要（可能由最后一次失败尝试补齐），整行扫读即可定位失败点。 */}
-          {row.original.error ? (
-            <p
-              className="mt-0.5 max-w-[180px] truncate text-2xs text-danger-text"
-              title={row.original.error}
-            >
-              {row.original.error}
+      cell: ({ row }) => {
+        // ticket 04：失败行的错误摘要。服务层只回事实字段，摘要统一由 rowErrorText 拼装
+        //（原始日志文本优先，缺失时用最近一次失败尝试兜底），整行扫读即可定位失败点。
+        const errorText = rowErrorText(row.original);
+        return (
+          <div className="min-w-0 whitespace-nowrap">
+            <p className="tnum text-2sm text-body">{formatDateTime(row.original.started_at_ms, mode)}</p>
+            <p className="mt-0.5">
+              <Badge tone={statusTone(row.original.http_status)}>{statusLabel(row.original.http_status)}</Badge>
             </p>
-          ) : null}
-        </div>
-      ),
+            {errorText ? (
+              <p className="mt-0.5 max-w-[180px] truncate text-2xs text-danger-text" title={errorText}>
+                {errorText}
+              </p>
+            ) : null}
+          </div>
+        );
+      },
     },
     {
       id: "model",

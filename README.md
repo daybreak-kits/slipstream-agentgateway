@@ -77,7 +77,7 @@ python scripts/seed_demo.py
 演示账号另有 lisi（代理用户）/ wangwu（普通用户）；管理员引导账号可用 SLIPSTREAM_ADMIN_USERNAME / SLIPSTREAM_ADMIN_PASSWORD 覆盖（系统环境 > .env > 默认，ADR-019）
 ```
 
-旧库升级（可选，新库无需执行）：`python scripts/migrate_priority_v2.py` 与 `python scripts/migrate_multikey_v2.py` 均默认 dry-run，加 `--apply` 写入并打 `v2` 标记；多密钥迁移把退役的 `upstreams.api_key_enc` 镜像转成首把密钥行并清空镜像，之后 no-op。
+旧库升级（可选，新库无需执行）：`python scripts/migrate_priority_v2.py` 与 `python scripts/migrate_multikey_v2.py` 均默认 dry-run，加 `--apply` 写入并打 `v2` 标记；多密钥迁移把退役的 `upstreams.api_key_enc` 镜像转成首把密钥行并清空镜像，之后 no-op；读取路径只认 `upstream_keys` 行，未迁移的旧库密钥数显示 0 并提示运行该脚本。
 
 ### 3）起控制面（3700）
 
