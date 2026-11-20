@@ -102,6 +102,7 @@ class Rollout:
             reason=reason,
         )
         if result.ok:
+            self._prune_stale_key_files(key_files)
             return row
         if on_failure == "raise":
             raise AppError(
@@ -115,6 +116,28 @@ class Rollout:
                 },
             )
         return row
+
+    def _prune_stale_key_files(self, key_files: dict[str, str]) -> None:
+        """Ticket 16: drop managed key files the freshly applied config no longer uses.
+
+        Best effort by contract: a cleanup failure must never turn a successful
+        apply into a failed one. The plan (stale list) is logged before deleting
+        and failures are logged as warnings, so the operator can audit the dir.
+        """
+        try:
+            audit = rendering.prune_key_files(key_files)
+        except Exception:  # pragma: no cover - prune is best-effort
+            logger.warning(
+                "key 文件清理失败，本次配置已生效但受管 keys/ 目录可能残留陈旧文件",
+                exc_info=True,
+            )
+            return
+        if audit.failed:
+            logger.warning(
+                "key 文件清理部分失败：%d 个文件保留请人工处理：%s",
+                len(audit.failed),
+                ", ".join(audit.failed),
+            )
 
     def rollback(self, revision_id: str, principal: str) -> ConfigRevisionORM:
         """Roll the data plane back to an archived revision and re-archive it as active."""

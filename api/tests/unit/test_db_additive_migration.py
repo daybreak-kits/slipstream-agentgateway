@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.orm import Session
 
 from l04_repo.base import init_db
+from l04_repo.orm import UpstreamKeyORM
 
 
 def test_init_db_adds_ticket_08_columns_to_existing_table(tmp_path) -> None:
@@ -69,3 +71,63 @@ def test_init_db_adds_trace_id_and_creates_request_attempts_on_an_old_db(tmp_pat
         ).scalar()
     assert value == ""
     engine.dispose()
+
+def test_init_db_drops_the_retired_upstream_keys_is_primary_column(tmp_path) -> None:
+    """Ticket 16: ADR-026 retired the key-level primary flag; old DBs drop it."""
+    db_path = tmp_path / "old-keys.db"
+    engine = create_engine("sqlite:///" + db_path.as_posix(), future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE upstream_keys ("
+                "id VARCHAR(64) PRIMARY KEY, upstream_id VARCHAR(64), "
+                "label VARCHAR(128), key_enc TEXT, key_suffix VARCHAR(16), "
+                "is_primary BOOLEAN NOT NULL DEFAULT 0, created_at_ms BIGINT)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO upstream_keys "
+                "(id, upstream_id, label, key_enc, key_suffix, is_primary, created_at_ms) "
+                "VALUES ('upk_old', 'ups_old', '旧密钥', 'enc', '-old', 1, 1)"
+            )
+        )
+
+    init_db(engine)
+
+    columns = {column["name"] for column in inspect(engine).get_columns("upstream_keys")}
+    assert "is_primary" not in columns
+    # Existing rows survive the drop; the additive columns still land.
+    assert {"last_test_json", "last_test_at_ms"} <= columns
+    with engine.connect() as connection:
+        row = connection.execute(
+            text("SELECT id, label, key_enc FROM upstream_keys WHERE id='upk_old'")
+        ).one()
+    assert tuple(row) == ("upk_old", "旧密钥", "enc")
+    engine.dispose()
+
+
+def test_fresh_db_has_no_is_primary_column_and_accepts_key_rows(tmp_path) -> None:
+    """Ticket 16: the ORM mapping must not carry the retired column at all."""
+    db_path = tmp_path / "fresh-keys.db"
+    engine = create_engine("sqlite:///" + db_path.as_posix(), future=True)
+    init_db(engine)
+
+    columns = {column["name"] for column in inspect(engine).get_columns("upstream_keys")}
+    assert "is_primary" not in columns
+    with Session(engine) as session:
+        session.add(
+            UpstreamKeyORM(
+                id="upk_new",
+                upstream_id="ups_new",
+                label="新密钥",
+                key_enc="enc2",
+                key_suffix="-new",
+                created_at_ms=1,
+            )
+        )
+        session.commit()
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT COUNT(*) FROM upstream_keys")).scalar() == 1
+    engine.dispose()
+

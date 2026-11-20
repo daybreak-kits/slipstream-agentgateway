@@ -73,8 +73,8 @@ class UpstreamKeyORM(Base):
     primary row and no mirror into ``upstreams.api_key_enc`` (the legacy column
     is kept one version for the migration, never written anymore). Keys are
     equal peers: label/suffix for display, last_test_* for the per-key probe
-    result (upstream_ops.test_keys), is_primary stays as a dead column until the
-    next schema cleanup.
+    result (upstream_ops.test_keys). Ticket 16 also retired the dead
+    is_primary column: init_db drops it from pre-existing databases.
     """
 
     __tablename__ = "upstream_keys"
@@ -86,9 +86,6 @@ class UpstreamKeyORM(Base):
     label: Mapped[str] = mapped_column(String(128), default="")
     key_enc: Mapped[str] = mapped_column(Text, default="")
     key_suffix: Mapped[str] = mapped_column(String(16), default="")
-    # ADR-026: the "primary key" concept is retired; the column is kept one
-    # version so old databases keep loading, nothing reads or writes it.
-    is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at_ms: Mapped[int] = mapped_column(BigInteger, default=0, index=True)
     # Per-key connectivity test (ADR-026 ③): the last POST keys/test outcome for
     # THIS row as a JSON array fragment payload; empty means "never tested".
