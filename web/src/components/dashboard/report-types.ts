@@ -316,7 +316,7 @@ export interface HeatmapReport {
 export interface FlowNodeMeta {
   id: string;
   label: string;
-  stage: "user" | "key" | "model" | "umodel" | "channel";
+  stage: "user" | "key" | "model" | "upstream" | "channel";
   value: number;
 }
 
@@ -329,6 +329,15 @@ export interface FlowLink {
   cost_micro?: number;
   charge_micro?: number;
 }
+
+/** 五段固定轴：后端 collapse 后只返回可见段，前端仍用完整表渲染轴名与恢复入口。 */
+export const FLOW_STAGES = [
+  { id: "user", label: "用户" },
+  { id: "key", label: "连接密钥" },
+  { id: "model", label: "公开模型" },
+  { id: "upstream", label: "上游模型" },
+  { id: "channel", label: "上游" },
+] as const;
 
 export interface FlowReport {
   metric: "requests" | "tokens";

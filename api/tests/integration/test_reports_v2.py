@@ -7,6 +7,7 @@ strftime cannot express correctly, so these tests are the boundary guard.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -360,6 +361,305 @@ def test_flow_has_five_stages_and_conserved_money(client, engine_and_sessionmake
         "cost_micro": 800,
         "charge_micro": 1000,
     }
+
+
+def test_flow_collapse_reconnects_the_remaining_stages(
+    client, engine_and_sessionmaker, fixed_now
+):
+    _, factory = engine_and_sessionmaker
+    _seed(
+        factory,
+        [{"event_id": "evt_flow_collapse", "at_ms": AT - 1000, "cost": 800, "charge": 1000}],
+    )
+
+    body = client.get("/admin/reports/flow?collapse=key").json()
+    assert [stage["id"] for stage in body["stages"]] == ["user", "model", "upstream", "channel"]
+    assert {node["stage"] for node in body["node_meta"].values()} == {
+        "user",
+        "model",
+        "upstream",
+        "channel",
+    }
+    assert len(body["links"]) == 3
+    first = next(link for link in body["links"] if link["source"].startswith("user:"))
+    last = next(link for link in body["links"] if link["target"].startswith("channel:"))
+    assert first["target"].startswith("model:")
+    assert sum(link["requests"] for link in body["links"]) == 3
+    assert first["charge_micro"] == 1000
+    assert last["cost_micro"] == 800
+    assert body["totals"] == {"requests": 1, "tokens": 15, "cost_micro": 800, "charge_micro": 1000}
+
+
+def test_flow_collapse_conserves_every_visible_edge_shape(
+    client, engine_and_sessionmaker, fixed_now
+):
+    _, factory = engine_and_sessionmaker
+    _seed(
+        factory,
+        [{"event_id": "evt_flow_edges", "at_ms": AT - 1000, "cost": 800, "charge": 1000}],
+    )
+    stages = ["user", "key", "model", "upstream", "channel"]
+    prefixes = {
+        "user": "user:",
+        "key": "key:",
+        "model": "model:",
+        "upstream": "umodel:",
+        "channel": "channel:",
+    }
+    original = client.get("/admin/reports/flow").json()
+    assert len(original["links"]) == 4
+
+    for mask in range(1, (1 << len(stages)) - 1):
+        hidden = [stage for bit, stage in enumerate(stages) if mask & (1 << bit)]
+        if len(hidden) > len(stages) - 2:
+            continue
+        body = client.get("/admin/reports/flow", params={"collapse": ",".join(hidden)}).json()
+        visible = [stage for stage in stages if stage not in hidden]
+        assert [stage["id"] for stage in body["stages"]] == visible
+        assert len(body["links"]) == len(visible) - 1
+        assert sum(link["requests"] for link in body["links"]) == 1 * (len(visible) - 1)
+        first = next(
+            link for link in body["links"] if link["source"].startswith(prefixes[visible[0]])
+        )
+        last = next(
+            link for link in body["links"] if link["target"].startswith(prefixes[visible[-1]])
+        )
+        assert first["charge_micro"] == 1000
+        assert last["cost_micro"] == 800
+        assert sum(link["charge_micro"] for link in body["links"]) == 1000
+        assert sum(link["cost_micro"] for link in body["links"]) == 800
+        assert all(link["source"] != link["target"] for link in body["links"])
+
+
+def test_flow_collapse_rejects_unknown_or_too_many_stages(client, fixed_now):
+    unknown = client.get("/admin/reports/flow", params={"collapse": "nope,user"})
+    assert unknown.status_code == 422
+    detail = unknown.json()
+    assert detail["code"] == "VALIDATION_ERROR"
+    assert detail["details"]["collapse"] == ["nope"]
+    assert detail["details"]["allowed"] == ["user", "key", "model", "upstream", "channel"]
+    for raw in ("user,key,model,upstream", "user,key,model,upstream,channel"):
+        too_many = client.get("/admin/reports/flow", params={"collapse": raw})
+        assert too_many.status_code == 422
+        assert too_many.json()["code"] == "VALIDATION_ERROR"
+    # 恰好保留两段是合法下界：隐藏 3 段后 visible 只剩首末两段。
+    lower_bound = client.get("/admin/reports/flow", params={"collapse": "user,key,model"})
+    assert lower_bound.status_code == 200
+    assert [stage["id"] for stage in lower_bound.json()["stages"]] == ["upstream", "channel"]
+
+
+_FLOW_DEFAULT_GOLDEN = {
+    "metric": "requests",
+    "nodes": [
+        "user:usr_t12",
+        "key:none",
+        "model:nebula-chat-1",
+        "umodel:nebula-01",
+        "channel:青岚云",
+    ],
+    "node_meta": {
+        "user:usr_t12": {"id": "user:usr_t12", "label": "晓岚", "stage": "user", "value": 1},
+        "key:none": {"id": "key:none", "label": "无密钥", "stage": "key", "value": 1},
+        "model:nebula-chat-1": {
+            "id": "model:nebula-chat-1",
+            "label": "nebula-chat-1",
+            "stage": "model",
+            "value": 1,
+        },
+        "umodel:nebula-01": {
+            "id": "umodel:nebula-01",
+            "label": "nebula-01",
+            "stage": "upstream",
+            "value": 1,
+        },
+        "channel:青岚云": {
+            "id": "channel:青岚云",
+            "label": "青岚云",
+            "stage": "channel",
+            "value": 1,
+        },
+    },
+    "links": [
+        {
+            "source": "key:none",
+            "target": "model:nebula-chat-1",
+            "requests": 1,
+            "tokens": 15,
+            "cost_micro": 0,
+            "charge_micro": 0,
+            "value": 1,
+        },
+        {
+            "source": "model:nebula-chat-1",
+            "target": "umodel:nebula-01",
+            "requests": 1,
+            "tokens": 15,
+            "cost_micro": 0,
+            "charge_micro": 0,
+            "value": 1,
+        },
+        {
+            "source": "umodel:nebula-01",
+            "target": "channel:青岚云",
+            "requests": 1,
+            "tokens": 15,
+            "cost_micro": 800,
+            "charge_micro": 0,
+            "value": 1,
+        },
+        {
+            "source": "user:usr_t12",
+            "target": "key:none",
+            "requests": 1,
+            "tokens": 15,
+            "cost_micro": 0,
+            "charge_micro": 1000,
+            "value": 1,
+        },
+    ],
+    "stages": [
+        {"id": "user", "label": "用户"},
+        {"id": "key", "label": "连接密钥"},
+        {"id": "model", "label": "公开模型"},
+        {"id": "upstream", "label": "上游模型"},
+        {"id": "channel", "label": "上游"},
+    ],
+    "totals": {"requests": 1, "tokens": 15, "cost_micro": 800, "charge_micro": 1000},
+    "currency": "CNY",
+    "fx_missing": [],
+    "estimate_note": "token amounts fold cache into input (stage B pending)",
+    "range": "all",
+    "from_ms": 0,
+    "to_ms": 1773115200001,
+    "timezone": "Asia/Shanghai",
+}
+
+
+def test_flow_default_payload_is_byte_identical_to_pre_collapse_golden(
+    client, engine_and_sessionmaker, fixed_now
+):
+    """默认（不传 collapse）输出必须与 collapse 引入前逐字节一致。
+
+    Golden 取自 collapse 之前的实现（HEAD e1c6220）对同一份种子的响应；任何
+    默认路径的字段/顺序/取值变化都会在这里显形。
+    """
+    _, factory = engine_and_sessionmaker
+    _seed(
+        factory,
+        [{"event_id": "evt_flow_golden", "at_ms": AT - 1000, "cost": 800, "charge": 1000}],
+    )
+    body = client.get("/admin/reports/flow").json()
+    assert json.dumps(body, sort_keys=True, ensure_ascii=False) == json.dumps(
+        _FLOW_DEFAULT_GOLDEN, sort_keys=True, ensure_ascii=False
+    )
+    # 空 collapse / 只有分隔符的 collapse 等价于缺省，默认输出不因新参数而变化。
+    for raw in ("", ",,", "  "):
+        assert client.get("/admin/reports/flow", params={"collapse": raw}).json() == body
+
+
+def test_flow_collapse_dedupes_and_ignores_blank_entries(
+    client, engine_and_sessionmaker, fixed_now
+):
+    _, factory = engine_and_sessionmaker
+    _seed(factory, [{"event_id": "evt_flow_dedupe", "at_ms": AT - 1000}])
+    reference = client.get("/admin/reports/flow", params={"collapse": "key"}).json()
+    for raw in ("key,key", "key, key", " key ", ",key,", ",,key"):
+        body = client.get("/admin/reports/flow", params={"collapse": raw}).json()
+        assert body == reference, raw
+    default = client.get("/admin/reports/flow").json()
+    for raw in ("", ",", ",,,", "   "):
+        assert client.get("/admin/reports/flow", params={"collapse": raw}).json() == default, raw
+
+
+def test_flow_collapse_conserves_multi_path_graph(client, engine_and_sessionmaker, fixed_now):
+    """任意合法隐藏组合下节点/边守恒，金额只锚定首末可见边，totals 按完整路径累计。"""
+    _, factory = engine_and_sessionmaker
+    _seed(
+        factory,
+        [
+            {"event_id": "evt_mp1", "at_ms": AT - 1000},
+            {
+                "event_id": "evt_mp2",
+                "at_ms": AT - 2000,
+                "public": "nebula-chat-2",
+                "upstream": "nebula-02",
+                "cost": 300,
+                "charge": 700,
+            },
+            {
+                "event_id": "evt_mp3",
+                "at_ms": AT - 3000,
+                "public": "nebula-chat-2",
+                "upstream": "nebula-03",
+                "provider": "OpenRouter",
+                "cost": 200,
+                "charge": 400,
+            },
+        ],
+    )
+    stages = ["user", "key", "model", "upstream", "channel"]
+    totals = {"requests": 3, "tokens": 45, "cost_micro": 1300, "charge_micro": 2100}
+    full = client.get("/admin/reports/flow").json()
+    nodes_by_stage = {
+        stage: {node_id for node_id, meta in full["node_meta"].items() if meta["stage"] == stage}
+        for stage in stages
+    }
+
+    for metric in ("requests", "tokens"):
+        step = totals["requests"] if metric == "requests" else totals["tokens"]
+        for mask in range(1, (1 << len(stages)) - 1):
+            hidden = [stage for bit, stage in enumerate(stages) if mask & (1 << bit)]
+            if len(hidden) > len(stages) - 2:
+                continue  # 不足两段由 422 覆盖，不是投影输入
+            visible = [stage for stage in stages if stage not in hidden]
+            body = client.get(
+                "/admin/reports/flow", params={"metric": metric, "collapse": ",".join(hidden)}
+            ).json()
+
+            assert body["totals"] == totals
+            assert [stage["id"] for stage in body["stages"]] == visible
+            meta = body["node_meta"]
+            assert set(body["nodes"]) == set(meta)
+            for stage in visible:
+                assert {node_id for node_id, node in meta.items() if node["stage"] == stage} == (
+                    nodes_by_stage[stage]
+                )
+            assert {node["stage"] for node in meta.values()} == set(visible)
+
+            links = body["links"]
+            pairs = [(link["source"], link["target"]) for link in links]
+            assert len(set(pairs)) == len(pairs), "重复边应已合并"
+            assert all(source != target for source, target in pairs), "投影后不允许自环"
+            assert all(source in meta and target in meta for source, target in pairs)
+            assert all(link["requests"] > 0 for link in links)
+            value_field = "requests" if metric == "requests" else "tokens"
+            assert all(link["value"] == link[value_field] for link in links)
+
+            meta_stage = {node_id: node["stage"] for node_id, node in meta.items()}
+            first_edges = [link for link in links if meta_stage[link["source"]] == visible[0]]
+            last_edges = [link for link in links if meta_stage[link["target"]] == visible[-1]]
+            assert sum(link["value"] for link in first_edges) == step
+            assert sum(link["value"] for link in last_edges) == step
+            assert sum(link["charge_micro"] for link in first_edges) == totals["charge_micro"]
+            assert sum(link["cost_micro"] for link in last_edges) == totals["cost_micro"]
+            assert sum(link["charge_micro"] for link in links) == totals["charge_micro"]
+            assert sum(link["cost_micro"] for link in links) == totals["cost_micro"]
+
+            in_sum: dict[str, int] = {}
+            out_sum: dict[str, int] = {}
+            for link in links:
+                out_sum[link["source"]] = out_sum.get(link["source"], 0) + link["value"]
+                in_sum[link["target"]] = in_sum.get(link["target"], 0) + link["value"]
+            for node_id, node in meta.items():
+                stage = node["stage"]
+                if stage == visible[0]:
+                    assert node["value"] == out_sum[node_id]
+                    assert node_id not in in_sum
+                elif stage == visible[-1]:
+                    assert node["value"] == in_sum[node_id]
+                    assert node_id not in out_sum
+                else:
+                    assert node["value"] == in_sum[node_id] == out_sum[node_id]
 
 
 def test_heatmap_shapes_and_cells(client, engine_and_sessionmaker, fixed_now):

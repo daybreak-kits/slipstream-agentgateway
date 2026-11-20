@@ -120,19 +120,24 @@ export function useReportsHeatmap(range: HeatmapRange, metric: HeatmapMetric) {
 export interface FlowParams {
   window: TimeWindow;
   metric: "requests" | "tokens";
+  /** 被隐藏的阶段 id；后端按完整五元组路径投影后返回可见子图。 */
+  collapse?: string[];
   enabled?: boolean;
 }
 
 /** 分流：五段桑基（用户 → 密钥 → 公开模型 → 上游模型 → 上游渠道）。 */
-export function useReportsFlow({ window, metric, enabled = true }: FlowParams) {
+export function useReportsFlow({ window, metric, collapse = [], enabled = true }: FlowParams) {
+  // 隐藏集合是集合语义：排序后再进查询键/参数，同一组隐藏阶段命中同一份缓存。
+  const hidden = [...collapse].sort().join(",");
   return useQuery({
-    queryKey: ["reports", "flow", ...timeWindowKey(window), metric],
+    queryKey: ["reports", "flow", ...timeWindowKey(window), metric, hidden],
     enabled,
     placeholderData: keepPreviousData,
     queryFn: async ({ signal }): Promise<FlowReport> => {
-      if (useMock) return mockFlow(metric);
+      if (useMock) return mockFlow(metric, collapse);
       const params = windowParams(window);
       params.set("metric", metric);
+      if (hidden) params.set("collapse", hidden);
       return api.get<FlowReport>(REPORT_PATHS.flow + "?" + params.toString(), { signal });
     },
   });
