@@ -3,6 +3,8 @@
 
 export interface LogRow {
   event_id: string;
+  /** M5-a：AG 启用 tracing 后填充；空串 = 该请求没有路由链数据。 */
+  trace_id: string;
   started_at_ms: number;
   completed_at_ms: number;
   duration_ms: number;
