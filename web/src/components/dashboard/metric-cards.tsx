@@ -28,6 +28,9 @@ interface DashboardKpisProps {
  * 缓存字段待后端 H 合入前为 undefined，按 0 降级（缓存卡显示「无缓存」），不报错。
  * 速率口径（GLOSSARY §5）：RPM = 请求 ÷ 活跃分钟、TPM = 词元 ÷ 活跃分钟（分母是活跃分钟，
  * 不是时间窗长度）；「最高峰」= totals.peak_rpm/peak_tpm，字段缺位（旧后端/mock 未合入）降级「—」。
+ * 图标口径（W5 ticket 10）：八卡八形 + 分类 tint 双编码——请求 Activity、词元 Layers、
+ * 缓存 Database、费用 Receipt、成本 CircleDollarSign、P50 Gauge、RPM Timer、TPM Zap；
+ * 同类账目同色（flow/token/cache/cost/brand/latency），不再四张卡共用 primary。
  */
 export function DashboardKpis({ data, latency, loading, error, onRetry }: DashboardKpisProps) {
   const { can } = usePermissions();
@@ -143,16 +146,16 @@ export function DashboardKpis({ data, latency, loading, error, onRetry }: Dashbo
         label="RPM 请求/分"
         value={loading ? undefined : fmtRpm(rpm)}
         hint={`活跃 ${fmtInt(activeMinutes)} 分钟 · 最高峰 ${fmtRpm(peakRpm)}`}
-        icon={METRIC_ICONS.requests.icon}
-        tone={METRIC_ICONS.requests.tone}
+        icon={METRIC_ICONS.rpm.icon}
+        tone={METRIC_ICONS.rpm.tone}
         loading={loading}
       />
       <MetricCard
         label="TPM 词元/分"
         value={loading ? undefined : fmtInt(tpm)}
         hint={`最高峰 ${fmtInt(peakTpm)} 词元/分`}
-        icon={METRIC_ICONS.tokens.icon}
-        tone={METRIC_ICONS.tokens.tone}
+        icon={METRIC_ICONS.tpm.icon}
+        tone={METRIC_ICONS.tpm.tone}
         loading={loading}
       />
     </div>

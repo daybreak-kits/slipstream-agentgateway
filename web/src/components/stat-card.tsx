@@ -3,23 +3,11 @@ import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { IconBadge } from "@/components/ui/icon-badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fmtPctPoint } from "@/lib/format";
 import type { MetricTone } from "@/lib/metric-icons";
 import { cn } from "@/lib/utils";
-
-/**
- * tone → 36×36 图标方块的「12% 底色 + 主色图标」组合。
- * 底色走 token 的透明度变体，深色主题自动跟随，不需要第二套颜色。
- */
-const TONE_BLOCK: Record<MetricTone, string> = {
-  primary: "bg-primary/12 text-primary",
-  success: "bg-success/12 text-success-text",
-  warning: "bg-warning/12 text-warning-text",
-  danger: "bg-danger/12 text-danger-text",
-  info: "bg-info/12 text-info",
-  neutral: "bg-surface-2 text-faint",
-};
 
 export interface MetricCardProps {
   label: string;
@@ -88,15 +76,9 @@ export function MetricCard({
     >
       <CardContent className={cn("flex items-start gap-3", dense ? "p-3" : "p-4")}>
         {Icon && (
-          <span
-            className={cn(
-              "flex h-9 w-9 shrink-0 items-center justify-center rounded-control",
-              TONE_BLOCK[tone],
-            )}
-            aria-hidden="true"
-          >
-            <Icon className="h-4 w-4" strokeWidth={1.75} />
-          </span>
+          // 图标方块 = ui/icon-badge 的轻盈分类 tint（--badge-*-bg/fg）；
+          // 形状由 icon 决定、颜色由分类 tone 决定，配合右侧标签文字双编码。
+          <IconBadge icon={Icon} tone={tone} size="md" className="rounded-control" />
         )}
         <div className="min-w-0 flex-1 space-y-1">
           <div className="truncate text-xs text-muted-foreground">{label}</div>
@@ -166,7 +148,14 @@ export interface StatCardProps {
 /**
  * @deprecated 兼容旧页面的纯文本卡（users / policies 还在用）。
  * 新代码一律 <MetricCard icon={METRIC_ICONS.x.icon} tone={METRIC_ICONS.x.tone} />。
+ * 旧 tone 映射到分类色板：default→neutral、primary→brand、warning→cost。
  */
+const LEGACY_TONE: Record<NonNullable<StatCardProps["tone"]>, MetricTone> = {
+  default: "neutral",
+  primary: "brand",
+  warning: "cost",
+};
+
 export function StatCard({ tone = "default", ...rest }: StatCardProps) {
-  return <MetricCard {...rest} tone={tone === "default" ? "neutral" : tone} />;
+  return <MetricCard {...rest} tone={LEGACY_TONE[tone]} />;
 }
