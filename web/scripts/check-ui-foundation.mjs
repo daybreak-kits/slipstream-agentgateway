@@ -285,7 +285,7 @@ check("壳层：侧栏 248/72、顶栏 64、内容区 max-w-480 + 24/32 padding"
 });
 
 // ---------- 6. 指标卡与图标语义（ticket 22：视觉打磨 1/2） ----------
-check("MetricCard：36 图标方块 + tone 12% 底色 + 20px 数值 + 13px 标签 + 12px 说明", async () => {
+check("MetricCard：36 图标方块 + 分类 tint 底色 + 20px 数值 + 13px 标签 + 12px 说明", async () => {
   const { MetricCard } = await load("/src/components/stat-card.tsx");
   const { METRIC_ICONS } = await load("/src/lib/metric-icons.ts");
   const visual = METRIC_ICONS.requests;
@@ -300,8 +300,10 @@ check("MetricCard：36 图标方块 + tone 12% 底色 + 20px 数值 + 13px 标�
   );
   expect(html.includes("h-9 w-9"), "图标方块必须是 36×36（h-9 w-9）");
   expect(html.includes("rounded-control"), "图标方块圆角必须是 rounded-control（8px）");
-  expect(/bg-primary\/12/.test(html), "tone 底色必须是主色 12% 透明度");
-  expect(html.includes("text-primary"), "彩色方块里的图标必须是主色");
+  // W5 ticket 10：指标图标走 ui/icon-badge 的轻盈分类 tint（--badge-*-bg/fg 浅色 wash），
+  // 不再所有卡共用 primary 12% 底色；底色与前景必须来自同一分类。
+  expect(html.includes("bg-[var(--badge-flow-bg)]"), "tone 底色必须是分类 tint（badge-flow）");
+  expect(html.includes("text-[var(--badge-flow-fg)]"), "分类方块里的图标必须用同组前景色");
   expect(/text-metric[^"]*font-semibold/.test(html), "数值必须是 text-metric（20px）半粗");
   expect(html.includes("tnum"), "数值必须 tnum（等宽数字）");
   expect(/text-xs[^"]*text-muted-foreground/.test(html), "标签必须是 13px 中性色");
@@ -316,10 +318,10 @@ check("MetricCard：dense 档位更紧，trend 显示方向箭头与百分比", 
   const { METRIC_ICONS } = await load("/src/lib/metric-icons.ts");
   const { Activity } = await import("lucide-react");
   const dense = render(
-    createElement(MetricCard, { label: "成本", value: "¥1.0000", icon: Activity, tone: "warning", dense: true }),
+    createElement(MetricCard, { label: "成本", value: "¥1.0000", icon: Activity, tone: "cost", dense: true }),
   );
   const standard = render(
-    createElement(MetricCard, { label: "成本", value: "¥1.0000", icon: Activity, tone: "warning" }),
+    createElement(MetricCard, { label: "成本", value: "¥1.0000", icon: Activity, tone: "cost" }),
   );
   expect(dense.includes("p-3") && !dense.includes("p-4"), "dense 档位内边距必须是 12（p-3）");
   expect(standard.includes("p-4"), "标准档位内边距必须是 16（p-4）");
@@ -344,9 +346,23 @@ check("MetricCard：加载骨架、失败重试与 StatCard 向后兼容导出",
 
 check("metric-icons：统一 icon/tone 映射覆盖指标条全部指标", () => {
   const text = read("src/lib/metric-icons.ts");
-  includesAll(text, ["requests:", "tokens:", "cost:", "charge:", "margin:", "latency:", "cache:", "errors:"], "指标映射");
-  includesAll(text, ["Activity", "Layers", "Wallet", "Receipt", "TrendingUp", "Timer", "Zap", "TriangleAlert"], "lucide 图标");
-  includesAll(text, ['tone: "primary"', 'tone: "success"', 'tone: "warning"', 'tone: "danger"', 'tone: "info"'], "tone 语义色");
+  includesAll(
+    text,
+    ["requests:", "tokens:", "cache:", "charge:", "cost:", "margin:", "latency:", "rpm:", "tpm:", "errors:"],
+    "指标映射",
+  );
+  // ticket 10：缓存=Database（不再是 Zap）、P50=Gauge（不再与冷却的 Timer 冲突）、
+  // 成本=CircleDollarSign（不再是泛用 Wallet）、RPM/TPM 各有独立来源。
+  includesAll(
+    text,
+    ["Activity", "Layers", "Database", "Receipt", "CircleDollarSign", "TrendingUp", "Gauge", "Timer", "Zap", "TriangleAlert"],
+    "lucide 图标",
+  );
+  // 指标分类色来自 ui/icon-badge 的轻盈 badge 色板，不再借用状态语义色（info/primary/success/warning）。
+  includesAll(text, ['tone: "flow"', 'tone: "token"', 'tone: "cache"', 'tone: "cost"', 'tone: "latency"', 'tone: "brand"'], "分类色");
+  for (const legacyTone of ['tone: "info"', 'tone: "primary"', 'tone: "success"', 'tone: "warning"']) {
+    expect(!text.includes(legacyTone), "指标图标不得再用状态语义色 " + legacyTone);
+  }
 });
 
 check("指标条：grid gap-3 + 2/3/4/6 列响应式（xl 起六列，八卡 6+2 两行）", () => {
@@ -688,6 +704,80 @@ check("看板 KPI 渲染：大数走千分位整数，RPM 两位、百分比一�
   expect(html.includes("1,179"), "TPM 必须千分位整数");
   expect(html.includes("41.5%"), "缓存命中率必须一位小数百分比");
   expect(!/[0-9]+\.[0-9]+[KMB]/.test(html), "KPI 不得出现带小数的 K/M/B 紧凑格式");
+});
+
+check("看板 KPI 图标：八卡八形 + 分类 tint 双重编码（缓存/P50 不用 info、不再四卡共用 primary）", async () => {
+  const { DashboardKpis } = await load("/src/components/dashboard/metric-cards.tsx");
+  const { METRIC_ICONS } = await load("/src/lib/metric-icons.ts");
+  const data = {
+    currency: "CNY",
+    totals: {
+      requests: 1_234_567,
+      error_count: 12,
+      input_tokens: 400_000,
+      cache_read_tokens: 150_000,
+      cache_write_tokens: 15_920,
+      output_tokens: 0,
+      tokens: 565_920,
+      active_minutes: 480,
+      peak_rpm: 123.456,
+      peak_tpm: 4567.89,
+      charge_micro: 12_345_678,
+      cost_micro: 8_765_432,
+    },
+  };
+  const latency = { total: { p50_ms: 234.5, p95_ms: 890 }, paired_samples: 120, min_samples: 5 };
+  // 费用 / 成本·毛利率 卡受权限控制；预填 /admin/auth/me 缓存让八卡全部渲染。
+  const { PermissionsProvider } = await load("/src/lib/permissions.ts");
+  const { AUTH_ME_QUERY_KEY } = await load("/src/lib/auth.ts");
+  queryClient.setQueryData(AUTH_ME_QUERY_KEY, {
+    id: "u-1",
+    username: "admin",
+    name: "管理员",
+    role: "admin",
+    status: "active",
+    permissions: ["billing:spend", "billing:cost"],
+  });
+  const html = render(
+    createElement(
+      PermissionsProvider,
+      null,
+      createElement(DashboardKpis, { data, latency, loading: false, error: null, onRetry: () => {} }),
+    ),
+  );
+
+  // ① 文字 + 图标形状双编码：八张卡的标签文字都在，图标形状八卡八形、各自对应指标语义。
+  const labels = ["请求量", "词元", "缓存", "费用", "成本 · 毛利率", "P50 延迟", "RPM 请求/分", "TPM 词元/分"];
+  for (const label of labels) expect(html.includes(label), "缺少 KPI 卡片：" + label);
+  // 只取每个 svg 的第一个图标类名：lucide 还会把别名（如 layers-3）追加进 class，别把别名当图形。
+  const icons = [...html.matchAll(/class="lucide lucide-([a-z0-9-]+)/g)].map((match) => match[1]);
+  const uniqueIcons = [...new Set(icons)];
+  expect(uniqueIcons.length === 8, "八卡图标形状必须互不相同，实际：" + uniqueIcons.join("、"));
+  includesAll(
+    uniqueIcons.join("、"),
+    ["activity", "layers", "database", "receipt", "circle-dollar-sign", "gauge", "timer", "zap"],
+    "KPI 图标语义",
+  );
+  expect(!uniqueIcons.includes("wallet"), "成本不再用泛用的 Wallet 图标");
+  expect(html.includes("h-4 w-4"), "指标图标必须 16px（h-4 w-4）");
+
+  // ② 配色：轻盈分类 tint，至少 6 种可区分色；缓存紫、P50 绿，都不再是 info 蓝灰。
+  const badgeTones = [...html.matchAll(/bg-\[var\(--badge-([a-z]+)-bg\)\]/g)].map((match) => match[1]);
+  // brand 分类走 primary 15% 浅底（ui/icon-badge 既有定义），其余分类走 badge 色板。
+  const brandCount = (html.match(/bg-primary\/15/g) || []).length;
+  expect(badgeTones.length + brandCount === 8, "八卡图标底色必须全部走分类 tint（badge 色板 + brand）");
+  const uniqueTones = [...new Set(badgeTones)];
+  const distinctTints = uniqueTones.length + (brandCount > 0 ? 1 : 0);
+  expect(distinctTints >= 6, "分类 tint 至少 6 种可区分色，实际：" + uniqueTones.join("、") + (brandCount > 0 ? "、brand" : ""));
+  expect(uniqueTones.includes("cache"), "缓存必须用 cache 分类色（紫），不得再是 info 灰");
+  expect(uniqueTones.includes("latency"), "P50 延迟必须用 latency 分类色（绿），不得再是 info 灰");
+  expect(!badgeTones.includes("info"), "KPI 图标不得再用 info 灰");
+  expect(brandCount <= 1, "最多一张卡用 primary/brand，不能再四张卡共用 primary");
+
+  // ③ 成本/毛利率/费用三个金钱语义图标互相区分。
+  expect(METRIC_ICONS.cost.icon !== METRIC_ICONS.margin.icon, "成本与毛利率图标必须区分");
+  expect(METRIC_ICONS.cost.icon !== METRIC_ICONS.charge.icon, "成本与费用图标必须区分");
+  expect(METRIC_ICONS.latency.icon !== METRIC_ICONS.rpm.icon, "P50 与 RPM 图标必须区分");
 });
 
 check("日志：费用列两行（金额 + 明细），金额两位、毛利一位", () => {

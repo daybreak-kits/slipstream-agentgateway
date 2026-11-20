@@ -370,6 +370,98 @@ async function main() {
     return "浅色/深色/跟随系统 均可切换";
   });
 
+  await test("dashboard.kpis", "看板 KPI：数字口径、八卡图标语义与轻盈分类配色", async () => {
+    await admin.ensureAuthed();
+    const from = admin.consoleErrors.length;
+    await admin.visit("/dashboard", "数据看板");
+    await admin.page.locator("main").getByText("请求量", { exact: true }).first().waitFor({ state: "visible", timeout: 15000 });
+
+    // 指标 → 期望图标（形状即语义）：缓存用 Database、P50 用 Gauge、成本用 CircleDollarSign，
+    // 费用 Receipt / 请求 Activity / 词元 Layers / RPM Timer / TPM Zap，八卡八形。
+    const EXPECTED = [
+      ["请求量", "activity"],
+      ["词元", "layers"],
+      ["缓存", "database"],
+      ["费用", "receipt"],
+      ["成本 · 毛利率", "circle-dollar-sign"],
+      ["P50 延迟", "gauge"],
+      ["RPM 请求/分", "timer"],
+      ["TPM 词元/分", "zap"],
+    ];
+    const cards = await admin.page.evaluate((labels) => {
+      const iconName = (svg) => {
+        const classes = (svg.getAttribute("class") || "").split(/\s+/);
+        const primary = classes.find((name) => name.startsWith("lucide-"));
+        return primary ? primary.slice("lucide-".length) : "";
+      };
+      return labels.map((label) => {
+        const leaves = Array.from(document.querySelectorAll("main *")).filter(
+          (el) => el.children.length === 0 && (el.textContent || "").trim() === label,
+        );
+        const card = leaves[0]?.closest('[data-slot="card"]');
+        if (!card) return { label, missing: true };
+        const svg = card.querySelector("svg.lucide");
+        const badge = svg?.closest("span");
+        return {
+          label,
+          missing: false,
+          icon: svg ? iconName(svg) : "",
+          iconClass: (svg?.getAttribute("class") || "") + " " + (badge?.getAttribute("class") || ""),
+          bg: badge ? getComputedStyle(badge).backgroundColor : "",
+          value: (card.querySelector(".tnum")?.textContent || "").trim(),
+        };
+      });
+    }, EXPECTED.map(([label]) => label));
+
+    // ① 八卡都在，且每卡同时有图标形状 + 文字标签（双重编码，不只靠颜色区分）。
+    for (const [label] of EXPECTED) {
+      assert(cards.some((card) => card.label === label && !card.missing), "看板缺少 KPI 卡：" + label);
+      assert(cards.find((card) => card.label === label).icon !== "", label + " 缺少图标形状");
+    }
+
+    // ② 图标语义：八卡八形，形状与指标一一对应。
+    const iconNames = cards.map((card) => card.icon);
+    assert(new Set(iconNames).size === 8, "八卡图标形状必须互不相同，实际：" + iconNames.join("、"));
+    for (const [label, icon] of EXPECTED) {
+      const card = cards.find((item) => item.label === label);
+      assert(card.icon === icon, label + " 图标应为 " + icon + "，实际：" + card.icon);
+    }
+
+    // ③ 轻盈分类配色：至少 5 种可区分图标底色；缓存与 P50 不同色；最多一张卡用 primary。
+    const backgrounds = cards.map((card) => card.bg);
+    assert(new Set(backgrounds).size >= 5, "KPI 图标底色至少 5 种可区分色，实际 " + new Set(backgrounds).size + " 种");
+    const cacheBg = cards.find((card) => card.label === "缓存").bg;
+    const p50Bg = cards.find((card) => card.label === "P50 延迟").bg;
+    assert(cacheBg !== p50Bg, "缓存与 P50 图标底色不能相同（不得再共用 info 灰）");
+    const primaryCards = cards.filter((card) => /bg-primary\/15|text-primary\b/.test(card.iconClass));
+    assert(primaryCards.length <= 1, "KPI 图标最多一张卡用 primary，不能再四张卡共用");
+    for (const card of cards) assert(!/text-info\b/.test(card.iconClass), card.label + " 图标不得再用 info 灰");
+
+    // ④ 数字口径：计数/词元/TPM 千分位整数、RPM 两位、金额两位、延迟秒两位。
+    const COUNT_RE = /^-?\d{1,3}(?:,\d{3})*$/;
+    const RPM_RE = /^\d{1,3}(?:,\d{3})*\.\d{2}$/;
+    const MONEY_RE = /^-?[¥$€]?\d{1,3}(?:,\d{3})*\.\d{2}$/;
+    const valueOf = (label) => cards.find((card) => card.label === label).value;
+    for (const label of ["请求量", "词元", "TPM 词元/分"]) {
+      assert(COUNT_RE.test(valueOf(label)), label + " 必须是千分位整数，实际：" + valueOf(label));
+    }
+    assert(RPM_RE.test(valueOf("RPM 请求/分")), "RPM 必须两位小数，实际：" + valueOf("RPM 请求/分"));
+    for (const label of ["费用", "成本 · 毛利率"]) {
+      assert(MONEY_RE.test(valueOf(label)), label + " 必须两位小数金额，实际：" + valueOf(label));
+    }
+    const cacheValue = valueOf("缓存");
+    assert(cacheValue === "无缓存" || COUNT_RE.test(cacheValue), "缓存必须千分位整数或「无缓存」，实际：" + cacheValue);
+    const p50 = valueOf("P50 延迟");
+    assert(
+      /^\d+\.\d{2}s$/.test(p50) || p50 === "—" || p50.startsWith("样本不足"),
+      "P50 延迟必须两位小数秒或占位，实际：" + p50,
+    );
+
+    await admin.shot("dashboard-kpis");
+    admin.assertNoNewErrors(from, "看板 KPI");
+    return "八卡数字口径 + 8 个图标形状 + " + new Set(backgrounds).size + " 种分类底色";
+  });
+
   await test("dashboard.tabs", "看板三标签（柱形/面积/分流）与热力图 7D/30D/365D 可切换", async () => {
     await admin.ensureAuthed();
     const from = admin.consoleErrors.length;
