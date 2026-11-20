@@ -5,11 +5,15 @@
  * 覆盖（对应 docs/ACCEPTANCE.md「自动可执行」条目）：
  *   - 登录页品牌、错误密码、真实登录
  *   - 管理员登录后主导航 8+ 页面逐页加载、无错误边界/NaN/undefined、console 无 error
- *   - 策略 / 护栏 / MCP 页面可打开且可编辑入口存在
- *   - 上游详情五个 Tab（基本信息/密钥/模型/改写/健康）可切换
- *   - 模型管理两 Tab、设置页分组（未合并的 ticket 记为 PENDING，见下）
+ *   - 网关策略三 Tab（流量策略/护栏/MCP）页面可打开且有编辑入口
+ *   - 上游详情四个 Tab（连接与模型/路由与模型/请求与响应/其他设置）可切换；逐模型探测/逐把密钥测试
+ *   - 模型管理两 Tab、公开模型「编辑」进整页 /models/public/:id（单 PATCH/唯一保存/成员 chip）
+ *   - 设置页分组（用户设置 5 段 + 运营设置 3 段）
+ *   - 看板三 Tab + 分流隐藏阶段（后端 collapse 投影）+ 8 KPI 卡 + 热力图三档
+ *   - 日志模型列两行 +「N 次尝试」路由链 popover + 费用两行
+ *   - 表格操作列 sticky 冻结、头身对齐、数字千分位；字段级脏标记与语义色
  *   - 模型试验 20 参数、会话复制/删除/重试、模型对话框
- *   - 普通用户看不到成本/管理员入口；直连 /cost 与 /admins 被前端拦截；后端 403；字段级权限缺失
+ *   - 普通用户看不到成本/管理员/用户管理入口；已删入口 /cost 404、/admins 跳转后无权限；后端 403；字段级权限缺失
  *   - 代理用户可进用户页、仍无成本
  *
  * 运行前提：
@@ -895,9 +899,10 @@ async function main() {
     const required = ["模型试验", "上游管理", "连接密钥", "价目管理"];
     const missing = required.filter((label) => !labels.includes(label));
     assert(missing.length === 0, "导航缺少：" + missing.join("、") + "；当前为 " + labels.join("/"));
-    for (const old of ["游乐场", "客户端密钥", "上游"]) {
+    for (const old of ["游乐场", "客户端密钥", "上游", "对外模型", "封禁"]) {
       assert(!labels.includes(old), "导航仍用旧术语：" + old);
     }
+    assert(!labels.some((label) => label === "渠道" || /(^|[^游])渠道$/.test(label)), "导航出现裸「渠道」：" + labels.join("/"));
     return "术语与 spec 一致；公开模型在模型管理 Tab";
   });
 
@@ -921,9 +926,10 @@ async function main() {
     await user.settle();
     const links = await user.navLinks();
     const hrefs = links.map((l) => l.href);
-    const forbidden = ["/cost", "/admins", "/users"].filter((href) => hrefs.includes(href));
-    assert(forbidden.length === 0, "普通用户侧栏出现受限入口：" + forbidden.join("、"));
-    assert(hrefs.includes("/revenue") || hrefs.includes("/settings"), "普通用户没有「营收（用户）」入口，billing:spend 应可见");
+    const forbidden = ["/bills", "/cost", "/revenue", "/admins", "/users", "/roles"].filter((href) => hrefs.includes(href));
+    assert(forbidden.length === 0, "普通用户侧栏出现受限/已删入口：" + forbidden.join("、"));
+    assert(hrefs.includes("/settings"), "普通用户侧栏缺少「用户设置」入口（billing:spend 应可见）");
+    assert(hrefs.length >= 6, "普通用户导航项过少（预期含看板/日志/模型试验/用户设置等）：" + hrefs.join("、"));
     await user.shot("user-nav");
     return "可见导航：" + links.map((l) => l.label).join("/");
   });
@@ -935,28 +941,29 @@ async function main() {
     }
     await user.ensureAuthed();
     assert(userLoggedIn, "普通用户未登录，跳过");
-    // /cost 已并入 /bills：普通用户访问应被重定向到账单页，且页面不出现运营成本
+    // /cost、/revenue 已随账单页删除（不是重定向）：普通用户直连应落到 404 页或被引导到用户设置，且不出现运营成本
     {
       const from = user.consoleErrors.length;
       await user.page.goto(BASE_URL + "/cost", { waitUntil: "domcontentloaded" });
       await user.settle();
       const path = new URL(user.page.url()).pathname;
-      assert(path.startsWith("/bills"), "/cost 未重定向到账单页，实际 " + path);
       const text = await user.mainText();
-      assert(!text.includes("成本（运营）"), "普通用户在账单页看到了「成本（运营）」");
+      const missingPage = /页面不存在|404|找不到页面|Not Found/i.test(text);
+      assert(path.startsWith("/settings") || missingPage, "/cost 既不是 404 也没引导到用户设置，实际 " + path);
+      assert(!text.includes("成本（运营）"), "普通用户在 /cost 落点看到了「成本（运营）」");
       user.assertNoNewErrors(from, "/cost");
-      await user.shot("user-cost-redirect");
+      await user.shot("user-cost-gone");
     }
     {
       const from = user.consoleErrors.length;
       await user.page.goto(BASE_URL + "/admins", { waitUntil: "domcontentloaded" });
       await user.settle();
       const text = await user.mainText();
-      assert(text.includes("没有访问权限"), "/admins 未显示「没有访问权限」");
+      assert(text.includes("没有访问权限"), "/admins（旧入口重定向 /roles）未显示「没有访问权限」");
       user.assertNoNewErrors(from, "/admins");
       await user.shot("user-forbidden-admins");
     }
-    return "运营成本不可见 · /admins 显示没有访问权限";
+    return "运营成本不可见 · /cost 已删（404/引导） · /admins 显示没有访问权限";
   });
 
   await test("user.api-permissions", "普通用户后端无 billing:cost，成本接口 403", async () => {
@@ -989,7 +996,7 @@ async function main() {
     const links = await agent.navLinks();
     const hrefs = links.map((l) => l.href);
     assert(hrefs.includes("/users"), "代理用户侧栏缺少「用户」入口");
-    assert(!hrefs.includes("/cost"), "代理用户侧栏不应出现「成本（运营）」");
+    assert(!hrefs.includes("/cost") && !hrefs.includes("/revenue"), "代理用户侧栏不应出现「成本（运营）」或旧营收入口");
     await agent.shot("agent-nav");
     return "users:create + billing:subtree，无 billing:cost";
   });
@@ -1001,6 +1008,152 @@ async function main() {
       assert(response.status === 200, apiPath + " 返回 " + response.status);
     }
     return "policies / guardrails / mcp-servers 均 200";
+  });
+
+  /* ---------- 五期新增交互（ticket 17 补充 / ticket 18 矩阵） ---------- */
+  await test("models.public-page", "公开模型「编辑」进整页：三段/唯一保存/成员 chip/脏标记", async () => {
+    await admin.ensureAuthed();
+    const list = await admin.apiGet("/admin/public-models");
+    const items = Array.isArray(list.body) ? list.body : (list.body && list.body.items) || [];
+    assert(items.length > 0, "/admin/public-models 无数据（先跑 seed_demo.py）");
+    const model = items[0];
+    const from = admin.consoleErrors.length;
+    const visited = await admin.visit("/models/public/" + model.id, "公开模型单页");
+    const path = new URL(admin.page.url()).pathname;
+    assert(path === "/models/public/" + model.id, "未进入公开模型单页，实际 " + path);
+    for (const label of ["基本信息", "成员编排"]) assertIncludes(visited.text, label, "公开模型单页");
+    const save = admin.page.getByRole("button", { name: "保存", exact: true });
+    assert((await save.count()) === 1, "整页应有且只有一个「保存」按钮，实际 " + (await save.count()));
+    for (const old of ["保存整页", "保存成员"]) assert(!visited.text.includes(old), "仍有旧保存文案：" + old);
+    const chips = admin.page.locator('[data-slot="member-chip"]');
+    assert((await chips.count()) > 0, "成员编排没有渲染成员 chip");
+    assert((await admin.page.locator('[data-slot="dirty-count"]').count()) === 0, "首次载入不应有脏标记");
+    const note = admin.page.getByLabel("备注").first();
+    assert((await note.count()) > 0, "找不到「备注」字段");
+    await note.fill((await note.inputValue()) + " acceptance-dirty");
+    await admin.page.waitForTimeout(300);
+    assert((await admin.page.locator('[data-slot="dirty-count"]').count()) > 0, "修改备注后未出现脏标记计数");
+    assertIncludes(await admin.mainText(), "未保存 1 项", "底部脏摘要");
+    await admin.page.getByRole("button", { name: "恢复全部" }).first().click();
+    await admin.page.waitForTimeout(300);
+    assert((await admin.page.locator('[data-slot="dirty-count"]').count()) === 0, "恢复全部后脏标记未清零");
+    admin.assertNoNewErrors(from, "公开模型单页");
+    await admin.shot("models-public-page");
+    return "单页三段 + 唯一保存 + 成员 chip " + (await chips.count()) + " 个 + 脏标记/恢复";
+  });
+
+  await test("logs.attempts", "日志模型列两行 + 尝试列（N 次尝试 popover / 无链路记录）+ 费用两行", async () => {
+    await admin.ensureAuthed();
+    const from = admin.consoleErrors.length;
+    const visited = await admin.visit("/logs", "使用日志");
+    assert(visited.text.includes("模型"), "日志表缺少「模型」列");
+    assert(visited.text.includes("尝试"), "日志表缺少「尝试」列");
+    assert(/计费|成本/.test(visited.text), "日志费用列缺少「计费/成本」两行文案");
+    const chainButtons = admin.page.getByRole("button", { name: /次尝试的路由链/ });
+    const noChain = admin.page.getByText("无链路记录", { exact: true });
+    const hasAttempts = (await chainButtons.count()) > 0;
+    const hasNoChain = (await noChain.count()) > 0;
+    assert(hasAttempts || hasNoChain, "尝试列既没有「N 次尝试」按钮也没有「无链路记录」降级文案");
+    let popoverText = "";
+    if (hasAttempts) {
+      await chainButtons.first().click();
+      await admin.page.waitForTimeout(800);
+      const popover = admin.page.locator("[data-radix-popper-content-wrapper]").first();
+      popoverText = (await popover.count()) > 0 ? await popover.innerText() : "";
+      assert(/路由链|次尝试|第 1 次|attempt/i.test(popoverText || (await admin.mainText())), "尝试 popover 未展示路由链内容");
+      await admin.page.keyboard.press("Escape");
+    }
+    admin.assertNoNewErrors(from, "日志尝试列");
+    await admin.shot("logs-attempts");
+    return "模型列两行 + 尝试列（" + (hasAttempts ? "N 次尝试 popover" : "无链路记录降级") + "）+ 费用两行";
+  });
+
+  await test("dashboard.flow-hide", "分流图隐藏阶段：图例触发 collapse 请求、后端守恒、最少 2 段、可恢复", async () => {
+    await admin.ensureAuthed();
+    const from = admin.consoleErrors.length;
+    // 后端契约先行：collapse 隐藏段但 totals 守恒、stages 减少；隐藏 4 段 422
+    const base = await admin.apiGet("/admin/reports/flow");
+    assert(base.status === 200, "/admin/reports/flow 返回 " + base.status);
+    const collapsed = await admin.apiGet("/admin/reports/flow?collapse=model");
+    assert(collapsed.status === 200, "collapse=model 返回 " + collapsed.status);
+    assert(JSON.stringify(base.body.totals) === JSON.stringify(collapsed.body.totals), "collapse 后 totals 不守恒");
+    assert((collapsed.body.stages || []).length === (base.body.stages || []).length - 1, "collapse 后 stages 数量未减少");
+    const tooMany = await admin.apiGet("/admin/reports/flow?collapse=key,model,upstream,channel");
+    assert(tooMany.status === 422, "隐藏 4 段应 422，实际 " + tooMany.status);
+    // 前端：点图例应把隐藏阶段作为 collapse 查询参数发给后端（无前端 splice）
+    await admin.visit("/dashboard", "数据看板");
+    await admin.page.getByRole("tab", { name: "分流图" }).first().click();
+    await admin.page.waitForTimeout(1200);
+    const legend = admin.page.locator('[aria-label="分流阶段轴"]');
+    assert((await legend.count()) > 0, "分流图缺少阶段轴（aria-label=分流阶段轴）");
+    assert((await legend.locator("button").count()) >= 5, "阶段轴应列出 5 个阶段");
+    const collapseRequests = [];
+    const onRequest = (request) => {
+      const url = request.url();
+      if (url.includes("/admin/reports/flow") && url.includes("collapse=")) collapseRequests.push(url);
+    };
+    admin.page.on("request", onRequest);
+    try {
+      await legend.getByRole("button", { name: "公开模型" }).first().click();
+      await admin.page.waitForTimeout(1500);
+      assert(collapseRequests.length > 0, "隐藏阶段后没有带 collapse 的 flow 请求（疑似前端 splice）");
+      assert(/collapse=model/.test(collapseRequests[0]), "collapse 参数未包含 model：" + collapseRequests[0]);
+      // 再隐藏两段 → 只剩 2 段，应到下限；第三段按钮禁用并提示
+      await legend.getByRole("button", { name: "上游模型" }).first().click();
+      await admin.page.waitForTimeout(900);
+      await legend.getByRole("button", { name: "上游", exact: true }).first().click();
+      await admin.page.waitForTimeout(1200);
+      const hint = await admin.mainText();
+      assert(/至少保留两个可见阶段|已到下限/.test(hint), "隐藏到 2 段后未出现下限提示");
+      const restored = [];
+      for (const label of ["公开模型", "上游模型", "上游"]) {
+        const button = legend.getByRole("button", { name: label, exact: true }).first();
+        if ((await button.count()) > 0) {
+          await button.click();
+          await admin.page.waitForTimeout(700);
+          restored.push(label);
+        }
+      }
+      assert(restored.length >= 2, "隐藏阶段后无法通过图例恢复");
+    } finally {
+      admin.page.off("request", onRequest);
+    }
+    admin.assertNoNewErrors(from, "分流隐藏阶段");
+    await admin.shot("dashboard-flow-hide");
+    return "collapse 请求 " + collapseRequests.length + " 次 · totals 守恒 · stages-1 · 4 段隐藏 422 · 图例可恢复";
+  });
+
+  await test("tables.align-sticky", "表格：操作列 sticky 冻结在最后一列、数字列头身同用右对齐", async () => {
+    await admin.ensureAuthed();
+    const from = admin.consoleErrors.length;
+    await admin.visit("/pricing", "价目管理");
+    const sticky = await admin.page.evaluate(() => {
+      for (const table of document.querySelectorAll("table")) {
+        const ths = [...table.querySelectorAll("thead th")];
+        const last = ths[ths.length - 1];
+        if (!last) continue;
+        if (last.className.includes("sticky") && last.className.includes("right-0")) {
+          return { ok: true, text: last.innerText.trim() };
+        }
+      }
+      return { ok: false };
+    });
+    assert(sticky.ok, "没有任何表格的操作列表头冻结在最后一列");
+    const aligned = await admin.page.evaluate(() => {
+      for (const table of document.querySelectorAll("table")) {
+        const ths = [...table.querySelectorAll("thead th")];
+        const idx = ths.findIndex((th) => th.className.includes("text-right"));
+        if (idx < 0) continue;
+        const td = table.querySelector("tbody tr td:nth-child(" + (idx + 1) + ")");
+        return { header: ths[idx].innerText.trim(), headerRight: true, bodyRight: !!td && td.className.includes("text-right") };
+      }
+      return null;
+    });
+    assert(aligned, "没有任何表格存在数字右对齐表头");
+    assert(aligned.bodyRight, "数字列头身对齐不一致（" + aligned.header + "）：表体未右对齐");
+    admin.assertNoNewErrors(from, "表格对齐/冻结");
+    await admin.shot("tables-align-sticky");
+    return "操作列「" + sticky.text + "」sticky right-0 · 数字列「" + aligned.header + "」头身同用右对齐";
   });
 
   await browser.close();

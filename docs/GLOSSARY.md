@@ -1,7 +1,7 @@
-# 术语表（二期）
+# 术语表（现行，五期）
 
 本表定义**词义**，不是机制说明。新仓从零，**不留旧名别名**；出现旧名即为 bug。
-二期已完成（ticket 01–22 全部合入），本表覆盖最终 UI 命名：公开模型、连接密钥、模型试验、价目管理、用户设置/运营设置。
+二期已完成（ticket 01–22 全部合入），本表覆盖最终 UI 命名：公开模型、连接密钥、模型试验、价目管理、用户设置/运营设置。五期（W5，2026-11-21）在二期词表上新增「模型探测 / 模型拉取 / 尝试链（路由链）/ 冷却互斥 / 分流投影 / 成员 chip / 种子计数口径」等词条（见 §1.1），并把路由、导航与页面计数同步到五期口径（§8）。
 
 ## 1. 三层寻址
 
@@ -14,6 +14,18 @@
 | 公开模型 PublicModel | `public_models` | 客户端唯一可写的名字，对应 AG 的 virtualModel；二期 UI/文档统一写“公开模型” | 旧名“调用模型 CallModel”“调用名”“调用串”“对外模型”全部已废（后端表名仍 `public_models`） |
 | 目标 ModelTarget | `model_targets` | 一条“公开模型 → 上游模型”的绑定，带 priority（weighted/conditional 另有 weight/when） | 在公开模型语境下也叫**成员**；旧名“渠道模型行”已废 |
 | 连接密钥 ClientKey | `api_keys` | 控制台签发、客户端调用 `/v1` 的凭据（`sk-…`），可掩码展示与审计化 reveal | 旧 UI 名“客户端密钥”已废；后端路径仍是 `/admin/api-keys`；不要与上游密钥混用 |
+
+## 1.1 五期新增词条（W5）
+
+| 术语 | 定义 | 易混 |
+|---|---|---|
+| 模型探测 Model probe | `POST /admin/upstreams/{id}/models/probe`：对上游**已保存**的上游模型逐个主动发一次最小 chat，串行、单模型 20s 超时；结果只回本次响应（连通/HTTP 失败/超时/连接失败），**不落库、不写 probe 行或密钥测试结果** | 与「拉取模型」不同：探测是验证已知模型能否调用；与接口风格 `auto` 的「自动探测」也不同：那是配置风格推断，不发起上游调用 |
+| 模型拉取 Discover models | `POST /admin/upstreams/{id}/discover-models`：从上游拉取候选模型清单，不自动建记录，管理员再选择导入 | 旧名「发现模型」已废；不是探测（不做逐模型调用验证） |
+| 尝试链 / 路由链 RequestAttempt | ADR-028：一次客户端请求的逐次上游尝试（attempt_no、上游、模型、状态码、错误类型/文本、耗时、结果），存 `request_attempts`；日志页经 `GET /admin/logs/{event_id}/attempts` 读取并展示「N 次尝试」 | 不是请求日志本身（`request_logs` 仍 1 请求 1 行）；历史日志无链路记录时显示「无链路记录」；与 OTel/trace/span 概念无关（系统层不出现） |
+| 冷却互斥 Cooldown exclusivity | 同一 scope 的**单次冷却**与**周期冷却**互斥：一种生效时另一种的创建/改期返回 409 `CONFLICT`，`details` 固定 `{blocking_rule_ids, cooldown_until_ms, window_end_ms}`；仅改 note 的 PATCH 放行（ADR-027，取代 ADR-004 叠加口径） | 批量冷却的冲突项进 `failed[]`，不整体失败；关闭（closed）不参与互斥 |
+| 分流投影 Flow collapse | 分流桑基图隐藏阶段由**后端**按完整五段路径投影重算（`collapse` 参数），隐藏段从路径删除、其余可见段按序连边，节点/边与金额守恒；至少保留 2 段 | 不是前端 splice；mock 不重算投影；未知阶段或不足 2 段 422 |
+| 成员 chip Member chip | 公开模型单页「成员编排」段的分层 chip：每个 chip 展示上游渠道/模型与 priority/weight/when，按层分组、conditional 末位兜底；候选按上游分组搜索 | 不是旧「成员双栏编辑」；chip 的增删/排序会产生整页脏标记，随唯一保存一次提交 |
+| 种子计数口径 | demo seed 的真实行数（厂商/上游/上游模型/公开模型/目标/用户/用量事件/计费流水/审计/app_settings/可用性规则/上游密钥）以 `api-contract §6` 为准，DELIVERY 只引用不复写 | 不要在文档里各写一套数字；「一个上游三把等权密钥」并计共 6 条上游密钥 |
 
 ## 2. 路由
 
@@ -31,24 +43,24 @@
 | 术语 | 定义 | 易混 |
 |---|---|---|
 | 关闭 Closed | **永久**不可用，直到人工「启用」。不参与路由，不出现在 `/v1/models`；动词统一「启用/关闭」 | 旧名「封禁 Ban」**已废**（2026-11-19 用户裁定）；与健康无关，是人的决定 |
-| 冷却 Cooldown | **临时**不可用，到期自动恢复；入口合并为一个「冷却」，内含**一次性**与**周期**两种模式（2026-11-19 用户裁定，ADR-025）；**只作用于上游模型**——公开模型没有冷却概念，只有 启用/关闭 | 所有自动/定时的不可用都叫冷却；一次性冷却预设时长 1/3/6/12/24/72 小时 |
+| 冷却 Cooldown | **临时**不可用，到期自动恢复；入口合并为一个行内「冷却」按钮，弹窗内切**一次性**与**周期**两种模式（ADR-025）；**只作用于上游模型**——公开模型没有冷却概念，只有 启用/关闭；单次与周期**互斥**（409，ADR-027），冷却中行内显示「解除」 | 所有自动/定时的不可用都叫冷却；一次性冷却预设时长 1/3/6/12/24/72 小时；批量冷却冲突项进 `failed[]`（不整体失败） |
 | 周期冷却 Schedule | 冷却的模式之二：按日/周/月复发的时间窗。当前窗口内不可用，窗口结束自动恢复。窗口期内人工「启用」= 仅跳过当前窗口，规则保留、后续窗口照常；删除规则须手动进界面。**冷却窗口按运营设置时区解释**（app_settings `timezone`，默认 Asia/Shanghai；与报表同源，2026-11-19 P1-6 落地） | 旧名“计划窗口”“定时封禁”已废；UI 提供紧凑编辑（重复方式+时间窗），不做完整排期日历 |
-| 可用性状态 AvailabilityState | 统一词表：`normal`（无措施）/ `cooling`（冷却中）/ `closed`（行关闭或封禁生效）；`closed` 优先 | 不要再用 `active`/`disabled` 另造一套；API 与渲染共用 |
+| 可用性状态 AvailabilityState | 统一词表：`normal`（无措施）/ `cooling`（冷却中）/ `closed`（行关闭生效，旧称「封禁」已废）；`closed` 优先 | 不要再用 `active`/`disabled` 另造一套；API 与渲染共用 |
 | 冷却投影 cooldown_until_ms | 规则表的**投影/缓存**，不是事实源；由写路径同步 | 任何判定先走 `availability.evaluate`，不得直接读列 |
 | 熔断 / 故障 | 数据面因失败自动降级的表现，属于**冷却**（自动触发） | 控制面**不落库**，只在看板只读展示 |
 
 判据：有到期时刻 = 冷却；没有 = 关闭。周期冷却的到期是当前窗口结束时刻（`rule_deadline_ms`），不是规则删除。
 
-二期现状：**可用性并入模型管理**，没有独立“可用性”页。**可用性措施（冷却两种模式）归属上游模型**（ADR-025，2026-11-19 用户裁定：上游模型存在时段性贵价/临时屏蔽诉求）；**公开模型行内只有 关闭/启用（+编辑、删除）**，不再放冷却/周期按钮。上游模型行内：关闭（永久，直到人工「启用」）、启用（解除关闭；周期冷却窗口期内启用=仅跳过当前窗口，规则保留）、冷却（弹窗内 单次冷却/周期冷却 两模式切换）、解除冷却；批量 PATCH 支持同样动作。**周期冷却提供紧凑 UI（重复方式+时间窗），完整排期日历不做；daily/weekly/monthly 周期冷却与 `/admin/availability-rules` 的 POST/GET/PATCH/DELETE 完整保留**；seed 仍只放 2 条关闭/一次性冷却示例，不代表周期能力取消。所有读取走 `availability` 评估器，`cooldown_until_ms` 只作投影/观测。
+五期现状：**可用性并入模型管理**，没有独立“可用性”页。**可用性措施（冷却两种模式）归属上游模型**（ADR-025）；**公开模型行内只有 关闭/启用（+编辑、删除）**，公开模型冷却写操作显式 422（ADR-027）。上游模型行内：关闭（永久，直到人工「启用」）、启用（解除关闭；周期冷却窗口期内启用=仅跳过当前窗口，规则保留）、冷却（弹窗内 单次冷却/周期冷却 两模式切换）、解除冷却（只删一次性托管规则；命中周期窗口只跳过当前窗口，周期规则保留，ADR-027）；批量 PATCH 支持同样动作，冲突项进 `failed[]`。**单次与周期互斥**：单次生效中不能创建/改期周期（409），周期窗口生效中不能设置单次（409，窗口外或已跳过可设）；仅改备注的 PATCH 放行。**周期冷却提供紧凑 UI（重复方式+时间窗），完整排期日历不做；daily/weekly/monthly 周期冷却与 `/admin/availability-rules` 的 POST/GET/PATCH/DELETE 完整保留**；seed 口径以 `api-contract §6` 为准（2 条可用性规则：关闭 + 一次性冷却，无排期窗口，不代表周期能力取消）。所有读取走 `availability` 评估器，`cooldown_until_ms` 只作投影/观测。
 
 ## 4. 协议与类型
 
 | 术语 | 定义 | 易混 |
 |---|---|---|
-| 接口风格 ApiStyle | `openai_chat` / `openai_responses` / `anthropic_messages` / `gemini` + `auto`（自动探测：依次试前四种；其他类型用户自行标记） | 不叫 protocol，避免与 HTTP/2、TLS 混 |
+| 接口风格 ApiStyle | `openai_chat` / `openai_responses` / `anthropic_messages` / `gemini` + `auto`（自动探测：依次试前四种；其他类型用户自行标记） | 不叫 protocol，避免与 HTTP/2、TLS 混；`auto` 的「自动探测」≠「模型探测」（后者是逐模型主动调用验证，见 §1.1） |
 | 模型类型 ModelType | `chat` / `embedding` / `rerank` / `image` / `video` / `audio` / `systemone`（**AG 内置 SystemOne 协议**，非透传：请求缺字段会被 AG 400 `failed to parse SystemOne request`；平台内部未来也用）+ `custom`（用户自填端点路径，body 原样转发） | 与接口风格正交：风格管「怎么连上游」，类型管「是什么接口」；UI 展示 chat→「OpenAI兼容」；**AG 1.7 对 image 类调用不记词元**（E14b 实测）：该类流量无用量、账本覆盖不到，属已知盲区，模型行需提示 |
 
-## 5. 用量、计费与金额（二期口径）
+## 5. 用量、计费与金额（现行口径）
 
 | 术语 | 字段/表 | 定义 | 易混 |
 |---|---|---|---|
@@ -63,6 +75,7 @@
 | 日聚合 DailyAggregate | `daily_aggregates` | 按天预聚合，看板只读它 | 不扫明细 |
 | 速率 RPM / TPM | 报表 totals | RPM = 请求数 ÷ 活跃分钟；TPM = 词元总数 ÷ 活跃分钟；活跃分钟 = 有请求的独立分钟数（报表时区）。RPM 保留 2 位小数、TPM 为千分位整数（`fmtRpm` / `fmtInt`）；「最高峰」= 窗口内单分钟最大值 | 不是瞬时速率；分母是活跃分钟不是时间窗长度 |
 | 缓存命中率 Cache Hit | 派生（GLOSSARY §5 词元口径） | 缓 ÷（入 + 缓），入为扣除缓存后的净输入；展示 1 位小数百分比（`fmtPct` / `fmtPctPoint`）；无缓存显示「无缓存」 | 分母不含出词元 |
+| 尝试次数 Attempts | `request_attempts` 行数 | 一次请求的逐次上游尝试次数；展示为千分位整数（`fmtInt`，与计数同口径），无记录为 0 且 UI 显示「无链路记录」 | 不是请求数；1 请求可对应 N 次尝试（ADR-028） |
 
 金额一律整数 micro（1 CNY = 1_000_000 micro），字段后缀 `_micro`；货币 `currency` 取 CNY/USD，
 v1 主币种 CNY。
@@ -76,6 +89,7 @@ v1 主币种 CNY。
 | 下发 Apply | 原子写 + AG 1.7 `--validate-only` + 热加载 + 确认 + 失败回滚 |
 | 配置版本 ConfigRevision | 每次下发的留档：artifact、真实 sha256、操作人、状态、失败详情 |
 | Dry-run | 策略/护栏/MCP 保存前的完整校验：IR → validate → render；失败 422 且不落库，保存成功也不等于已下发 |
+| 密钥文件清理 KeyFilePrune | apply 成功后按**本次渲染的 `key_files` 白名单**清理 `<ag_config_dir>/keys` 下直接存放的陈旧 `*.key`；目录外、非 `.key`、子目录与符号链接永不触碰；删除失败只告警不阻断（best-effort），`dry_run` 可先看计划（ADR-026 补记，ticket 16） |
 
 ## 7. 角色、权限与账号
 
@@ -91,11 +105,11 @@ v1 主币种 CNY。
 | 自定义角色 CustomRole | `admin_roles`（builtin=false） | 管理员自建的角色，权限必须是已注册键；有成员时不可删 | 不是“临时授权”；它就是一等角色 |
 
 内置角色不可改权限、不可删；旧角色名只用于迁移：owner→admin、operator→agent、viewer→user。
-权限键 41 个：主数据 10 / 流量治理 4 / 治理 7 / 计费 6 / 用量 3 / 账号 10 / 模型试验 1。
+权限键 41 个：主数据 10 / 流量治理 4 / 治理 7 / 计费 6 / 用量 3 / 账号 10 / 模型试验 1。五期未新增权限键：模型探测复用 `upstream_models:write`，公开模型 PATCH 携带 `targets` 时复用 `model_targets:write`。
 
 ## 8. 页面类型与导航分组（三期最终）
 
-管理台 **26 条路由 = 16 个功能页 + 登录 + 404 + 8 个旧入口重定向页**（`/settings`、`/ops-settings`、`/upstream-prices`、`/downstream-prices`、`/admins`、`/policies`、`/guardrails`、`/mcp`）；侧栏 4 组（常规/配置/工具/系统）、**15 个一级入口 + 运营设置 3 个二级分区 = 18 个导航项**。唯一清单来源 `web/src/routes.ts` → `ops/checks/routes.json`（26 条）；参数化路由 `/settings/:section`（5 变体）与 `/ops-settings/:section`（3 变体）展开后浏览器验收 URL 共 32 条。
+管理台 **27 条路由 = 17 个功能页 + 登录 + 404 + 8 个旧入口重定向页**（`/settings`、`/ops-settings`、`/upstream-prices`、`/downstream-prices`、`/admins`、`/policies`、`/guardrails`、`/mcp`），共 **19 个页面模块**（`web/src/pages/*.tsx`）；侧栏 4 组（常规/配置/工具/系统）、**15 个一级导航项**；运营设置 3 个二级分区是页内子导航（`/ops-settings/:section`），不重复挂侧栏。唯一清单来源 `web/src/routes.ts` → `ops/checks/routes.json`（27 条）；参数化路由 `/settings/:section`（5 变体）与 `/ops-settings/:section`（3 变体）、以及运行时详情页 `/upstreams/:id`、`/models/public/:id`、登录页展开后浏览器验收 URL 共 33 条（route-audit 实测路由 27 / 页面 19 / 导航 15）。
 
 | 导航分组 | 页面 | 页面类型 |
 |---|---|---|
@@ -107,7 +121,7 @@ v1 主币种 CNY。
 
 页面类型口径：
 - **列表页**：DataTable + 筛选/分页，行内操作打开表单或详情；
-- **详情/编辑页**：上游渠道整页编辑器（连接与模型/路由与映射/请求与响应/其他设置四 Tab，ADR-023）、模型管理（上游模型/公开模型两 Tab，可用性行内）、网关策略三 Tab、用户设置/运营设置；
+- **详情/编辑页**：上游渠道整页编辑器（连接与模型/**路由与模型**/请求与响应/其他设置四 Tab，ADR-023；「模型」并入「路由与模型」，「健康」并入「连接与模型」）、模型管理（上游模型/公开模型两 Tab，可用性行内）、网关策略三 Tab、用户设置/运营设置；**公开模型「编辑」进入整页 `/models/public/:id`**（页头 + 基本信息 + 成员编排三段 + 底部唯一保存，ticket 13；成员编排为分层 chip，ticket 14，不再回列表弹窗）；
 - **仪表盘/报表页**：快速上手、数据看板（区间 + 趋势 + 延迟 + 热力）；账单页移除——花费 → 用户设置·花费，充值/余额/流水 → 用户管理，待补价 → 价目管理「未配价」筛选；
 - **工具页**：模型试验，状态只存浏览器 localStorage；
-- **认证/兜底页**：登录、404；旧入口重定向页：`/upstream-prices`、`/downstream-prices` → `/pricing`；`/cost`、`/revenue`、`/unpriced` 随账单移除一并删除。
+- **认证/兜底页**：登录、404；旧入口重定向页（8 个）：`/settings`（→ 用户设置默认段）、`/ops-settings`（→ 运营设置默认段）、`/upstream-prices`、`/downstream-prices` → `/pricing`、`/admins` → `/roles`、`/policies` → `/gateway-policies?tab=policies`、`/guardrails` → `?tab=guardrails`、`/mcp` → `?tab=mcp`；`/cost`、`/revenue`、`/unpriced` 随账单移除一并**删除**（不是重定向；成本入口在 `/settings/spend` 与价目页），导航中不存在这些入口。

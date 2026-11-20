@@ -1,4 +1,4 @@
-# 决策记录（v1 草案，评审通过后拆成 docs/adr/ADR-00x）
+# 决策记录（现行，ADR-001…ADR-028 连续编号）
 
 ## ADR-001 数据面用 agentgateway，控制面自研
 
@@ -61,9 +61,15 @@
 - 代价：同层权重无法表达（failover 不支持 weight；weighted 是单层，会丢掉分层）。v1 接受。
 - 代价：成本优先（cost）策略 v1 不支持；若将来要，走 conditional + callout，属二期。
 
-## ADR-004 可用性只有两种措施：封禁与冷却
+## ADR-004 可用性只有两种措施：封禁与冷却（部分被 ADR-027 修订）
 
 - 状态：已定（2026-11-18 架构评审 #8 裁定；原「建议 · 待评审」）
+
+**修订注记（2026-11-20/21，W5 ticket 02/17）**：
+
+- 术语：API/DB 枚举保留 `ban`，但 UI 与文档统一称「关闭」，不再使用「封禁」（ADR-018/术语表）。
+- 公开模型冷却已取消：可用性措施只属上游模型，公开模型只有启停（ADR-025）。
+- 本文「同一 scope 的托管规则与管理员规则可叠加、取最晚截止时间」的口径已被 **ADR-027 取代**：单次冷却与周期冷却互斥（409），解除只删一次性规则、周期规则保留。规则表单表唯一写入权威、投影列只作兼容观测的结论不变。
 
 **决策**：用户可见与可操作的措施只有两种：
 
@@ -82,7 +88,7 @@
 `upstream_models.cooldown_until_ms` / `public_models.cooldown_until_ms` 是规则表的**投影/缓存**，不是第二事实源：
 
 - 模型页的冷却/解除（`PATCH /admin/upstream-models/{id}`、`PATCH /admin/public-models/{id}` 及批量 PATCH 的 `cooldown_until_ms`）写入一条确定性的托管规则（`rule_row_<hash>`，kind=cooldown, recurrence=once）；写路径统一调用投影同步函数。
-- API 与渲染的读取只走评估器，不各自解释 `cooldown_until_ms`。同一 scope 的托管规则与管理员规则叠加，取仍生效的最晚截止时间；存在托管规则时不再把投影列当作独立冷却来源（防止过期缓存延长冷却）。解除只删托管规则，不误删周期规则。
+- API 与渲染的读取只走评估器，不各自解释 `cooldown_until_ms`。同一 scope 的托管规则与管理员规则叠加，取仍生效的最晚截止时间（**W5 起作废：单次与周期互斥，见修订注记/ADR-027**）；存在托管规则时不再把投影列当作独立冷却来源（防止过期缓存延长冷却）。解除只删托管规则，不误删周期规则。
 - 旧库只有未来 deadline、没有规则：启动时 `migrate_legacy_cooldowns` 幂等把 deadline 采纳为托管规则，过期列清零；不做破坏性 schema 迁移，规则和列都不删。
 
 **状态词表**：`normal`（无措施）、`cooling`（冷却中，带当前窗口截止时刻）、`closed`（行被关闭，或封禁生效）；`closed` 优先。API 与渲染共用这组值，避免 UI 再自行推导「关闭优先于冷却」。
@@ -96,7 +102,7 @@
 - 封禁/冷却生效有秒级延迟（重渲染 + 热加载耗时）。
 - 数据面因失败自动触发的熔断/降级**不落控制面库**，只在看板只读展示；不要试图把运行时状态同步回控制面。
 - 投影列可能滞后一个调度周期，仅作兼容/观测；任何判定不得直接读它。
-- 同一 scope 的托管规则与管理员的周期/一次性规则可叠加；周期规则是一等能力，不随 UI 是否提供完整排期日历而删除。
+- 同一 scope 的托管规则与管理员的周期/一次性规则可叠加（**W5 起作废：互斥，见 ADR-027**）；周期规则是一等能力，不随 UI 是否提供完整排期日历而删除。
 
 ## ADR-005 用量与账本：不做影子对账
 
@@ -430,6 +436,8 @@
 
 **后果修正（2026-11-20，E19 实测裁决）**：「路由链可视化不回归」修正为**可经 OTel Traces 实现、列为独立后续工单（M5，待立项）**：pinned 1.7.0 渲染 `frontendPolicies.tracing`（顶层 tracing 键属 xds 根、standalone 拒收）后，1 请求产生 1 server 根 span + 每次上游尝试 1 个 client span（含上游身份/逐次状态码/错误类型），根 span 带 retry.attempt，且 request_logs.trace_id/span_id 同步填充可与 span 树 join（9c5ad71）。1.7.0 的 accessLog upstreamCalls CEL 字段实测静默失效（文档宣称支持）——访问日志路线不可用；metrics 仅宏观无 endpoint 标签；agctl 不存在。M5 范围草案：AG 渲染 tracing（randomSampling 策略）→ 控制面常驻轻量 OTLP/HTTP 接收器 → 按 trace_id join 复原 attempts[] → 日志详情路由链展示；量产需采样/过滤。本批四期不含 M5。
 
+**注记（2026-11-21，W5 ticket 17）**：上条修正已由 ADR-028 落地——路由链改由适配器 loopback OTLP 归一化为 `RequestAttempt`，落 `request_attempts`，经 `GET /admin/logs/{event_id}/attempts` 暴露；系统级 OTLP 接收器、`trace_spans` 表与 `GET /admin/traces/{trace_id}` 均已删除。`request_logs` 1 请求 1 行不变，路由链可视化不再依赖 trace/span 存储（ADR-028）。
+
 ## ADR-025 可用性措施归属上游模型，公开模型只有启停
 
 - 状态：已定（2026-11-19 用户裁决；收窄 ADR-004「可用性并入模型管理」的适用面）
@@ -441,6 +449,8 @@
 **理由**：归属错位会让运营在公开模型上误设冷却（实际生效的是成员引用的上游模型），语义混乱；合并入口减少认知负担；AG 数据面健康/驱逐本来就作用在上游后端一侧，语义自洽。
 
 **后果**：models.tsx 公开模型表移除冷却/周期按钮及其弹窗；上游模型冷却 UI 重做为双模式弹窗；后端 availability API 不变（仍按 upstream_model_id 挂规则）；GLOSSARY §3 已同步。
+
+**注记（2026-11-21，W5 ticket 02/17）**：冷却入口进一步收敛为行内单个「冷却」按钮（弹窗内切「单次/周期」），冷却中行内显示「解除」；周期规则在抽屉内紧凑编辑。单次与周期互斥、解除只删一次性规则、409 details 三键见 ADR-027；公开模型冷却写操作返回 422「公开模型不支持冷却：冷却只属于上游模型（ADR-025）」。
 
 ## ADR-026 多密钥平权：每把上游密钥展开为一个独立 AG 上游
 
@@ -454,7 +464,34 @@
 
 **后果**：upstream_ops.py 重写密钥 CRUD（去 mirror/rotate/set_primary）；rendering/render.py 加密钥维度展开；contract.ts 重生成（UpstreamKey 形状变化）；keys-panel UI 重做（失效标红+批量删除+去主密钥标记）；迁移脚本清空 api_key_enc；E18 实验先行。
 
-**补记（ticket 16，2026-11-20）**：① is_primary 死列收口——ORM 字段已删，init_db 对旧库执行幂等的 `ALTER TABLE upstream_keys DROP COLUMN is_primary`（列不存在则跳过），不再「保留一版」；② 每轮成功下发后按当前 key_files 白名单清理受管 keys/ 目录内陈旧密钥文件（dry-run 可审计；目录外、非 .key、子目录不碰；失败只告警不阻断应用），历史遗留文件与「主密钥时代」文件名随之收口；③ E20 裁决（P0-RESULTS §E20）：AG 对 conditional targets 按 first-match 首条独占，多密钥若展开只有第一把有流量，故 conditional 每目标只展开首把密钥并打 warning（渲染日志 + 成员编辑器提示 + DELIVERY 已注明）——这是既定裁决而非遗漏，密钥平权/容错仅在 failover/weighted 生效；④ provider/上游模型 id 进入 provider 名与 keys/{id}#{seq}.key，validate 拒绝路径分隔符、Windows 保留字符、控制字符与非密钥序号形态的 #，保证跨平台文件名安全。
+**补记（ticket 16，2026-11-20）**：① is_primary 死列收口——ORM 字段已删，init_db 对旧库执行幂等的 `ALTER TABLE upstream_keys DROP COLUMN is_primary`（列不存在则跳过），不再「保留一版」；② 每轮成功下发后按当前 key_files 白名单清理受管 keys/ 目录内陈旧密钥文件（dry-run 可审计；目录外、非 .key、子目录不碰；失败只告警不阻断应用），历史遗留文件与「主密钥时代」文件名随之收口；③ E20 裁决（P0-RESULTS §E20）：AG 对 conditional targets 按 first-match 首条独占，多密钥若展开只有第一把有流量，故 conditional 每目标只展开首把密钥并打 warning（渲染日志 + 成员编辑器提示 + DELIVERY 已注明）——这是既定裁决而非遗漏，密钥平权/容错仅在 failover/weighted 生效；④ provider/上游模型 id 进入 provider 名与 keys/{id}#{seq}.key，validate 拒绝路径分隔符、Windows 保留字符、控制字符与非密钥序号形态的 #，保证跨平台文件名安全；⑤ 按密钥归因不可得——用量归因比较前剥去 provider 名 `#序号` 后缀，系统不按单把密钥分账（E18/E20 边界，DELIVERY「已知边界」同步）。
+
+## ADR-027 冷却互斥与解除语义（取代 ADR-004 的叠加口径）
+
+- 状态：已定（2026-11-20 ticket 02 落地；W5 规格 §2；取代 ADR-004「同一 scope 的托管规则与管理员的周期/一次性规则可叠加，取仍生效的最晚截止时间」）
+
+**背景**：ADR-004 允许同一 scope 的托管一次性冷却与管理员的周期/一次性规则叠加取最晚。W4 把「单次冷却 / 周期冷却」做成两个入口后，叠加语义在 UI 上无法自解释：行内一个「冷却中」状态可能同时来自两套规则，「解除」「启用」该作用于哪一条没有唯一答案。W5 规格裁定两种形状互斥，并重定义「解除」。
+
+**决策**：
+
+1. **互斥**：同一 scope 的冷却两种形状互斥，写路径统一走 `availability.assert_cooldown_mode_available`。
+   - 单次冷却生效期间：拒绝创建/改期周期冷却 → 409 `CONFLICT`「单次冷却生效期间不能创建或改期周期冷却；请先解除单次冷却」。
+   - 周期冷却窗口生效期间（窗口尚未被 skip）：拒绝创建/改期单次冷却 → 409 `CONFLICT`「周期冷却窗口生效期间不能设置单次冷却；请等窗口结束或先跳过本窗口」。
+   - 窗口外、窗口已被启用/解除跳过、或没有活跃周期窗口时，单次冷却可写。
+2. **409 details 固定三键、两种形状**：恒为 `{blocking_rule_ids, cooldown_until_ms, window_end_ms}`。
+   - 挡周期规则时（存在生效中的单次规则）：`cooldown_until_ms > 0`（阻塞单次规则的截止），`window_end_ms = 0`。
+   - 挡单次规则时（存在活跃周期窗口）：`cooldown_until_ms = 0`，`window_end_ms = max(当前窗口结束)`。
+   - 批量冷却/启停不整体失败：命中互斥的行进入 `failed[]`（`{id, code, message, details}`），其余行照常提交；启用时跳过的窗口汇总在 `window_skipped[]`。
+3. **note-only 放行**：可用性规则 PATCH 只有在结构字段（`kind / scope / scope_id / recurrence / expires_at_ms / schedule_json`）实际变化时才重跑互斥校验；仅改 `note`、或重发相同值不算变化，照常通过。结构变更同时清除该规则的窗口例外（`skip_until_ms = 0`）。
+4. **关闭不参与互斥**：`closed`（行 `enabled=false`，或历史 `ban` 规则）是独立措施；互斥只在 cooldown 之间生效，ban 规则不影响冷却写入。
+5. **公开模型无冷却**：对公开模型写冷却（行 PATCH 携带 `cooldown_until_ms`，或 availability 规则 `scope=public_model, kind=cooldown`）→ 422 `VALIDATION_ERROR`「公开模型不支持冷却：冷却只属于上游模型（ADR-025）」。
+6. **解除** = 删除当前生效的单次托管规则；若命中本 scope 的周期窗口，只写一次性例外 `skip_until_ms = 窗口结束`，**不删除周期规则**，下一窗口照常冷却——单条 PATCH/POST 在行体顶层返回 `window_skip: {rule_ids, skip_until_ms, message}`（无跳过为 null），批量启用返回 `window_skipped[]`。窗口内「启用」同样只跳过当前窗口。删除周期规则仍需显式确认。
+7. **投影不是判定来源**：行 `cooldown_until_ms` 仍是规则表的投影/兼容观测值；规则表是唯一写入权威与判定来源，任何读取不得直接解释投影列（ADR-004 该结论不变）。
+8. **写后立即下发**：模型行冷却/解除/启停写操作提交后主动 `Rollout.apply`（reason `model-cooldown` / `model-release` / `model-enable` / `model-disable`，`on_failure=keep-booked`），不等 job/人工 apply，修复「新建/删除规则不触发 `rules_changed_since`」。
+
+**理由**：两种形状若可叠加，同一个「冷却中」状态就有两个互相独立的到期来源，解除与启用必须同时解释两条规则，「单按钮双模式」的 UI 也无法映射到唯一写路径。互斥把状态收敛为一个活跃冷却；details 三键让前端能定位阻塞规则并给出可操作提示（列阻塞规则 id 与截止时刻），而不是只显示一句文案。
+
+**后果**：ADR-004 的叠加口径作废（规则表唯一写入权威、投影列语义不变）；UI 行内一个「冷却」按钮双模式、冷却中显示「解除」、周期规则只在抽屉内编辑（ADR-025 注记）；一次性冷却仍以确定性托管规则（`rule_row_<hash>`）落库，不新增第二事实源；「解除」不再清除规则表中的周期规则与已锚定的窗口例外。
 
 ## ADR-028 追踪归适配层：系统只存归一化请求尝试，不定义 OTel/接收器/span 表
 

@@ -1154,6 +1154,30 @@ async function main() {
       PAGES.splice(at >= 0 ? at + 1 : PAGES.length, 0, [detailPath, labelForPath(ROUTE_TABLE, detailPath)]);
     }
 
+    // 公开模型详情页（ticket 17）：取第一个公开模型 id，纳入新页面交互审计
+    const publicModels = await page.request.get(API + "/admin/public-models", { headers: { Accept: "application/json" } }).then((r) => r.json()).catch(() => null);
+    const pmList = Array.isArray(publicModels) ? publicModels : publicModels && (publicModels.items || publicModels.data || publicModels.models);
+    const firstPublicModelId = Array.isArray(pmList) && pmList[0] ? pmList[0].id : null;
+    const wantsPublicModel = !ONLY || ONLY.some((p) => p === "/models" || p.startsWith("/models/public/"));
+    if (firstPublicModelId && wantsPublicModel) {
+      const at = PAGES.findIndex((entry) => entry[0] === "/models");
+      const publicModelPath = "/models/public/" + firstPublicModelId;
+      PAGES.splice(at >= 0 ? at + 1 : PAGES.length, 0, [publicModelPath, labelForPath(ROUTE_TABLE, publicModelPath)]);
+    }
+
+    // 运营设置 3 段子页（ticket 17）：routes.ts 改为页内子导航后，auditPages 不再展开该参数路由，
+    // 这里显式补回，避免交互审计覆盖面回退。
+    const wantsOpsSettings = !ONLY || ONLY.some((p) => p === "/ops-settings" || p.startsWith("/ops-settings/"));
+    if (wantsOpsSettings) {
+      const at = PAGES.findIndex((entry) => entry[0] === "/ops-settings");
+      const opsSections = [
+        ["/ops-settings/connection", "运营设置·连接地址"],
+        ["/ops-settings/system", "运营设置·系统参数"],
+        ["/ops-settings/runtime", "运营设置·运行信息"],
+      ];
+      PAGES.splice(at >= 0 ? at + 1 : PAGES.length, 0, ...opsSections);
+    }
+
     for (const entry of PAGES) await auditPage(page, sessionState, entry);
     await auditShell(page, sessionState);
     await auditLogin(browser);
