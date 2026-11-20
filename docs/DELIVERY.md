@@ -26,6 +26,9 @@ cd C:\Users\microsoft\workspace\webdev\slipstream\api
 $env:PYTHONPATH="src"; python scripts/seed_demo.py
 # 旧库 priority 语义迁移：默认 dry-run，--apply 写入并记录 priority_semantics=v2；已迁移则 no-op
 python scripts/migrate_priority_v2.py --database-url sqlite:///./.data_store/slipstream.db
+# 旧库多密钥迁移：把退役的 upstreams.api_key_enc 镜像转成首把密钥行并清空镜像，写 multikey_semantics=v2
+#（新库无需执行：init_db 建库即带 upstream_keys，seed/CRUD 只写密钥行；旧库执行一次后 no-op）
+python scripts/migrate_multikey_v2.py --database-url sqlite:///./.data_store/slipstream.db
 
 # 2) 控制面（管理台后端）
 $env:PYTHONPATH="src"; python -m uvicorn l06_api.app:create_app --factory --host 127.0.0.1 --port 3700
@@ -36,7 +39,7 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 # 打开 http://localhost:3700
 ```
 
-- **演示数据规模**：3 厂商 / 6 上游 / 20 上游模型（其中 **19 个带成本 + 1.2 倍率**）/ 8 公开模型（6 failover + 2 weighted）/ 16 目标 / **6 用户**（根用户 D + 两层代理树）/ 5 把 `sk-` 连接密钥 / 252 条用量 / 245 条计费流水 / 2 条配置版本 / 68 条审计 / 12 条 app_settings / 2 条可用性规则（ban + cooldown，无排期窗口）；策略、护栏、MCP 各有一份样例配置。全程不使用 qax/qianxin 厂商名。
+- **演示数据规模**：3 厂商 / 4 上游（zai-01 一个渠道 **3 把密钥**，nebula-01、local-01/02 各 1 把，共 **6 条上游密钥**）/ 16 上游模型（其中 **15 个带成本 + 1.2 倍率**，1 个故意未定价）/ 8 公开模型（6 failover + 2 weighted）/ 16 目标 / **6 用户**（根用户 D + 两层代理树）/ 5 把 `sk-` 连接密钥 / 252 条用量 / 245 条计费流水 / 2 条配置版本 / 64 条审计 / 13 条 app_settings / 2 条可用性规则（ban + cooldown，无排期窗口）；策略、护栏、MCP 各有一份样例配置。全程不使用 qax/qianxin 厂商名。
 - **登录**：真实会话（ticket 02）。默认演示账号 `admin / admin12345`（管理用户），另有 `lisi`（代理用户）、`wangwu`（普通用户），首次登录后请修改。除登录/健康检查外的 `/admin/*` 全部要求会话。
 - **端口**：管理台与控制面同为 **3700**（单端口：`web/dist` 由控制面同源托管，不再单独起前端端口）；仅本地 HMR 可选 `cd web && npm run dev`（5173，vite 代理 `/admin`、`/api` 到 3700）；数据面 **3600**；旧的 agentgateway（3691 / 19004-19006）**未做任何改动**。
 - **主机名**：管理台与 API 必须同主机名（都用 `localhost`）；混用 `localhost` 与 `127.0.0.1` 会因 SameSite=Lax 不带 cookie。
@@ -53,7 +56,7 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 - 单端口部署（本提交）：`web/dist` 由控制面 3700 同源托管（`api/src/l06_api/spa.py`），管理台不再单独占端口；`npm run build` 后 `/`、`/login`、`/models` 深链均 200 HTML，`/assets/*.js` 200，`/admin/health` 200，未知 `/admin/*` 保持 JSON，`/openapi.json`、`/docs` 200；浏览器验收 `--strict` PASS 25/FAIL 0（证据 `ops/checks/.logs/acceptance/20261118-202505/report.md`）。
 - 浏览器端到端：`node ops/checks/acceptance_browser.mjs --channel msedge --strict` → **PASS 25 / FAIL 0 / PENDING 0 / SKIP 0**；证据在 `ops/checks/.logs/acceptance/20261118-192227/report.md`，覆盖登录品牌与错误密码、控制面健康、管理员主导航逐页无 console error、策略/护栏/MCP 编辑入口、上游详情五 Tab、模型试验 20 参数与会话操作、设置 IA、普通用户看不到成本且直连 `/cost` 被重定向/拦截、后端无 `billing:cost` 返回 403、代理用户可管用户但无成本、命令面板（Ctrl+K）、主题三态（ToggleGroup radio）、看板三 Tab 与热力图区间、价目编辑与还原。
 - 截图：浏览器验收时逐页截图保存在 `ops/checks/.logs/acceptance/<时间戳>/`（不入库）；历史批次汇总截图已清理（不入库，可用验收脚本重新生成）。
-- seed / 迁移：连续两次 `seed_demo.py` 计数一致；`migrate_priority_v2.py` 的 dry-run、apply、二次 no-op 由 `tests/integration/test_priority_migration_demo.py` 覆盖（seed 产生的 v2 数据先还原为 legacy 形状再验证翻转）。ticket 20 的验收脚本、ticket 19 的 seed/迁移、ticket 21 的本文档互相引用同一组数字。
+- seed / 迁移：连续两次 `seed_demo.py` 计数一致；`migrate_priority_v2.py` 的 dry-run、apply、二次 no-op 由 `tests/integration/test_priority_migration_demo.py` 覆盖（seed 产生的 v2 数据先还原为 legacy 形状再验证翻转）。ticket 20 的验收脚本、ticket 19 的 seed/迁移、ticket 21 的本文档互相引用同一组数字。多密钥迁移的旧库路径由 `tests/integration/test_multikey_migration.py` 覆盖，新库路径（建库即带 `upstream_keys`、seed/CRUD 只写密钥行、跑脚本只补 `multikey_semantics=v2` 标记）由 `tests/integration/test_seed_demo_multikey.py` 覆盖；本机 8 上游旧库已实测迁移（镜像转首把密钥行 + 清空镜像 + 打标记）。
 
 ## 4. 已知限制（如实记录）
 
@@ -121,7 +124,7 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 ## 四期交付注记（2026-11-20，详见 docs/CHANGELOG-phase4.md）
 
 1. **多密钥平权（ADR-026）**：每把上游密钥 = 一个独立 AG 上游（`{model}#k{seq}`，E18 形态）；failover/weighted 下密钥级平权分流（P2C 概率性，非均匀），**conditional 模式密钥平权不生效（E20）**——每目标仅用第一把密钥且成员编排有提示；按上游密钥分账不可得（request_logs 只记最终上游）。
-2. **主密钥概念废除**：is_primary/镜像/轮换端点全部退役；空上游非法（创建 422 + 删最后一把 409）；旧库升级跑 `api/scripts/migrate_multikey_v2.py`（dry-run 默认）。
+2. **主密钥概念废除**：is_primary/镜像/轮换端点全部退役；空上游非法（创建 422 + 删最后一把 409）。多密钥迁移触发路径：**旧库**跑 `api/scripts/migrate_multikey_v2.py`（dry-run 默认；`--apply` 把镜像转成首把密钥行、清空镜像、写 `multikey_semantics=v2`，之后 no-op）；**新库**无需执行（`init_db` 建库即带 `upstream_keys`，seed/CRUD 只写密钥行，跑脚本仅补标记）。
 3. **表格与分页规范（DESIGN-AUDIT 四期）**：大表表体内部滚动+撑满页底+最小高度、操作列冻结右侧、头身对齐一致、凡表必有列设置；分页 nav 必须 `position:relative`（sr-only 逃逸 ICB 会顶高 html scrollHeight 酿成全站窗口滚动空白，见 §4 红线）。
 4. **语义色=分位数锚定**：日志首字/耗时按当前窗口 `all` 块分位动态着色（≤P50 绿/≤P95 黄/>P95 红），非固定阈值；旧后端无 all 块时降级中性灰。
 5. **模型参数来源**：models.dev 每日自动+手动兑入（只填空、手改永不覆盖、USD 进价按 fx_snapshots 折 CNY、无汇率 skip）；代理用户经 `GET /admin/my/models` 查参数（零金额键）。

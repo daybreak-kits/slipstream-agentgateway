@@ -1,10 +1,11 @@
 """Demo seed for the Slipstream control plane (task-170, ticket 19).
 
 Creates a realistic 7-day dataset so every frontend page has something to show:
-3 vendors, 6 upstreams, 20 upstream models (cost + 1.2x markup where priced),
-8 public models (failover + weighted, AG 1.7 小优先 priority), 6 consumers
-(root user D + two-level tree), 5 client keys (sk- + 64 upper case chars),
-price books (upstream + charge + fx), ~250 gateway usage events with
+3 vendors, 4 upstreams (one zai channel with THREE equal keys, ADR-026),
+16 upstream models (cost + 1.2x markup where the row is priced), 8 public
+models (failover + weighted, AG 1.7 小优先 priority), 6 consumers (root user D +
+two-level tree), 5 client keys (sk- + 64 upper case chars), price books
+(upstream + charge + fx), ~250 gateway usage events with
 cost/charge/ledger/daily aggregates, 3 unpriced rows, 2 availability rules
 (ban + cooldown; no scheduled windows), 2 config revisions, editable
 policy / guardrail / MCP sample documents and the audit trail produced by the
@@ -28,6 +29,13 @@ Old databases (三期外部数据) — flip legacy "bigger wins" priorities to v
     cd slipstream/api
     PYTHONPATH=src python scripts/migrate_priority_v2.py          # dry-run 预演
     PYTHONPATH=src python scripts/migrate_priority_v2.py --apply  # 写入 + v2 标记
+
+Old databases also move the retired upstreams.api_key_enc mirror into
+upstream_keys once (ADR-026 多密钥); a database created by this code (new DB)
+already writes rows only, so the command just records the v2 marker there:
+
+    PYTHONPATH=src python scripts/migrate_multikey_v2.py          # dry-run 预演
+    PYTHONPATH=src python scripts/migrate_multikey_v2.py --apply  # 迁移 + v2 标记
 
 Console login (ticket 02 / ADR-019) — every seeded account shares one demo
 password. The seed writes the three console accounts straight onto the unified
@@ -82,6 +90,7 @@ from l05_service import (  # noqa: E402
     policy_store,
     prices,
     roles,
+    upstream_ops,
     usage_ingest,
     user_tree,
 )
@@ -101,50 +110,55 @@ VENDORS = [
     ("本地推理", "local", "自建 GPU 集群，vLLM 部署"),
 ]
 
-# (vendor slug, base_url, api_style, fake upstream key)
+# (vendor slug, base_url, api_style, [fake upstream keys])
+# ADR-026: one channel owns N equal-peer keys - the renderer expands each row
+# into its own AG provider ({upstream_id}#{seq}); the demo keeps the zai channel
+# multi-key instead of faking it with three same-base_url upstreams.
 UPSTREAMS = [
-    ("zai", "https://open.bigmodel.cn/api/paas/v4", "openai_chat", "sk-zai-demo-primary"),
-    ("zai", "https://open.bigmodel.cn/api/paas/v4", "openai_chat", "sk-zai-demo-backup"),
-    ("zai", "https://open.bigmodel.cn/api/paas/v4", "openai_chat", "sk-zai-demo-cheap"),
-    ("nebula", "https://api.nebula.example/v1", "anthropic_messages", "sk-nebula-demo-01"),
-    ("local", "http://127.0.0.1:8000/v1", "openai_chat", "sk-local-demo-01"),
-    ("local", "http://127.0.0.1:8001/v1", "openai_chat", "sk-local-demo-02"),
+    ("zai", "https://open.bigmodel.cn/api/paas/v4", "openai_chat",
+     ["sk-zai-demo-primary", "sk-zai-demo-backup", "sk-zai-demo-cheap"]),
+    ("nebula", "https://api.nebula.example/v1", "anthropic_messages",
+     ["sk-nebula-demo-01"]),
+    ("local", "http://127.0.0.1:8000/v1", "openai_chat", ["sk-local-demo-01"]),
+    ("local", "http://127.0.0.1:8001/v1", "openai_chat", ["sk-local-demo-02"]),
 ]
 
+# labels for the 2nd..Nth key row; the first one is create_upstream's 默认密钥
+EXTRA_KEY_LABELS = ("备用密钥", "低成本备用")
+
 # upstream index -> [(model name, model type, priced?)]
+# The three old zai channels merged into one channel: their model rows are the
+# union (no duplicate names across one upstream anymore).
 UPSTREAM_MODELS = {
     0: [("glm-5.3", "chat", True), ("glm-5.3-flash", "chat", True),
-        ("glm-4.6", "chat", True), ("embedding-4", "embedding", True)],
-    1: [("glm-5.3", "chat", True), ("glm-4.6", "chat", True),
-        ("glm-4.5-air", "chat", False)],
-    2: [("glm-5.3-air", "chat", True), ("glm-5.3-flash", "chat", True),
-        ("glm-4.6", "chat", True)],
-    3: [("nebula-chat-1", "chat", True), ("nebula-chat-2", "chat", True),
+        ("glm-4.6", "chat", True), ("embedding-4", "embedding", True),
+        ("glm-5.3-air", "chat", True), ("glm-4.5-air", "chat", False)],
+    1: [("nebula-chat-1", "chat", True), ("nebula-chat-2", "chat", True),
         ("nebula-embed-1", "embedding", True)],
-    4: [("llama-3.3-70b", "chat", True), ("qwen2.5-72b", "chat", True),
+    2: [("llama-3.3-70b", "chat", True), ("qwen2.5-72b", "chat", True),
         ("deepseek-v3", "chat", True), ("bge-m3", "embedding", True)],
-    5: [("llama-3.3-70b", "chat", True), ("qwen2.5-32b", "chat", True),
+    3: [("llama-3.3-70b", "chat", True), ("qwen2.5-32b", "chat", True),
         ("mistral-large", "chat", True)],
 }
 
 # (public name, routing mode, note, [(upstream index, model name, priority, weight)])
 PUBLIC_MODELS = [
     ("glm-5.3", "failover", "旗舰对话模型，三层降级", [
-        (0, "glm-5.3", 1, 0), (1, "glm-5.3", 2, 0), (4, "deepseek-v3", 3, 0)]),
-    ("glm-flash", "failover", "低成本快模型，跨厂商互备", [
-        (0, "glm-5.3-flash", 1, 0), (2, "glm-5.3-air", 2, 0)]),
+        (0, "glm-5.3", 1, 0), (2, "deepseek-v3", 2, 0), (1, "nebula-chat-1", 3, 0)]),
+    ("glm-flash", "failover", "低成本快模型，同渠道降级", [
+        (0, "glm-5.3-flash", 1, 0), (0, "glm-5.3-air", 2, 0)]),
     ("gpt-4o", "failover", "对外别名，指向合规通道", [
-        (3, "nebula-chat-1", 1, 0), (0, "glm-4.6", 2, 0)]),
+        (1, "nebula-chat-1", 1, 0), (0, "glm-4.6", 2, 0)]),
     ("claude-3-7-sonnet", "failover", "长上下文合规通道", [
-        (3, "nebula-chat-2", 1, 0)]),
+        (1, "nebula-chat-2", 1, 0)]),
     ("deepseek-v3", "failover", "自建集群优先，云端兜底", [
-        (4, "deepseek-v3", 1, 0), (1, "glm-4.6", 2, 0)]),
+        (2, "deepseek-v3", 1, 0), (0, "glm-4.6", 2, 0)]),
     ("qwen-max", "weighted", "两张本地卡按权重分流", [
-        (4, "qwen2.5-72b", 0, 60), (5, "qwen2.5-32b", 0, 40)]),
+        (2, "qwen2.5-72b", 0, 60), (3, "qwen2.5-32b", 0, 40)]),
     ("llama-70b", "weighted", "双实例等权灰度", [
-        (4, "llama-3.3-70b", 0, 50), (5, "llama-3.3-70b", 0, 50)]),
+        (2, "llama-3.3-70b", 0, 50), (3, "llama-3.3-70b", 0, 50)]),
     ("embed-v4", "failover", "向量化模型，云端加本地兜底", [
-        (0, "embedding-4", 1, 0), (4, "bge-m3", 2, 0)]),
+        (0, "embedding-4", 1, 0), (2, "bge-m3", 2, 0)]),
 ]
 
 # (name, initial micro, topup history micro, parent name, role)
@@ -290,18 +304,30 @@ def seed(session, rng: random.Random) -> dict[str, object]:
 
     upstreams: dict[str, object] = {}
     upstream_vendor: dict[str, str] = {}
-    for vendor_slug, base_url, api_style, api_key in UPSTREAMS:
+    key_counts: dict[str, int] = {}
+    for vendor_slug, base_url, api_style, api_keys in UPSTREAMS:
         upstream = crud.create_upstream(
             session,
             vendor_id=vendors[vendor_slug].id,
             base_url=base_url,
             api_style=api_style,
-            api_key=api_key,
+            api_key=api_keys[0],
             secret_box=secret_box,
             actor="seed",
         )
+        # ADR-026: the remaining credentials are equal peers of the same channel.
+        for index, api_key in enumerate(api_keys[1:], start=1):
+            upstream_ops.add_key(
+                session,
+                upstream,
+                label=EXTRA_KEY_LABELS[index - 1],
+                api_key=api_key,
+                secret_box=secret_box,
+                actor="seed",
+            )
         upstreams[upstream.name] = upstream  # names are slug-01 .. slug-NN
         upstream_vendor[upstream.name] = vendor_slug
+        key_counts[upstream.name] = len(api_keys)
 
     upstream_models: dict[tuple[str, str], object] = {}
     index_to_upstream = {i: up for i, up in enumerate(upstreams.values())}
@@ -419,7 +445,7 @@ def seed(session, rng: random.Random) -> dict[str, object]:
             if unpriced_planned < 3 and rng.random() < 0.03:
                 # Deliberately unpriced: the upstream model has no price row.
                 unpriced_planned += 1
-                upstream_name = up_name_by_index[1]
+                upstream_name = up_name_by_index[0]
                 upstream_model = "glm-4.5-air"
             else:
                 index, upstream_model = rng.choice(target_rows_by_public[public_name])
@@ -447,7 +473,13 @@ def seed(session, rng: random.Random) -> dict[str, object]:
                     http_status=status,
                     public_model=public_name,
                     upstream_model=upstream_model,
-                    provider=upstreams[upstream_name].id,
+                    # ADR-026: real AG rows carry the expanded provider name
+                    # {upstream_id}#{seq}; the seq here is deterministic so the
+                    # generated dataset (and its counts) stay reproducible.
+                    provider=(
+                        f"{upstreams[upstream_name].id}"
+                        f"#{event_count % key_counts[upstream_name] + 1}"
+                    ),
                     api_key_id=keys[user_name].key_id,
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
@@ -493,7 +525,7 @@ def seed(session, rng: random.Random) -> dict[str, object]:
         session,
         kind="cooldown",
         scope="model_target",
-        scope_id=targets[("glm-flash", "zai-03", "glm-5.3-air")].id,
+        scope_id=targets[("glm-flash", "zai-01", "glm-5.3-air")].id,
         recurrence="once",
         expires_at_ms=now + 2 * 3_600_000,
         note="429 限流自动冷却 2 小时",
@@ -506,7 +538,7 @@ def seed(session, rng: random.Random) -> dict[str, object]:
         artifact_hash=sha256_hex("seed-revision-1"),
         adapter_id="agentgateway",
         operator="张三",
-        reason="首次上线：3 厂商 / 6 上游 / 8 对外模型",
+        reason="首次上线：3 厂商 / 4 上游 / 8 对外模型",
         status="superseded",
         previous_revision_id=None,
         created_at_ms=now - 3 * DAY_MS,
