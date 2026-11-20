@@ -680,6 +680,138 @@ async function main() {
     return "上游模型 / 公开模型 双 Tab 存在且可切换";
   });
 
+  await test("models.upstreamDrawer", "上游模型编辑：100vh 抽屉、固定底栏、滚动、冷却互斥与小屏全宽", async () => {
+    await admin.ensureAuthed();
+    const from = admin.consoleErrors.length;
+    const modelsRes = await admin.apiGet("/admin/upstream-models?page_size=200");
+    assert(modelsRes.status === 200, "/admin/upstream-models 返回 " + modelsRes.status);
+    const models = Array.isArray(modelsRes.body) ? modelsRes.body : (modelsRes.body && modelsRes.body.items) || [];
+    assert(models.length > 0, "没有上游模型数据（先跑 seed_demo.py）");
+    const model = models[0];
+    const MARK = "ticket11-acceptance-" + Date.now();
+    const cleanup = async () => {
+      // 释放行冷却 + 删除本用例创建的周期规则（备注带 MARK），保证验收幂等。
+      try {
+        await admin.page.request.patch(admin.apiBase + "/admin/upstream-models/" + model.id, { data: { cooldown_until_ms: 0 } });
+        const rulesRes = await admin.apiGet("/admin/availability-rules?page_size=200");
+        const rules = Array.isArray(rulesRes.body) ? rulesRes.body : [];
+        for (const rule of rules) {
+          if (rule.scope === "upstream_model" && rule.scope_id === model.id && String(rule.note || "").includes(MARK)) {
+            await admin.page.request.delete(admin.apiBase + "/admin/availability-rules/" + rule.id);
+          }
+        }
+      } catch {
+        // 清理失败不改变验收结论
+      }
+      await admin.page.setViewportSize({ width: 1440, height: 900 });
+    };
+    try {
+      await admin.visit("/models", "模型管理");
+      const row = admin.page.locator("tr", { hasText: model.name }).first();
+      await row.waitFor({ state: "visible", timeout: 15000 });
+      await row.getByRole("button", { name: "编辑", exact: true }).click();
+      const drawer = admin.page.locator('[data-slot="upstream-model-drawer"]');
+      await drawer.waitFor({ state: "visible", timeout: 8000 });
+      // Sheet 有 slide-in 动画（500ms）：等几何稳定后再量 100vh / 宽度 / 贴边。
+      await admin.page.waitForTimeout(800);
+      const viewport = admin.page.viewportSize();
+
+      // ① 大屏：右侧满高 100vh、宽 760–860px、贴右边缘；四个分组齐全。
+      const box = await drawer.boundingBox();
+      assert(box, "抽屉没有可见区域");
+      assert(Math.abs(box.height - viewport.height) <= 2, "抽屉必须满高（100vh），实际 " + JSON.stringify(box));
+      assert(box.width >= 760 && box.width <= 861, "大屏抽屉宽应在 760–860px，实际 " + box.width);
+      assert(Math.abs(box.x + box.width - viewport.width) <= 1, "抽屉必须贴右边缘，实际 x=" + box.x);
+      const drawerText = await drawer.innerText();
+      for (const label of ["基本信息", "能力与参数", "价格", "状态与冷却"]) assertIncludes(drawerText, label, "抽屉分组");
+      await admin.shot("models-upstream-drawer-large");
+
+      // ② 内容区滚动、底部「取消 / 保存」固定：滚动前后保存按钮视口位置不变。
+      const save = drawer.getByRole("button", { name: "保存", exact: true });
+      assert((await save.count()) === 1, "抽屉必须有唯一「保存」主按钮");
+      const before = await save.boundingBox();
+      const scroller = drawer.locator(".overflow-y-auto").first();
+      const metrics = await scroller.evaluate((el) => ({ scrollHeight: el.scrollHeight, clientHeight: el.clientHeight }));
+      assert(metrics.scrollHeight > metrics.clientHeight, "抽屉内容必须可滚动（不了一屏时不该挤扁底栏），实际 " + JSON.stringify(metrics));
+      await scroller.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+      await admin.page.waitForTimeout(250);
+      const after = await save.boundingBox();
+      assert(before && after && Math.abs(before.y - after.y) <= 1, "滚动后底部按钮必须固定，before=" + JSON.stringify(before) + " after=" + JSON.stringify(after));
+      assert(after.y + after.height >= viewport.height - 80 && after.y + after.height <= viewport.height - 2, "底部按钮必须贴着视口底部，实际 " + JSON.stringify(after));
+      await admin.shot("models-upstream-drawer-scrolled");
+
+      // ③ 09 脏标记：字段改动 → 已修改点 + 未保存摘要 + 保存变主按钮；恢复全部后清零并中性禁用。
+      await scroller.evaluate((el) => { el.scrollTop = 0; });
+      const nameInput = drawer.locator("input.font-mono").first();
+      const originalName = await nameInput.inputValue();
+      await nameInput.fill(originalName + "-dirty");
+      await drawer.getByText("已修改", { exact: true }).first().waitFor({ state: "visible", timeout: 5000 });
+      assertIncludes(await drawer.innerText(), "未保存 1 项", "未保存摘要");
+      assert(!(await save.isDisabled()), "有未保存修改时保存按钮必须可用（主按钮）");
+      await drawer.getByRole("button", { name: "恢复全部", exact: true }).click();
+      await admin.page.waitForTimeout(200);
+      assert((await nameInput.inputValue()) === originalName, "恢复全部必须回填基线值");
+      assert(await save.isDisabled(), "干净状态下保存按钮必须中性禁用");
+
+      // ④ 冷却互斥：设单次冷却 → 周期模式禁用 + 互斥说明（含截止）→ 唯一解除。
+      await drawer.locator('[data-mode="single"]').click();
+      await drawer.getByRole("button", { name: "1 小时", exact: true }).click();
+      await drawer.getByRole("button", { name: "设置冷却", exact: true }).click();
+      await drawer.getByText("冷却中", { exact: true }).waitFor({ state: "visible", timeout: 10000 });
+      assert(await drawer.locator('[data-mode="periodic"]').isDisabled(), "单次冷却生效时周期模式必须禁用");
+      const coolingText = await drawer.innerText();
+      assertIncludes(coolingText, "单次冷却生效期间不能创建或改期周期冷却", "互斥说明");
+      assertIncludes(coolingText, "当前单次冷却至", "互斥说明含截止时间");
+      const release = drawer.locator('[data-slot="cooldown-release"]');
+      assert((await release.count()) === 1, "冷却中必须恰好一个「解除」入口");
+      await release.click();
+      await drawer.getByText("无冷却", { exact: true }).waitFor({ state: "visible", timeout: 10000 });
+
+      // ⑤ 周期窗口（UI 建 00:00–00:00 全天窗口）→ 单次模式禁用 + 阻塞规则与窗口结束时间；解除只跳过当前窗口。
+      await drawer.locator('[data-mode="periodic"]').click();
+      await drawer.locator('input[type="time"]').nth(0).fill("00:00");
+      await drawer.locator('input[type="time"]').nth(1).fill("00:00");
+      await drawer.getByPlaceholder("如：每日凌晨例行维护").fill(MARK);
+      await drawer.getByRole("button", { name: "设置周期冷却", exact: true }).click();
+      await drawer.getByText("已有周期冷却", { exact: true }).waitFor({ state: "visible", timeout: 10000 });
+      await drawer.getByText("冷却中", { exact: true }).waitFor({ state: "visible", timeout: 10000 });
+      assert(await drawer.locator('[data-mode="single"]').isDisabled(), "周期窗口生效时单次模式必须禁用");
+      const windowText = await drawer.innerText();
+      assertIncludes(windowText, "周期冷却窗口生效期间不能设置单次冷却", "互斥说明");
+      assertIncludes(windowText, "窗口至", "互斥说明含窗口结束时间");
+      assertIncludes(windowText, "00:00–00:00", "互斥说明含阻塞规则摘要");
+      await admin.shot("models-upstream-drawer-cooldown-conflict");
+      await drawer.locator('[data-slot="cooldown-release"]').click();
+      await drawer.getByText("无冷却", { exact: true }).waitFor({ state: "visible", timeout: 10000 });
+      // 删除周期规则（需要显式确认），删除后单次模式恢复可用。
+      await drawer.getByRole("button", { name: "删除规则", exact: true }).click();
+      const confirm = admin.page.getByRole("alertdialog");
+      await confirm.waitFor({ state: "visible", timeout: 5000 });
+      await confirm.getByRole("button", { name: "删除规则", exact: true }).click();
+      await admin.page.waitForTimeout(600);
+      assert(!(await drawer.locator('[data-mode="single"]').isDisabled()), "删除周期规则后单次模式应恢复可用");
+
+      // ⑥ 小屏（390×844）：窄屏全屏（宽=视口宽、高=100vh）。
+      await admin.page.setViewportSize({ width: 390, height: 844 });
+      await admin.page.waitForTimeout(400);
+      const small = await drawer.boundingBox();
+      assert(small && Math.abs(small.width - 390) <= 2, "窄屏抽屉必须全宽，实际 " + JSON.stringify(small));
+      assert(Math.abs(small.height - 844) <= 2, "窄屏抽屉必须满高，实际 " + JSON.stringify(small));
+      await admin.shot("models-upstream-drawer-small");
+
+      // ⑦ 未保存离开提示：周期草稿未提交时点「取消」先确认。
+      await drawer.getByRole("button", { name: "取消", exact: true }).click();
+      const discard = admin.page.getByRole("alertdialog");
+      await discard.waitFor({ state: "visible", timeout: 5000 });
+      await discard.getByRole("button", { name: "放弃修改", exact: true }).click();
+      await drawer.waitFor({ state: "hidden", timeout: 5000 });
+      admin.assertNoNewErrors(from, "上游模型抽屉");
+      return "大屏 820×900 满高贴右、内容滚动底栏固定、脏标记/恢复、单次与周期互斥+唯一解除、小屏 390 全宽、未保存离开确认";
+    } finally {
+      await cleanup();
+    }
+  });
+
   /* ---------- 模型试验 ---------- */
   const PLAYGROUND_PARAMS = [
     "system prompt", "API 密钥", "流式", "temperature", "top_p", "top_k",

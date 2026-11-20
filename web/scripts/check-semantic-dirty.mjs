@@ -291,15 +291,259 @@ check("页面表单 ops_settings：连接地址用脏标记原语 + 恢复 + 底
   );
 });
 
+// ---------- 6b. 上游模型满高抽屉与冷却互斥（ticket 11） ----------
+check("cooldown-state：单次/周期互斥与阻塞说明", async () => {
+  const { cooldownModeState } = await load("/src/components/models/cooldown-state.ts");
+  const now = 1_700_000_000_000;
+  const fmt = (ms) => "T" + ms;
+  const baseRule = {
+    id: "rule_1", kind: "cooldown", scope: "upstream_model", scope_id: "m1",
+    recurrence: "once", expires_at_ms: now + 3_600_000, schedule_json: null, note: "", created_at_ms: now,
+  };
+  const call = (overrides) => cooldownModeState({
+    row: { enabled: true },
+    rules: [],
+    scope: "upstream_model",
+    scopeId: "m1",
+    nowMs: now,
+    formatDeadline: fmt,
+    ...overrides,
+  });
+
+  // 1) 常态：没有冷却、不阻塞模式、没有解除入口。
+  const normal = call({});
+  expect(!normal.cooling && !normal.blockedSingle && !normal.blockedPeriodic && !normal.releaseVisible, "常态不应有冷却/阻塞/解除");
+  expect(normal.singleBlockReason === "" && normal.periodicBlockReason === "", "常态不应有阻塞说明");
+  expect(normal.coolingUntilMs === 0, "常态冷却截止必须为 0，实际 " + normal.coolingUntilMs);
+
+  // 2) 单次冷却生效：周期模式禁用；单次模式仍可用（改期）；解除可见。
+  const single = call({
+    row: { enabled: true, cooldown_until_ms: now + 3_600_000, availability: { state: "cooling", cooldown_until_ms: now + 3_600_000 } },
+    rules: [baseRule],
+  });
+  expect(single.cooling, "单次冷却中 cooling 必须为 true");
+  expect(single.singleActiveRule && single.singleActiveRule.id === "rule_1", "必须识别生效中的单次规则");
+  expect(single.coolingUntilMs === now + 3_600_000, "冷却截止应取规则截止，实际 " + single.coolingUntilMs);
+  expect(single.blockedPeriodic === true && single.blockedSingle === false, "单次生效只禁周期模式");
+  expect(single.periodicBlockReason.includes("单次冷却生效期间不能创建或改期周期冷却"), "周期禁用要给出互斥原因：" + single.periodicBlockReason);
+  expect(single.periodicBlockReason.includes("T" + (now + 3_600_000)), "周期禁用原因要含单次截止时间：" + single.periodicBlockReason);
+  expect(single.releaseVisible === true, "冷却中必须给出解除入口");
+
+  // 3) 周期窗口生效（行冷却但无单次规则）：单次模式禁用；说明含阻塞规则与窗口结束时间。
+  const periodicRule = {
+    ...baseRule, id: "rule_2", recurrence: "daily", expires_at_ms: null,
+    schedule_json: JSON.stringify({ windows: [{ start: "02:00", end: "04:00" }] }),
+  };
+  const periodic = call({
+    row: { enabled: true, cooldown_until_ms: now + 1_800_000, availability: { state: "cooling", cooldown_until_ms: now + 1_800_000 } },
+    rules: [periodicRule],
+  });
+  expect(periodic.cooling && periodic.releaseVisible, "周期窗口生效时也必须显示冷却与解除");
+  expect(periodic.periodicActiveRule && periodic.periodicActiveRule.id === "rule_2", "必须识别周期窗口规则");
+  expect(periodic.blockedSingle === true && periodic.blockedPeriodic === false, "周期窗口生效只禁单次模式");
+  expect(periodic.singleBlockReason.includes("周期冷却窗口生效期间不能设置单次冷却"), "单次禁用要给出互斥原因：" + periodic.singleBlockReason);
+  expect(periodic.singleBlockReason.includes("T" + (now + 1_800_000)), "单次禁用原因要含窗口结束时间：" + periodic.singleBlockReason);
+  expect(periodic.singleBlockReason.includes("每天"), "单次禁用原因要含阻塞规则摘要：" + periodic.singleBlockReason);
+
+  // 4) 缺 availability:read（rules=null）降级：仍显示冷却与解除，但不猜着禁用模式。
+  const unknown = call({
+    row: { enabled: true, cooldown_until_ms: now + 600_000, availability: { state: "cooling", cooldown_until_ms: now + 600_000 } },
+    rules: null,
+  });
+  expect(unknown.cooling && unknown.releaseVisible, "规则不可读时仍应显示冷却与解除");
+  expect(unknown.blockedSingle === false && unknown.blockedPeriodic === false, "规则不可读时不能猜着禁用模式");
+
+  // 5) 其它 scope / ban 规则不得被当成生效冷却。
+  const other = call({
+    row: { enabled: true, cooldown_until_ms: now + 600_000, availability: { state: "cooling", cooldown_until_ms: now + 600_000 } },
+    rules: [
+      { ...baseRule, id: "rule_x", scope: "public_model", scope_id: "p1" },
+      { ...baseRule, id: "rule_y", kind: "ban", expires_at_ms: null },
+    ],
+  });
+  expect(other.singleActiveRule === null && other.periodicActiveRule === null, "其它 scope/ban 规则不得被当成生效冷却");
+  expect(other.blockedSingle === false && other.blockedPeriodic === false, "其它规则不得误禁模式");
+
+  // 6) 已关闭的行仍有冷却：解除入口照常给出。
+  const closed = call({
+    row: { enabled: false, cooldown_until_ms: now + 600_000, availability: { state: "closed" } },
+  });
+  expect(closed.cooling === true && closed.releaseVisible === true, "关闭的行若有未来冷却截止仍应显示解除入口");
+});
+
+check("CooldownControlPanel：模式禁用/互斥说明/唯一解除/选中态", async () => {
+  const { CooldownControlPanel } = await load("/src/components/models/cooldown-panel.tsx");
+  const baseState = {
+    cooling: false,
+    coolingUntilMs: 0,
+    singleActiveRule: null,
+    periodicActiveRule: null,
+    blockedSingle: false,
+    blockedPeriodic: false,
+    singleBlockReason: "",
+    periodicBlockReason: "",
+    releaseVisible: false,
+  };
+  const panel = (state, extra) =>
+    render(
+      createElement(CooldownControlPanel, {
+        state,
+        mode: "single",
+        onModeChange: () => {},
+        onRelease: () => {},
+        singleForm: createElement("div", null, "单次冷却表单"),
+        periodicForm: createElement("div", null, "周期冷却表单"),
+        ...extra,
+      }),
+    );
+  const tagOf = (html, marker) => {
+    const match = html.match(new RegExp("<button[^>]*" + marker + "[^>]*>"));
+    return match ? match[0] : "";
+  };
+
+  // 1) 常态：两种模式都可选，无互斥提示、无解除入口；单次模式选中态明显且只渲染当前表单。
+  const normal = panel(baseState);
+  expect(normal.includes('data-slot="cooldown-panel"'), "冷却面板缺少 data-slot 标记：" + normal.slice(0, 200));
+  expect(!normal.includes('data-slot="cooldown-conflict"'), "常态不应出现互斥提示");
+  expect(!normal.includes('data-slot="cooldown-release"'), "常态不应出现解除入口");
+  const normalSingle = tagOf(normal, 'data-mode="single"');
+  const normalPeriodic = tagOf(normal, 'data-mode="periodic"');
+  expect(normalSingle.includes('aria-pressed="true"') && normalSingle.includes("border-primary"), "选中的单次模式必须有明显选中态：" + normalSingle);
+  expect(normalPeriodic.includes('aria-pressed="false"'), "未选中的周期模式 aria-pressed 必须为 false");
+  expect(!normalSingle.includes("disabled") && !normalPeriodic.includes("disabled"), "常态两种模式都不应禁用");
+  expect(normal.includes("单次冷却表单") && !normal.includes("周期冷却表单"), "只渲染当前选中模式表单");
+
+  // 2) 周期窗口生效：单次模式禁用 + 互斥说明（含窗口结束时间）+ 唯一解除。
+  const singleReason = "周期冷却窗口生效期间不能设置单次冷却；阻塞规则：每天 02:00–04:00；窗口至 11-20 12:00，可先解除跳过本窗口";
+  const blockedSingle = panel(
+    { ...baseState, cooling: true, coolingUntilMs: 1, blockedSingle: true, singleBlockReason: singleReason, releaseVisible: true },
+    { mode: "single" },
+  );
+  expect(tagOf(blockedSingle, 'data-mode="single"').includes("disabled"), "周期窗口生效时必须禁用单次模式");
+  expect(blockedSingle.includes('data-slot="cooldown-conflict"'), "互斥冲突必须有醒目的提示块");
+  expect(blockedSingle.includes("周期冷却窗口生效期间不能设置单次冷却"), "互斥提示缺少原因");
+  expect(blockedSingle.includes("窗口至 11-20 12:00"), "互斥提示缺少窗口结束时间");
+  expect((blockedSingle.match(/data-slot="cooldown-release"/g) || []).length === 1, "冷却中必须恰好一个解除入口");
+
+  // 3) 单次冷却生效：周期模式禁用 + 互斥说明；解除入口按 pending 禁用。
+  const periodicReason = "单次冷却生效期间不能创建或改期周期冷却；当前单次冷却至 11-20 12:00，请先解除单次冷却";
+  const blockedPeriodic = panel(
+    { ...baseState, cooling: true, coolingUntilMs: 1, blockedPeriodic: true, periodicBlockReason: periodicReason, releaseVisible: true },
+    { mode: "single", pending: true },
+  );
+  expect(tagOf(blockedPeriodic, 'data-mode="periodic"').includes("disabled"), "单次冷却生效时必须禁用周期模式");
+  expect(blockedPeriodic.includes("单次冷却生效期间不能创建或改期周期冷却"), "互斥提示缺少原因");
+  expect(blockedPeriodic.includes("仅跳过当前窗口") || blockedPeriodic.includes("只跳过本窗口") || blockedPeriodic.includes("跳过本窗口"), "解除入口要说明只跳过本窗口");
+  expect(tagOf(blockedPeriodic, 'data-slot="cooldown-release"').includes("disabled"), "解除动作 pending 时必须禁用");
+
+  // 4) 选中周期模式：换表单、切换态正确。
+  const periodicMode = panel(baseState, { mode: "periodic" });
+  expect(tagOf(periodicMode, 'data-mode="periodic"').includes('aria-pressed="true"'), "周期模式选中态");
+  expect(periodicMode.includes("周期冷却表单") && !periodicMode.includes("单次冷却表单"), "切换模式后只渲染周期表单");
+});
+
+check("上游模型满高抽屉：右侧 100vh、四组内容、固定底栏与 09 脏标记", () => {
+  const text = read("src/components/models/upstream-model-drawer.tsx");
+  includesAll(
+    text,
+    [
+      // 右侧满高抽屉：侧边、100vh、760–860px 宽、窄屏全宽
+      "SheetContent",
+      'side="right"',
+      "h-screen",
+      "w-full",
+      "sm:w-[820px]",
+      "sm:min-w-[760px]",
+      "sm:max-w-[860px]",
+      // 三段式骨架：可滚动内容 + 固定底栏
+      "flex-1",
+      "overflow-y-auto",
+      "shrink-0",
+      "border-t",
+      // 四个分组
+      "基本信息",
+      "能力与参数",
+      "价格",
+      "状态与冷却",
+      // 09 脏标记原语
+      "useDirtyFields",
+      "DirtyField",
+      "DirtyCountBadge",
+      "DirtyFooter",
+      "DirtySaveButton",
+      "onReset",
+      // 冷却面板 + 互斥推导
+      "CooldownControlPanel",
+      "cooldownModeState",
+      "useAvailabilityRulesQuery",
+      "availability:read",
+      // 未保存离开与保存状态
+      "ConfirmDialog",
+      "保存中",
+      "保存失败",
+      "取消",
+    ],
+    "上游模型满高抽屉",
+  );
+  // 保存是唯一主按钮：只有一个 DirtySaveButton，其余按钮不得用 primary 变体。
+  expect((text.match(/<DirtySaveButton/g) || []).length === 1, "抽屉必须恰好一个主保存按钮（DirtySaveButton）");
+  expect(!text.includes('variant="primary"'), "除保存外的按钮不得用 primary 变体（保存是唯一主按钮）");
+});
+
+check("接线：两处上游模型编辑改用抽屉，冷却入口只在抽屉", () => {
+  for (const file of ["src/pages/models.tsx", "src/components/upstreams/models-panel.tsx"]) {
+    const text = read(file);
+    expect(text.includes("upstream-model-drawer"), file + " 必须使用满高抽屉编辑上游模型");
+    expect(!text.includes("upstream-model-dialog"), file + " 不能再引用旧弹窗");
+    expect(!text.includes("CooldownManageDialog"), file + " 冷却控制必须收进抽屉（行内不再弹冷却窗）");
+  }
+  const models = read("src/pages/models.tsx");
+  expect(!models.includes("cooldownFor"), "行内不再保留冷却快捷入口（冷却只从抽屉进入）");
+  const panel = read("src/components/upstreams/models-panel.tsx");
+  expect(panel.includes("releaseCooldown"), "上游详情模型行冷却中要保留「解除」快捷入口");
+});
+
+check("冷却表单：单次预设/自定义截止与周期规则编辑", async () => {
+  const { SingleCooldownFields, PeriodicCooldownFields } = await load("/src/components/models/cooldown-panel.tsx");
+
+  // 单次：1/3/6/12/24/72 小时预设 + 自定义截止 + 原因 + 到期时刻说明，默认选中 1 小时。
+  const single = render(createElement(SingleCooldownFields, { pending: false, onSubmit: () => {}, onDirtyChange: () => {} }));
+  includesAll(single, ["1 小时", "3 小时", "6 小时", "12 小时", "24 小时", "72 小时", "自定义截止", "到期时刻", "原因", "设置冷却"], "单次冷却表单");
+  const pressed = single.match(/aria-pressed="true"/g) || [];
+  expect(pressed.length === 1, "单次冷却默认必须恰好选中一个时长预设，实际 " + pressed.length);
+  expect(single.includes("<svg"), "提交按钮必须带语义图标（不只靠颜色）");
+
+  // 周期：已有周期规则（摘要 + 删除规则）+ 重复方式/时间窗/备注 + 提交。
+  const periodicRule = {
+    id: "rule_2", kind: "cooldown", scope: "upstream_model", scope_id: "m1", recurrence: "daily",
+    expires_at_ms: null, schedule_json: JSON.stringify({ windows: [{ start: "02:00", end: "04:00" }] }),
+    note: "", created_at_ms: 1,
+  };
+  const periodic = render(
+    createElement(PeriodicCooldownFields, {
+      scope: "upstream_model",
+      scopeId: "m1",
+      rules: [periodicRule],
+      pending: false,
+      onSubmit: () => {},
+      onRemoveRule: () => {},
+      onDirtyChange: () => {},
+    }),
+  );
+  includesAll(periodic, ["已有周期冷却", "每天 02:00–04:00", "删除规则", "重复方式", "开始时间", "结束时间", "备注", "设置周期冷却"], "周期冷却表单");
+  expect(!periodic.includes("仅跳过当前窗口"), "周期表单不得混入单次解除语义");
+});
+
 // ---------- 7. 行内语义动作按钮接线 ----------
 const actionFiles = [
-  ["src/pages/models.tsx", ["edit", "delete", "cooldown", "releaseCooldown", "disable", "enable"]],
+  ["src/pages/models.tsx", ["edit", "delete", "releaseCooldown", "disable", "enable"]],
   ["src/pages/upstreams.tsx", ["edit", "delete", "testConnection", "disable", "enable"]],
   ["src/pages/client_keys.tsx", ["rename", "resetKey", "delete", "disable", "enable"]],
   ["src/pages/roles.tsx", ["edit", "delete"]],
   ["src/components/users/users-panel.tsx", ["edit", "delete", "disable", "enable"]],
-  ["src/components/upstreams/models-panel.tsx", ["edit", "delete", "disable", "enable", "testConnection", "fetchModels"]],
-  ["src/components/models/cooldown-dialogs.tsx", ["releaseCooldown"]],
+  ["src/components/upstreams/models-panel.tsx", ["edit", "delete", "disable", "enable", "testConnection", "fetchModels", "releaseCooldown"]],
+  ["src/components/models/cooldown-panel.tsx", ["releaseCooldown", "cooldown", "delete"]],
+  ["src/components/models/upstream-model-drawer.tsx", ["enable", "disable"]],
   ["src/pages/upstream_detail.tsx", ["testConnection"]],
 ];
 const legacyIconKeys = ["delete", "disable", "enable", "cooldown", "releaseCooldown", "testConnection"];

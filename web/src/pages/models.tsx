@@ -3,7 +3,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/lib/notify";
 import { useMatch, useNavigate, useSearchParams } from "react-router-dom";
 
-import { CooldownManageDialog } from "@/components/models/cooldown-dialogs";
 import {
   availabilityText, availabilityTone, isCooling, periodicByRow, ruleSummary,
   useAvailabilityMutation, useAvailabilityRulesQuery, useBatchMutation,
@@ -15,7 +14,7 @@ import {
   isImageType, MODEL_TYPES, parametersOf, parameterSummary, ROUTING_LABELS, similarity, TYPE_SOURCE_LABELS,
 } from "@/components/models/model-vocab";
 import { PublicModelEditor } from "@/components/models/public-model-editor";
-import { UpstreamModelDialog } from "@/components/models/upstream-model-dialog";
+import { UpstreamModelDrawer } from "@/components/models/upstream-model-drawer";
 import { PageHeader } from "@/components/layout/page-header";
 import { ModelsTable, type ModelColumn } from "@/components/models/table";
 import {
@@ -227,11 +226,10 @@ function UpstreamTab() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
   const [typeValue, setTypeValue] = useState<string>(SELECT_ALL_VALUE);
-  const [dialog, setDialog] = useState<{ open: boolean; initial: UpstreamModel | null }>({ open: false, initial: null });
+  const [drawer, setDrawer] = useState<{ open: boolean; initial: UpstreamModel | null }>({ open: false, initial: null });
   const [deleting, setDeleting] = useState<UpstreamModel | null>(null);
   const [batchDelete, setBatchDelete] = useState(false);
   const [batchPrice, setBatchPrice] = useState(false);
-  const [cooldownFor, setCooldownFor] = useState<UpstreamModel | null>(null);
 
   const allItems = q.data?.items ?? [];
   const needle = search.trim().toLowerCase();
@@ -419,7 +417,7 @@ function UpstreamTab() {
       headerClassName: "min-w-64",
       cell: (row: UpstreamModel) => (
         <div className="flex flex-wrap gap-1">
-          <ActionButton action="edit" size="dense" onClick={() => setDialog({ open: true, initial: row })}>
+          <ActionButton action="edit" size="dense" onClick={() => setDrawer({ open: true, initial: row })}>
             编辑
           </ActionButton>
           {row.enabled ? (
@@ -440,7 +438,8 @@ function UpstreamTab() {
             </ActionButton>
           )}
           {/* ADR-025 + ticket 02：冷却中行内只保留一个「解除」（不再同时出现「冷却」），
-              单次规则删除；命中周期窗口时后端只跳过本窗口并保留周期规则。 */}
+              单次规则删除；命中周期窗口时后端只跳过本窗口并保留周期规则。
+              ticket 11：设置冷却收进编辑抽屉，行内只保留「解除」快捷入口。 */}
           {isCooling(row) ? (
             <ActionButton
               action="releaseCooldown"
@@ -449,11 +448,7 @@ function UpstreamTab() {
             >
               解除
             </ActionButton>
-          ) : (
-            <ActionButton action="cooldown" size="dense" onClick={() => setCooldownFor(row)}>
-              冷却
-            </ActionButton>
-          )}
+          ) : null}
           <ActionButton
             action="delete"
             size="dense"
@@ -556,35 +551,16 @@ function UpstreamTab() {
         toolbarEnd={toolbarEnd}
         emptyText="还没有登记上游模型"
         emptyAction={canWrite ? (
-          <Button size="sm" disabled={(qUpstreams.data?.items.length ?? 0) === 0} onClick={() => setDialog({ open: true, initial: null })}>登记模型</Button>
+          <Button size="sm" disabled={(qUpstreams.data?.items.length ?? 0) === 0} onClick={() => setDrawer({ open: true, initial: null })}>登记模型</Button>
         ) : undefined}
         onClearFilters={clearFilters}
       />
-      {dialog.open ? (
-        <UpstreamModelDialog
-          initial={dialog.initial}
+      {drawer.open ? (
+        <UpstreamModelDrawer
+          initial={drawer.initial}
           upstreams={qUpstreams.data?.items ?? []}
           canCost={canCost}
-          onClose={() => setDialog({ open: false, initial: null })}
-        />
-      ) : null}
-      {cooldownFor !== null ? (
-        <CooldownManageDialog
-          title={"冷却上游模型 · " + cooldownFor.name}
-          row={cooldownFor}
-          scope="upstream_model"
-          scopeId={cooldownFor.id}
-          rules={(rulesQuery.data ?? []).filter((rule) => rule.scope === "upstream_model" && rule.scope_id === cooldownFor.id)}
-          pending={availability.isPending}
-          onCooldown={(deadline, note) => {
-            availability.mutate({ id: cooldownFor.id, action: "cooldown", cooldown_until_ms: deadline, note });
-            setCooldownFor(null);
-          }}
-          onRelease={() => {
-            availability.mutate({ id: cooldownFor.id, action: "release" });
-            setCooldownFor(null);
-          }}
-          onClose={() => setCooldownFor(null)}
+          onClose={() => setDrawer({ open: false, initial: null })}
         />
       ) : null}
       <ConfirmDialog
