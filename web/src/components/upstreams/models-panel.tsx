@@ -3,7 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
 import { toast } from "@/lib/notify";
 
-import { UpstreamModelDialog } from "@/components/models/upstream-model-dialog";
+import { isCooling, useAvailabilityMutation } from "@/components/models/availability";
+import { UpstreamModelDrawer } from "@/components/models/upstream-model-drawer";
 import { parameterSummary } from "@/components/models/model-vocab";
 import { DataTable } from "@/components/data-table";
 import { ActionButton } from "@/components/ui/action-button";
@@ -29,8 +30,10 @@ export function UpstreamModelsPanel({ upstream }: { upstream: UpstreamRow }) {
     queryKey: ["upstream-models"],
     queryFn: () => apiList<UpstreamModel>(ENDPOINTS.upstreamModels),
   });
-  const [dialog, setDialog] = useState<{ open: boolean; initial: UpstreamModel | null }>({ open: false, initial: null });
+  const [drawer, setDrawer] = useState<{ open: boolean; initial: UpstreamModel | null }>({ open: false, initial: null });
   const [deleting, setDeleting] = useState<UpstreamModel | null>(null);
+  // ticket 11：冷却设置进抽屉，行内只保留「解除」快捷入口。
+  const availability = useAvailabilityMutation("upstream");
 
   // 稳定引用：TanStack Table 行模型 memo 依赖 data 引用（见 DataTable 注释）。
   const rows = useMemo(
@@ -112,7 +115,7 @@ export function UpstreamModelsPanel({ upstream }: { upstream: UpstreamRow }) {
         if (!canWrite) return null;
         return (
           <div className="flex flex-wrap gap-1">
-            <ActionButton action="edit" size="dense" onClick={() => setDialog({ open: true, initial: row })}>
+            <ActionButton action="edit" size="dense" onClick={() => setDrawer({ open: true, initial: row })}>
               编辑
             </ActionButton>
             <ActionButton
@@ -123,6 +126,16 @@ export function UpstreamModelsPanel({ upstream }: { upstream: UpstreamRow }) {
             >
               {row.enabled ? "关闭" : "启用"}
             </ActionButton>
+            {isCooling(row) ? (
+              <ActionButton
+                action="releaseCooldown"
+                size="dense"
+                disabled={availability.isPending}
+                onClick={() => availability.mutate({ id: row.id, action: "release" })}
+              >
+                解除
+              </ActionButton>
+            ) : null}
             <ActionButton
               action="delete"
               size="dense"
@@ -146,7 +159,7 @@ export function UpstreamModelsPanel({ upstream }: { upstream: UpstreamRow }) {
           探测列为上游级连通状态（后端仅提供上游级测试连接，没有模型级探测）。
         </p>
         {canWrite ? (
-          <Button size="sm" onClick={() => setDialog({ open: true, initial: null })}>
+          <Button size="sm" onClick={() => setDrawer({ open: true, initial: null })}>
             <ACTION_ICONS.add className="h-3.5 w-3.5" /> 添加模型
           </Button>
         ) : null}
@@ -161,12 +174,12 @@ export function UpstreamModelsPanel({ upstream }: { upstream: UpstreamRow }) {
         filterPlaceholder="搜索模型名"
         storageKey="slipstream.cols.upstream-models"
       />
-      {dialog.open ? (
-        <UpstreamModelDialog
-          initial={dialog.initial}
+      {drawer.open ? (
+        <UpstreamModelDrawer
+          initial={drawer.initial}
           upstreams={[upstream]}
           canCost={canCost}
-          onClose={() => setDialog({ open: false, initial: null })}
+          onClose={() => setDrawer({ open: false, initial: null })}
           onSaved={() => {
             void qc.invalidateQueries({ queryKey: ["upstreams"] });
             void qc.invalidateQueries({ queryKey: ["upstream", upstream.id] });
