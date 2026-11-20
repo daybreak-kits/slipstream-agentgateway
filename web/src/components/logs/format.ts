@@ -2,18 +2,8 @@ import { fmtPct } from "@/lib/format";
 
 export type LogBadgeTone = "neutral" | "success" | "warning" | "danger" | "info";
 
-
-/** 吞吐只展示生成阶段的速度，单位由调用方补「词元/s」；无输出或无法测速时留白。 */
-export function fmtThroughput(tps: number | null | undefined): string {
-  if (tps === null || tps === undefined || !Number.isFinite(tps) || tps <= 0) return "—";
-  return tps >= 100 ? Math.round(tps).toLocaleString("en-US") : tps.toFixed(1);
-}
-
-/** 缓存比例按百分数展示；0 与 null 都表示这次请求没有吃到缓存。 */
-export function fmtCachePct(ratio: number | null | undefined): string {
-  if (ratio === null || ratio === undefined || !Number.isFinite(ratio) || ratio <= 0) return "—";
-  return ratio >= 10 ? Math.round(ratio) + "%" : ratio.toFixed(1) + "%";
-}
+// 吞吐（fmtThroughput）与缓存比例（fmtPctPoint）已上收 lib/format（W5-D2 单一来源），
+// 本文件只保留日志域的标签/口径 helper，不再实现数字 formatter。
 
 export function statusTone(status: number): LogBadgeTone {
   if (status >= 200 && status < 300) return "success";

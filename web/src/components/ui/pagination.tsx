@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PAGE_SIZE_TIERS } from "@/generated/contract";
-import { formatCount } from "@/lib/format";
+import { fmtInt } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 /** 每页行数可选项；单一来源是后端 deps.ALLOWED_PAGE_SIZES（经生成契约下发）。 */
@@ -129,7 +129,7 @@ export function Pagination({
       )}
     >
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <p className="text-xs text-faint">总计 {formatCount(total)} 条</p>
+        <p className="text-xs text-faint">总计 {fmtInt(total)} 条</p>
         <div className="flex items-center gap-2 text-xs text-faint">
           <span>每页行数</span>
           <Select

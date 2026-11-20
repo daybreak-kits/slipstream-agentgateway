@@ -31,7 +31,7 @@ import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Tabs } from "@/components/ui/tabs";
 import { api, apiList, ENDPOINTS } from "@/lib/api";
-import { fmtCny, fmtInt, fmtMarkup, fmtMs, fmtPricePerM, formatCount } from "@/lib/format";
+import { fmtInt, fmtMarkup, fmtMs, fmtPricePerM, fmtUnitPriceMicro } from "@/lib/format";
 import { ACTION_ICONS } from "@/lib/icons";
 import { usePermissions } from "@/lib/permissions";
 import { SELECT_ALL_VALUE } from "@/lib/select-sentinels";
@@ -314,7 +314,7 @@ function UpstreamTab() {
           <div>入 {fmtPricePerM(row.cost_input_per_1m)} · 出 {fmtPricePerM(row.cost_output_per_1m)}</div>
         )}
         <div className="text-faint">
-          倍率 {fmtMarkup(row.markup)} · 缓 {cache ? fmtCny(cache.micro) + "/M" : "—"}
+          倍率 {fmtMarkup(row.markup)} · 缓 {cache ? fmtUnitPriceMicro(cache.micro) + "/M" : "—"}
         </div>
       </div>
     );
@@ -394,7 +394,7 @@ function UpstreamTab() {
       label: "被引用",
       className: "text-right tnum",
       headerClassName: "whitespace-nowrap",
-      cell: (row) => <span className="text-2sm">{formatCount(row.target_count ?? 0)}</span>,
+      cell: (row) => <span className="text-2sm">{fmtInt(row.target_count ?? 0)}</span>,
     },
     {
       key: "status",
@@ -881,7 +881,7 @@ function PublicTab() {
         const names = targets.slice(0, 3).map((t) => t.upstream_model_name || t.upstream_model_id).filter((name) => Boolean(name));
         return (
           <div>
-            <span className="tnum text-2sm">{formatCount(row.target_count ?? targets.length)}</span>
+            <span className="tnum text-2sm">{fmtInt(row.target_count ?? targets.length)}</span>
             <div className="text-2xs text-faint">{names.length > 0 ? names.join(" · ") + (targets.length > 3 ? " …" : "") : "—"}</div>
           </div>
         );

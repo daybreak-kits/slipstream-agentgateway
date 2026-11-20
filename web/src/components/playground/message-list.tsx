@@ -4,7 +4,7 @@ import { toast } from "@/lib/notify";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { fmtCny, fmtInt } from "@/lib/format";
+import { fmtCny, fmtInt, fmtMoneyAvg, fmtSeconds, fmtThroughput } from "@/lib/format";
 import type { PlaygroundMessage, PlaygroundUsage } from "@/lib/playground";
 import { cn } from "@/lib/utils";
 
@@ -161,7 +161,8 @@ export function MarkdownLite({ text, className }: { text: string; className?: st
 function costLabel(usage: PlaygroundUsage): string {
   if (typeof usage.costMicro === "number") return "成本 " + fmtCny(usage.costMicro);
   if (typeof usage.costUsd === "number" && usage.costUsd > 0) {
-    return "成本 $" + usage.costUsd.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
+    // 单请求成本很小，按「单请求均值」口径保留 4 位小数（USD 折 micro 后交给统一 formatter）。
+    return "成本 " + fmtMoneyAvg(usage.costUsd * 1_000_000, "USD");
   }
   return "成本 —";
 }
@@ -175,11 +176,11 @@ function UsageLine({ usage, canSeeCost }: { usage: PlaygroundUsage; canSeeCost: 
   if (canSeeCost) parts.push(costLabel(usage));
   parts.push("TTFT " + (usage.ttftMs === null ? "—" : fmtInt(usage.ttftMs) + "ms"));
   parts.push(
-    "总耗时 " + (usage.elapsedMs === null ? "—" : (usage.elapsedMs / 1000).toFixed(2) + "s"),
+    "总耗时 " + (usage.elapsedMs === null ? "—" : fmtSeconds(usage.elapsedMs)),
   );
   parts.push(
     "吞吐 " +
-      (usage.throughput === null ? "—" : fmtInt(Math.round(usage.throughput)) + " tok/s"),
+      (usage.throughput === null ? "—" : fmtThroughput(usage.throughput) + " tok/s"),
   );
   if (canSeeCost && typeof usage.chargeMicro === "number") {
     parts.push("花费 " + fmtCny(usage.chargeMicro));

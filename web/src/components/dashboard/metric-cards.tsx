@@ -2,12 +2,11 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { MetricCard } from "@/components/stat-card";
 import { cacheHitFraction } from "@/components/logs/format";
-import { fmtCount, fmtFixed, fmtInt, fmtPct, fmtSeconds } from "@/lib/format";
+import { fmtFixed, fmtInt, fmtMoney, fmtPct, fmtRpm, fmtSeconds } from "@/lib/format";
 import { METRIC_ICONS } from "@/lib/metric-icons";
 import { usePermissions } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 
-import { fmtMoney } from "./chart-format";
 import type { LatencyReport, TimeseriesReport } from "./report-types";
 
 interface DashboardKpisProps {
@@ -86,23 +85,23 @@ export function DashboardKpis({ data, latency, loading, error, onRetry }: Dashbo
     >
       <MetricCard
         label="请求量"
-        value={loading ? undefined : fmtCount(requests)}
-        hint={`错误 ${fmtCount(errorCount)} 次 · 错误率 ${requests > 0 ? fmtPct(errorCount / requests) : "—"}`}
+        value={loading ? undefined : fmtInt(requests)}
+        hint={`错误 ${fmtInt(errorCount)} 次 · 错误率 ${requests > 0 ? fmtPct(errorCount / requests) : "—"}`}
         icon={METRIC_ICONS.requests.icon}
         tone={METRIC_ICONS.requests.tone}
         loading={loading}
       />
       <MetricCard
         label="词元"
-        value={loading ? undefined : fmtCount(totalTokens)}
-        hint={`入 ${fmtCount(inputTokens)}/出 ${fmtCount(outputTokens)}`}
+        value={loading ? undefined : fmtInt(totalTokens)}
+        hint={`入 ${fmtInt(inputTokens)}/出 ${fmtInt(outputTokens)}`}
         icon={METRIC_ICONS.tokens.icon}
         tone={METRIC_ICONS.tokens.tone}
         loading={loading}
       />
       <MetricCard
         label="缓存"
-        value={loading ? undefined : cacheTokens > 0 ? fmtCount(cacheTokens) : "无缓存"}
+        value={loading ? undefined : cacheTokens > 0 ? fmtInt(cacheTokens) : "无缓存"}
         hint={loading ? undefined : cacheFraction === null ? "无缓存" : `命中率 ${fmtPct(cacheFraction)}`}
         icon={METRIC_ICONS.cache.icon}
         tone={METRIC_ICONS.cache.tone}
@@ -142,16 +141,16 @@ export function DashboardKpis({ data, latency, loading, error, onRetry }: Dashbo
       />
       <MetricCard
         label="RPM 请求/分"
-        value={loading ? undefined : rpm === null ? "—" : fmtFixed(rpm)}
-        hint={`活跃 ${fmtInt(activeMinutes)} 分钟 · 最高峰 ${peakRpm === undefined ? "—" : fmtFixed(peakRpm)}`}
+        value={loading ? undefined : fmtRpm(rpm)}
+        hint={`活跃 ${fmtInt(activeMinutes)} 分钟 · 最高峰 ${fmtRpm(peakRpm)}`}
         icon={METRIC_ICONS.requests.icon}
         tone={METRIC_ICONS.requests.tone}
         loading={loading}
       />
       <MetricCard
         label="TPM 词元/分"
-        value={loading ? undefined : tpm === null ? "—" : fmtFixed(tpm)}
-        hint={`最高峰 ${peakTpm === undefined ? "—" : fmtFixed(peakTpm)} 词元/分`}
+        value={loading ? undefined : fmtInt(tpm)}
+        hint={`最高峰 ${fmtInt(peakTpm)} 词元/分`}
         icon={METRIC_ICONS.tokens.icon}
         tone={METRIC_ICONS.tokens.tone}
         loading={loading}

@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { fmtFixed } from "@/lib/format";
+import { fmtPctPoint } from "@/lib/format";
 import type { MetricTone } from "@/lib/metric-icons";
 import { cn } from "@/lib/utils";
 
@@ -145,7 +145,7 @@ function TrendChip({ trend }: { trend: NonNullable<MetricCardProps["trend"]> }) 
       )}
     >
       <Icon className="h-3 w-3" strokeWidth={2} aria-hidden="true" />
-      {fmtFixed(Math.abs(trend.delta), 1)}%
+      {fmtPctPoint(Math.abs(trend.delta))}
       <span className="sr-only">{up ? "上升" : "下降"}</span>
       {trend.label !== undefined && <span className="text-faint">· {trend.label}</span>}
     </span>

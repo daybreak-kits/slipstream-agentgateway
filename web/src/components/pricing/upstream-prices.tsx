@@ -10,10 +10,10 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { PriceTable, type PriceColumn } from "@/components/pricing/table";
-import { UNIT_HINT, deriveSpendMicro, fmtPrice, priceMicro } from "@/components/pricing/money";
+import { UNIT_HINT, deriveSpendMicro, priceMicro } from "@/components/pricing/money";
 import { invalidatePricing, useUpstreamModels } from "@/components/pricing/queries";
 import { api, ENDPOINTS } from "@/lib/api";
-import { fmtMoney6 } from "@/lib/format";
+import { fmtPriceAmount, fmtUnitPriceMicro } from "@/lib/format";
 import { ACTION_ICONS } from "@/lib/icons";
 import { usePermissions } from "@/lib/permissions";
 import { useDirtyGuard } from "@/lib/use-dirty-guard";
@@ -268,7 +268,7 @@ export function UpstreamPricesSection() {
       cell: (model) => {
         const draft = drafts[model.id] ?? draftOf(model);
         if (!canEdit) {
-          return <span className="tnum text-body">{fmtPrice(model.cost_input_per_1m)}</span>;
+          return <span className="tnum text-body">{fmtPriceAmount(model.cost_input_per_1m)}</span>;
         }
         return (
           <Input
@@ -295,7 +295,7 @@ export function UpstreamPricesSection() {
       cell: (model) => {
         const draft = drafts[model.id] ?? draftOf(model);
         if (!canEdit) {
-          return <span className="tnum text-body">{fmtPrice(model.cost_output_per_1m)}</span>;
+          return <span className="tnum text-body">{fmtPriceAmount(model.cost_output_per_1m)}</span>;
         }
         return (
           <Input
@@ -361,13 +361,13 @@ export function UpstreamPricesSection() {
             <div>
               <span className="mr-1.5 text-2xs text-faint">入</span>
               <span className={derivedInput === null ? "text-faint" : "text-title"}>
-                {fmtMoney6(derivedInput, "CNY")}
+                {fmtUnitPriceMicro(derivedInput, "CNY")}
               </span>
             </div>
             <div>
               <span className="mr-1.5 text-2xs text-faint">出</span>
               <span className={derivedOutput === null ? "text-faint" : "text-title"}>
-                {fmtMoney6(derivedOutput, "CNY")}
+                {fmtUnitPriceMicro(derivedOutput, "CNY")}
               </span>
             </div>
           </div>

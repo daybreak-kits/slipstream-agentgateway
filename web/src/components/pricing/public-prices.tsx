@@ -2,8 +2,9 @@ import { useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { PriceTable, type PriceColumn } from "@/components/pricing/table";
-import { UNIT_HINT, fmtPrice } from "@/components/pricing/money";
+import { UNIT_HINT } from "@/components/pricing/money";
 import { usePublicModels, usePublicPrices } from "@/components/pricing/queries";
+import { fmtPriceAmount } from "@/lib/format";
 import { usePermissions } from "@/lib/permissions";
 import type { PublicModel, PublicModelPrice } from "@/types";
 
@@ -82,13 +83,13 @@ export function PublicPricesSection() {
           <div>
             <span className="mr-1.5 text-2xs text-faint">入</span>
             <span className={price.available ? "text-title" : "text-faint"}>
-              {fmtPrice(price.price_input_per_1m, price.currency)}
+              {fmtPriceAmount(price.price_input_per_1m, price.currency)}
             </span>
           </div>
           <div>
             <span className="mr-1.5 text-2xs text-faint">出</span>
             <span className={price.available ? "text-title" : "text-faint"}>
-              {fmtPrice(price.price_output_per_1m, price.currency)}
+              {fmtPriceAmount(price.price_output_per_1m, price.currency)}
             </span>
           </div>
         </div>

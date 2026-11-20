@@ -1,4 +1,4 @@
-import { fmtCount, fmtInt, fmtSeconds } from "@/lib/format";
+import { fmtInt, fmtSeconds } from "@/lib/format";
 
 import { seriesVar } from "./chart-theme";
 import { ChartCard } from "./chart-card";
@@ -100,7 +100,7 @@ export function LatencyCards({ window, data, loading, error, onRetry }: LatencyC
         })}
       </div>
       <p className="mt-3 text-2xs text-faint">
-        {`分位只统计 ttft > 0 且 duration > 0 的成对样本（共 ${fmtCount(data?.paired_samples ?? 0)} 条），避免把失败/空响应算进延迟`}
+        {`分位只统计 ttft > 0 且 duration > 0 的成对样本（共 ${fmtInt(data?.paired_samples ?? 0)} 条），避免把失败/空响应算进延迟`}
       </p>
     </ChartCard>
   );

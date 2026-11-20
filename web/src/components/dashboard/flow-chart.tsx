@@ -7,7 +7,7 @@ import { CanvasRenderer } from "echarts/renderers";
 
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { fmtCount } from "@/lib/format";
+import { fmtInt } from "@/lib/format";
 import { usePermissions } from "@/lib/permissions";
 
 import { fmtMoney } from "./chart-format";
@@ -104,8 +104,8 @@ export function FlowChart({ data, hiddenStages, onToggleStage }: FlowChartProps)
             const target = meta[String(edge.target ?? "")]?.label ?? String(edge.target ?? "");
             const rows = [
               escapeHtml(source) + " → " + escapeHtml(target),
-              "请求：" + fmtCount(Number(edge.requests ?? 0)),
-              "词元：" + fmtCount(Number(edge.tokens ?? 0)),
+              "请求：" + fmtInt(Number(edge.requests ?? 0)),
+              "词元：" + fmtInt(Number(edge.tokens ?? 0)),
             ];
             if (canSpend && edge.charge_micro !== undefined) {
               rows.push("花费：" + fmtMoney(Number(edge.charge_micro), data.currency));
@@ -120,7 +120,7 @@ export function FlowChart({ data, hiddenStages, onToggleStage }: FlowChartProps)
           return [
             escapeHtml(node.label),
             FLOW_STAGES.find((stage) => stage.id === node.stage)?.label ?? node.stage,
-            (data.metric === "tokens" ? "词元：" : "请求：") + fmtCount(node.value),
+            (data.metric === "tokens" ? "词元：" : "请求：") + fmtInt(node.value),
           ].join("<br/>");
         },
       },
