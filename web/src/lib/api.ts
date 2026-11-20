@@ -178,6 +178,7 @@ export const ENDPOINTS = {
   upstreamModelCreate: "/admin/upstream-models",
   upstreamModelUpdate: (id: string) => "/admin/upstream-models/" + id,
   publicModelCreate: "/admin/public-models",
+  // ticket 12：公开模型保存只走单 PATCH（基本信息 + 策略 + 启用 + targets 整批替换）
   publicModelUpdate: (id: string) => "/admin/public-models/" + id,
   apiKeyReveal: (id: string) => "/admin/api-keys/" + id + "/reveal",
   apiKeyRotate: (id: string) => "/admin/api-keys/" + id + "/rotate",
@@ -213,7 +214,7 @@ export const ENDPOINTS = {
   // ticket 10：模型管理（上游模型 / 公开模型两个 Tab）
   upstreamModelBatch: "/admin/upstream-models/batch",
   publicModelBatch: "/admin/public-models/batch",
-  publicModelTargets: (id: string) => "/admin/public-models/" + id + "/targets",
+  // ticket 12：删除 PUT /admin/public-models/{id}/targets，成员随单 PATCH 提交
   // W4-H：models.dev 快照兑入（单条=编辑弹窗按钮，批量=工具条同步按钮）与用户侧模型参数
   upstreamModelAdopt: (id: string) => "/admin/upstream-models/" + id + "/adopt-modelsdev",
   upstreamModelsAdopt: "/admin/upstream-models/adopt-modelsdev",
