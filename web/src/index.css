@@ -89,6 +89,11 @@
   --color-danger-text: var(--danger-text);
   --color-danger-soft: var(--danger-soft);
   --color-info: var(--info);
+  --color-info-text: var(--info-text);
+  --color-info-soft: var(--info-soft);
+  --color-neutral: var(--neutral);
+  --color-neutral-text: var(--neutral-text);
+  --color-neutral-soft: var(--neutral-soft);
   --color-focus-ring: var(--focus-ring);
   --color-overlay: var(--overlay);
 
@@ -158,7 +163,12 @@
   --danger: #dc2626;
   --danger-text: #b91c1c;
   --danger-soft: #fef2f2;
-  --info: #5b6573;
+  --info: #2563eb;
+  --info-text: #1d4ed8;
+  --info-soft: #eff6ff;
+  --neutral: #6b7280;
+  --neutral-text: #4b5563;
+  --neutral-soft: #f3f4f6;
   --focus-ring: #4f46e5;
 
   /* 徽标 tint（6 组：bg/fg） */
@@ -276,7 +286,12 @@
   --danger: #f87171;
   --danger-text: #f87171;
   --danger-soft: rgba(248, 113, 113, 0.14);
-  --info: #9ca3af;
+  --info: #60a5fa;
+  --info-text: #93c5fd;
+  --info-soft: rgba(96, 165, 250, 0.14);
+  --neutral: #9ca3af;
+  --neutral-text: #d1d5db;
+  --neutral-soft: rgba(156, 163, 175, 0.14);
   --focus-ring: #a5b4fc;
 
   --badge-flow-bg: rgba(96, 165, 250, 0.16);
