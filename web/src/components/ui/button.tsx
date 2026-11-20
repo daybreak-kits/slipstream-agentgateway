@@ -21,8 +21,8 @@ export const buttonVariants = cva(
       // 控件高度阶梯：28 dense / 32 sm / 36 md / 40 default / 44 lg
       size: {
         dense: "h-7 rounded-control px-2 text-[13px]",
-        sm: "h-8 rounded-control px-3 text-[13px]",
-        md: "h-9 rounded-control px-3.5 text-[13px]",
+        sm: "h-8 rounded-control px-3 text-sm",
+        md: "h-9 rounded-control px-3.5 text-sm",
         default: "h-10 px-4",
         lg: "h-11 px-6",
         icon: "h-10 w-10",

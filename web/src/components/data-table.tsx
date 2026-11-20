@@ -278,9 +278,9 @@ export function DataTable<T>({
           ) : null}
         </div>
       ) : null}
-      {/* 表体内部滚动（DESIGN-AUDIT 四期 §3/§9）：滚动区高度自适应视口（起步公式 17rem，配 min-h-80 兜底），
-          表头在该容器内吸顶；筛选行、工具行、分页条都在滚动区外常驻。 */}
-      <TableWrap className="max-h-[calc(100dvh-17rem)] min-h-80 overflow-y-auto rounded-lg border border-border bg-surface">
+      {/* 表体内部滚动（DESIGN-AUDIT 四期 §3/§9）：滚动区高度自适应视口（起步公式 17rem），
+          不设最小高度——数据少时表格随内容收缩，不整块留白；表头在该容器内吸顶。 */}
+      <TableWrap className="max-h-[calc(100dvh-17rem)] overflow-y-auto rounded-lg border border-border bg-surface">
         <Table>
           <THead>
             {table.getHeaderGroups().map((hg) => (

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 
 import { UpstreamModelDialog } from "@/components/models/upstream-model-dialog";
 import { parameterSummary } from "@/components/models/model-vocab";

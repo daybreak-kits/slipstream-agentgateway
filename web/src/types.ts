@@ -188,6 +188,14 @@ export interface AdoptModelsDevResult {
   params_source?: ModelParamsSource;
 }
 
+/** W4-H：GET /admin/upstream-models/modelsdev-status 已存快照摘要（上次同步时间）。 */
+export interface ModelsDevSnapshotStatus {
+  models: number;
+  providers: number;
+  /** 0 = 从未同步；否则为快照抓取时刻（毫秒时间戳） */
+  fetched_at_ms: number;
+}
+
 /** W4-H：POST /admin/upstream-models/adopt-modelsdev 批量同步汇总。 */
 export interface AdoptModelsDevBatchResult {
   refreshed: boolean;

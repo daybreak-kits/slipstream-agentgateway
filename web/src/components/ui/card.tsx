@@ -42,7 +42,7 @@ export const CardTitle = forwardRef<HTMLHeadingElement, HTMLAttributes<HTMLHeadi
 
 export const CardDescription = forwardRef<HTMLParagraphElement, HTMLAttributes<HTMLParagraphElement>>(
   function CardDescription({ className, ...rest }, ref) {
-    return <p ref={ref} data-slot="card-description" className={cn("text-[13px] text-muted-foreground", className)} {...rest} />;
+    return <p ref={ref} data-slot="card-description" className={cn("text-sm text-muted-foreground", className)} {...rest} />;
   },
 );
 

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 
 import { DirtyHint, TransportBadgeNote } from "./shared";
 import { type McpDraftDocument } from "./helpers";

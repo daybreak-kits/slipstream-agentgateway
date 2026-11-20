@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link2, ScrollText, Settings2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { NavLink, useParams } from "react-router-dom";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 
 import { fmtMs } from "@/lib/format";
 import { ErrorState, SectionCard } from "@/components/governance/panel";
@@ -388,7 +388,7 @@ export function OpsSettingsPage() {
   return (
     <div className="space-y-3">
       <p className="text-2sm text-faint">
-        运营设置是控制面级配置：点击运营设置后，左侧出现子导航；这里的改动影响所有用户。
+        运营设置是控制面级配置：左侧是页面内子导航；这里的改动影响所有用户。
       </p>
       <div className="flex flex-col gap-4 lg:flex-row">
         <nav aria-label="运营设置子导航" className="shrink-0 space-y-0.5 lg:w-44 lg:border-r lg:border-border lg:pr-3">
@@ -398,7 +398,7 @@ export function OpsSettingsPage() {
               to={"/ops-settings/" + item.key}
               className={({ isActive }) =>
                 cn(
-                  "flex items-start gap-2 rounded-control px-2.5 py-2 text-left transition-colors",
+                  "group flex items-start gap-2 rounded-control px-2.5 py-2 text-left transition-colors",
                   isActive || active.key === item.key
                     ? "bg-primary-soft text-primary"
                     : "text-body hover:bg-surface-2 hover:text-title",
@@ -408,7 +408,9 @@ export function OpsSettingsPage() {
               <item.icon className="mt-0.5 h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
               <span className="min-w-0">
                 <span className="block text-2sm font-medium">{item.label}</span>
-                <span className="block text-2xs text-faint">{item.hint}</span>
+                <span className="hidden text-2xs text-faint group-hover:block group-focus-visible:block">
+                  {item.hint}
+                </span>
               </span>
             </NavLink>
           ))}

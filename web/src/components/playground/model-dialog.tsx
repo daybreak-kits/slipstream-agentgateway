@@ -113,7 +113,7 @@ export function ModelDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bottom-4 right-4 left-auto top-auto w-[min(30rem,calc(100vw-2rem))] translate-x-0 translate-y-0 gap-0 p-0">
+      <DialogContent className="w-[min(30rem,calc(100vw-2rem))] gap-0 p-0">
         <DialogHeader className="border-b border-border px-4 py-3 pr-10 text-left">
           <DialogTitle className="text-sm">选择公开模型</DialogTitle>
           <DialogDescription className="text-2xs leading-relaxed">

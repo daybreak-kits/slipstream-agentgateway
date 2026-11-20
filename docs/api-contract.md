@@ -391,6 +391,7 @@ AG 1.7 拒绝（`mcp.transport.http=false`），保存即 422。渲染到顶层 
 | PATCH | /admin/model-targets/batch | model_targets:write | 同上 |
 | POST | /admin/upstream-models/{id}/adopt-modelsdev | upstream_models:write | **从 models.dev 兑入单条**（W4-H）：先尽力刷新快照（失败降级用库内 `model_dev_snapshots`），按模型名匹配（精确优先，大小写不敏感且唯一才回退；不做模糊猜测），**只填空键**（0/False/默认单模态/NULL 进价视为空，手改永不覆盖）→ `AdoptModelsDevResult {id, name, matched, status, provider, model, refreshed, results{键→filled\|skipped-manual\|skipped-no-fx\|no-match}, filled[], params_source}` |
 | POST | /admin/upstream-models/adopt-modelsdev | upstream_models:write | **同步 models.dev（批量）**（W4-H）：全部上游模型一次兑入，返回 `{refreshed, snapshot{providers,models,fetched_at_ms}, total, matched, filled_models, filled_keys, no_match, items[]}`；控制台「同步 models.dev」按钮与每日 job（`models_dev_sync`，SLIPSTREAM_JOBS_ENABLED=0 可停）共用同一服务 |
+| GET | /admin/upstream-models/modelsdev-status | upstream_models:read | **库内 models.dev 快照摘要**（W4-H）：只读 `model_dev_snapshots`、不发网络请求 → `ModelsDevSnapshotStatus {models, providers, fetched_at_ms}`；`fetched_at_ms=0` 表示从未同步，控制台工具条据此显示「上次同步」|
 
 W4-H 兑入语义：
 

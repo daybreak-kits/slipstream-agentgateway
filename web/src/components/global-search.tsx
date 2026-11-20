@@ -193,15 +193,15 @@ export function GlobalSearch() {
   return (
     <>
       <Button
-        variant="ghost"
+        variant="outline"
         size="sm"
-        className="gap-2 text-faint"
+        className="gap-2 border-border-strong bg-surface font-normal text-faint hover:text-body"
         title="全局搜索（⌘K / Ctrl+K）"
         onClick={() => setOpen(true)}
       >
         <Search className="h-4 w-4" />
-        <span className="hidden text-2xs sm:inline">搜索</span>
-        <kbd className="hidden rounded border border-border px-1 text-2xs sm:inline">⌘K</kbd>
+        <span className="hidden text-2sm sm:inline">搜索</span>
+        <kbd className="hidden rounded border border-border-strong bg-surface-2 px-1 text-2xs text-muted-foreground sm:inline">⌘K</kbd>
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="overflow-hidden p-0">

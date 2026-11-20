@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
 import { useMemo, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 
 import { DataTable } from "@/components/data-table";
 import { ErrorState } from "@/components/governance/panel";
@@ -325,12 +325,12 @@ export function UsersPanel({
         return (
           <div className="flex flex-wrap items-center gap-1.5">
             {canUpdate && (
-              <Button variant="primary" size="sm" onClick={() => setTopupUser(user)}>
+              <Button variant="ghost" size="sm" onClick={() => setTopupUser(user)}>
                 <ACTION_ICONS.recharge className="h-3.5 w-3.5" /> 充值
               </Button>
             )}
             {canUpdate && (
-              <Button variant="outline" size="sm" onClick={() => setAdjustUser(user)}>
+              <Button variant="ghost" size="sm" onClick={() => setAdjustUser(user)}>
                 <ACTION_ICONS.adjustBalance className="h-3.5 w-3.5" /> 调整余额
               </Button>
             )}
@@ -340,23 +340,32 @@ export function UsersPanel({
               </Button>
             )}
             {canUpdate && (
-              <Button variant="outline" size="sm" onClick={() => setResetTarget({ id: user.id, name: user.name })}>
-                重置密码
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setResetTarget({ id: user.id, name: user.name })}
+              >
+                <ACTION_ICONS.resetKey className="h-3.5 w-3.5" /> 重置密码
               </Button>
             )}
             {canUpdate && (
               <Button
-                variant="outline"
+                variant="ghost"
                 size="sm"
                 disabled={patchStatus.isPending || (isRoot && !disabledNow)}
                 title={isRoot && !disabledNow ? "根用户不可关闭" : undefined}
                 onClick={() => patchStatus.mutate({ id: user.id, status: disabledNow ? "active" : "disabled" })}
               >
+                {disabledNow ? (
+                  <ACTION_ICONS.enable className="h-3.5 w-3.5" />
+                ) : (
+                  <ACTION_ICONS.disable className="h-3.5 w-3.5" />
+                )}
                 {disabledNow ? "启用" : "关闭"}
               </Button>
             )}
             {canUpdate && (
-              <Button variant="outline" size="sm" onClick={() => setEditing(user)}>
+              <Button variant="ghost" size="sm" onClick={() => setEditing(user)}>
                 <ACTION_ICONS.edit className="h-3.5 w-3.5" /> 编辑
               </Button>
             )}

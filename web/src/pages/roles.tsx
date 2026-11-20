@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 
 import { DataTable } from "@/components/data-table";
 import { ErrorState } from "@/components/governance/panel";
@@ -160,7 +160,7 @@ export function AdminsPage() {
             {role.builtin ? (
               // 内置角色只读入口：不要求 roles:write（查看权限摘要不是写操作）
               <Button
-                variant="outline"
+                variant="ghost"
                 size="sm"
                 onClick={() => {
                   setEditingRole(role);
@@ -172,7 +172,7 @@ export function AdminsPage() {
             ) : (
               canManageRoles && (
                 <Button
-                  variant="outline"
+                  variant="ghost"
                   size="sm"
                   onClick={() => {
                     setEditingRole(role);

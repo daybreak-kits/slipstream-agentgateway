@@ -11,7 +11,7 @@ export const Label = forwardRef<ElementRef<typeof LabelPrimitive.Root>, LabelPro
       ref={ref}
       data-slot="label"
       className={cn(
-        "inline-flex items-center gap-2 text-[13px] font-medium leading-none text-title select-none",
+        "inline-flex items-center gap-2 text-sm font-medium leading-none text-title select-none",
         className,
       )}
       {...props}

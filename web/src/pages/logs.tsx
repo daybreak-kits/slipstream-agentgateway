@@ -9,7 +9,7 @@ import {
   Search,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 
 import { DataTable } from "@/components/data-table";
 import { mockLatency } from "@/components/dashboard/report-mocks";
@@ -26,7 +26,9 @@ import {
   statusLabel,
   statusTone,
 } from "@/components/logs/format";
-import { LATENCY_TONE_BAR_CLASS, latencyTone } from "@/components/logs/latency-tone";
+import {
+  LATENCY_TONE_BAR_CLASS, LATENCY_TONE_TEXT_CLASS, latencyTone,
+} from "@/components/logs/latency-tone";
 import { LogDetailDrawer } from "@/components/logs/log-detail-drawer";
 import {
   buildLogQuery,
@@ -492,7 +494,9 @@ function LatencyLine({
         className={cn("h-3.5 w-[3px] shrink-0 rounded-full", LATENCY_TONE_BAR_CLASS[tone])}
       />
       <span className="text-faint">{label}</span>
-      <span className="tnum text-body">{fmtSeconds(value)}</span>
+      <span className={cn("tnum font-medium", LATENCY_TONE_TEXT_CLASS[tone])}>
+        {fmtSeconds(value)}
+      </span>
     </p>
   );
 }

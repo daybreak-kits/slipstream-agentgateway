@@ -59,6 +59,7 @@ from l06_api.schemas import (
     AdoptModelsDevBatchResult,
     AdoptModelsDevResult,
     ModelBulk,
+    ModelsDevSnapshotStatus,
     ModelTargetCreate,
     ModelTargetUpdate,
     PublicModelCreate,
@@ -270,6 +271,21 @@ def list_upstream_models(
             )
         )
     return items
+
+
+@router.get(
+    "/admin/upstream-models/modelsdev-status",
+    response_model=ModelsDevSnapshotStatus,
+)
+def modelsdev_status(
+    session: Session = Depends(session_of),
+    _principal=Depends(require("upstream_models:read")),
+) -> dict:
+    """Stored models.dev snapshot summary for the console toolbar.
+
+    Returns counts + the newest fetched_at_ms (0 = 从未同步); no network call.
+    """
+    return models_dev.snapshot_status(session)
 
 
 @router.patch("/admin/upstream-models/batch")

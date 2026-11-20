@@ -117,13 +117,13 @@ check("index.css：阴影两档 shadow-card / shadow-pop", () => {
   ], "阴影");
 });
 
-check("index.css：字号四档 + metric 19 + h1 22（修正 metric > h1 反转）", () => {
+check("index.css：字号四档 + metric 20 + h1 22（14px 基准，最小 12px）", () => {
   const css = read("src/index.css");
   includesAll(css, [
-    "--text-2xs: 11px;", "--text-2xs--line-height: 16px;",
+    "--text-2xs: 12px;", "--text-2xs--line-height: 18px;",
     "--text-2sm: 13px;", "--text-2sm--line-height: 20px;",
-    "--text-metric: 19px;", "--text-metric--line-height: 26px;",
-    "--text-h1: 22px;", "--text-h1--line-height: 28px;",
+    "--text-metric: 20px;", "--text-metric--line-height: 28px;",
+    "--text-h1: 22px;", "--text-h1--line-height: 30px;",
   ], "字号");
   expect(!/--text-sm:\s*\d/.test(css), "不得覆盖内置 text-sm（14/20），旧规范要求只加档");
   expect(!/--text-xs:\s*\d/.test(css), "不得覆盖内置 text-xs（12/16）");
@@ -163,7 +163,7 @@ const render = (element) =>
     createElement(QueryClientProvider, { client: queryClient }, createElement(MemoryRouter, null, element)),
   );
 
-check("BrandLockup：两行品牌锁（驭流 14/600 + SLIPSTREAM 11/500 大写 0.16em）+ logo 36", async () => {
+check("BrandLockup：两行品牌锁（驭流 14/600 + SLIPSTREAM 12/500 大写 0.16em）+ logo 36", async () => {
   const { BrandLockup } = await load("/src/components/layout/sidebar.tsx");
   const html = render(createElement(BrandLockup, { collapsed: false }));
   expect(html.includes("/logo-v10-contrast.svg"), "logo 必须用产品内主用文件 logo-v10-contrast.svg");
@@ -173,7 +173,7 @@ check("BrandLockup：两行品牌锁（驭流 14/600 + SLIPSTREAM 11/500 大写 
   expect(html.includes("驭流"), "第一行中文名缺失");
   expect(html.includes(">Slipstream<"), "第二行英文名缺失（文本内容为 Slipstream）");
   expect(/text-sm[^"]*font-semibold[^"]*tracking-tight/.test(html), "中文名必须是 14px/600/tracking-tight");
-  expect(/text-2xs[^"]*uppercase[^"]*tracking-\[0\.16em\]/.test(html), "英文名必须是 11px/全大写/0.16em");
+  expect(/text-2xs[^"]*uppercase[^"]*tracking-\[0\.16em\]/.test(html), "英文名必须是 12px/全大写/0.16em");
   expect(html.includes("text-muted-foreground"), "英文名必须弱化为 muted-foreground");
 });
 
@@ -285,7 +285,7 @@ check("壳层：侧栏 248/72、顶栏 64、内容区 max-w-480 + 24/32 padding"
 });
 
 // ---------- 6. 指标卡与图标语义（ticket 22：视觉打磨 1/2） ----------
-check("MetricCard：36 图标方块 + tone 12% 底色 + 19px 数值 + 12px 标签 + 11px 说明", async () => {
+check("MetricCard：36 图标方块 + tone 12% 底色 + 20px 数值 + 13px 标签 + 12px 说明", async () => {
   const { MetricCard } = await load("/src/components/stat-card.tsx");
   const { METRIC_ICONS } = await load("/src/lib/metric-icons.ts");
   const visual = METRIC_ICONS.requests;
@@ -302,10 +302,10 @@ check("MetricCard：36 图标方块 + tone 12% 底色 + 19px 数值 + 12px 标�
   expect(html.includes("rounded-control"), "图标方块圆角必须是 rounded-control（8px）");
   expect(/bg-primary\/12/.test(html), "tone 底色必须是主色 12% 透明度");
   expect(html.includes("text-primary"), "彩色方块里的图标必须是主色");
-  expect(/text-metric[^"]*font-semibold/.test(html), "数值必须是 text-metric（19px）半粗");
+  expect(/text-metric[^"]*font-semibold/.test(html), "数值必须是 text-metric（20px）半粗");
   expect(html.includes("tnum"), "数值必须 tnum（等宽数字）");
-  expect(/text-xs[^"]*text-muted-foreground/.test(html), "标签必须是 12px 中性色");
-  expect(html.includes("text-2xs"), "说明必须是 11px");
+  expect(/text-xs[^"]*text-muted-foreground/.test(html), "标签必须是 13px 中性色");
+  expect(html.includes("text-2xs"), "说明必须是 12px");
   expect(html.includes("min-w-0"), "单卡必须 min-w-0，避免栅格把卡片挤爆");
   expect(html.includes("truncate"), "数值/说明必须单行截断");
   expect(html.includes("请求量") && html.includes("1,234") && html.includes("所选区间内用量事件"), "标签/数值/说明必须都渲染");

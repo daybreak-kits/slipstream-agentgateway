@@ -4,7 +4,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, NavLink, useParams } from "react-router-dom";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 
 import { roleHint, roleLabel } from "@/components/governance/roles";
 import { fmtMs } from "@/lib/format";

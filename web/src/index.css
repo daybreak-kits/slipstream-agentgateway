@@ -22,15 +22,15 @@
   --width-sidebar: 248px;
   --width-sidebar-collapsed: 72px;
 
-  /* 字号四档：11/16、12/16（内置 text-xs）、13/20、14/20（内置 text-sm）；只加档不覆盖内置 */
-  --text-2xs: 11px;
-  --text-2xs--line-height: 16px;
+  /* 字号四档：12/18（最小可读）、12/16（内置 text-xs）、13/20、14/20（内置 text-sm）；只加档不覆盖内置 */
+  --text-2xs: 12px;
+  --text-2xs--line-height: 18px;
   --text-2sm: 13px;
   --text-2sm--line-height: 20px;
-  --text-metric: 19px;
-  --text-metric--line-height: 26px;
+  --text-metric: 20px;
+  --text-metric--line-height: 28px;
   --text-h1: 22px;
-  --text-h1--line-height: 28px;
+  --text-h1--line-height: 30px;
 
   /* 阴影只允许两档：静止卡片 / 浮层（菜单、popover、dialog、toast） */
   --shadow-card: 0 1px 2px rgba(17, 24, 39, 0.04), 0 8px 24px -18px rgba(17, 24, 39, 0.28);

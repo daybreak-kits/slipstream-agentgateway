@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
 import { useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 
 import { DataTable } from "@/components/data-table";
 import { Badge } from "@/components/ui/badge";

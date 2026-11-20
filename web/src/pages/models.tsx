@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 import { useMatch, useNavigate, useSearchParams } from "react-router-dom";
 
 import { CooldownManageDialog } from "@/components/models/cooldown-dialogs";
@@ -30,12 +30,13 @@ import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Tabs } from "@/components/ui/tabs";
 import { api, apiList, ENDPOINTS } from "@/lib/api";
-import { fmtCny, fmtInt, fmtMarkup, fmtPricePerM, formatCount } from "@/lib/format";
+import { fmtCny, fmtInt, fmtMarkup, fmtMs, fmtPricePerM, formatCount } from "@/lib/format";
 import { ACTION_ICONS } from "@/lib/icons";
 import { usePermissions } from "@/lib/permissions";
 import { SELECT_ALL_VALUE } from "@/lib/select-sentinels";
 import type {
   AdoptModelsDevBatchResult,
+  ModelsDevSnapshotStatus,
   PublicModel,
   RoutingMode,
   Upstream,
@@ -288,8 +289,16 @@ function UpstreamTab() {
         });
       }
       void qc.invalidateQueries({ queryKey: ["upstream-models"] });
+      void qc.invalidateQueries({ queryKey: ["modelsdev-status"] });
     },
     onError: (e: Error) => toast.error("同步 models.dev 失败", { description: e.message }),
+  });
+
+  // W4-H：工具条常显「上次同步」——读库内快照摘要，不发网络请求；同步成功后刷新。
+  const modelsDevStatus = useQuery({
+    queryKey: ["modelsdev-status"],
+    queryFn: () => api.get<ModelsDevSnapshotStatus>(ENDPOINTS.upstreamModelsModelsDevStatus),
+    staleTime: 60_000,
   });
 
   // 价格单元格（W4-C）：进价 2 位小数（<0.01 升 4 位）；入出均未配置显示灰字「未设置」（同参数列「未声明」样式）。
@@ -472,6 +481,14 @@ function UpstreamTab() {
           </Button>
         </>
       ) : null}
+      <span className="text-2xs text-faint">
+        {modelsDevStatus.data?.fetched_at_ms
+          ? "上次同步 " + fmtMs(modelsDevStatus.data.fetched_at_ms)
+          : "尚未同步 models.dev"}
+        {modelsDevStatus.data?.models
+          ? " · " + fmtInt(modelsDevStatus.data.models) + " 条快照"
+          : ""}
+      </span>
       <Button
         variant="outline"
         size="sm"

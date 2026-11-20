@@ -284,12 +284,7 @@ export const ROUTES: RouteDef[] = [
       path: "/ops-settings",
       permission: "settings:read",
     },
-    variants: [
-      { path: "/ops-settings/connection", title: "连接地址", icon: "Link2" },
-      { path: "/ops-settings/system", title: "系统参数", icon: "SlidersHorizontal" },
-      { path: "/ops-settings/runtime", title: "运行信息", icon: "FileText" },
-    ],
-    note: "ticket 16：运营设置点击后左侧出现子导航",
+    note: "ticket 16：页面内子导航；侧栏不重复挂二级项（2026-11-20 全站修复）",
   },
   {
     path: "/settings",

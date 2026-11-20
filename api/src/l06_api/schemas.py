@@ -806,6 +806,14 @@ class AdoptModelsDevBatchResult(BaseModel):
     items: list[AdoptModelsDevResult]
 
 
+class ModelsDevSnapshotStatus(BaseModel):
+    """Stored models.dev snapshot summary (console「上次同步」)."""
+
+    models: int
+    providers: int
+    fetched_at_ms: int
+
+
 class MyModelParameters(BaseModel):
     """The canonical capability block (same shape as upstream models' parameters);
     no cost/markup key ever appears here (user-facing endpoint)."""

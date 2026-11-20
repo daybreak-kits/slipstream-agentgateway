@@ -5,7 +5,7 @@ import { forwardRef, type HTMLAttributes } from "react";
 import { cn } from "@/lib/utils";
 
 const alertVariants = cva(
-  "relative grid w-full grid-cols-[0_1fr] items-start gap-y-0.5 rounded-md border px-3.5 py-3 text-[13px] leading-relaxed has-[>svg]:grid-cols-[1rem_1fr] has-[>svg]:gap-x-2.5 [&>svg]:size-4 [&>svg]:translate-y-0.5",
+  "relative grid w-full grid-cols-[0_1fr] items-start gap-y-0.5 rounded-md border px-3.5 py-3 text-sm leading-relaxed has-[>svg]:grid-cols-[1rem_1fr] has-[>svg]:gap-x-2.5 [&>svg]:size-4 [&>svg]:translate-y-0.5",
   {
     variants: {
       variant: {
@@ -68,7 +68,7 @@ export const AlertDescription = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDi
     <div
       ref={ref}
       data-slot="alert-description"
-      className={cn("col-start-2 grid justify-items-start gap-1 text-[13px] opacity-90", className)}
+      className={cn("col-start-2 grid justify-items-start gap-1 text-sm opacity-90", className)}
       {...props}
     />
   ),

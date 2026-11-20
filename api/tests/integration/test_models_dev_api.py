@@ -15,11 +15,11 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from tests.conftest import seed_channel
 
 from l01_core.timeutil import now_ms
 from l04_repo.orm import FxSnapshotORM
 from l05_service import models_dev
-from tests.conftest import seed_channel
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "models_dev_api.json"
 
@@ -27,7 +27,8 @@ FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "models_dev_api.jso
 @pytest.fixture(autouse=True)
 def _offline_fetch(monkeypatch):
     """Every HTTP adopt must be hermetic: the "network" returns the fixture."""
-    monkeypatch.setattr(models_dev, "fetch_snapshot", lambda *a, **k: json.loads(FIXTURE.read_text(encoding="utf-8")))
+    payload = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    monkeypatch.setattr(models_dev, "fetch_snapshot", lambda *a, **k: payload)
 
 
 @pytest.fixture()
@@ -112,6 +113,29 @@ def test_adopt_batch_summarizes(client, seeded_ids):
     assert body["snapshot"]["models"] == 5
 
 
+def test_modelsdev_status_empty_before_any_sync(client, seeded_ids):
+    response = client.get("/admin/upstream-models/modelsdev-status")
+    assert response.status_code == 200, response.text
+    assert response.json() == {"models": 0, "providers": 0, "fetched_at_ms": 0}
+
+
+def test_modelsdev_status_reports_stored_snapshot(client, seeded_ids):
+    _create_model(client)
+    assert client.post("/admin/upstream-models/adopt-modelsdev").status_code == 200
+    response = client.get("/admin/upstream-models/modelsdev-status")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    # The fixture snapshot has 5 models across providers; no network call here.
+    assert body["models"] == 5
+    assert body["providers"] >= 1
+    assert body["fetched_at_ms"] > 0
+
+
+def test_modelsdev_status_requires_login(client, anon_client):
+    assert client.get("/admin/upstream-models/modelsdev-status").status_code == 200
+    assert anon_client.get("/admin/upstream-models/modelsdev-status").status_code == 401
+
+
 def test_adopt_requires_write_permission(client, seeded_ids, login_cookies, anon_client):
     _create_model(client)
     # user role can read upstream models but has no upstream_models:write.
@@ -192,7 +216,8 @@ def test_my_models_excludes_disabled(client, seeded_ids):
         "/admin/model-targets",
         json={"public_model_id": "pmdl_test", "upstream_model_id": created["id"], "priority": 2},
     )
-    assert client.patch("/admin/upstream-models/" + created["id"], json={"enabled": False}).status_code == 200
+    patched = client.patch("/admin/upstream-models/" + created["id"], json={"enabled": False})
+    assert patched.status_code == 200
     items = client.get("/admin/my/models").json()
     flagship = next(item for item in items if item["name"] == "flagship")
     assert flagship["sources"] == ["glm-5.3"]  # disabled member skipped

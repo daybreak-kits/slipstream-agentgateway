@@ -44,3 +44,11 @@ export const LATENCY_TONE_BAR_CLASS: Record<LatencyTone, string> = {
   danger: "bg-danger",
   neutral: "bg-faint",
 };
+
+/** 语义色 → 数值文字色（首字 / 耗时两行，数字本身也要能读出快慢）。 */
+export const LATENCY_TONE_TEXT_CLASS: Record<LatencyTone, string> = {
+  success: "text-success-text",
+  warning: "text-warning-text",
+  danger: "text-danger-text",
+  neutral: "text-faint",
+};

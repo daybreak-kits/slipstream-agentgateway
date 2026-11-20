@@ -1,6 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import { Copy } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 
 import { Button } from "@/components/ui/button";
 import { ENDPOINTS, api } from "@/lib/api";

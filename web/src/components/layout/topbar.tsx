@@ -3,10 +3,11 @@ import {
   KeyRound, LogOut, Monitor, Moon, PanelLeftClose, PanelLeftOpen, RefreshCw, Sun, UserRound,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 
 import { GlobalSearch } from "@/components/global-search";
 import { roleLabel } from "@/components/governance/roles";
+import { NotificationCenter } from "@/components/layout/notification-center";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -128,6 +129,8 @@ export function Topbar({ title, group, collapsed, onToggleCollapse }: TopbarProp
           </span>
         ) : null}
         <GlobalSearch />
+        <ThemeMenu theme={theme} onChange={onThemeChange} />
+        <NotificationCenter />
         <Button variant="ghost" size="icon" title="刷新全部数据" aria-label="刷新全部数据" onClick={onRefresh}>
           <RefreshCw className="size-4" />
         </Button>
@@ -165,15 +168,6 @@ export function Topbar({ title, group, collapsed, onToggleCollapse }: TopbarProp
                 修改密码
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuRadioGroup value={theme} onValueChange={onThemeChange}>
-                {THEME_OPTIONS.map((option) => (
-                  <DropdownMenuRadioItem key={option.value} value={option.value}>
-                    <option.icon className="size-4" />
-                    {option.label}
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-              <DropdownMenuSeparator />
               <DropdownMenuItem className="text-danger-text" onClick={onLogout}>
                 <LogOut />
                 退出登录
@@ -183,5 +177,31 @@ export function Topbar({ title, group, collapsed, onToggleCollapse }: TopbarProp
         ) : null}
       </div>
     </header>
+  );
+}
+
+/** 主题三选一：放在全局搜索旁（用户菜单里只留账号动作，不再重复主题入口）。 */
+function ThemeMenu({ theme, onChange }: { theme: Theme; onChange: (next: string) => void }) {
+  const current = THEME_OPTIONS.find((option) => option.value === theme) ?? THEME_OPTIONS[2]!;
+  const CurrentIcon = current.icon;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" title={"主题：" + current.label} aria-label="切换主题">
+          <CurrentIcon className="size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-36">
+        <DropdownMenuLabel>主题</DropdownMenuLabel>
+        <DropdownMenuRadioGroup value={theme} onValueChange={onChange}>
+          {THEME_OPTIONS.map((option) => (
+            <DropdownMenuRadioItem key={option.value} value={option.value}>
+              <option.icon className="size-4" />
+              {option.label}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

@@ -36,7 +36,7 @@ from decimal import Decimal
 from typing import Any
 
 import httpx
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from l01_core.errors import AppError, ErrorCode
@@ -200,6 +200,26 @@ def refresh_snapshot(
         "providers": len({row.provider for row in rows}),
         "models": len(rows),
         "fetched_at_ms": fetched_at,
+    }
+
+
+def snapshot_status(session: Session) -> dict[str, Any]:
+    """Summary of the stored snapshot for the console「上次同步」line.
+
+    Reads only the snapshot table (no fetch): models/providers counts and the
+    newest fetched_at_ms (0 when the table is empty because nothing ever synced).
+    """
+    models, providers, fetched_at_ms = session.execute(
+        select(
+            func.count(ModelDevSnapshotORM.model),
+            func.count(func.distinct(ModelDevSnapshotORM.provider)),
+            func.max(ModelDevSnapshotORM.fetched_at_ms),
+        )
+    ).one()
+    return {
+        "models": int(models or 0),
+        "providers": int(providers or 0),
+        "fetched_at_ms": int(fetched_at_ms or 0),
     }
 
 

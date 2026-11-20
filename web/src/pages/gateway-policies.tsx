@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 
 import { describeError } from "@/components/governance/gateway-policies";
 import { GuardrailsTab } from "@/components/governance/gateway-policies/guardrails-tab";

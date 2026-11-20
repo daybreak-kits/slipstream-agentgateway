@@ -182,6 +182,12 @@ export interface ModelTargetUpdate {
   enabled?: boolean | null;
 }
 
+export interface ModelsDevSnapshotStatus {
+  models: number;
+  providers: number;
+  fetched_at_ms: number;
+}
+
 export interface MyModelOut {
   name: string;
   model_type: string;

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { AlertCircle, Copy, RotateCcw, Trash2 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

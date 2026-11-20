@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
 import { useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 
 import { CopyKeyButton } from "@/components/keys/copy-key-button";
 import { RenameKeyDialog } from "@/components/keys/rename-key-dialog";
@@ -176,7 +176,7 @@ export function ClientKeysPage() {
         return (
           <div className="flex flex-wrap items-center gap-1.5">
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
               disabled={setStatus.isPending}
               onClick={() => setStatus.mutate({ keyId: key.id, status: active ? "disabled" : "active" })}
@@ -194,7 +194,7 @@ export function ClientKeysPage() {
             <Button variant="ghost" size="sm" onClick={() => setRenameTarget(key)}>
               <ACTION_ICONS.rename className="h-3.5 w-3.5" /> 重命名
             </Button>
-            <Button variant="outline" size="sm" onClick={() => setRotateTarget(key)}>
+            <Button variant="ghost" size="sm" onClick={() => setRotateTarget(key)}>
               <ACTION_ICONS.resetKey className="h-3.5 w-3.5" /> 重置
             </Button>
             <Button
