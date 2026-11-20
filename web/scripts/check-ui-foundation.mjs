@@ -375,6 +375,167 @@ check("术语：UI 文案统一「词元 / 花费」（src 下无 Tokens、无�
   expect(bad.length === 0, "仍有旧术语：\n       " + bad.join("\n       "));
 });
 
+// ---------- 4. 表格列元数据与操作列冻结（W5 ticket 06 / DESIGN-AUDIT 四期 §2） ----------
+/** 走 DataTable/ModelsTable/PriceTable 且带行操作的文件：操作列必须声明 sticky:"right"（最后一列 + 尾部冻结）。 */
+const ACTION_COLUMN_FILES = [
+  "src/pages/upstreams.tsx",
+  "src/pages/client_keys.tsx",
+  "src/pages/audits.tsx",
+  "src/pages/config_revisions.tsx",
+  "src/pages/logs.tsx",
+  "src/pages/roles.tsx",
+  "src/components/users/users-panel.tsx",
+  "src/components/upstreams/models-panel.tsx",
+  "src/pages/models.tsx",
+  "src/components/pricing/upstream-prices.tsx",
+  "src/components/pricing/cache-prices.tsx",
+];
+/** 不走三套表格组件的裸表但带行操作：必须复用共享冻结列类（窄屏横向滚动时同样冻结）。 */
+const RAW_ACTION_TABLE_FILES = [
+  "src/components/upstreams/keys-panel.tsx",
+  "src/components/governance/gateway-policies/mcp-tab.tsx",
+];
+
+check("表格列元数据：DataTable 的 align/sticky 头身同用，冻结列在最后一列", async () => {
+  const { DataTable } = await load("/src/components/data-table.tsx");
+  const columns = [
+    { accessorKey: "name", header: "名称", meta: { align: "right" } },
+    { id: "actions", header: "操作", meta: { sticky: "right", hideable: false }, cell: () => "编辑" },
+  ];
+  const html = render(
+    createElement(DataTable, { columns, data: [{ name: "alpha" }], emptyText: "暂无数据" }),
+  );
+  expect(/<th[^>]*class="[^"]*text-right/.test(html), "表头必须应用 align=right（头身同用）");
+  expect(/<td[^>]*class="[^"]*text-right/.test(html), "表体必须应用 align=right（头身同用）");
+  expect(/<th[^>]*class="[^"]*sticky right-0/.test(html), "表头冻结列必须有 sticky right-0");
+  expect(/<td[^>]*class="[^"]*sticky right-0/.test(html), "表体冻结列必须有 sticky right-0");
+  expect(/<th[^>]*class="[^"]*bg-surface-2/.test(html), "冻结列表头底色必须跟随表头行（bg-surface-2）");
+  expect(/<td[^>]*class="[^"]*bg-surface/.test(html), "冻结列单元格必须是不透明底色（bg-surface）");
+  expect(html.includes("shadow-[inset_1px_0_0_var(--border)]"), "冻结列必须有左侧分割阴影");
+  expect(/<th[^>]*class="[^"]*align-middle/.test(html), "表头必须垂直居中（align-middle）");
+  expect(/<td[^>]*class="[^"]*align-middle/.test(html), "表体必须垂直居中（align-middle）");
+  expect(html.indexOf("操作") > html.indexOf("名称"), "操作列必须是最后一列");
+});
+
+check("表格列元数据：ModelsTable 的 align/sticky 头身同用，冻结列在最后一列", async () => {
+  const { ModelsTable } = await load("/src/components/models/table.tsx");
+  const columns = [
+    { key: "name", label: "名称", className: "text-right", cell: () => "alpha" },
+    { key: "actions", label: "操作", hideable: false, align: "right", sticky: "right", cell: () => "编辑" },
+  ];
+  const html = render(
+    createElement(ModelsTable, {
+      columns,
+      rows: [{ id: "a" }],
+      totalCount: 1,
+      storageKey: "slipstream.test",
+      tabKey: "t",
+      searchText: "",
+      onSearchChange: () => {},
+      searchPlaceholder: "搜索",
+      emptyText: "暂无数据",
+      onClearFilters: () => {},
+    }),
+  );
+  expect(/<th[^>]*class="[^"]*sticky right-0/.test(html), "表头冻结列必须有 sticky right-0");
+  expect(/<td[^>]*class="[^"]*sticky right-0/.test(html), "表体冻结列必须有 sticky right-0");
+  expect(/<th[^>]*class="[^"]*text-right/.test(html), "表头必须应用 align=right（头身同用）");
+  expect(/<td[^>]*class="[^"]*text-right/.test(html), "表体必须应用 align=right（头身同用）");
+  expect(/<td[^>]*class="[^"]*bg-surface/.test(html), "冻结列单元格必须是不透明底色（bg-surface）");
+  expect(/<th[^>]*class="[^"]*align-middle/.test(html), "表头必须垂直居中（align-middle）");
+  expect(/<td[^>]*class="[^"]*align-middle/.test(html), "表体必须垂直居中（align-middle）");
+  expect(/<td[^>]*class="[^"]*h-8/.test(html), "模型表紧凑行高必须与表头同档（h-8）");
+  expect(html.indexOf("操作") > html.indexOf("名称"), "操作列必须是最后一列");
+});
+
+check("表格列元数据：PriceTable 的 align/sticky 头身同用，冻结列在最后一列", async () => {
+  const { PriceTable } = await load("/src/components/pricing/table.tsx");
+  const columns = [
+    { key: "name", label: "名称", cell: () => "alpha" },
+    { key: "actions", label: "操作", hideable: false, align: "right", sticky: "right", cell: () => "编辑" },
+  ];
+  const html = render(
+    createElement(PriceTable, {
+      columns,
+      rows: [{ id: "a" }],
+      totalCount: 1,
+      sectionKey: "t",
+      searchText: "",
+      onSearchChange: () => {},
+      searchPlaceholder: "搜索",
+      emptyText: "暂无数据",
+      onClearFilters: () => {},
+      rowKey: (row) => row.id,
+    }),
+  );
+  expect(/<th[^>]*class="[^"]*sticky right-0/.test(html), "表头冻结列必须有 sticky right-0");
+  expect(/<td[^>]*class="[^"]*sticky right-0/.test(html), "表体冻结列必须有 sticky right-0");
+  expect(/<th[^>]*class="[^"]*text-right/.test(html), "表头必须应用 align=right（头身同用）");
+  expect(/<td[^>]*class="[^"]*text-right/.test(html), "表体必须应用 align=right（头身同用）");
+  expect(/<td[^>]*class="[^"]*align-middle/.test(html), "表体必须垂直居中（align-middle）");
+  expect(/<td[^>]*class="[^"]*h-8/.test(html), "价目表紧凑行高必须与表头同档（h-8）");
+  expect(html.indexOf("操作") > html.indexOf("名称"), "操作列必须是最后一列");
+});
+
+check("表格列元数据：三套表格共用 lib/table-columns 的 align/sticky 契约", () => {
+  includesAll(
+    read("src/lib/table-columns.ts"),
+    [
+      "TableColumnAlign",
+      "TableColumnSticky",
+      "align?:",
+      "sticky?:",
+      "FROZEN_COLUMN_CELL_CLASS",
+      "FROZEN_COLUMN_HEADER_CLASS",
+      "--row-hover",
+    ],
+    "共享列元数据",
+  );
+  for (const file of [
+    "src/components/data-table.tsx",
+    "src/components/models/table.tsx",
+    "src/components/pricing/table.tsx",
+  ]) {
+    expect(
+      /from "@\/lib\/table-columns"/.test(read(file)),
+      file + " 必须复用 @/lib/table-columns 的列元数据",
+    );
+  }
+});
+
+check("表格操作列：全站带行操作的表都声明 sticky:\"right\"，裸表复用冻结列类", () => {
+  const problems = [];
+  for (const file of ACTION_COLUMN_FILES) {
+    const text = read(file);
+    const actions = (text.match(/(?:id|key): "actions"/g) ?? []).length;
+    const sticky = (text.match(/sticky: "right"/g) ?? []).length;
+    if (actions === 0) problems.push(file + "：未找到 id/key: actions 列");
+    else if (sticky < actions) problems.push(file + "：操作列缺少 sticky: \"right\"（" + actions + " 列 / " + sticky + " 声明）");
+  }
+  for (const file of RAW_ACTION_TABLE_FILES) {
+    const text = read(file);
+    if (!text.includes('from "@/lib/table-columns"')) problems.push(file + "：未复用共享冻结列类");
+    if (!text.includes("FROZEN_COLUMN_HEADER_CLASS")) problems.push(file + "：表头未使用 FROZEN_COLUMN_HEADER_CLASS");
+    if (!text.includes("FROZEN_COLUMN_CELL_CLASS")) problems.push(file + "：单元格未使用 FROZEN_COLUMN_CELL_CLASS");
+  }
+  expect(problems.length === 0, "操作列冻结不完整：\n       " + problems.join("\n       "));
+});
+
+check("表格行节奏：表头/正文同高且垂直居中，行悬浮色与冻结列同步", async () => {
+  const { TH, TD, TR } = await load("/src/components/ui/table.tsx");
+  const th = render(createElement(TH, null, "列头"));
+  const td = render(createElement(TD, null, "值"));
+  const tr = render(createElement(TR, null, createElement(TD, null, "行")));
+  expect(/<th[^>]*class="[^"]*h-9/.test(th), "表头行高必须与正文同档（h-9）");
+  expect(/<th[^>]*class="[^"]*align-middle/.test(th), "表头必须垂直居中");
+  expect(/<td[^>]*class="[^"]*h-9/.test(td), "正文行高必须 h-9（与表头同档）");
+  expect(/<td[^>]*class="[^"]*align-middle/.test(td), "正文必须垂直居中");
+  expect(/class="[^"]*group/.test(tr) && /--row-hover/.test(tr), "表体行必须提供 group + --row-hover，供冻结列同步悬浮底色");
+  const css = read("src/index.css");
+  includesAll(css, ["--row-hover:", "--z-sticky-column:", "--z-sticky-head:"], "表格冻结列 token");
+  expect((css.match(/--row-hover:/g) ?? []).length >= 2, "行悬浮色必须浅/深各一套");
+});
+
 // ---------- run ----------
 const failures = [];
 server = await createServer({

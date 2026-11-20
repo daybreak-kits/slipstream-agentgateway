@@ -8,6 +8,7 @@ import { PageToolbar, SectionCard } from "@/components/governance/panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ACTION_ICONS } from "@/lib/icons";
+import { FROZEN_COLUMN_CELL_CLASS, FROZEN_COLUMN_HEADER_CLASS } from "@/lib/table-columns";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -265,7 +266,8 @@ export function McpTab({ data, draft, onDraftChange, canWrite, dirtyCount }: {
                       <TH>传输</TH>
                       <TH>目标</TH>
                       <TH>参数 / 环境变量</TH>
-                      {editing && <TH className="text-right">操作</TH>}
+                      {/* 操作列 = 最后一列 + 尾部冻结（W5 D1）：裸表复用共享冻结列类。 */}
+                      {editing && <TH className={FROZEN_COLUMN_HEADER_CLASS + " text-right"}>操作</TH>}
                     </tr>
                   </THead>
                   <tbody>
@@ -292,12 +294,12 @@ export function McpTab({ data, draft, onDraftChange, canWrite, dirtyCount }: {
                             : "—"}
                         </TD>
                         {editing && (
-                          <TD className="text-right">
+                          <TD className={FROZEN_COLUMN_CELL_CLASS + " text-right"}>
                             <div className="flex justify-end gap-1.5">
-                              <Button variant="outline" size="sm" onClick={() => openEditForm(index)}>
+                              <Button variant="outline" size="dense" onClick={() => openEditForm(index)}>
                                 <ACTION_ICONS.edit className="h-3.5 w-3.5" /> 编辑
                               </Button>
-                              <Button variant="ghost" size="sm" onClick={() => removeServer(index)}>
+                              <Button variant="ghost" size="dense" onClick={() => removeServer(index)}>
                                 移除
                               </Button>
                             </div>

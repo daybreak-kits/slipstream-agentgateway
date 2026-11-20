@@ -204,10 +204,11 @@ export function ConfigRevisionsPage() {
       id: "actions",
       header: "操作",
       enableSorting: false,
+      meta: { sticky: "right" },
       cell: (c) => (
         <Button
           variant="ghost"
-          size="sm"
+          size="dense"
           onClick={() => {
             setDetailRow(c.row.original);
             setDrawerOpen(true);

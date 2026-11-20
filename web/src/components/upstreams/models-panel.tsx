@@ -105,6 +105,7 @@ export function UpstreamModelsPanel({ upstream }: { upstream: UpstreamRow }) {
     {
       id: "actions",
       header: "操作",
+      meta: { sticky: "right" },
       cell: (c) => {
         const row = c.row.original;
         if (!canWrite) return null;

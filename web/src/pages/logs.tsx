@@ -663,10 +663,11 @@ function buildLogColumns(spec: LogColumnSpec): ColumnDef<LogRow, unknown>[] {
       id: "actions",
       header: "查看详情",
       enableSorting: false,
+      meta: { sticky: "right" },
       cell: ({ row }) => (
         <Button
           variant="ghost"
-          size="sm"
+          size="dense"
           aria-label={"查看 " + row.original.event_id + " 详情"}
           onClick={() => onOpen(row.original)}
         >

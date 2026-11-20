@@ -378,8 +378,8 @@ export function UpstreamPricesSection() {
       key: "actions",
       label: "操作",
       hideable: false,
-      headerClassName: "text-right",
-      className: "text-right",
+      align: "right",
+      sticky: "right",
       cell: (model) => {
         if (!canEdit) return <span className="text-2xs text-faint">只读</span>;
         const draft = drafts[model.id] ?? draftOf(model);
@@ -388,11 +388,11 @@ export function UpstreamPricesSection() {
         if (!dirty) return <span className="text-2xs text-faint">—</span>;
         return (
           <div className="flex items-center justify-end gap-1">
-            <Button size="sm" variant="ghost" onClick={() => resetDraft(model.id)} disabled={saving}>
+            <Button size="dense" variant="ghost" onClick={() => resetDraft(model.id)} disabled={saving}>
               <ACTION_ICONS.undo className="h-3.5 w-3.5" /> 撤销
             </Button>
             <Button
-              size="sm"
+              size="dense"
               onClick={() => save.mutate({ model, draft })}
               disabled={!draftValid(draft) || saving}
             >

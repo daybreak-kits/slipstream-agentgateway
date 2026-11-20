@@ -412,34 +412,36 @@ function UpstreamTab() {
     ...(canWrite ? [{
       key: "actions",
       label: "操作",
+      // 操作列 = 最后一列 + 尾部冻结（W5 D1）：sticky 由 lib/table-columns 同时上 th 与 td。
+      sticky: "right",
       hideable: false,
       headerClassName: "min-w-64",
       cell: (row: UpstreamModel) => (
         <div className="flex flex-wrap gap-1">
-          <Button variant="ghost" size="sm" onClick={() => setDialog({ open: true, initial: row })}>
+          <Button variant="ghost" size="dense" onClick={() => setDialog({ open: true, initial: row })}>
             <ACTION_ICONS.edit className="h-3.5 w-3.5" /> 编辑
           </Button>
           {row.enabled ? (
-            <Button variant="ghost" size="sm" onClick={() => availability.mutate({ id: row.id, action: "disable" })}>
+            <Button variant="ghost" size="dense" onClick={() => availability.mutate({ id: row.id, action: "disable" })}>
               <ACTION_ICONS.disable className="h-3.5 w-3.5" /> 关闭
             </Button>
           ) : (
-            <Button variant="ghost" size="sm" onClick={() => availability.mutate({ id: row.id, action: "enable" })}>
+            <Button variant="ghost" size="dense" onClick={() => availability.mutate({ id: row.id, action: "enable" })}>
               <ACTION_ICONS.enable className="h-3.5 w-3.5" /> 启用
             </Button>
           )}
           {/* ADR-025：冷却双模式弹窗（单次/周期两个页签）；冷却中保留行内快捷解除。 */}
-          <Button variant="ghost" size="sm" onClick={() => setCooldownFor(row)}>
+          <Button variant="ghost" size="dense" onClick={() => setCooldownFor(row)}>
             <ACTION_ICONS.cooldown className="h-3.5 w-3.5" /> 冷却
           </Button>
           {isCooling(row) ? (
-            <Button variant="ghost" size="sm" onClick={() => availability.mutate({ id: row.id, action: "release" })}>
+            <Button variant="ghost" size="dense" onClick={() => availability.mutate({ id: row.id, action: "release" })}>
               <ACTION_ICONS.releaseCooldown className="h-3.5 w-3.5" /> 解除冷却
             </Button>
           ) : null}
           <Button
             variant="ghost"
-            size="sm"
+            size="dense"
             className="text-danger-text"
             disabled={(row.target_count ?? 0) > 0}
             title={(row.target_count ?? 0) > 0 ? "被公开模型引用，先移除成员再删除" : undefined}
@@ -895,13 +897,15 @@ function PublicTab() {
     ...(canWrite ? [{
       key: "actions",
       label: "操作",
+      // 操作列 = 最后一列 + 尾部冻结（W5 D1）：sticky 由 lib/table-columns 同时上 th 与 td。
+      sticky: "right",
       hideable: false,
       headerClassName: "min-w-56",
       cell: (row: PublicModel) => (
         <div className="flex flex-wrap gap-1">
           <Button
             variant="ghost"
-            size="sm"
+            size="dense"
             className="h-7 w-7 px-0"
             aria-label={"复制公开名 " + row.name}
             title="复制公开名"
@@ -910,19 +914,19 @@ function PublicTab() {
             <ACTION_ICONS.copy className="h-3.5 w-3.5" />
           </Button>
           {/* ADR-025：编辑+成员合并为整页编辑器入口；新建仍走简化弹窗。 */}
-          <Button variant="ghost" size="sm" onClick={() => openEditor(row)}>
+          <Button variant="ghost" size="dense" onClick={() => openEditor(row)}>
             <ACTION_ICONS.edit className="h-3.5 w-3.5" /> 编辑
           </Button>
           {row.enabled ? (
-            <Button variant="ghost" size="sm" onClick={() => availability.mutate({ id: row.id, action: "disable" })}>
+            <Button variant="ghost" size="dense" onClick={() => availability.mutate({ id: row.id, action: "disable" })}>
               <ACTION_ICONS.disable className="h-3.5 w-3.5" /> 关闭
             </Button>
           ) : (
-            <Button variant="ghost" size="sm" onClick={() => availability.mutate({ id: row.id, action: "enable" })}>
+            <Button variant="ghost" size="dense" onClick={() => availability.mutate({ id: row.id, action: "enable" })}>
               <ACTION_ICONS.enable className="h-3.5 w-3.5" /> 启用
             </Button>
           )}
-          <Button variant="ghost" size="sm" className="text-danger-text" onClick={() => setDeleting(row)}>
+          <Button variant="ghost" size="dense" className="text-danger-text" onClick={() => setDeleting(row)}>
             <ACTION_ICONS.delete className="h-3.5 w-3.5" /> 删除
           </Button>
         </div>
