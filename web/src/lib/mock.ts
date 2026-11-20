@@ -211,17 +211,23 @@ const mockLogs: MockLogRow[] = Array.from({ length: 36 }, (_, i) => {
   const charge_micro = failed ? null : 5200 + i * 1177;
   // M5-b：成功行里挑一部分带 trace_id（两轮失败→成功 / 三轮），失败行与其余行留空，
   // 用来验证「无 trace 不渲染路由链」分支。
+  // ticket 04：i===5 是失败但带尝试链的行——行级错误摘要由最后一次失败尝试补齐；
+  // 其余失败行没有 attempts，验证「无链路记录」降级。
   const trace_id = failed
-    ? ""
+    ? i === 5
+      ? "tr_m5b_failed"
+      : ""
     : i % 4 === 0
       ? "tr_m5b_retry"
       : i % 7 === 0
         ? "tr_m5b_three"
         : "";
+  const attempts_count =
+    trace_id === "tr_m5b_three" || trace_id === "tr_m5b_failed" ? 3 : trace_id ? 2 : 0;
   return {
     event_id: "mev_" + String(1000 + i),
     trace_id,
-    attempts_count: trace_id === "tr_m5b_three" ? 3 : trace_id ? 2 : 0,
+    attempts_count,
     has_attempts: trace_id.length > 0,
     started_at_ms,
     completed_at_ms: started_at_ms + duration_ms,
@@ -413,6 +419,49 @@ const mockAttempts: Record<string, LogAttemptsOut> = {
         duration_ms: 140,
         outcome: "ok",
         started_at_ms: MOCK_TRACE_BASE_MS + 3_600_135,
+      },
+    ],
+  },
+  // ticket 04：失败但带尝试链的行——最后一轮 502 是行级错误摘要的来源。
+  tr_m5b_failed: {
+    event_id: "",
+    trace_id: "tr_m5b_failed",
+    attempts: [
+      {
+        attempt: 1,
+        upstream_ref: "ups_zai",
+        upstream_name: "zai-01",
+        model: "glm-5.3",
+        status_code: 500,
+        error_type: "500",
+        error_message: "upstream returned 500",
+        duration_ms: 55,
+        outcome: "error",
+        started_at_ms: MOCK_TRACE_BASE_MS + 7_200_005,
+      },
+      {
+        attempt: 2,
+        upstream_ref: "ups_zai",
+        upstream_name: "zai-01",
+        model: "glm-5.3",
+        status_code: 503,
+        error_type: "503",
+        error_message: "upstream unavailable",
+        duration_ms: 60,
+        outcome: "error",
+        started_at_ms: MOCK_TRACE_BASE_MS + 7_200_070,
+      },
+      {
+        attempt: 3,
+        upstream_ref: "ups_or",
+        upstream_name: "or-01",
+        model: "glm-5.3",
+        status_code: 502,
+        error_type: "502",
+        error_message: "bad gateway",
+        duration_ms: 70,
+        outcome: "error",
+        started_at_ms: MOCK_TRACE_BASE_MS + 7_200_140,
       },
     ],
   },

@@ -30,6 +30,10 @@ import {
 } from "@/components/logs/latency-tone";
 import { LogDetailDrawer } from "@/components/logs/log-detail-drawer";
 import {
+  NoChainRecord,
+  RequestAttemptChainPopover,
+} from "@/components/logs/request-attempt-chain";
+import {
   buildLogQuery,
   createDefaultLogFilters,
   cycleLogSort,
@@ -84,6 +88,7 @@ const STATUS_OPTIONS: Array<{ value: LogStatusFilter; label: string }> = [
 const LOG_COLUMN_LABELS: Record<string, string> = {
   datetime: "日期时间",
   model: "模型",
+  attempts: "尝试",
   user: "用户",
   key: "密钥",
   tokens: "词元",
@@ -505,6 +510,15 @@ function buildLogColumns(spec: LogColumnSpec): ColumnDef<LogRow, unknown>[] {
           <p className="mt-0.5">
             <Badge tone={statusTone(row.original.http_status)}>{statusLabel(row.original.http_status)}</Badge>
           </p>
+          {/* ticket 04：失败行的错误摘要（可能由最后一次失败尝试补齐），整行扫读即可定位失败点。 */}
+          {row.original.error ? (
+            <p
+              className="mt-0.5 max-w-[180px] truncate text-2xs text-danger-text"
+              title={row.original.error}
+            >
+              {row.original.error}
+            </p>
+          ) : null}
         </div>
       ),
     },
@@ -531,6 +545,24 @@ function buildLogColumns(spec: LogColumnSpec): ColumnDef<LogRow, unknown>[] {
               {item.upstream_model || "—"}
             </p>
           </div>
+        );
+      },
+    },
+    {
+      // ticket 04：模型旁的尝试列。有尝试 →「N 次尝试」按钮开路由链 popover；
+      // 历史行没有尝试记录 → 明确写「无链路记录」，不伪造链路。
+      id: "attempts",
+      header: "尝试",
+      enableSorting: false,
+      cell: ({ row }) => {
+        const item = row.original;
+        if (!item.has_attempts) return <NoChainRecord />;
+        return (
+          <RequestAttemptChainPopover
+            eventId={item.event_id}
+            attemptsCount={item.attempts_count ?? 0}
+            totalDurationMs={item.duration_ms}
+          />
         );
       },
     },
