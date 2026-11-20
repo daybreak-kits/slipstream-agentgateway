@@ -117,3 +117,14 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 6. **审计时间筛选未做**：审计其余筛选（动作/操作者/对象）可用，时间范围筛选待后续。
 
 **ADR-024 混合形态（终版落地）**：渲染层迁移最初按 AG 1.7「完整形态」（`gateways` + AI 组）设计，但 1.7 的路由只能匹配 path/method/query/header/host，**读不到请求体里的 model**，一个 route 只对应一个 AI 后端，AI 组也没有 weight——若全部公开模型走同一路径/body，无法区分模型，会塌缩到同一后端并丢失各模型的 failover 链与健康策略，因此简化的「纯完整形态」被推翻。终版采用混合形态：模型路由与 failover/weighted/conditional 仍由 `llm.models`/`llm.virtualModels` 表达；网关面迁到 `gateways` + `llm.gateways`；请求内 retry 以顶层 `policies[]` 挂到内部路由 `internal/llm:request`。强制项：每个上游必须带自己的 `apiKey.file`（否则 AG 会把客户端 Authorization 透传到上游）、baseUrl 必须是绝对 http(s)、https 上游渲染 `models[].tls.hostname`。金样 `api/tests/contract/fixtures/ag_1_7_full_config.yaml` 由真实 1.7 二进制 `--validate-only` 校验。
+
+## 四期交付注记（2026-11-20，详见 docs/CHANGELOG-phase4.md）
+
+1. **多密钥平权（ADR-026）**：每把上游密钥 = 一个独立 AG 上游（`{model}#k{seq}`，E18 形态）；failover/weighted 下密钥级平权分流（P2C 概率性，非均匀），**conditional 模式密钥平权不生效（E20）**——每目标仅用第一把密钥且成员编排有提示；按上游密钥分账不可得（request_logs 只记最终上游）。
+2. **主密钥概念废除**：is_primary/镜像/轮换端点全部退役；空上游非法（创建 422 + 删最后一把 409）；旧库升级跑 `api/scripts/migrate_multikey_v2.py`（dry-run 默认）。
+3. **表格与分页规范（DESIGN-AUDIT 四期）**：大表表体内部滚动+撑满页底+最小高度、操作列冻结右侧、头身对齐一致、凡表必有列设置；分页 nav 必须 `position:relative`（sr-only 逃逸 ICB 会顶高 html scrollHeight 酿成全站窗口滚动空白，见 §4 红线）。
+4. **语义色=分位数锚定**：日志首字/耗时按当前窗口 `all` 块分位动态着色（≤P50 绿/≤P95 黄/>P95 红），非固定阈值；旧后端无 all 块时降级中性灰。
+5. **模型参数来源**：models.dev 每日自动+手动兑入（只填空、手改永不覆盖、USD 进价按 fx_snapshots 折 CNY、无汇率 skip）；代理用户经 `GET /admin/my/models` 查参数（零金额键）。
+6. **路由链（M5 待立项）**：E19 证实可经 OTel Traces 实现（渲染 `frontendPolicies.tracing` + 控制面 OTLP 接收器 + trace_id join）；`randomSampling` 需显式开启否则无 span；accessLog upstreamCalls 在 1.7.0 静默失效。
+7. **conditional × 多密钥为受限组合**（E20/D2）：渲染不展开密钥、兜底至多 1 条且必须末位（AG 硬校验）、成员编排有提示。
+8. 看板 8 卡（缓存/RPM/TPM 自六卡拆出，**只拆不加**）、峰值=窗口内单分钟最大值；热力图 30D 按周/365D 按月（13 行，跨年加年份前缀）。
