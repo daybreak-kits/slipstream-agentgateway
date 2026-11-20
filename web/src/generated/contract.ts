@@ -463,6 +463,12 @@ export interface UpstreamModelPatch {
   markup?: number | string | null;
 }
 
+export interface UpstreamModelProbeIn {
+  model_id?: string | null;
+  model_ids?: string[];
+  key_id?: string | null;
+}
+
 export interface UpstreamPatch {
   name?: string | null;
   base_url?: string | null;
