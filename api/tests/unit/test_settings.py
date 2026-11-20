@@ -72,3 +72,31 @@ def test_bootstrap_admin_env_has_no_slipstream_prefix() -> None:
             else:
                 os.environ[key] = value
         reset_settings_cache()
+
+
+_TRACE_ENV_KEYS = ("SLIPSTREAM_TRACE_OTLP_HOST", "SLIPSTREAM_TRACE_OTLP_PORT")
+
+
+def test_trace_receiver_host_and_port_are_env_configurable() -> None:
+    previous = {key: os.environ.get(key) for key in _TRACE_ENV_KEYS}
+    try:
+        os.environ["SLIPSTREAM_TRACE_OTLP_HOST"] = "0.0.0.0"
+        os.environ["SLIPSTREAM_TRACE_OTLP_PORT"] = "4321"
+        reset_settings_cache()
+        settings = get_settings()
+        assert settings.trace_otlp_host == "0.0.0.0"
+        assert settings.trace_otlp_port == 4321
+        # M5-a default endpoint is the same-host OTLP/HTTP port.
+        reset_settings_cache()
+        for key in _TRACE_ENV_KEYS:
+            os.environ.pop(key, None)
+        defaults = get_settings()
+        assert defaults.trace_otlp_host == "127.0.0.1"
+        assert defaults.trace_otlp_port == 4318
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        reset_settings_cache()

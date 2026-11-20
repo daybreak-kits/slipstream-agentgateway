@@ -4,7 +4,9 @@ The data-plane SQLite DB keeps request metadata (request_logs) and optional
 prompt/completion bodies (request_log_payloads). Rows older than the operator
 setting log_retention_days are deleted here, and only here: the control-plane
 ledger (ledger_entries / gateway_usage_events / charge_entries) lives in a
-separate database and must never be touched by retention.
+separate database and must never be touched by retention. M5-a appends a
+control-plane trace_spans pass under the same day-granular setting; that pass
+only prunes spans, never usage facts or the ledger.
 
 Registering this as a job means the cleanup follows SLIPSTREAM_JOBS_ENABLED like
 the other in-process jobs; a deployment running jobs on a separate worker gets
@@ -25,6 +27,7 @@ from l01_core.settings import (
 )
 from l03_adapters.agentgateway.usage import cleanup_expired_logs
 from l04_repo.repository import get_setting
+from l05_service.traces import cleanup_expired_spans
 
 #: Retention is a daily housekeeping task, not a per-minute one.
 LOG_CLEANUP_INTERVAL_S = 24 * 3600
@@ -59,9 +62,16 @@ def _retention_days(session_factory: sessionmaker) -> int:
 def cleanup_job(
     session_factory: sessionmaker, settings: Settings | None = None
 ) -> dict[str, int]:
-    """One retention pass over the data-plane log DB; returns deleted-row counts."""
+    """One retention pass: data-plane request logs + control-plane trace spans."""
     resolved = settings or get_settings()
-    return cleanup_expired_logs(resolved.ag_log_db_path, _retention_days(session_factory))
+    days = _retention_days(session_factory)
+    counts = cleanup_expired_logs(resolved.ag_log_db_path, days)
+    # M5-a: spans live in the control-plane DB, not AG's request-log SQLite.
+    # Only trace_spans is pruned; usage events / ledger rows are never retention.
+    with session_factory() as session:
+        counts["trace_spans"] = cleanup_expired_spans(session, days)
+        session.commit()
+    return counts
 
 
 def make_cleanup_job(

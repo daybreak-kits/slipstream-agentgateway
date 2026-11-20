@@ -1,9 +1,11 @@
-"""Composition root: the control-plane app plus the in-process background jobs.
+"""Composition root: the control-plane app plus in-process side services.
 
 ADR-010 (DECISIONS.md) forbids l06_api from importing l07_jobs, so the job
 wiring lives here, at the top of the dependency graph: l06 builds the app, l07
-starts the runner, and this module composes them. This file is not a numbered
-layer (no lXX_ prefix), so the downward-import lint leaves it alone.
+starts the runner, and this module composes them. M5-a adds the resident OTLP
+trace receiver on its own port; its bind failure is a warning, never a crash.
+This file is not a numbered layer (no lXX_ prefix), so the downward-import lint
+leaves it alone.
 
 Run:  cd api && uvicorn server:create_app --factory --port 3700
 Disable the jobs with SLIPSTREAM_JOBS_ENABLED=0 (or jobs=False for tests and
@@ -18,6 +20,7 @@ from sqlalchemy.orm import sessionmaker
 
 from l01_core.settings import get_settings
 from l06_api.app import create_app as build_api_app
+from l06_api.trace_receiver import wire_trace_receiver
 from l07_jobs.wiring import start_runner
 
 
@@ -33,4 +36,7 @@ def create_app(
     if jobs is not None:
         settings = settings.model_copy(update={"jobs_enabled": jobs})
     start_runner(app, app.state.session_factory, settings)
+    # M5-a: the OTLP receiver is a resident passive service on its own port.
+    # A bind failure logs a warning and leaves the control plane serving.
+    wire_trace_receiver(app, app.state.session_factory, settings)
     return app

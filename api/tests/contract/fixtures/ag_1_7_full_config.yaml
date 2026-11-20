@@ -186,3 +186,7 @@ frontendPolicies:
   accessLog:
     database:
       llm: full
+  tracing:
+    host: "127.0.0.1:4318"
+    protocol: http
+    randomSampling: "true"

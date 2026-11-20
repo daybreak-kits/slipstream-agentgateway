@@ -11,8 +11,9 @@ billing amounts are integer micro units with explicit currency and price version
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Any
 
 
 class ApiStyle(StrEnum):
@@ -178,6 +179,32 @@ class UsageEvent:
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
     raw_json: str = ""
+    # M5-a: OTel trace id from request_logs (join key to the span tree).
+    trace_id: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class TraceSpanRecord:
+    """One OTel span normalized by the AG telemetry decoder for storage (M5-a).
+
+    The adapter layer (l03) owns protobuf parsing and the attribute whitelist;
+    this domain record is the layer-neutral hand-off to ingestion (l05). start/end
+    are epoch milliseconds, kind is `server` or `client`, and http_status is None
+    when the span carried no HTTP status attribute.
+    """
+
+    trace_id: str
+    span_id: str
+    parent_span_id: str = ""
+    kind: str = ""
+    http_path: str = ""
+    http_status: int | None = None
+    error_type: str = ""
+    retry_attempt: int | None = None
+    start_ms: int = 0
+    end_ms: int = 0
+    duration_ms: int = 0
+    attributes: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

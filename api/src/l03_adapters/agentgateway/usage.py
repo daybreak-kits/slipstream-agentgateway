@@ -185,6 +185,9 @@ def _row_to_event(row: sqlite3.Row) -> UsageEvent:
         if "cache_creation_input_tokens" in keys
         else 0,
         raw_json=json.dumps(raw, ensure_ascii=False, default=str),
+        # M5-a: request_logs.trace_id is filled by AG when tracing is enabled;
+        # it is the join key to trace_spans. Older fixture schemas may omit it.
+        trace_id=str(row["trace_id"] or "") if "trace_id" in keys else "",
     )
 
 

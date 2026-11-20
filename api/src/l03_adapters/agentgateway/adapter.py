@@ -256,6 +256,15 @@ class AgentgatewayAdapter:
                     verified=True,
                 ),
                 Capability(
+                    "frontendPolicies.tracing",
+                    True,
+                    "1.7.0",
+                    "frontendPolicies.tracing {host,protocol:http,randomSampling:\"true\"} "
+                    "→ OTLP/HTTP /v1/traces；每请求 1 server 根 span + 每次上游尝试 1 "
+                    "client span（E19），顶层 tracing 键被 1.7 拒绝",
+                    verified=True,
+                ),
+                Capability(
                     "policies.remoteRateLimit",
                     False,
                     "",

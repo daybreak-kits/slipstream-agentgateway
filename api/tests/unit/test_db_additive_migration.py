@@ -36,3 +36,36 @@ def test_init_db_adds_ticket_08_columns_to_existing_table(tmp_path) -> None:
         ).one()
     assert tuple(row) == ("", "")
     engine.dispose()
+
+
+def test_init_db_adds_trace_id_and_creates_trace_spans_on_an_old_db(tmp_path) -> None:
+    """M5-a additive path: old usage rows keep working and gain an empty trace_id."""
+    db_path = tmp_path / "old-usage.db"
+    engine = create_engine("sqlite:///" + db_path.as_posix(), future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE gateway_usage_events ("
+                "event_id VARCHAR(128) PRIMARY KEY, started_at_ms BIGINT)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO gateway_usage_events (event_id, started_at_ms) "
+                "VALUES ('evt_old', 1)"
+            )
+        )
+
+    init_db(engine)
+
+    inspector = inspect(engine)
+    assert "trace_id" in {column["name"] for column in inspector.get_columns(
+        "gateway_usage_events"
+    )}
+    assert inspector.has_table("trace_spans")
+    with engine.connect() as connection:
+        value = connection.execute(
+            text("SELECT trace_id FROM gateway_usage_events WHERE event_id='evt_old'")
+        ).scalar()
+    assert value == ""
+    engine.dispose()

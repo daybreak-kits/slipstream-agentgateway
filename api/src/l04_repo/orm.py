@@ -18,7 +18,16 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -265,9 +274,10 @@ class GatewayUsageEventORM(Base):
     Column mapping (request_logs 26 cols): id -> event_id, started_at ->
     started_at_ms, gen_ai_request_model -> public_model, gen_ai_response_model ->
     upstream_model, gen_ai_provider_name -> provider, agentgateway_user (= the
-    key metadata.name we render) -> api_key_id. Cache columns are stored raw but
-    billing folds them into input per the lead's conservative rule (billing.md §6,
-    stage B re-checks); reports must label token amounts as estimates.
+    key metadata.name we render) -> api_key_id, trace_id -> trace_id (M5-a join
+    key to trace_spans). Cache columns are stored raw but billing folds them into
+    input per the lead's conservative rule (billing.md §6, stage B re-checks);
+    reports must label token amounts as estimates.
     """
 
     __tablename__ = "gateway_usage_events"
@@ -288,6 +298,38 @@ class GatewayUsageEventORM(Base):
     cache_read_tokens: Mapped[int] = mapped_column(Integer, default=0)
     cache_write_tokens: Mapped[int] = mapped_column(Integer, default=0)
     raw_json: Mapped[str] = mapped_column(Text, default="")
+    # M5-a: AG fills request_logs.trace_id when frontendPolicies.tracing is on;
+    # this is the join key to the span tree (span_id is not duplicated here).
+    trace_id: Mapped[str] = mapped_column(String(64), default="")
+    ingested_at_ms: Mapped[int] = mapped_column(BigInteger, default=0)
+
+
+class TraceSpanORM(Base):
+    """One received OTLP span (M5-a): the routing-chain fact table.
+
+    AG 1.7 emits one server root span per request and one client span per upstream
+    attempt; attempt order is recovered by sorting client spans on start_ms (E19:
+    no explicit attempt ordinal exists). (trace_id, span_id) is the primary key so
+    an OTLP export retry cannot duplicate a span without dropping a same-id span
+    from another trace. attributes_json keeps only the decoder's whitelist
+    subset (http/gen_ai/retry/duration keys).
+    """
+
+    __tablename__ = "trace_spans"
+    __table_args__ = (Index("ix_trace_spans_trace_start", "trace_id", "start_ms"),)
+
+    trace_id: Mapped[str] = mapped_column(String(64), primary_key=True, index=True)
+    span_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    parent_span_id: Mapped[str] = mapped_column(String(64), default="")
+    kind: Mapped[str] = mapped_column(String(16), default="")
+    http_path: Mapped[str] = mapped_column(String(512), default="")
+    http_status: Mapped[int] = mapped_column(Integer, default=0)
+    error_type: Mapped[str] = mapped_column(String(64), default="")
+    retry_attempt: Mapped[int] = mapped_column(Integer, default=0)
+    start_ms: Mapped[int] = mapped_column(BigInteger, default=0)
+    end_ms: Mapped[int] = mapped_column(BigInteger, default=0)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    attributes_json: Mapped[str] = mapped_column(Text, default="{}")
     ingested_at_ms: Mapped[int] = mapped_column(BigInteger, default=0)
 
 

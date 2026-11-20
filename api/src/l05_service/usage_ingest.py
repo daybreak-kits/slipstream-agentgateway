@@ -197,6 +197,7 @@ def _ingest_batch(
                 cache_read_tokens=event.cache_read_tokens,
                 cache_write_tokens=event.cache_write_tokens,
                 raw_json=event.raw_json,
+                trace_id=event.trace_id,
                 ingested_at_ms=now_ms(),
             )
         )

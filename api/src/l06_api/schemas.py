@@ -11,7 +11,7 @@ invalid rules never reach storage.
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -546,6 +546,41 @@ class PolicyCountsOut(BaseModel):
     users: int
 
 
+class TraceSpanOut(BaseModel):
+    """One stored OTel span (M5-a); attributes keep the decoder whitelist subset."""
+
+    trace_id: str
+    span_id: str
+    parent_span_id: str
+    kind: str
+    http_path: str
+    http_status: int | None
+    error_type: str
+    retry_attempt: int | None
+    start_ms: int
+    end_ms: int
+    duration_ms: int
+    attributes: dict[str, Any]
+
+
+class TraceAttemptOut(BaseModel):
+    """One upstream attempt reconstructed from a client span (start order, 1-based)."""
+
+    attempt: int
+    span_id: str
+    http_path: str
+    http_status: int | None
+    error_type: str
+    duration_ms: int
+    start_ms: int
+
+
+class TraceDetailOut(BaseModel):
+    trace_id: str
+    spans: list[TraceSpanOut]
+    attempts: list[TraceAttemptOut]
+
+
 class CorsConfig(BaseModel):
     """Data-plane browser CORS; rendering is opt-in via enabled."""
 
@@ -635,6 +670,23 @@ class HealthConfig(BaseModel):
     restore_health: int = Field(default=0, ge=0)
 
 
+class TracingConfig(BaseModel):
+    """M5-a: AG OTLP/HTTP span export switch (frontendPolicies.tracing).
+
+    host+port are the control-plane receiver endpoint; protocol is fixed to
+    OTLP/HTTP and random_sampling must be rendered as the string "true" (AG 1.7
+    emits no span otherwise, E19).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    host: str = Field(default="127.0.0.1", min_length=1, max_length=255)
+    port: int = Field(default=4318, ge=1, le=65535)
+    protocol: Literal["http"] = "http"
+    random_sampling: bool = True
+
+
 class PolicyConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -649,6 +701,7 @@ class PolicyConfig(BaseModel):
     )
     retry: RetryConfig | None = None
     health: HealthConfig | None = None
+    tracing: TracingConfig = Field(default_factory=TracingConfig)
 
 
 class PolicyConfigIn(BaseModel):

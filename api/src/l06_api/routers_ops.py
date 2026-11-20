@@ -680,6 +680,9 @@ def _log_item(
     )
     return {
         "event_id": row.event_id,
+        # M5-a: join key to GET /admin/traces/{trace_id}; empty on old rows or
+        # when AG tracing was disabled at request time.
+        "trace_id": row.trace_id or "",
         "started_at_ms": row.started_at_ms,
         "completed_at_ms": row.completed_at_ms,
         "duration_ms": row.duration_ms,

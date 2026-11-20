@@ -363,6 +363,22 @@ class AccessLogSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class TracingPolicySpec:
+    """M5-a: AG OTLP/HTTP span export (frontendPolicies.tracing, E19).
+
+    Rendered only when the operator enables it. host+port become the exporter
+    endpoint in AG's single `host` string; protocol stays `http` (OTLP/HTTP) and
+    randomSampling MUST be the string "true"/"false" - AG defaults to false and
+    emits no span otherwise.
+    """
+
+    host: str = "127.0.0.1"
+    port: int = 4318
+    protocol: str = "http"
+    random_sampling: bool = True
+
+
+@dataclass(frozen=True, slots=True)
 class McpTargetSpec:
     """One top-level mcp.targets[] entry.
 
@@ -421,6 +437,8 @@ class PoliciesSpec:
     remote_rate_limit: RemoteRateLimitPolicySpec | None = None
     # ADR-021: global access-log/payload switch (metadata | full).
     access_log: AccessLogSpec | None = None
+    # M5-a: OTLP/HTTP trace export; None means "disabled, render no tracing block".
+    tracing: TracingPolicySpec | None = None
 
 
 @dataclass(frozen=True, slots=True)
