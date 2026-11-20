@@ -316,6 +316,223 @@ for (const [file, actions] of actionFiles) {
   });
 }
 
+// ---------- 8. 公开模型单页编辑器（W5 ticket 13） ----------
+const publicModelFixture = (patch = {}) => ({
+  id: "pm_01",
+  name: "glm-5.3",
+  routing_mode: "failover",
+  note: "主力对话模型",
+  enabled: true,
+  created_at_ms: Date.parse("2026-11-10T09:00:00"),
+  targets: [
+    { id: "mt_02", public_model_id: "pm_01", upstream_model_id: "um_02", upstream_model_name: "glm-5.3-flash", upstream_name: "zai-01", priority: 2, weight: 1, when: null, enabled: true },
+    { id: "mt_01", public_model_id: "pm_01", upstream_model_id: "um_01", upstream_model_name: "glm-5.3", upstream_name: "zai-01", priority: 1, weight: 1, when: null, enabled: true },
+  ],
+  ...patch,
+});
+const upstreamModelFixtures = [
+  { id: "um_01", upstream_id: "up_01", name: "glm-5.3", upstream_name: "zai-01", model_type: "chat", enabled: true, created_at_ms: 0 },
+  { id: "um_02", upstream_id: "up_01", name: "glm-5.3-flash", upstream_name: "zai-01", model_type: "chat", enabled: true, created_at_ms: 0 },
+];
+const dirtyStateOf = (fields) => ({
+  dirtyFields: new Set(fields),
+  dirtyCount: fields.length,
+  isDirty: fields.length > 0,
+  isDirtyField: (field) => fields.includes(field),
+});
+const pageForm = (patch = {}) => ({
+  name: "glm-5.3",
+  routing_mode: "failover",
+  note: "主力对话模型",
+  enabled: true,
+  members: [
+    { upstream_model_id: "um_01", priority: "1", weight: "1", when: "" },
+    { upstream_model_id: "um_02", priority: "2", weight: "1", when: "" },
+  ],
+  ...patch,
+});
+const pageProps = (patch = {}) => ({
+  model: publicModelFixture(),
+  form: pageForm(),
+  upstreamModels: upstreamModelFixtures,
+  fallbackNames: new Map(),
+  dirty: dirtyStateOf(["name"]),
+  saving: false,
+  saveError: null,
+  missingPermissions: [],
+  onFormChange: () => {},
+  onMembersChange: () => {},
+  onResetField: () => {},
+  onResetAll: () => {},
+  onSave: () => {},
+  ...patch,
+});
+const buttonsContaining = (html, text) =>
+  [...html.matchAll(/<button\b[\s\S]*?<\/button>/g)].map((match) => match[0]).filter((button) => button.includes(text));
+
+check("public-model-form：草稿 hydrate、单 PATCH 载荷、双权限与整页校验", async () => {
+  const { EMPTY_PUBLIC_MODEL_FORM, formOf, missingPermissions, normalizeForm, patchPayloadOf, validateForm } = await load(
+    "/src/components/models/public-model-form.ts",
+  );
+  const form = formOf(publicModelFixture());
+  expect(form.name === "glm-5.3" && form.routing_mode === "failover" && form.enabled === true, "formOf 必须回填基本字段");
+  expect(form.note === "主力对话模型", "formOf 必须回填备注");
+  expect(form.members.length === 2, "formOf 必须带入成员草稿");
+  expect(form.members[0].upstream_model_id === "um_02", "成员草稿保持服务端 targets 顺序（fixture 故意乱序）");
+  expect(form.members[0].priority === "2" && form.members[0].weight === "1", "成员数字字段必须转成字符串");
+  expect(EMPTY_PUBLIC_MODEL_FORM.name === "" && EMPTY_PUBLIC_MODEL_FORM.members.length === 0, "空草稿不能带成员");
+  const payload = patchPayloadOf({ ...form, name: "  glm-5.3  ", note: " 备注 " });
+  expect(payload.name === "glm-5.3" && payload.note === "备注", "单 PATCH 载荷必须 trim 名称/备注，实际 " + JSON.stringify(payload));
+  expect(Array.isArray(payload.targets) && payload.targets.length === 2, "单 PATCH 必须携带 targets");
+  expect(payload.targets[0].priority === 1 && payload.targets[1].priority === 2, "targets 必须按 priority 升序提交");
+  expect(payload.enabled === true && payload.routing_mode === "failover", "载荷必须包含启用与策略");
+  expect(typeof payload.targets[0].weight === "number", "targets weight 必须是数字");
+  const noWeight = patchPayloadOf({ ...form, members: [{ upstream_model_id: "um_01", priority: "1", weight: "", when: "" }] });
+  expect(noWeight.targets[0].weight === 0, "空 weight 必须提交成 0");
+  expect(missingPermissions(() => true).length === 0, "权限齐全时不应缺权限");
+  expect(
+    missingPermissions((permission) => permission === "public_models:write").join(",") === "model_targets:write",
+    "只缺成员写权限时必须精确点名 model_targets:write",
+  );
+  expect(
+    missingPermissions(() => false).join(",") === "public_models:write,model_targets:write",
+    "双权限必须按固定顺序返回",
+  );
+  expect(validateForm({ ...form, name: "  " }).some((error) => error.includes("名称")), "名称不能为空");
+  expect(validateForm({ ...form, members: [] }).some((error) => error.includes("至少保留 1 个成员")), "至少要保留一个成员");
+  expect(
+    validateForm({ ...form, members: [form.members[0], { ...form.members[0] }] }).some((error) => error.includes("成员重复")),
+    "重复成员必须报错",
+  );
+  const conditional = normalizeForm({
+    ...form,
+    routing_mode: "conditional",
+    members: [
+      { upstream_model_id: "um_01", priority: "1", weight: "", when: "" },
+      { upstream_model_id: "um_02", priority: "2", weight: "", when: "" },
+    ],
+  });
+  expect(validateForm(conditional).some((error) => error.includes("末位")), "conditional 非末位成员不能留空 when");
+  expect(normalizeForm(conditional).members.length === 2 && normalizeForm(conditional).members[0].when === "", "normalizeForm 必须保留成员 when");
+});
+
+check("PublicModelPageView：单页三段 + 页头 h1/状态/脏标记 + 唯一「保存」", async () => {
+  const { PublicModelPageView } = await load("/src/components/models/public-model-page.tsx");
+  const html = render(createElement(PublicModelPageView, pageProps()));
+  expect(!html.includes("tablist"), "公开模型编辑器不能再有页签");
+  expect(!html.includes('role="tab"'), "不能再有 tab role");
+  expect(/<h1[^>]*>/.test(html), "页头必须是 h1");
+  includesAll(html, ["glm-5.3", "failover · 故障转移", "正常", "1 项未保存", "未保存 1 项"], "页头状态与脏标记");
+  const basic = html.indexOf("基本信息");
+  const members = html.indexOf("成员编排");
+  const summary = html.indexOf("只读摘要");
+  expect(basic >= 0 && members > basic && summary > members, "三段顺序必须是 基本信息 → 成员编排 → 只读摘要");
+  const saveButtons = buttonsContaining(html, "保存");
+  expect(saveButtons.length === 1, "整页只能有一个保存按钮，实际 " + saveButtons.length);
+  expect(!html.includes("保存整页"), "旧「保存整页」文案必须移除");
+  expect(!html.includes("保存成员"), "旧成员保存按钮必须移除");
+  const summaryStart = html.indexOf('data-slot="public-model-summary"');
+  const footerStart = html.indexOf('data-slot="dirty-footer"');
+  expect(summaryStart >= 0 && footerStart > summaryStart, "只读摘要必须有独立容器且位于底部动作条之前");
+  const summaryHtml = html.slice(summaryStart, footerStart);
+  expect(!/<input|<textarea|<select/i.test(summaryHtml), "只读摘要内不得有可编辑控件");
+  includesAll(summaryHtml, ["priority", "冷却", "上游模型"], "只读摘要必须说明渲染语义与冷却归属");
+});
+
+check("PublicModelPageView：保存失败保留脏标记、保存中进度、缺权限禁用保存并点名权限键", async () => {
+  const { PublicModelPageView } = await load("/src/components/models/public-model-page.tsx");
+  const failed = render(createElement(PublicModelPageView, pageProps({ saveError: "数据库暂时不可用" })));
+  includesAll(failed, ["保存失败，修改已保留", "数据库暂时不可用", "未保存 1 项"], "失败时必须保留脏标记与用户输入");
+  const saving = render(createElement(PublicModelPageView, pageProps({ saving: true })));
+  includesAll(saving, ["保存中"], "保存中必须显示进度");
+  expect(buttonsContaining(saving, "保存").every((button) => button.includes("disabled")), "保存中按钮必须禁用");
+  const readOnly = render(
+    createElement(
+      PublicModelPageView,
+      pageProps({ dirty: dirtyStateOf([]), missingPermissions: ["public_models:write", "model_targets:write"] }),
+    ),
+  );
+  includesAll(
+    readOnly,
+    ["缺少权限", "public_models:write", "model_targets:write", "名称、策略、备注与启用状态", "成员编排"],
+    "缺权限时必须点名两个权限键与影响范围",
+  );
+  expect(buttonsContaining(readOnly, "保存")[0].includes("disabled"), "缺权限时保存必须禁用");
+  expect(/<fieldset[^>]*disabled/.test(readOnly), "缺权限时字段必须只读");
+  const partial = render(createElement(PublicModelPageView, pageProps({ missingPermissions: ["model_targets:write"] })));
+  includesAll(partial, ["model_targets:write"], "只缺成员权限也要点名");
+  expect(!partial.includes("public_models:write"), "已具备的权限不应出现在缺失提示里");
+});
+
+check("PublicModelPageView：成员校验与 conditional 末位兜底提示", async () => {
+  const { PublicModelPageView } = await load("/src/components/models/public-model-page.tsx");
+  includesAll(
+    render(createElement(PublicModelPageView, pageProps())),
+    ["至少保留 1 个成员", "成员不可重复", "末位成员可以留空 when"],
+    "成员规则提示",
+  );
+  const empty = render(createElement(PublicModelPageView, pageProps({ form: pageForm({ members: [] }) })));
+  includesAll(empty, ["至少保留 1 个成员"], "空成员校验提示");
+  expect(buttonsContaining(empty, "保存")[0].includes("disabled"), "成员非法时不能保存");
+  const duplicate = render(
+    createElement(
+      PublicModelPageView,
+      pageProps({
+        form: pageForm({
+          members: [
+            { upstream_model_id: "um_01", priority: "1", weight: "1", when: "" },
+            { upstream_model_id: "um_01", priority: "2", weight: "1", when: "" },
+          ],
+        }),
+      }),
+    ),
+  );
+  includesAll(duplicate, ["成员重复"], "重复成员提示");
+  expect(buttonsContaining(duplicate, "保存")[0].includes("disabled"), "重复成员时不能保存");
+  const conditional = pageForm({
+    routing_mode: "conditional",
+    members: [
+      { upstream_model_id: "um_01", priority: "1", weight: "", when: 'request.user_id == "u1"' },
+      { upstream_model_id: "um_02", priority: "2", weight: "", when: "" },
+    ],
+  });
+  includesAll(
+    render(createElement(PublicModelPageView, pageProps({ form: conditional }))),
+    ["conditional", "末位兜底", "glm-5.3-flash"],
+    "conditional 末位兜底提示",
+  );
+  const badConditional = pageForm({
+    routing_mode: "conditional",
+    members: [
+      { upstream_model_id: "um_01", priority: "1", weight: "", when: "" },
+      { upstream_model_id: "um_02", priority: "2", weight: "", when: "" },
+    ],
+  });
+  includesAll(
+    render(createElement(PublicModelPageView, pageProps({ form: badConditional }))),
+    ["只有末位成员可以留空 when"],
+    "末位兜底校验提示",
+  );
+});
+
+check("接线：公开模型编辑器单页（无 Tab、单 PATCH、双权限、脏标记与脏守卫）", () => {
+  const text = read("src/components/models/public-model-editor.tsx");
+  includesAll(
+    text,
+    ["PublicModelPageView", "useDirtyFields", "usePermissions", "useDirtyGuard", "ENDPOINTS.publicModelUpdate"],
+    "公开模型编辑器接线",
+  );
+  const formContract = read("src/components/models/public-model-form.ts");
+  includesAll(formContract, ["public_models:write", "model_targets:write", "missingPermissions"], "双权限契约");
+  expect(!text.includes("Tabs"), "必须移除 Tabs 引入与使用");
+  expect(!text.includes("保存整页") && !text.includes("保存成员"), "旧保存文案必须移除");
+  expect((text.match(/save\.mutate\(/g) ?? []).length === 1, "整页只能有一个保存入口");
+  includesAll(text, ["api.patch", "patchPayloadOf"], "保存必须走单 PATCH 且携带 targets");
+  const page = read("src/components/models/public-model-page.tsx");
+  expect(!page.includes("Tabs"), "单页视图不得使用 Tabs");
+  expect(page.includes("DirtySaveButton") && page.includes("DirtyFooter"), "单页视图必须用统一脏表单动作条");
+});
+
 // ---------- run ----------
 server = await createServer({
   configFile: join(webRoot, "vite.config.ts"),

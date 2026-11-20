@@ -1,66 +1,73 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "@/lib/notify";
 
+import { EmptyState, ErrorState } from "@/components/governance/panel";
 import { PageHeader } from "@/components/layout/page-header";
-import { Badge } from "@/components/ui/badge";
+import { PublicModelPageView } from "@/components/models/public-model-page";
+import {
+  EMPTY_PUBLIC_MODEL_FORM,
+  formOf,
+  missingPermissions,
+  normalizeForm,
+  patchPayloadOf,
+  sameMemberDrafts,
+  type PublicModelForm,
+} from "@/components/models/public-model-form";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Field } from "@/components/models/field";
-import { MemberBoard } from "@/components/models/member-editor";
-import { type MemberDraft, memberDraftsOf, targetsPayload, validateMembers } from "@/components/models/member-drafts";
-import { ROUTING_LABELS } from "@/components/models/model-vocab";
-import { Input } from "@/components/ui/input";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs } from "@/components/ui/tabs";
 import { api, apiList, ENDPOINTS } from "@/lib/api";
-import { availabilityText, availabilityTone } from "@/components/models/availability";
-import type { PublicModel, RoutingMode, UpstreamModel } from "@/types";
+import { usePermissions } from "@/lib/permissions";
+import { useDirtyFields } from "@/lib/use-dirty-fields";
+import { useDirtyGuard } from "@/lib/use-dirty-guard";
+import type { PublicModel, UpstreamModel } from "@/types";
 
 /**
- * 公开模型整页编辑器（W4-C，路由 /models/public/:id；编辑+成员合并入口，ADR-025）。
- * Tab1 基本信息+策略；Tab2 双栏成员编排。
- * Ticket 12：整页保存只发一个 PATCH /admin/public-models/{id}（可选 targets），
- * 服务端在同一事务内完成基本字段 + routing_mode + enabled + 成员整批替换；
- * 两个 Tab 的「保存」提交同一份整页草稿，不再有半成功（单页合并归 ticket 13）。
- * 未保存改动按现行弹窗草稿处理（离开即丢，改写守卫归 G 波）。
+ * 公开模型单页编辑器（ticket 13，路由 /models/public/:id）。
+ *
+ * W4-C 的两个 Tab（基本信息 / 成员编排）与两个保存按钮合并为一页三段：
+ * 页头 h1 + 状态 + 脏标记，底部唯一「保存」。一次保存只发一个
+ * PATCH /admin/public-models/{id}（含 targets 整批替换），服务端在同一事务里
+ * 提交基本字段、策略、启用与成员——不会出现基本信息已改、成员未改的半成功
+ * （ticket 12 契约）。成员 chip 流归 ticket 14，本票仍复用 MemberBoard。
  */
 export function PublicModelEditor({ id }: { id: string }) {
   const qc = useQueryClient();
+  const { can } = usePermissions();
   const q = useQuery({
     queryKey: ["public-models"],
     queryFn: () => apiList<PublicModel>(ENDPOINTS.publicModels),
     refetchInterval: 30_000,
   });
-  const qModels = useQuery({ queryKey: ["upstream-models"], queryFn: () => apiList<UpstreamModel>(ENDPOINTS.upstreamModels) });
+  const qModels = useQuery({
+    queryKey: ["upstream-models"],
+    queryFn: () => apiList<UpstreamModel>(ENDPOINTS.upstreamModels),
+  });
   const model = useMemo(() => (q.data?.items ?? []).find((row) => row.id === id) ?? null, [q.data, id]);
   const upstreamModels = qModels.data?.items ?? [];
 
-  const [form, setForm] = useState({
-    name: "",
-    routing_mode: "failover" as RoutingMode,
-    note: "",
-    enabled: true,
-  });
-  const [members, setMembers] = useState<MemberDraft[]>([]);
+  const [form, setForm] = useState<PublicModelForm>(EMPTY_PUBLIC_MODEL_FORM);
+  // baseline = 上一次保存成功（或首次载入）时的整页快照：保存成功回填后脏标记清零，
+  // 保存失败不换 baseline——用户输入与未保存标记都会保留。
+  const [baseline, setBaseline] = useState<PublicModelForm | null>(null);
   const [hydratedId, setHydratedId] = useState("");
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  // 首次载入（或路由换到另一行）时以服务端行为准重置草稿；保存后的 refetch 不回灌，避免覆盖编辑中内容。
+  // 首次载入（或路由换到另一行）时以服务端行为准重置草稿；保存后的 refetch 不回灌，
+  // 避免覆盖正在编辑的内容。
   useEffect(() => {
     if (model && model.id !== hydratedId) {
-      setForm({
-        name: model.name,
-        routing_mode: model.routing_mode,
-        note: model.note ?? "",
-        enabled: model.enabled,
-      });
-      setMembers(memberDraftsOf(model));
+      const next = formOf(model);
+      setForm(next);
+      setBaseline(next);
+      setSaveError(null);
       setHydratedId(model.id);
     }
   }, [model, hydratedId]);
+
+  const dirty = useDirtyFields(baseline, form, { equals: { members: sameMemberDrafts } });
+  const permissionGaps = missingPermissions(can);
 
   // 服务端 targets 的 id → 名称兜底：上游模型列表不含已被删除的引用行时仍可显示。
   const fallbackNames = useMemo(() => {
@@ -71,131 +78,112 @@ export function PublicModelEditor({ id }: { id: string }) {
     return map;
   }, [model]);
 
-  const memberErrors = validateMembers(members, form.routing_mode);
-
-  // Ticket 12：一个 PATCH 保存整页（基本字段 + 策略 + 启用 + targets 整批替换），
-  // 服务端单事务提交，失败整体回滚——不再出现「基本信息已改、成员未改」。
+  // 单 PATCH 提交整页：基本字段 + 策略 + 启用 + 成员整批替换，服务端单事务提交。
   const save = useMutation({
-    mutationFn: () =>
-      api.patch<PublicModel>(ENDPOINTS.publicModelUpdate(id), {
-        name: form.name.trim(),
-        routing_mode: form.routing_mode,
-        note: form.note.trim(),
-        enabled: form.enabled,
-        targets: targetsPayload(members),
-      }),
+    mutationFn: () => api.patch<PublicModel>(ENDPOINTS.publicModelUpdate(id), patchPayloadOf(form)),
     onSuccess: () => {
+      const saved = normalizeForm(form);
+      setForm(saved);
+      setBaseline(saved);
+      setSaveError(null);
       toast.success("公开模型已保存");
       void qc.invalidateQueries({ queryKey: ["public-models"] });
     },
-    onError: (e: Error) => toast.error("保存失败", { description: e.message }),
+    onError: (error: Error) => {
+      // 不清 form/baseline：失败后保留用户输入与脏标记，可直接修正后重试。
+      setSaveError(error.message);
+      toast.error("保存失败", { description: "修改已保留，可修正后重试" });
+    },
   });
+
+  const leaveGuard = useDirtyGuard(dirty.isDirty);
+
+  const resetField = (field: keyof PublicModelForm) => {
+    if (!baseline) return;
+    setForm((previous) => {
+      switch (field) {
+        case "name":
+          return { ...previous, name: baseline.name };
+        case "routing_mode":
+          return { ...previous, routing_mode: baseline.routing_mode };
+        case "note":
+          return { ...previous, note: baseline.note };
+        case "enabled":
+          return { ...previous, enabled: baseline.enabled };
+        case "members":
+          return { ...previous, members: baseline.members };
+      }
+    });
+  };
 
   if (q.isPending) {
     return (
       <div className="space-y-3">
+        <Skeleton className="h-4 w-28" />
         <Skeleton className="h-8 w-64" />
+        <Skeleton className="h-48 w-full" />
         <Skeleton className="h-64 w-full" />
+        <Skeleton className="h-32 w-full" />
       </div>
     );
   }
+
+  if (q.isError) {
+    return (
+      <div className="space-y-3">
+        <PageHeader title="编辑公开模型" description="公开模型列表加载失败；已保存的数据不受影响。" />
+        <ErrorState
+          description={q.error.message}
+          onRetry={() => void q.refetch()}
+          retrying={q.isFetching}
+        />
+        <Link
+          to="/models?tab=public"
+          className="inline-flex items-center gap-1 text-2sm text-primary-text hover:underline"
+        >
+          返回模型管理
+        </Link>
+      </div>
+    );
+  }
+
   if (model === null) {
     return (
       <div className="space-y-3">
-        <PageHeader title="编辑公开模型" description="未找到该公开模型，可能已被删除。" />
-        <Link to="/models?tab=public" className="inline-flex items-center gap-1 text-2sm text-primary-text hover:underline">
-          <ArrowLeft className="h-3.5 w-3.5" /> 返回模型管理
-        </Link>
+        <PageHeader title="公开模型不存在" description="该公开模型可能已被删除；从模型管理重新选择。" />
+        <EmptyState
+          title="未找到该公开模型"
+          description="它可能已被删除，或链接里的编号无效。"
+          action={
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/models?tab=public">返回模型管理</Link>
+            </Button>
+          }
+        />
       </div>
     );
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Link to="/models?tab=public" className="inline-flex items-center gap-1 text-2sm text-primary-text hover:underline">
-          <ArrowLeft className="h-3.5 w-3.5" /> 返回模型管理
-        </Link>
-      </div>
-      <PageHeader
-        title="编辑公开模型"
-        description={<>公开模型「{model.name}」。保存整页生效：基本信息、策略、启用与成员在一次事务里提交。</>}
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge tone="primary">{ROUTING_LABELS[form.routing_mode].label}</Badge>
-            <Badge tone={availabilityTone(model)}>{availabilityText(model)}</Badge>
-          </div>
-        }
+    <>
+      <PublicModelPageView
+        model={model}
+        form={form}
+        upstreamModels={upstreamModels}
+        fallbackNames={fallbackNames}
+        dirty={dirty}
+        saving={save.isPending}
+        saveError={saveError}
+        missingPermissions={permissionGaps}
+        onFormChange={(patch) => setForm((previous) => ({ ...previous, ...patch }))}
+        onMembersChange={(members) => setForm((previous) => ({ ...previous, members }))}
+        onResetField={resetField}
+        onResetAll={() => {
+          if (baseline) setForm(baseline);
+        }}
+        onSave={() => save.mutate()}
       />
-      <Tabs
-        items={[
-          {
-            key: "basic",
-            label: "基本信息",
-            content: (
-              <div className="max-w-2xl space-y-3">
-                <Field label="名称" hint="用户请求时使用的模型名">
-                  <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="如 glm-5.3" />
-                </Field>
-                <Field label="策略" hint="strategy 与 priority/weight 的渲染语义一致；旧系统 priority 已翻转为数值小优先">
-                  <RadioGroup value={form.routing_mode} onValueChange={(v) => setForm({ ...form, routing_mode: v as RoutingMode })} className="gap-2">
-                    {(Object.keys(ROUTING_LABELS) as RoutingMode[]).map((mode) => (
-                      <label key={mode} className="flex items-start gap-2 rounded-md border border-border p-2 text-2sm">
-                        <RadioGroupItem value={mode} className="mt-0.5" />
-                        <span>
-                          <span className="font-medium text-body">{ROUTING_LABELS[mode].label}</span>
-                          <span className="block text-2xs text-faint">{ROUTING_LABELS[mode].desc}</span>
-                        </span>
-                      </label>
-                    ))}
-                  </RadioGroup>
-                </Field>
-                <Field label="备注">
-                  <Input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="选填" />
-                </Field>
-                <label className="flex items-center gap-2 text-2sm text-body">
-                  <Checkbox checked={form.enabled} onCheckedChange={(checked) => setForm({ ...form, enabled: checked === true })} />
-                  启用
-                </label>
-                <div className="flex items-center gap-2">
-                  <Button
-                    disabled={save.isPending || form.name.trim() === "" || memberErrors.length > 0}
-                    onClick={() => save.mutate()}
-                    title="一次保存基本信息、策略、启用状态与成员（服务端单事务）"
-                  >
-                    {save.isPending ? "保存中…" : "保存整页"}
-                  </Button>
-                  {memberErrors.length > 0 ? <span className="text-2xs text-danger-text">成员编排有误，整页无法保存</span> : null}
-                </div>
-              </div>
-            ),
-          },
-          {
-            key: "members",
-            label: "成员编排",
-            content: (
-              <div className="space-y-3">
-                <p className="text-2xs text-faint">{ROUTING_LABELS[form.routing_mode].desc}。保存整页时成员整批替换；后端按 priority 升序校验，被引用的上游模型不能删除。</p>
-                <MemberBoard
-                  members={members}
-                  upstreamModels={upstreamModels}
-                  fallbackNames={fallbackNames}
-                  mode={form.routing_mode}
-                  onChange={setMembers}
-                />
-                {memberErrors.length > 0 ? <p className="text-2xs text-danger-text">{memberErrors.join("；")}</p> : null}
-                <Button
-                  disabled={save.isPending || memberErrors.length > 0}
-                  onClick={() => save.mutate()}
-                  title="成员随整页一起提交（服务端单事务）"
-                >
-                  {save.isPending ? "保存中…" : "保存整页"}
-                </Button>
-              </div>
-            ),
-          },
-        ]}
-      />
-    </div>
+      {leaveGuard}
+    </>
   );
 }
