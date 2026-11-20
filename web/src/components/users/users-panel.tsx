@@ -100,6 +100,8 @@ export function UsersPanel({
   const [ledgerUser, setLedgerUser] = useState<UserTreeNode | null>(null);
   const [resetTarget, setResetTarget] = useState<ResetTarget | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<UserTreeNode | null>(null);
+  /** 关闭（停用）账号前二次确认：避免误点，尤其避免关闭当前登录账号导致本次会话立即失效。 */
+  const [disableTarget, setDisableTarget] = useState<UserTreeNode | null>(null);
   /** 创建/重置成功返回的一次性密码（ADR-019：仅此一次），关闭弹窗即不再可见 */
   const [oneTimeSecret, setOneTimeSecret] = useState<{ title: string; secret: string } | null>(null);
 
@@ -356,7 +358,11 @@ export function UsersPanel({
                 size="dense"
                 disabled={patchStatus.isPending || (isRoot && !disabledNow)}
                 title={isRoot && !disabledNow ? "根用户不可关闭" : undefined}
-                onClick={() => patchStatus.mutate({ id: user.id, status: disabledNow ? "active" : "disabled" })}
+                onClick={() =>
+                  disabledNow
+                    ? patchStatus.mutate({ id: user.id, status: "active" })
+                    : setDisableTarget(user)
+                }
               >
                 {disabledNow ? "启用" : "关闭"}
               </ActionButton>
@@ -501,6 +507,21 @@ export function UsersPanel({
         onConfirm={() => {
           if (resetTarget === null) return;
           resetPassword.mutate({ id: resetTarget.id, password: generatePassword(12) });
+        }}
+      />
+
+      <ConfirmDialog
+        open={disableTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDisableTarget(null);
+        }}
+        title={"关闭用户「" + (disableTarget?.name ?? "") + "」？"}
+        description="关闭后该用户立即无法登录，已有会话在下次请求时失效；之后可随时重新启用。若关闭的是当前登录账号，本次会话会立即失效。"
+        confirmLabel="关闭用户"
+        destructive
+        onConfirm={() => {
+          if (disableTarget === null) return;
+          patchStatus.mutate({ id: disableTarget.id, status: "disabled" });
         }}
       />
 
