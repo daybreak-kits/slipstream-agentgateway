@@ -156,6 +156,7 @@ interface MockLogRow {
   time_to_first_token_ms: number;
   http_status: number;
   public_model: string;
+  requested_model: string;
   upstream_model: string;
   upstream_model_id: string;
   target_priority: number | null;
@@ -228,6 +229,8 @@ const mockLogs: MockLogRow[] = Array.from({ length: 36 }, (_, i) => {
     time_to_first_token_ms: is_stream ? 220 + ((i * 149) % 700) : 0,
     http_status: failed ? (i % 2 === 0 ? 500 : 502) : 200,
     public_model: model,
+    // 混合形态 AG 日志才有请求模型；i%6===0 的行模拟历史/直连行，展示「—」降级。
+    requested_model: i % 6 === 0 ? "" : model,
     upstream_model: model,
     upstream_model_id: "um_0" + String((i % 3) + 1),
     target_priority: 1,
