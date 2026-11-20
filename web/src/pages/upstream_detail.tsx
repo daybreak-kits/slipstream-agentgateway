@@ -13,6 +13,7 @@ import {
   type KeyTestResult, type PendingKey, type ProbeResultView, type UpstreamDraft, type UpstreamRow,
 } from "@/components/upstreams/shared";
 import { TransformsEditor } from "@/components/transforms/transforms-editor";
+import { ActionButton } from "@/components/ui/action-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -333,16 +334,15 @@ export function UpstreamDetailPage() {
           >
             <ACTION_ICONS.fetchModels className="h-3.5 w-3.5" /> 获取上游模型
           </Button>
-          <Button
+          <ActionButton
+            action="testConnection"
             variant="outline"
-            size="sm"
             disabled={isNew || !canWrite || test.isPending}
             title={isNew ? "先保存上游渠道，再测试连接" : undefined}
             onClick={requestTest}
           >
-            <ACTION_ICONS.testConnection className="h-3.5 w-3.5" />
             {test.isPending ? "测试中…" : "测试连接"}
-          </Button>
+          </ActionButton>
           <Button
             size="sm"
             disabled={!canSave || !canWrite}

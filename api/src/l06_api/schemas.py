@@ -496,6 +496,22 @@ class UpstreamProbeIn(BaseModel):
     api_style: str | None = Field(default=None, min_length=1, max_length=64)
 
 
+class UpstreamModelProbeIn(BaseModel):
+    """POST /admin/upstreams/{id}/models/probe body (ticket 05).
+
+    model_ids (stored model row ids) or the single model_id spelling; key_id
+    picks one credential, absent means the first key row. extra="forbid" is the
+    security boundary made explicit: the request can never supply base_url,
+    api_style or an arbitrary credential - those come from stored rows only.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    model_id: str | None = Field(default=None, min_length=1, max_length=64)
+    model_ids: list[str] = Field(default_factory=list, max_length=200)
+    key_id: str | None = Field(default=None, min_length=1, max_length=64)
+
+
 class UpstreamImportModels(BaseModel):
     names: list[str] = Field(min_length=1, max_length=500)
     model_type: str = "chat"

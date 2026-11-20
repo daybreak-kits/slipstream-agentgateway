@@ -58,6 +58,11 @@ DETECT_ORDER: tuple[ApiStyle, ...] = (
 RESPONSES_PROBE_MAX_TOKENS = 16
 _ANTHROPIC_VERSION = "2023-06-01"
 
+# Ticket 05 model probe: one minimal chat per stored model, serial, no persistence.
+MODEL_PROBE_TIMEOUT_SECONDS = 20.0
+MODEL_PROBE_MAX_TOKENS = 16
+MODEL_PROBE_MESSAGE_LIMIT = 200
+
 
 def _upstream(session: Session, upstream_id: str) -> UpstreamORM:
     upstream = UPSTREAM_REPO.get(session, upstream_id)
@@ -907,6 +912,244 @@ def probe(
         # response shows the human summary line instead of the blob
         view["message"] = detection_message
     return view
+
+
+# --- ticket 05: model-level chat probe ---------------------------------------
+
+
+def _probe_http_client(timeout_s: float) -> httpx.Client:
+    """One short-lived HTTP client per model probe.
+
+    Module level so tests can replace only the wire (MockTransport) while the
+    URL/auth/body construction and sanitising run for real.
+    """
+    return httpx.Client(timeout=timeout_s, follow_redirects=True)
+
+
+def _model_chat_url(base_url: str, api_style: str, model: str) -> str:
+    """Chat endpoint for one stored style, keeping an existing /vN segment."""
+    trimmed = base_url.strip()
+    if trimmed.endswith("#"):
+        # The '#' pin only marks the models endpoint; chat lives next to it.
+        trimmed = trimmed[:-1]
+    if api_style == ApiStyle.GEMINI:
+        gemini_model = model.strip().removeprefix("models/")
+        if re.fullmatch(r"v\d+[^/]*", trimmed.rstrip("/").rsplit("/", 1)[-1]):
+            return trimmed.rstrip("/") + f"/models/{gemini_model}:generateContent"
+        return trimmed.rstrip("/") + f"/v1beta/models/{gemini_model}:generateContent"
+    paths = {
+        ApiStyle.OPENAI_CHAT: "chat/completions",
+        ApiStyle.OPENAI_RESPONSES: "responses",
+        ApiStyle.ANTHROPIC_MESSAGES: "messages",
+    }
+    path = paths.get(ApiStyle(api_style))
+    if path is None:
+        raise AppError(ErrorCode.VALIDATION_ERROR, f"api_style 不支持 chat 探测: {api_style}")
+    return _endpoint_url(trimmed, path)
+
+
+def _model_chat_body(api_style: str, model: str) -> dict[str, Any]:
+    """The smallest chat payload each protocol accepts (max tokens = 16)."""
+    if api_style == ApiStyle.OPENAI_RESPONSES:
+        return {
+            "model": model,
+            "input": "ping",
+            "max_output_tokens": MODEL_PROBE_MAX_TOKENS,
+        }
+    if api_style == ApiStyle.ANTHROPIC_MESSAGES:
+        return {
+            "model": model,
+            "max_tokens": MODEL_PROBE_MAX_TOKENS,
+            "messages": [{"role": "user", "content": "ping"}],
+        }
+    if api_style == ApiStyle.GEMINI:
+        return {
+            "contents": [{"parts": [{"text": "ping"}]}],
+            "generationConfig": {"maxOutputTokens": MODEL_PROBE_MAX_TOKENS},
+        }
+    return {
+        "model": model,
+        "messages": [{"role": "user", "content": "ping"}],
+        "max_tokens": MODEL_PROBE_MAX_TOKENS,
+        "stream": False,
+    }
+
+
+def _upstream_error_detail(response: httpx.Response) -> str:
+    """Short upstream-reported reason for a failed probe (not redacted yet)."""
+    payload: object = None
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+    detail = ""
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict):
+            detail = str(error.get("message") or error.get("code") or "")
+        elif isinstance(error, str):
+            detail = error
+        if not detail:
+            detail = str(payload.get("message") or payload.get("detail") or "")
+    if not detail:
+        detail = response.text or ""
+    return " ".join(detail.split())[:1000]
+
+
+_SECRET_PATTERNS = (
+    re.compile(r"(?i)bearer\s+[a-z0-9._\-]+"),
+    re.compile(r"sk-[A-Za-z0-9_\-]{6,}"),
+)
+
+
+def _redact_probe_message(message: str, api_key: str) -> str:
+    """Top-and-tail the message: secrets out, one line, hard length cap."""
+    redacted = message
+    if api_key:
+        redacted = redacted.replace(api_key, "***")
+    redacted = _SECRET_PATTERNS[0].sub("Bearer ***", redacted)
+    redacted = _SECRET_PATTERNS[1].sub("sk-***", redacted)
+    redacted = " ".join(redacted.split())
+    if len(redacted) > MODEL_PROBE_MESSAGE_LIMIT:
+        redacted = redacted[: MODEL_PROBE_MESSAGE_LIMIT - 1] + "…"
+    return redacted
+
+
+def probe_model_chat(
+    *,
+    base_url: str,
+    api_style: str,
+    api_key: str,
+    model: str,
+    timeout_s: float = MODEL_PROBE_TIMEOUT_SECONDS,
+) -> tuple[int, str, int]:
+    """POST one minimal chat to a stored upstream; returns (status, detail, ms).
+
+    Nothing raises on an upstream rejection: a non-2xx status comes back with a
+    short reason the caller redacts. Network errors still raise so the caller
+    can classify timeout vs connection failure.
+    """
+    url = _model_chat_url(base_url, api_style, model)
+    headers = {**_auth_headers(api_style, api_key), "Content-Type": "application/json"}
+    started = time.perf_counter()
+    with _probe_http_client(timeout_s) as client:
+        response = client.post(url, headers=headers, json=_model_chat_body(api_style, model))
+    latency_ms = int((time.perf_counter() - started) * 1000)
+    if 200 <= response.status_code < 300:
+        return response.status_code, "", latency_ms
+    return response.status_code, _upstream_error_detail(response), latency_ms
+
+
+def _probe_key(
+    session: Session, upstream: UpstreamORM, *, secret_box: SecretBox, key_id: str | None
+) -> tuple[str, str]:
+    """(plaintext, key row id) of the selected credential, else the first row."""
+    rows = _ensure_rows(session, upstream, secret_box)
+    selected = (_resolve(rows, key_id) if key_id else rows[0] if rows else None)
+    if selected is None:
+        return "", ""
+    return _decrypt(secret_box, selected.key_enc), selected.id
+
+
+def probe_models(
+    session: Session,
+    upstream: UpstreamORM,
+    *,
+    model_ids: list[str],
+    key_id: str | None,
+    secret_box: SecretBox,
+) -> dict[str, Any]:
+    """Serial minimal-chat probe of this upstream's stored models (ticket 05).
+
+    Only rows that already belong to this upstream are accepted - the request
+    can never name a base URL, style or credential beyond a stored key id, so
+    the endpoint cannot be turned into an SSRF/probing proxy. Results are
+    returned once and never persisted (no probe row, no last_test, no audit).
+    """
+    requested: list[str] = []
+    for raw in model_ids:
+        value = (raw or "").strip()
+        if value and value not in requested:
+            requested.append(value)
+    if not requested:
+        raise AppError(ErrorCode.VALIDATION_ERROR, "model_ids 不能为空")
+    try:
+        api_style = ApiStyle(upstream.api_style)
+    except ValueError:
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR, f"unknown api_style: {upstream.api_style}"
+        ) from None
+    if api_style == ApiStyle.AUTO:
+        raise AppError(ErrorCode.VALIDATION_ERROR, "api_style 尚未解析（auto），无法探测")
+
+    rows = {
+        row.id: row
+        for row in session.scalars(
+            select(UpstreamModelORM).where(UpstreamModelORM.id.in_(requested))
+        ).all()
+    }
+    unknown = [model_id for model_id in requested if model_id not in rows]
+    foreign = [
+        model_id
+        for model_id in requested
+        if model_id in rows and rows[model_id].upstream_id != upstream.id
+    ]
+    if unknown or foreign:
+        details: dict[str, Any] = {}
+        if unknown:
+            details["unknown_model_ids"] = unknown
+        if foreign:
+            details["foreign_model_ids"] = foreign
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR,
+            "只能探测该上游已存在的模型",
+            details=details,
+        )
+
+    api_key, selected_key_id = _probe_key(
+        session, upstream, secret_box=secret_box, key_id=key_id
+    )
+    items: list[dict[str, Any]] = []
+    for model_id in requested:
+        row = rows[model_id]
+        started = time.perf_counter()
+        status, detail, latency_ms = 0, "", 0
+        try:
+            status, detail, latency_ms = probe_model_chat(
+                base_url=upstream.base_url,
+                api_style=upstream.api_style,
+                api_key=api_key,
+                model=row.name,
+            )
+            if 200 <= status < 300:
+                ok, error_type, message = True, "", ""
+            else:
+                ok, error_type = False, "http"
+                message = f"上游返回 HTTP {status}"
+                if detail:
+                    message += f"：{detail}"
+                if status == 401 and not api_key:
+                    message += "（本次请求没有携带密钥）"
+        except httpx.TimeoutException:
+            ok, error_type, status = False, "timeout", 0
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            message = f"请求超时（{int(MODEL_PROBE_TIMEOUT_SECONDS)} 秒）"
+        except httpx.HTTPError as exc:
+            ok, error_type, status = False, "connection", 0
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            message = f"连接失败：{exc}"
+        items.append(
+            {
+                "model_id": row.id,
+                "model": row.name,
+                "ok": ok,
+                "status": status,
+                "latency_ms": latency_ms,
+                "error_type": error_type,
+                "message": _redact_probe_message(message, api_key),
+            }
+        )
+    return {"upstream_id": upstream.id, "key_id": selected_key_id, "items": items}
 
 
 def import_models(
