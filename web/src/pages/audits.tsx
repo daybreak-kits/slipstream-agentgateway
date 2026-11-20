@@ -148,8 +148,9 @@ export function AuditLogsPage() {
       id: "actions",
       header: "操作",
       enableSorting: false,
+      meta: { sticky: "right" },
       cell: (c) => (
-        <Button variant="ghost" size="sm" onClick={() => openDetail(c.row.original)}>
+        <Button variant="ghost" size="dense" onClick={() => openDetail(c.row.original)}>
           <ACTION_ICONS.view className="h-3.5 w-3.5" /> 详情
         </Button>
       ),

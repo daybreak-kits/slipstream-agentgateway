@@ -413,33 +413,48 @@ function UpstreamTab() {
     ...(canWrite ? [{
       key: "actions",
       label: "操作",
+      // 操作列 = 最后一列 + 尾部冻结（W5 D1）：sticky 由 lib/table-columns 同时上 th 与 td。
+      sticky: "right",
       hideable: false,
       headerClassName: "min-w-64",
       cell: (row: UpstreamModel) => (
         <div className="flex flex-wrap gap-1">
-          <ActionButton action="edit" onClick={() => setDialog({ open: true, initial: row })}>
+          <ActionButton action="edit" size="dense" onClick={() => setDialog({ open: true, initial: row })}>
             编辑
           </ActionButton>
           {row.enabled ? (
-            <ActionButton action="disable" onClick={() => availability.mutate({ id: row.id, action: "disable" })}>
+            <ActionButton
+              action="disable"
+              size="dense"
+              onClick={() => availability.mutate({ id: row.id, action: "disable" })}
+            >
               关闭
             </ActionButton>
           ) : (
-            <ActionButton action="enable" onClick={() => availability.mutate({ id: row.id, action: "enable" })}>
+            <ActionButton
+              action="enable"
+              size="dense"
+              onClick={() => availability.mutate({ id: row.id, action: "enable" })}
+            >
               启用
             </ActionButton>
           )}
           {/* ADR-025：冷却双模式弹窗（单次/周期两个页签）；冷却中保留行内快捷解除。 */}
-          <ActionButton action="cooldown" onClick={() => setCooldownFor(row)}>
+          <ActionButton action="cooldown" size="dense" onClick={() => setCooldownFor(row)}>
             冷却
           </ActionButton>
           {isCooling(row) ? (
-            <ActionButton action="releaseCooldown" onClick={() => availability.mutate({ id: row.id, action: "release" })}>
+            <ActionButton
+              action="releaseCooldown"
+              size="dense"
+              onClick={() => availability.mutate({ id: row.id, action: "release" })}
+            >
               解除冷却
             </ActionButton>
           ) : null}
           <ActionButton
             action="delete"
+            size="dense"
             disabled={(row.target_count ?? 0) > 0}
             title={(row.target_count ?? 0) > 0 ? "被公开模型引用，先移除成员再删除" : undefined}
             onClick={() => setDeleting(row)}
@@ -904,13 +919,15 @@ function PublicTab() {
     ...(canWrite ? [{
       key: "actions",
       label: "操作",
+      // 操作列 = 最后一列 + 尾部冻结（W5 D1）：sticky 由 lib/table-columns 同时上 th 与 td。
+      sticky: "right",
       hideable: false,
       headerClassName: "min-w-56",
       cell: (row: PublicModel) => (
         <div className="flex flex-wrap gap-1">
           <Button
             variant="ghost"
-            size="sm"
+            size="dense"
             className="h-7 w-7 px-0"
             aria-label={"复制公开名 " + row.name}
             title="复制公开名"
@@ -919,19 +936,27 @@ function PublicTab() {
             <ACTION_ICONS.copy className="h-3.5 w-3.5" />
           </Button>
           {/* ADR-025：编辑+成员合并为整页编辑器入口；新建仍走简化弹窗。 */}
-          <ActionButton action="edit" onClick={() => openEditor(row)}>
+          <ActionButton action="edit" size="dense" onClick={() => openEditor(row)}>
             编辑
           </ActionButton>
           {row.enabled ? (
-            <ActionButton action="disable" onClick={() => availability.mutate({ id: row.id, action: "disable" })}>
+            <ActionButton
+              action="disable"
+              size="dense"
+              onClick={() => availability.mutate({ id: row.id, action: "disable" })}
+            >
               关闭
             </ActionButton>
           ) : (
-            <ActionButton action="enable" onClick={() => availability.mutate({ id: row.id, action: "enable" })}>
+            <ActionButton
+              action="enable"
+              size="dense"
+              onClick={() => availability.mutate({ id: row.id, action: "enable" })}
+            >
               启用
             </ActionButton>
           )}
-          <ActionButton action="delete" onClick={() => setDeleting(row)}>
+          <ActionButton action="delete" size="dense" onClick={() => setDeleting(row)}>
             删除
           </ActionButton>
         </div>

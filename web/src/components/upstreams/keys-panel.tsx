@@ -31,6 +31,7 @@ import { Table, TableWrap, TD, TH, THead, TR } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { api, ENDPOINTS } from "@/lib/api";
 import { ACTION_ICONS } from "@/lib/icons";
+import { FROZEN_COLUMN_CELL_CLASS, FROZEN_COLUMN_HEADER_CLASS } from "@/lib/table-columns";
 import { formatDateTime, useTimezone } from "@/lib/time";
 import { parseKeyLines, type PendingKey } from "./shared";
 import type { UpstreamKey, UpstreamKeyList } from "@/types";
@@ -250,7 +251,8 @@ function KeysTable({
             <TH>密钥</TH>
             <TH>测试结果</TH>
             <TH>创建时间</TH>
-            <TH>操作</TH>
+            {/* 操作列 = 最后一列 + 尾部冻结（W5 D1）：裸表也复用 lib/table-columns 的冻结列类。 */}
+            <TH className={FROZEN_COLUMN_HEADER_CLASS}>操作</TH>
           </tr>
         </THead>
         <tbody>
@@ -276,7 +278,7 @@ function KeysTable({
               <TD>
                 <span className="tnum text-2xs text-body">{row.createdText}</span>
               </TD>
-              <TD>{actions(row)}</TD>
+              <TD className={FROZEN_COLUMN_CELL_CLASS}>{actions(row)}</TD>
             </TR>
           ))}
         </tbody>

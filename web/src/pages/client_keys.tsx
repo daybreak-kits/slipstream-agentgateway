@@ -171,6 +171,7 @@ export function ClientKeysPage() {
     {
       id: "actions",
       header: "操作",
+      meta: { sticky: "right" },
       cell: (cell) => {
         if (!canWrite) return <span className="text-2xs text-faint">只读</span>;
         const key = cell.row.original;
@@ -179,18 +180,19 @@ export function ClientKeysPage() {
           <div className="flex flex-wrap items-center gap-1.5">
             <ActionButton
               action={active ? "disable" : "enable"}
+              size="dense"
               disabled={setStatus.isPending}
               onClick={() => setStatus.mutate({ keyId: key.id, status: active ? "disabled" : "active" })}
             >
               {active ? "关闭" : "启用"}
             </ActionButton>
-            <ActionButton action="rename" onClick={() => setRenameTarget(key)}>
+            <ActionButton action="rename" size="dense" onClick={() => setRenameTarget(key)}>
               重命名
             </ActionButton>
-            <ActionButton action="resetKey" onClick={() => setRotateTarget(key)}>
+            <ActionButton action="resetKey" size="dense" onClick={() => setRotateTarget(key)}>
               重置
             </ActionButton>
-            <ActionButton action="delete" onClick={() => setDeleteTarget(key)}>
+            <ActionButton action="delete" size="dense" onClick={() => setDeleteTarget(key)}>
               删除
             </ActionButton>
           </div>

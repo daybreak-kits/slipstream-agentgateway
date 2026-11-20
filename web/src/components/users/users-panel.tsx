@@ -318,6 +318,7 @@ export function UsersPanel({
     {
       id: "actions",
       header: "操作",
+      meta: { sticky: "right" },
       cell: (cell) => {
         const user = cell.row.original;
         if (user.status === "deleted") return <span className="text-2xs text-faint">已删除</span>;
@@ -326,24 +327,24 @@ export function UsersPanel({
         return (
           <div className="flex flex-wrap items-center gap-1.5">
             {canUpdate && (
-              <Button variant="ghost" size="sm" onClick={() => setTopupUser(user)}>
+              <Button variant="ghost" size="dense" onClick={() => setTopupUser(user)}>
                 <ACTION_ICONS.recharge className="h-3.5 w-3.5" /> 充值
               </Button>
             )}
             {canUpdate && (
-              <Button variant="ghost" size="sm" onClick={() => setAdjustUser(user)}>
+              <Button variant="ghost" size="dense" onClick={() => setAdjustUser(user)}>
                 <ACTION_ICONS.adjustBalance className="h-3.5 w-3.5" /> 调整余额
               </Button>
             )}
             {canReadLedger && (
-              <Button variant="ghost" size="sm" onClick={() => setLedgerUser(user)}>
+              <Button variant="ghost" size="dense" onClick={() => setLedgerUser(user)}>
                 <ACTION_ICONS.transactions className="h-3.5 w-3.5" /> 流水
               </Button>
             )}
             {canUpdate && (
               <Button
                 variant="ghost"
-                size="sm"
+                size="dense"
                 onClick={() => setResetTarget({ id: user.id, name: user.name })}
               >
                 <ACTION_ICONS.resetKey className="h-3.5 w-3.5" /> 重置密码
@@ -352,6 +353,7 @@ export function UsersPanel({
             {canUpdate && (
               <ActionButton
                 action={disabledNow ? "enable" : "disable"}
+                size="dense"
                 disabled={patchStatus.isPending || (isRoot && !disabledNow)}
                 title={isRoot && !disabledNow ? "根用户不可关闭" : undefined}
                 onClick={() => patchStatus.mutate({ id: user.id, status: disabledNow ? "active" : "disabled" })}
@@ -360,13 +362,14 @@ export function UsersPanel({
               </ActionButton>
             )}
             {canUpdate && (
-              <ActionButton action="edit" onClick={() => setEditing(user)}>
+              <ActionButton action="edit" size="dense" onClick={() => setEditing(user)}>
                 编辑
               </ActionButton>
             )}
             {canDelete && (
               <ActionButton
                 action="delete"
+                size="dense"
                 disabled={isRoot}
                 title={isRoot ? "根用户不可删除" : undefined}
                 onClick={() => setDeleteTarget(user)}

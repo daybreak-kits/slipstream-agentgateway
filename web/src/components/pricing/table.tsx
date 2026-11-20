@@ -11,6 +11,11 @@ import { Input } from "@/components/ui/input";
 import { PAGE_SIZE_OPTIONS, Pagination } from "@/components/ui/pagination";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableWrap, TD, TH, THead, TR } from "@/components/ui/table";
+import {
+  tableColumnCellClass,
+  tableColumnHeaderClass,
+  type TableColumnLayoutMeta,
+} from "@/lib/table-columns";
 import { cn } from "@/lib/utils";
 
 /** 列显隐持久化（DESIGN-AUDIT §2）：key=slipstream.cols.pricing，按段存隐藏列 key 数组。 */
@@ -45,22 +50,18 @@ function writeHiddenCols(sectionKey: string, hidden: string[]): void {
   }
 }
 
-/** 价目页列定义：hideable 默认 true；勾选列/操作列等固定列传 false。 */
-export interface PriceColumn<T> {
+/** 价目页列定义：align/sticky 与 DataTable/ModelsTable 共用 lib/table-columns。 */
+export interface PriceColumn<T> extends TableColumnLayoutMeta {
   key: string;
   /** 列设置菜单里的名称；表头默认渲染它，需要单位副行等复杂表头时用 header 覆盖。 */
   label: string;
   header?: ReactNode;
   cell: (row: T) => ReactNode;
-  /** 追加到 td 与 th 的类（对齐镜像，DESIGN-AUDIT 四期 §2：数值列 text-right tnum 头身同用）；行高紧凑由表格统一收紧到 py-1.5。 */
-  className?: string;
-  /** 仅追加到 th 的覆盖通道（对齐/宽度覆写）。 */
-  headerClassName?: string;
-  hideable?: boolean;
   /** 可排序列（DESIGN-AUDIT §2）：点击表头循环 升 → 降 → 取消。 */
   sortable?: boolean;
   /** 排序取值；null（未配价等）恒排在最后。 */
   sortValue?: (row: T) => number | string | null;
+  hideable?: boolean;
 }
 
 interface PriceTableProps<T> {
@@ -207,10 +208,9 @@ export function PriceTable<T>({
                   key={col.key}
                   onClick={col.sortable && col.sortValue ? () => toggleSort(col) : undefined}
                   className={cn(
-                    "sticky top-0 z-[var(--z-sticky)] bg-surface-2",
+                    "sticky top-0 z-[var(--z-sticky)] bg-surface-2 h-8",
                     col.sortable && col.sortValue && "cursor-pointer hover:text-body",
-                    col.className,
-                    col.headerClassName,
+                    tableColumnHeaderClass(col),
                   )}
                 >
                   <span className="inline-flex items-center gap-1">
@@ -230,7 +230,7 @@ export function PriceTable<T>({
               Array.from({ length: 5 }, (_, i) => (
                 <TR key={i}>
                   {visibleColumns.map((col) => (
-                    <TD key={col.key} className={cn("py-1.5", col.className)}>
+                    <TD key={col.key} className={cn("h-8 py-0.5", tableColumnCellClass(col))}>
                       <Skeleton className="h-4 w-full max-w-40" />
                     </TD>
                   ))}
@@ -268,7 +268,7 @@ export function PriceTable<T>({
               pageRows.map((row, index) => (
                 <TR key={rowKey(row) ?? index}>
                   {visibleColumns.map((col) => (
-                    <TD key={col.key} className={cn("py-1.5", col.className)}>
+                    <TD key={col.key} className={cn("h-8 py-0.5", tableColumnCellClass(col))}>
                       {col.cell(row)}
                     </TD>
                   ))}

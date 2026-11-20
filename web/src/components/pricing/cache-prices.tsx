@@ -207,11 +207,11 @@ export function CachePricesSection() {
       key: "actions",
       label: "操作",
       hideable: false,
-      headerClassName: "text-right",
-      className: "text-right",
+      align: "right",
+      sticky: "right",
       cell: (pair) =>
         canWrite ? (
-          <Button size="sm" variant="outline" onClick={() => setEditing(pair)}>
+          <Button size="dense" variant="outline" onClick={() => setEditing(pair)}>
             编辑
           </Button>
         ) : (
