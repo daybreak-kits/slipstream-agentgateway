@@ -167,7 +167,7 @@ export function availabilityText(row: { enabled: boolean; cooldown_until_ms?: nu
 
 export function availabilityTone(row: { enabled: boolean; cooldown_until_ms?: number; availability?: ModelAvailability }): "success" | "warning" {
   if (row.availability?.state === "cooling" || (row.availability?.state !== "closed" && isCooling(row))) return "warning";
-  // 「已关闭」用 warning 语义色（DESIGN-AUDIT 四期 §16 / W4-A1）：中性灰不表达「被人为停用」的警示。
+  // 「已关闭」用 warning 语义色（DESIGN-AUDIT 四期 §16 / W4-A1）：中性灰不表达「被人为关闭」的警示。
   if (row.availability?.state === "closed" || !row.enabled) return "warning";
   return "success";
 }

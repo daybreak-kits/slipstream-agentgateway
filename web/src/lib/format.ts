@@ -141,7 +141,7 @@ export function fmtYuan(micro: number): string {
   return fmtMoney(micro, "CNY", 2);
 }
 
-/** 兼容旧调用（billing/my-spend-panel）：无币种信息时按人民币展示。 */
+/** 兼容旧调用：无币种信息时按人民币展示。 */
 export function fmtMicroYuan(micro: number): string {
   return fmtMoney(micro, "CNY", 2);
 }

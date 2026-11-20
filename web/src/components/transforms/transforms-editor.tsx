@@ -382,7 +382,7 @@ function SectionEditor({ config, rules, allTransforms, onChange, upstreamId }: S
                             />
                             {["model", "stream"].includes((rule.path ?? "").trim().toLowerCase()) && (
                               <span className="text-2xs text-warning-text">
-                                该路径影响{rule.path?.trim().toLowerCase() === "model" ? "后续选路" : "SSE 流式帧"}，风险由管理员承担
+                                该路径影响{rule.path?.trim().toLowerCase() === "model" ? "后续选路" : "SSE 流式帧"}，风险由管理用户承担
                               </span>
                             )}
                           </>
@@ -634,8 +634,8 @@ export function TransformsEditor({
       <ReadOnlyBlock
         title="响应改写默认条件：无"
         lines={[
-          "控制面不再注入 response.code < 400 守卫，管理员写的改写行原样生效",
-          "要只改成功响应，请自行加一行 response.code < 400 条件；错误体是否改写由管理员决定",
+          "控制面不再注入 response.code < 400 守卫，管理用户写的改写行原样生效",
+          "要只改成功响应，请自行加一行 response.code < 400 条件；错误体是否改写由管理用户决定",
         ]}
       />
       <div className="flex items-center justify-between gap-2">

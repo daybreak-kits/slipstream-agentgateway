@@ -389,7 +389,7 @@ const unpricedRows: UnpricedList = {
 
 const configRevisions: ConfigRevision[] = [
   { id: "cr_03", artifact_hash: "h3f9a2c1e5", adapter_id: "openai-chat", operator: "admin", reason: "新增 embed-v4 目标", status: "active", previous_revision_id: "cr_02", created_at_ms: Date.parse("2026-11-17T01:05:12") },
-  { id: "cr_02", artifact_hash: "h7b1e8d0f2", adapter_id: "openai-chat", operator: "admin", reason: "OpenRouter 密钥轮换", status: "superseded", previous_revision_id: "cr_01", created_at_ms: Date.parse("2026-11-16T15:40:00") },
+  { id: "cr_02", artifact_hash: "h7b1e8d0f2", adapter_id: "openai-chat", operator: "admin", reason: "OpenRouter 密钥更换", status: "superseded", previous_revision_id: "cr_01", created_at_ms: Date.parse("2026-11-16T15:40:00") },
   { id: "cr_01", artifact_hash: "h5c0a9f2d8", adapter_id: "openai-chat", operator: "admin", reason: "校验失败", status: "failed", error_detail: "数据面校验失败：未知字段 model_aliases", previous_revision_id: null, created_at_ms: Date.parse("2026-11-16T15:12:44") },
 ];
 
@@ -721,10 +721,11 @@ const sampleTransforms: UpstreamTransforms = {
   response_body: [],
 };
 
+/** 旧 /admin/admins mock（ADR-019 后由统一用户表取代）：仅保留读取桩，角色键与 admin_roles 对齐。 */
 const adminAccounts: AdminAccount[] = [
-  { id: "ad_01", username: "owner", role: "owner", enabled: true, created_at: "2026-10-01T08:00:00", last_login_at: "2026-11-17T02:00:00" },
+  { id: "ad_01", username: "owner", role: "admin", enabled: true, created_at: "2026-10-01T08:00:00", last_login_at: "2026-11-17T02:00:00" },
   { id: "ad_02", username: "ops-admin", role: "admin", enabled: true, created_at: "2026-10-12T08:00:00", last_login_at: "2026-11-16T23:30:00" },
-  { id: "ad_03", username: "audit-viewer", role: "viewer", enabled: false, created_at: "2026-11-01T08:00:00", last_login_at: null },
+  { id: "ad_03", username: "audit-viewer", role: "user", enabled: false, created_at: "2026-11-01T08:00:00", last_login_at: null },
 ];
 
 /**
@@ -755,7 +756,7 @@ const adminRoles: RoleDefinition[] = [
     id: "rol_admin",
     key: "admin",
     name: "管理用户",
-    description: "拥有全部权限，可维护角色、管理员与所有配置",
+    description: "拥有全部权限，可维护角色、管理用户与所有配置",
     builtin: true,
     all_permissions: true,
     permissions: [...MOCK_ALL_PERMISSIONS],

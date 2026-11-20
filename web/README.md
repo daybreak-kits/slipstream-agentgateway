@@ -52,7 +52,6 @@ src/
 │  ├─ layout/nav-items.ts    导航分区：监控 / 主数据 / 治理
 │  ├─ data-table.tsx         TanStack Table 封装：排序 / 筛选 / 分页(25/50/100/200) / 空态 / 骨架
 │  ├─ stat-card.tsx          指标卡
-│  ├─ chart-placeholder.tsx  图表占位（接数后替换）
 │  ├─ transforms/transforms-editor.tsx
 │  │                          改写规则编辑器（四段分区 / 条件行 / 保护头拦截 / 分段预览 / custom_cel）
 │  └─ ui/                    button / card / badge / input / table / skeleton / empty / tabs

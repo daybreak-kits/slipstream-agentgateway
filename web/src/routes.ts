@@ -227,7 +227,7 @@ export const ROUTES: RouteDef[] = [
     title: "角色管理",
     permission: "admins:read",
     nav: { section: "系统", icon: "UserCog", order: 3, permission: "admins:read" },
-    note: "ADR-023：管理员页改角色管理（角色+权限矩阵）；权限键沿用 admins:read；页面内容重写归 F5 工位",
+    note: "ADR-023：管理用户页改角色管理（角色+权限矩阵）；权限键沿用 admins:read；页面内容重写归 F5 工位",
   },
   {
     path: "/gateway-policies",
@@ -329,7 +329,7 @@ export const ROUTES: RouteDef[] = [
     page: "pricing_redirect",
     component: "PricingRedirect",
     props: { to: "/roles" },
-    title: "旧管理员入口重定向",
+    title: "旧账号入口重定向",
     note: "ADR-023：/admins → /roles 过渡重定向",
   },
   {

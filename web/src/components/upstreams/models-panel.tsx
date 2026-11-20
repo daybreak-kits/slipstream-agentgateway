@@ -94,7 +94,7 @@ export function UpstreamModelsPanel({ upstream }: { upstream: UpstreamRow }) {
       accessorKey: "enabled",
       header: "状态",
       cell: (c) =>
-        // 「关闭」语义色 warning（DESIGN-AUDIT 四期 §16 / W4-A1）：中性灰不表达「被人为停用」的警示。
+        // 「关闭」语义色 warning（DESIGN-AUDIT 四期 §16 / W4-A1）：中性灰不表达「被人为关闭」的警示。
         c.row.original.enabled ? <Badge tone="success">启用</Badge> : <Badge tone="warning">关闭</Badge>,
     },
     {

@@ -236,7 +236,7 @@ export function UpstreamPricesSection() {
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-medium text-title">{model.name}</span>
           <Badge tone={model.enabled ? "success" : "neutral"}>
-            {model.enabled ? "启用" : "停用"}
+            {model.enabled ? "启用" : "关闭"}
           </Badge>
         </div>
       ),

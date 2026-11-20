@@ -355,24 +355,13 @@ check("指标条：grid gap-3 + 2/3/4/6 列响应式（xl 起六列，八卡 6+2
     ["grid-cols-2", "gap-3", "sm:grid-cols-3", "lg:grid-cols-4", "xl:grid-cols-6"],
     "八卡指标条",
   );
-  for (const file of [
-    "src/components/billing/cost-panel.tsx",
-    "src/components/billing/unpriced-panel.tsx",
-    "src/components/billing/my-spend-panel.tsx",
-    "src/pages/quick-start.tsx",
-  ]) {
-    includesAll(read(file), ["grid-cols-2", "gap-3"], file + " 指标条");
-  }
+  // W4-I：billing 的 cost/unpriced/my-spend 面板是零引用孤儿，已删除；
+  // 指标条契约仍在 dashboard 与 quick-start 两处生效。
+  includesAll(read("src/pages/quick-start.tsx"), ["grid-cols-2", "gap-3"], "quick-start 指标条");
 });
 
-check("页面接线：cost / unpriced / upstream_detail 用 MetricCard + 统一图标映射", () => {
-  for (const file of [
-    "src/components/billing/cost-panel.tsx",
-    "src/components/billing/unpriced-panel.tsx",
-    "src/pages/upstream_detail.tsx",
-  ]) {
-    includesAll(read(file), ["MetricCard", "@/lib/metric-icons"], file + " 接线");
-  }
+check("页面接线：upstream_detail 用 MetricCard + 统一图标映射", () => {
+  includesAll(read("src/pages/upstream_detail.tsx"), ["MetricCard", "@/lib/metric-icons"], "upstream_detail 接线");
 });
 
 check("术语：UI 文案统一「词元 / 花费」（src 下无 Tokens、无「收费」）", () => {

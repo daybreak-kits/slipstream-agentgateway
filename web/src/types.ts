@@ -491,7 +491,7 @@ export interface SettingsPutResult {
 export interface AdminAccount {
   id: string;
   username: string;
-  role: "owner" | "admin" | "viewer";
+  role: "admin" | "agent" | "user";
   enabled: boolean;
   created_at: string;
   last_login_at: string | null;

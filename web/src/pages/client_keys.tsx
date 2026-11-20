@@ -156,7 +156,7 @@ export function ClientKeysPage() {
       header: "状态",
       cell: (cell) => {
         const active = cell.row.original.status === "active";
-        // 关闭是可逆启停（非终态），用 warning 提示「被人为停用」而不是中性灰（DESIGN-AUDIT 四期 §16）。
+        // 关闭是可逆启停（非终态），用 warning 提示「被人为关闭」而不是中性灰（DESIGN-AUDIT 四期 §16）。
         return <Badge tone={active ? "success" : "warning"}>{active ? "启用" : "关闭"}</Badge>;
       },
     },

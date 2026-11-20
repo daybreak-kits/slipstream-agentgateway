@@ -25,7 +25,7 @@ export function roleLabel(role: string | null | undefined): string {
 }
 
 export const ROLE_HINT: Record<string, string> = {
-  admin: "全部权限；可管理管理员、角色与配置写入",
+  admin: "全部权限；可维护角色、管理用户与配置",
   agent: "普通用户权限 + 创建/管理下级用户，可看子树花费",
   user: "只读 + 查看自己的花费",
 };
