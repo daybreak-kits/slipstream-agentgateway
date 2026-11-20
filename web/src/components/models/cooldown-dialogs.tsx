@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/lib/notify";
 
-import { isCooling, availabilityText } from "@/components/models/availability";
+import { conflictDescription, isCooling, availabilityText } from "@/components/models/availability";
 import { Field } from "@/components/models/field";
 import { ActionButton } from "@/components/ui/action-button";
 import { Badge } from "@/components/ui/badge";
@@ -98,6 +98,7 @@ function PeriodicCooldownForm({
   onDirtyChange: (dirty: boolean) => void;
 }) {
   const qc = useQueryClient();
+  const { mode: timezone } = useTimezone();
   const [recurrence, setRecurrence] = useState<Exclude<CooldownRecurrence, "once">>("daily");
   const [start, setStart] = useState("02:00");
   const [end, setEnd] = useState("04:00");
@@ -144,7 +145,7 @@ function PeriodicCooldownForm({
       refresh();
       onClose();
     },
-    onError: (e: Error) => toast.error("设置失败", { description: e.message }),
+    onError: (e: Error) => toast.error("设置失败", { description: conflictDescription(e, timezone) }),
   });
   const remove = useMutation({
     mutationFn: (id: string) => api.del<void>(ENDPOINTS.availabilityRule(id)),
@@ -161,7 +162,8 @@ function PeriodicCooldownForm({
     <div className="space-y-3">
       <p className="text-2xs text-faint">
         周期冷却按 ADR-004 的时间窗循环生效：窗口内该对象退出路由，窗口结束自动恢复，不需要人工解除。
-        单次冷却与周期冷却可并存；启用/解除会清掉该对象的周期规则。
+        单次冷却与周期冷却互斥：单次生效期间不能新增或改期周期规则；周期窗口生效期间也不能设置单次冷却
+        （窗口内可先点「解除」，只跳过本窗口，周期规则保留）。
       </p>
       {existing.length > 0 ? (
         <div className="space-y-1 rounded-md border border-border bg-surface-2 p-2">
@@ -215,7 +217,7 @@ function PeriodicCooldownForm({
 
 /**
  * 冷却双模式弹窗（W4-C，ADR-025）：「冷却」「周期」两入口合一。
- * 顶部显示当前状态；冷却中提供「解除冷却」；页签切换单次冷却 / 周期冷却。
+ * 顶部显示当前状态；冷却中提供单个「解除」（ticket 02）；页签切换单次冷却 / 周期冷却。
  * 仅上游模型可用（公开模型没有冷却概念，GLOSSARY §3）。
  */
 export function CooldownManageDialog({
@@ -257,9 +259,10 @@ export function CooldownManageDialog({
               action="releaseCooldown"
               variant="outline"
               disabled={pending}
+              title="解除单次冷却；若正处周期窗口则只跳过本窗口，周期规则保留"
               onClick={onRelease}
             >
-              解除冷却
+              解除
             </ActionButton>
           ) : null}
         </div>

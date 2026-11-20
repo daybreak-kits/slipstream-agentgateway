@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 from l01_core.errors import AppError, ErrorCode
 from l01_core.ids import new_id
 from l01_core.timeutil import now_ms
+from l03_adapters.spi import DataPlaneAdapter
 from l04_repo.orm import (
     AuditLogORM,
     ModelTargetORM,
@@ -40,6 +41,7 @@ from l04_repo.repository import (
 )
 from l05_service import crud, models_dev, pricing, rbac
 from l05_service.availability import (
+    PUBLIC_MODEL_COOLDOWN_MESSAGE,
     SCOPE_PUBLIC_MODEL,
     SCOPE_UPSTREAM_MODEL,
     AvailabilitySnapshot,
@@ -54,7 +56,8 @@ from l05_service.model_params import (
     decode_parameters,
     validate_type_source,
 )
-from l06_api.deps import page_params, require, session_of
+from l05_service.rollout import Rollout
+from l06_api.deps import get_adapter, page_params, require, session_of
 from l06_api.schemas import (
     AdoptModelsDevBatchResult,
     AdoptModelsDevResult,
@@ -291,9 +294,10 @@ def modelsdev_status(
 def batch_upstream_models(
     payload: ModelBulk,
     session: Session = Depends(session_of),
+    adapter: DataPlaneAdapter = Depends(get_adapter),
     principal=Depends(require("upstream_models:write")),
 ) -> dict:
-    return _apply_batch(
+    result = _apply_batch(
         session,
         UPSTREAM_MODEL_REPO,
         ids=payload.ids,
@@ -301,6 +305,15 @@ def batch_upstream_models(
         cooldown_until_ms=payload.cooldown_until_ms,
         actor=principal.admin_id,
     )
+    if result["changed"] and payload.action in {"enable", "disable", "cooldown", "release"}:
+        # 可用性批量写后立即下发（ticket 02）。
+        Rollout(session, adapter).apply(
+            principal.username,
+            reason=f"models-batch-{payload.action}",
+            on_failure="keep-booked",
+        )
+        session.commit()
+    return result
 
 
 @router.patch(
@@ -311,6 +324,7 @@ def update_upstream_model(
     upstream_model_id: str,
     payload: UpstreamModelPatch,
     session: Session = Depends(session_of),
+    adapter: DataPlaneAdapter = Depends(get_adapter),
     principal=Depends(require("upstream_models:write")),
 ) -> dict:
     """Edit everything the old channel-model dialog edited.
@@ -345,6 +359,7 @@ def update_upstream_model(
             row.parameters_json = canonical
             row.params_source = "manual"
     window_skip = None
+    apply_reason = ""
     if "enabled" in provided:
         if payload.enabled is None:
             raise AppError(ErrorCode.VALIDATION_ERROR, "enabled 不能为空")
@@ -353,6 +368,7 @@ def update_upstream_model(
             window_skip = enable_model_availability(
                 session, scope=SCOPE_UPSTREAM_MODEL, scope_id=row.id
             )
+        apply_reason = "model-enable" if payload.enabled else "model-disable"
     if "cooldown_until_ms" in provided:
         if payload.cooldown_until_ms:
             set_model_cooldown(
@@ -361,13 +377,21 @@ def update_upstream_model(
                 scope_id=row.id,
                 until_ms=payload.cooldown_until_ms,
             )
+            apply_reason = "model-cooldown"
         else:
-            # 解除冷却 (GLOSSARY §3): 托管规则与窗口例外一并清除，周期规则重获效力。
-            release_model_cooldown(
+            # 解除 (ticket 02): 删单次托管规则；命中周期窗口只跳过本窗口并保留规则。
+            window_skip = release_model_cooldown(
                 session, scope=SCOPE_UPSTREAM_MODEL, scope_id=row.id
             )
+            apply_reason = "model-release"
     _apply_cost_fields(row, payload)
     session.commit()
+    if apply_reason:
+        # 写后立即下发（ticket 02），不等 job/人工 apply。
+        Rollout(session, adapter).apply(
+            principal.username, reason=apply_reason, on_failure="keep-booked"
+        )
+        session.commit()
     availability = evaluate(session)
     upstream_name, vendor_name = _um_names(session, row)
     target_count = int(
@@ -536,16 +560,27 @@ def list_public_models(
 def batch_public_models(
     payload: ModelBulk,
     session: Session = Depends(session_of),
+    adapter: DataPlaneAdapter = Depends(get_adapter),
     principal=Depends(require("public_models:write")),
 ) -> dict:
-    return _apply_batch(
+    result = _apply_batch(
         session,
         PUBLIC_MODEL_REPO,
         ids=payload.ids,
         action=payload.action,
         cooldown_until_ms=payload.cooldown_until_ms,
         actor=principal.admin_id,
+        allow_cooldown=False,
+        cooldown_error=PUBLIC_MODEL_COOLDOWN_MESSAGE,
     )
+    if result["changed"] and payload.action in {"enable", "disable"}:
+        Rollout(session, adapter).apply(
+            principal.username,
+            reason=f"models-batch-{payload.action}",
+            on_failure="keep-booked",
+        )
+        session.commit()
+    return result
 
 
 @router.patch("/admin/public-models/{public_model_id}")
@@ -553,6 +588,7 @@ def update_public_model(
     public_model_id: str,
     payload: PublicModelPatch,
     session: Session = Depends(session_of),
+    adapter: DataPlaneAdapter = Depends(get_adapter),
     principal=Depends(require("public_models:write")),
 ) -> dict:
     """One atomic save: basic fields, routing_mode, enabled and (optional) members.
@@ -571,6 +607,9 @@ def update_public_model(
         # Replacing the routing plan needs its own grant, independent of the
         # alias-edit public_models:write gate above (spec §5).
         rbac.require_permission(principal.permissions, "model_targets:write")
+    if "cooldown_until_ms" in provided:
+        # 冷却只属于上游模型（ADR-025 / ticket 02）：明确拒绝而不是静默忽略。
+        raise AppError(ErrorCode.VALIDATION_ERROR, PUBLIC_MODEL_COOLDOWN_MESSAGE)
     if "name" in provided:
         name = (payload.name or "").strip()
         if not name:
@@ -592,27 +631,16 @@ def update_public_model(
     if "note" in provided:
         row.note = payload.note or ""
     window_skip = None
+    apply_reason = ""
     if "enabled" in provided:
         if payload.enabled is None:
             raise AppError(ErrorCode.VALIDATION_ERROR, "enabled 不能为空")
         row.enabled = payload.enabled
-        if payload.enabled:  # 启用=解除关闭+托管冷却；周期窗口内仅跳过当前窗口（GLOSSARY §3）
+        if payload.enabled:  # 启用=解除关闭，遗留窗口只跳过当前窗口（GLOSSARY §3）
             window_skip = enable_model_availability(
                 session, scope=SCOPE_PUBLIC_MODEL, scope_id=row.id
             )
-    if "cooldown_until_ms" in provided:
-        if payload.cooldown_until_ms:
-            set_model_cooldown(
-                session,
-                scope=SCOPE_PUBLIC_MODEL,
-                scope_id=row.id,
-                until_ms=payload.cooldown_until_ms,
-            )
-        else:
-            # 解除冷却 (GLOSSARY §3): 托管规则与窗口例外一并清除，周期规则重获效力。
-            release_model_cooldown(
-                session, scope=SCOPE_PUBLIC_MODEL, scope_id=row.id
-            )
+        apply_reason = "model-enable" if payload.enabled else "model-disable"
     if "targets" in provided:
         drafts = (
             []
@@ -628,6 +656,12 @@ def update_public_model(
             require_members=True,
         )
     session.commit()
+    if apply_reason:
+        # 写后立即下发（ticket 02）。
+        Rollout(session, adapter).apply(
+            principal.username, reason=apply_reason, on_failure="keep-booked"
+        )
+        session.commit()
     targets = _targets_by_public(session, [row.id]).get(row.id, [])
     body = _pm_body(
         row,
@@ -706,7 +740,7 @@ def batch_model_targets(
         cooldown_until_ms=payload.cooldown_until_ms,
         actor=principal.admin_id,
         allow_cooldown=False,
-    )
+    )  # model targets have no availability write; no rollout to trigger
 
 
 @router.patch("/admin/model-targets/{target_id}")
@@ -790,12 +824,14 @@ def _apply_batch(
     cooldown_until_ms: int | None = None,
     actor: str = "",
     allow_cooldown: bool = True,
+    cooldown_error: str = "成员没有冷却语义；请对上游模型设置冷却",
 ) -> dict:
     """Shared availability/delete batch for the three model-family entities.
 
     Partial success is reported per id (old console behaviour): a referenced
     upstream model cannot be deleted, but the rest of the batch still applies.
-    `schedule` is not a batch action (periodic rules live on
+    A mutual-exclusion conflict (ticket 02) is also a per-id failure, never an
+    overall failure. `schedule` is not a batch action (periodic rules live on
     /admin/availability-rules), so it never even reaches this function.
     """
     changed: list[str] = []
@@ -804,12 +840,9 @@ def _apply_batch(
     # 启用落到周期冷却窗口内时逐行记下跳过的窗口（GLOSSARY §3），随结果带回。
     skipped_windows: list[dict] = []
     if action in {"cooldown", "release"} and not allow_cooldown:
-        # Members have no cooldown column: the deadline belongs to the model that
-        # owns them, so fail loudly instead of setting an attribute that is not there.
-        raise AppError(
-            ErrorCode.VALIDATION_ERROR,
-            "成员没有冷却语义；请对上游模型或公开模型设置冷却",
-        )
+        # The entity family has no cooldown semantics: fail loudly with the
+        # family-specific explanation instead of writing nothing.
+        raise AppError(ErrorCode.VALIDATION_ERROR, cooldown_error)
     deadline = 0
     if action == "cooldown":
         deadline = validate_cooldown_until(cooldown_until_ms)
@@ -852,8 +885,14 @@ def _apply_batch(
             else:  # release
                 _release_row_cooldown(session, row)
         except AppError as exc:
+            # 409 conflict details ride along so the console can name the blocker.
             failed.append(
-                {"id": entity_id, "code": exc.code.value, "message": exc.message}
+                {
+                    "id": entity_id,
+                    "code": exc.code.value,
+                    "message": exc.message,
+                    "details": exc.details,
+                }
             )
             continue
         changed.append(entity_id)

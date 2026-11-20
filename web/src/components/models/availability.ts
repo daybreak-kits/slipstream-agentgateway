@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/lib/notify";
 
-import { api, ENDPOINTS } from "@/lib/api";
+import { ApiError, api, ENDPOINTS } from "@/lib/api";
+import { formatDateTime, useTimezone, type TimezoneMode } from "@/lib/time";
 import type {
   AvailabilityRule, CooldownRecurrence, ModelAvailability, ModelBatchResult,
 } from "@/types";
@@ -188,11 +189,29 @@ const AVAIL_LABEL: Record<AvailabilityAction, string> = {
   enable: "已启用",
   disable: "已关闭",
   cooldown: "已设置冷却",
-  release: "已解除冷却",
+  release: "已解除",
 };
+
+/**
+ * 409 冷却互斥（ticket 02）：后端消息已说明原因与处理方式，这里补上阻塞时间，
+ * 让操作者知道等多久（周期窗口结束）或何时可设周期规则（单次截止）。
+ */
+export function conflictDescription(error: Error, timezone: TimezoneMode): string {
+  if (!(error instanceof ApiError) || error.code !== "CONFLICT") return error.message;
+  const windowEnd = Number(error.details.window_end_ms ?? 0);
+  const singleUntil = Number(error.details.cooldown_until_ms ?? 0);
+  if (windowEnd > 0) {
+    return error.message + "（当前周期窗口至 " + formatDateTime(windowEnd, timezone) + "）";
+  }
+  if (singleUntil > 0) {
+    return error.message + "（单次冷却至 " + formatDateTime(singleUntil, timezone) + "）";
+  }
+  return error.message;
+}
 
 export function useAvailabilityMutation(kind: "upstream" | "public") {
   const qc = useQueryClient();
+  const { mode: timezone } = useTimezone();
   const listKey = kind === "upstream" ? "upstream-models" : "public-models";
   return useMutation({
     mutationFn: async (vars: { id: string; action: AvailabilityAction; cooldown_until_ms?: number; note?: string }) => {
@@ -219,7 +238,7 @@ export function useAvailabilityMutation(kind: "upstream" | "public") {
         void qc.invalidateQueries({ queryKey: ["availability-rules"] });
       }
     },
-    onError: (e: Error) => toast.error("操作失败", { description: e.message }),
+    onError: (e: Error) => toast.error("操作失败", { description: conflictDescription(e, timezone) }),
   });
 }
 

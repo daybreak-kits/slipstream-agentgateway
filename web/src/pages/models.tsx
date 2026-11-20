@@ -439,19 +439,21 @@ function UpstreamTab() {
               启用
             </ActionButton>
           )}
-          {/* ADR-025：冷却双模式弹窗（单次/周期两个页签）；冷却中保留行内快捷解除。 */}
-          <ActionButton action="cooldown" size="dense" onClick={() => setCooldownFor(row)}>
-            冷却
-          </ActionButton>
+          {/* ADR-025 + ticket 02：冷却中行内只保留一个「解除」（不再同时出现「冷却」），
+              单次规则删除；命中周期窗口时后端只跳过本窗口并保留周期规则。 */}
           {isCooling(row) ? (
             <ActionButton
               action="releaseCooldown"
               size="dense"
               onClick={() => availability.mutate({ id: row.id, action: "release" })}
             >
-              解除冷却
+              解除
             </ActionButton>
-          ) : null}
+          ) : (
+            <ActionButton action="cooldown" size="dense" onClick={() => setCooldownFor(row)}>
+              冷却
+            </ActionButton>
+          )}
           <ActionButton
             action="delete"
             size="dense"

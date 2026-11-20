@@ -11,13 +11,32 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from l03_adapters.spi import DataPlaneAdapter
 from l04_repo.orm import AvailabilityRuleORM
 from l04_repo.repository import AVAILABILITY_REPO
 from l05_service import availability
-from l06_api.deps import page_params, require, session_of
+from l05_service.rollout import Rollout
+from l06_api.deps import get_adapter, page_params, require, session_of
 from l06_api.schemas import RuleCreate, RulePatch
 
 router = APIRouter(prefix="/admin/availability-rules", tags=["availability"])
+
+
+def _apply(
+    session: Session, adapter: DataPlaneAdapter, principal, *, reason: str
+) -> None:
+    """Write-then-apply (ticket 02): availability writes push the data plane.
+
+    rules_changed_since only sees rules whose effective state *changed over
+    time*, so create/update/delete of a rule would otherwise wait for a manual
+    apply (or the job's window boundary) before the router honoured it.
+    """
+    # keep-booked：行已提交，渲染失败（例如所有目标临时冷却导致无路由可下发）
+    # 不应把已生效的业务写入变成 502；下一次可用性写或 job 会再次下发。
+    Rollout(session, adapter).apply(
+        principal.username, reason=reason, on_failure="keep-booked"
+    )
+    session.commit()
 
 
 def _body(row: AvailabilityRuleORM) -> dict:
@@ -38,6 +57,7 @@ def _body(row: AvailabilityRuleORM) -> dict:
 def create_rule(
     payload: RuleCreate,
     session: Session = Depends(session_of),
+    adapter: DataPlaneAdapter = Depends(get_adapter),
     principal=Depends(require("availability:write")),
 ) -> dict:
     row = availability.create_rule(
@@ -51,6 +71,7 @@ def create_rule(
         note=payload.note,
     )
     session.commit()
+    _apply(session, adapter, principal, reason="availability-rule-create")
     return _body(row)
 
 
@@ -70,12 +91,14 @@ def update_rule(
     rule_id: str,
     payload: RulePatch,
     session: Session = Depends(session_of),
+    adapter: DataPlaneAdapter = Depends(get_adapter),
     principal=Depends(require("availability:write")),
 ) -> dict:
     row = availability.update_rule(
         session, rule_id, payload.model_dump(exclude_unset=True)
     )
     session.commit()
+    _apply(session, adapter, principal, reason="availability-rule-update")
     return _body(row)
 
 
@@ -83,7 +106,9 @@ def update_rule(
 def delete_rule(
     rule_id: str,
     session: Session = Depends(session_of),
+    adapter: DataPlaneAdapter = Depends(get_adapter),
     principal=Depends(require("availability:write")),
 ) -> None:
     availability.delete_rule(session, rule_id)
     session.commit()
+    _apply(session, adapter, principal, reason="availability-rule-delete")
