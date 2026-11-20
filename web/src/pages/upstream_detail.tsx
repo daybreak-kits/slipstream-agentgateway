@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Trash2 } from "lucide-react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "@/lib/notify";
 
 import { MetricCard } from "@/components/stat-card";
 import { ConnectionTab } from "@/components/upstreams/connection-tab";
 import { DiscoverModelsDialog } from "@/components/upstreams/discover-dialog";
 import { LockedTabNotice, UpstreamModelsPanel } from "@/components/upstreams/models-panel";
+import { useModelProbe } from "@/components/upstreams/model-probe";
 import {
-  API_STYLE_LABELS, probeKindLabel, probeStatusView, probeViewFromApiError,
+  API_STYLE_LABELS, UPSTREAM_TABS, probeKindLabel, probeStatusView, probeViewFromApiError, resolveUpstreamTab,
   type KeyTestResult, type PendingKey, type ProbeResultView, type UpstreamDraft, type UpstreamRow,
 } from "@/components/upstreams/shared";
 import { TransformsEditor } from "@/components/transforms/transforms-editor";
@@ -31,13 +32,6 @@ import type { Vendor } from "@/types";
 
 /** 新建走同一条路由（/upstreams/new）；保存成功后 replace 成真实 id。 */
 const NEW_UPSTREAM_ID = "new";
-
-const TAB_ITEMS = [
-  { key: "connection", label: "连接与模型" },
-  { key: "models", label: "路由与映射" },
-  { key: "transforms", label: "请求与响应" },
-  { key: "settings", label: "其他设置" },
-];
 
 function draftOf(row: UpstreamRow | null): UpstreamDraft {
   return {
@@ -89,7 +83,9 @@ export function UpstreamDetailPage() {
   const [draft, setDraft] = useState<UpstreamDraft>(() => draftOf(null));
   const [baseline, setBaseline] = useState<UpstreamDraft | null>(isNew ? draftOf(null) : null);
   const [pendingKeys, setPendingKeys] = useState<PendingKey[]>([]);
-  const [activeTab, setActiveTab] = useState("connection");
+  // W5 ticket 07：?tab=routing 由列表页「测试」快捷跳转带入；缺省/非法值回落「连接与模型」。
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<string>(() => resolveUpstreamTab(searchParams.get("tab")));
   // W4-G：改写编辑器的 dirty 上抛到页面级——页签圆点、切页签确认与离页守卫都要吃到它。
   const [transformsDirty, setTransformsDirty] = useState(false);
   const [pendingTab, setPendingTab] = useState<string | null>(null);
@@ -97,6 +93,9 @@ export function UpstreamDetailPage() {
   const [keyTests, setKeyTests] = useState<KeyTestResult | null>(null);
   const [discoverOpen, setDiscoverOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+
+  // 会话内模型探测（路由与模型 Tab）：状态挂在页面，切换页签不丢结果、不落库。
+  const modelProbe = useModelProbe(id);
 
   const upstream = upstreamQ.data ?? null;
 
@@ -124,19 +123,28 @@ export function UpstreamDetailPage() {
   const onDraftChange = (patch: Partial<UpstreamDraft>) => setDraft((prev) => ({ ...prev, ...patch }));
 
   // 切页签：改写草稿挂在 TransformsEditor 组件状态里，切走即丢（W4-G 起 dirty 时先确认）。
+  // 同时把页签写回 URL（?tab=）：列表页「测试」快捷跳转与分享链接都定位到同一页签。
+  const switchTab = (key: string) => {
+    setActiveTab(key);
+    if (searchParams.get("tab") !== key) {
+      const next = new URLSearchParams(searchParams);
+      next.set("tab", key);
+      setSearchParams(next, { replace: true });
+    }
+  };
   const requestTab = (key: string) => {
     if (key === activeTab) return;
     if (activeTab === "transforms" && transformsDirty) {
       setPendingTab(key);
       return;
     }
-    setActiveTab(key);
+    switchTab(key);
   };
 
   // 未保存页签琥珀圆点：连接与模型 Tab（草稿状态都挂在这个页签的表单上）与请求与响应 Tab。
   const tabItems = useMemo(
     () =>
-      TAB_ITEMS.map((item) => {
+      UPSTREAM_TABS.map((item) => {
         if (item.key === "connection") return { ...item, dot: draftDirty || newDraftDirty };
         if (item.key === "transforms") return { ...item, dot: transformsDirty };
         return item;
@@ -144,7 +152,7 @@ export function UpstreamDetailPage() {
     [draftDirty, newDraftDirty, transformsDirty],
   );
 
-  // ── 保存：只写配置，不触发探测（探测走页头「测试连接」/「获取上游模型」） ──
+  // ── 保存：只写配置，不触发探测（探测走页头「测试连接」与「路由与模型」的拉取/模型探测） ──
   const save = useMutation({
     mutationFn: async (): Promise<{ row: UpstreamRow; failedKeys: number }> => {
       if (isNew) {
@@ -185,7 +193,7 @@ export function UpstreamDetailPage() {
         navigate("/upstreams/" + row.id, { replace: true });
         return;
       }
-      toast.success("已保存", { description: "配置已写入；测试连接与获取模型使用页面最新填写的协议风格。" });
+      toast.success("已保存", { description: "配置已写入；测试连接使用页面最新填写的协议风格。" });
       // 以服务端行为准：空白名称按后端语义保持原名，回填避免草稿与服务端漂移。
       setDraft(draftOf(row));
       setBaseline(draftOf(row));
@@ -325,20 +333,12 @@ export function UpstreamDetailPage() {
               {draft.enabled ? "保存后启用" : "保存后关闭"}
             </label>
           )}
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={isNew || !canWrite}
-            title={isNew ? "先保存上游渠道，再获取模型" : undefined}
-            onClick={() => setDiscoverOpen(true)}
-          >
-            <ACTION_ICONS.fetchModels className="h-3.5 w-3.5" /> 获取上游模型
-          </Button>
+          {/* 逐把密钥测试（旧 test-connection）留在页头/「连接与模型」；模型探测在「路由与模型」。 */}
           <ActionButton
             action="testConnection"
             variant="outline"
             disabled={isNew || !canWrite || test.isPending}
-            title={isNew ? "先保存上游渠道，再测试连接" : undefined}
+            title={isNew ? "先保存上游渠道，再测试连接" : "逐把测试密钥连通性（结果写库并展示在连接状态）"}
             onClick={requestTest}
           >
             {test.isPending ? "测试中…" : "测试连接"}
@@ -346,7 +346,7 @@ export function UpstreamDetailPage() {
           <Button
             size="sm"
             disabled={!canSave || !canWrite}
-            title="保存写入配置；测试连接与获取模型使用页面最新填写的协议风格"
+            title="保存写入配置；测试连接使用页面最新填写的协议风格"
             onClick={() => save.mutate()}
           >
             <ACTION_ICONS.save className="h-3.5 w-3.5" />
@@ -369,14 +369,18 @@ export function UpstreamDetailPage() {
           probe={probe}
           keyTests={keyTests}
           modelCount={modelCount}
-          onGoModels={() => requestTab("models")}
+          onGoModels={() => requestTab("routing")}
         />
       ) : null}
-      {activeTab === "models" ? (
+      {activeTab === "routing" ? (
         isNew || !upstream ? (
-          <LockedTabNotice subject="路由与映射" />
+          <LockedTabNotice subject="路由与模型" />
         ) : (
-          <UpstreamModelsPanel upstream={upstream} />
+          <UpstreamModelsPanel
+            upstream={upstream}
+            probe={modelProbe}
+            onFetchModels={() => setDiscoverOpen(true)}
+          />
         )
       ) : null}
       {activeTab === "transforms" ? (
@@ -478,7 +482,7 @@ export function UpstreamDetailPage() {
           destructive
           onConfirm={() => {
             setTransformsDirty(false);
-            setActiveTab(pendingTab);
+            switchTab(pendingTab);
             setPendingTab(null);
           }}
         />

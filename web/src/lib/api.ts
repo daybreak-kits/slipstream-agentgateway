@@ -154,6 +154,7 @@ export const ENDPOINTS = {
   upstreamKeysBatchDelete: (code: string) => "/admin/upstreams/" + code + "/keys/batch-delete",
   upstreamKeysTest: (code: string) => "/admin/upstreams/" + code + "/keys/test",
   upstreamTest: (code: string) => "/admin/upstreams/" + code + "/test-connection",
+  upstreamModelsProbe: (code: string) => "/admin/upstreams/" + code + "/models/probe",
   upstreamImportModels: (code: string) => "/admin/upstreams/" + code + "/import-models",
   transforms: (code: string) => "/admin/upstreams/" + code + "/transforms",
   transformsPreview: (code: string) => "/admin/upstreams/" + code + "/transforms/preview",

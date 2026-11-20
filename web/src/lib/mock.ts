@@ -1434,6 +1434,27 @@ export async function mockRequest<T>(path: string, init?: RequestInit): Promise<
     if (body.enabled !== undefined) row.enabled = body.enabled;
     return row as T;
   }
+  // 模型探测（W5 ticket 07）：不落库；mock 逐模型给出成功/失败示例，便于演示会话内结果。
+  if (init?.method === "POST" && /^\/admin\/upstreams\/[^/?]+\/models\/probe$/.test(path.split("?")[0] ?? "")) {
+    const body = JSON.parse(String(init.body ?? "{}")) as { model_ids?: string[]; model_id?: string; key_id?: string };
+    const ids = body.model_ids ?? (body.model_id ? [body.model_id] : []);
+    const items = ids
+      .map((modelId) => upstreamModels.find((m) => m.id === modelId))
+      .filter((m): m is UpstreamModel => Boolean(m))
+      .map((m, index) => {
+        const failed = m.model_type === "embedding" || index % 3 === 2;
+        return {
+          model_id: m.id,
+          model: m.name,
+          ok: !failed,
+          status: failed ? 400 : 200,
+          latency_ms: failed ? 240 : 320 + index * 15,
+          error_type: failed ? "http" : "",
+          message: failed ? "上游返回 HTTP 400：model not supported" : "",
+        };
+      });
+    return { upstream_id: (path.split("?")[0] ?? "").split("/")[3] ?? "", key_id: body.key_id ?? "", items } as T;
+  }
   // —— B2 CRUD：对外模型 ——
   // GET 实时组装（契约默认内嵌 targets[]），不能用路由表的模块级快照
   if (init?.method === "GET" && (path.split("?")[0] ?? "") === "/admin/public-models") {

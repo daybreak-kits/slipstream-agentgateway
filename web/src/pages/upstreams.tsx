@@ -27,7 +27,7 @@ import { api, apiList, ENDPOINTS } from "@/lib/api";
 import { ACTION_ICONS } from "@/lib/icons";
 import { formatDateTime, useTimezone } from "@/lib/time";
 import { usePermissions } from "@/lib/permissions";
-import { API_STYLE_LABELS, probeStatusView, type ProbeResultView, type UpstreamRow } from "@/components/upstreams/shared";
+import { API_STYLE_LABELS, probeStatusView, upstreamRoutingHref, type UpstreamRow } from "@/components/upstreams/shared";
 import type { UpstreamBatchResult, Vendor } from "@/types";
 import { PageHeader } from "@/components/layout/page-header";
 
@@ -166,18 +166,6 @@ export function UpstreamsPage() {
       refresh();
     },
     onError: () => { /* api.ts 已统一提示 */ },
-  });
-
-  const test = useMutation({
-    mutationFn: (upstream: UpstreamRow) => api.post<ProbeResultView>(ENDPOINTS.upstreamTest(upstream.id)),
-    onSuccess: (result) => {
-      if (result.status === "ok") {
-        toast.success("连通性测试通过", { description: (result.model_count ?? 0) + " 个模型 · " + result.latency_ms + " ms" });
-      } else {
-        toast.error("连通性测试未通过", { description: result.message || undefined });
-      }
-      refresh();
-    },
   });
 
   const del = useMutation({
@@ -332,13 +320,15 @@ export function UpstreamsPage() {
             >
               {item.enabled ? "关闭" : "启用"}
             </ActionButton>
+            {/* W5 ticket 07：列表行内「测试」只做快速跳转——串行测试搬进详情「路由与模型」，
+                不再点一行就全局 pending 灰掉所有行。 */}
             <ActionButton
               action="testConnection"
               size="dense"
-              disabled={test.isPending || !canWrite}
-              onClick={() => test.mutate(item)}
+              title="打开该上游的「路由与模型」页签执行模型探测"
+              onClick={() => navigate(upstreamRoutingHref(item.id))}
             >
-              {test.isPending && test.variables?.id === item.id ? "测试中…" : "测试连接"}
+              测试
             </ActionButton>
             <ActionButton action="edit" size="dense" onClick={() => openEditor(item)}>
               编辑

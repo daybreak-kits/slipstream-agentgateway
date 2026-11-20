@@ -551,15 +551,23 @@ async function main() {
     return "策略/护栏/MCP 均可打开且可编辑";
   });
 
-  await test("upstream.detail-tabs", "上游详情五个 Tab 可切换", async () => {
+  /** 上游列表数据：有的接口回裸数组，有的回 {items}。 */
+  async function listUpstreams() {
     const upstreams = await admin.apiGet("/admin/upstreams");
     assert(upstreams.status === 200, "/admin/upstreams 返回 " + upstreams.status);
     const items = Array.isArray(upstreams.body) ? upstreams.body : (upstreams.body && upstreams.body.items) || [];
     assert(items.length > 0, "没有上游数据（先跑 seed_demo.py）");
+    return items;
+  }
+
+  await test("upstream.detail-tabs", "上游详情四 Tab（连接与模型/路由与模型/请求与响应/其他设置）可切换", async () => {
+    const items = await listUpstreams();
     const upstream = items[0];
     const visited = await admin.visit("/upstreams/" + upstream.id, "上游详情");
-    for (const label of ["基本信息", "密钥", "模型", "改写", "健康"]) assertIncludes(visited.text, label, "上游详情 Tab");
-    for (const label of ["密钥", "健康", "模型"]) {
+    for (const label of ["连接与模型", "路由与模型", "请求与响应", "其他设置"]) {
+      assertIncludes(visited.text, label, "上游详情 Tab");
+    }
+    for (const label of ["路由与模型", "请求与响应", "其他设置", "连接与模型"]) {
       const button = admin.page.getByRole("tab", { name: label, exact: true }).first();
       assert((await button.count()) > 0, "找不到 Tab 按钮：" + label);
       await button.click();
@@ -567,7 +575,97 @@ async function main() {
       await admin.assertSane("上游详情/" + label);
       await admin.shot("upstream-tab-" + label);
     }
-    return "上游 " + (upstream.name || upstream.id) + " 五个 Tab 存在且可切换";
+    return "上游 " + (upstream.name || upstream.id) + " 四个 Tab 存在且可切换";
+  });
+
+  await test("upstream.test-jump", "列表「测试」只跳转详情「路由与模型」，不再发 test-connection、不再全局 pending", async () => {
+    const items = await listUpstreams();
+    const target = items.find((item) => (item.model_count ?? 0) > 0) || items[0];
+    await admin.visit("/upstreams", "上游渠道");
+    const testRequests = [];
+    const onRequest = (request) => {
+      if (request.url().includes("/test-connection")) testRequests.push(request.url());
+    };
+    admin.page.on("request", onRequest);
+    try {
+      const row = admin.page.locator("tbody tr", { hasText: target.name }).first();
+      assert((await row.count()) > 0, "列表找不到上游行：" + target.name);
+      const testButton = row.getByRole("button", { name: "测试", exact: true }).first();
+      assert((await testButton.count()) > 0, "上游行内缺少「测试」按钮");
+      await testButton.click();
+      // 旧实现先发请求并禁灰所有行；新实现立即跳转并带 ?tab=routing。
+      await admin.page.waitForURL(/\/upstreams\/[^/]+\?tab=routing/, { timeout: 10000 });
+    } finally {
+      admin.page.off("request", onRequest);
+    }
+    assert(testRequests.length === 0, "列表页「测试」仍在发 test-connection：" + testRequests.join("、"));
+    await admin.settle();
+    const activeTab = admin.page.locator('[role="tab"][aria-selected="true"]').first();
+    const activeText = await activeTab.innerText();
+    assert(activeText.includes("路由与模型"), "跳转后未定位到「路由与模型」Tab，当前：" + activeText);
+    await admin.assertSane("上游详情/路由与模型（跳转）");
+    await admin.shot("upstream-test-jump");
+    return "行内测试跳转到 " + admin.page.url().replace(BASE_URL, "") + "，无 test-connection 请求";
+  });
+
+  await test("upstream.route-model-test", "路由与模型：单模型测试 + 全部测试可取消 + 密钥选择 + 失败行会话内展示", async () => {
+    const items = await listUpstreams();
+    // 优先本地假上游（seed 里 127.0.0.1:8000 会快速连接失败），失败行几秒内可见；
+    // 否则退回任意有模型的上游（真实上游/假 key 也会很快 401）。
+    const withModels = items.filter((item) => (item.model_count ?? 0) > 0);
+    assert(withModels.length > 0, "没有带模型的上游（先跑 seed_demo.py）");
+    const target = withModels.find((item) => String(item.base_url || "").includes("127.0.0.1")) || withModels[0];
+
+    await admin.visit("/upstreams/" + target.id + "?tab=routing", "上游详情/路由与模型");
+    const activeText = await admin.page.locator('[role="tab"][aria-selected="true"]').first().innerText();
+    assert(activeText.includes("路由与模型"), "?tab=routing 未定位到「路由与模型」Tab");
+
+    // 密钥选择：默认项必须存在（真实上游密钥下拉按实际密钥行列出）。
+    const keyTrigger = admin.page.getByRole("combobox", { name: "选择测试密钥" }).first();
+    assert((await keyTrigger.count()) > 0, "缺少密钥选择入口（aria-label=选择测试密钥）");
+    await keyTrigger.click();
+    const defaultOption = admin.page.getByRole("option", { name: "默认（第一把）" }).first();
+    await defaultOption.waitFor({ state: "visible", timeout: 5000 }).catch(() => {});
+    assert((await defaultOption.count()) > 0, "密钥选择缺少「默认（第一把）」");
+    await admin.page.keyboard.press("Escape");
+
+    // 单模型测试：行内「测试」→ 测试结果列出现 连通/失败/超时/连接失败（会话内徽章）。
+    const probeCell = admin.page.locator("tbody tr").first().locator("td").nth(4);
+    const rowTestButton = admin.page.locator("tbody tr").first().getByRole("button", { name: "测试", exact: true }).first();
+    assert((await rowTestButton.count()) > 0, "模型行内缺少「测试」按钮");
+    await rowTestButton.click();
+    const deadline = Date.now() + 30000;
+    let probeText = "";
+    while (Date.now() < deadline) {
+      probeText = await probeCell.innerText().catch(() => "");
+      if (/连通|失败|超时|连接失败/.test(probeText)) break;
+      await admin.page.waitForTimeout(300);
+    }
+    assert(/连通|失败|超时|连接失败/.test(probeText), "单模型测试未出现会话内结果徽章，当前：" + probeText);
+    await admin.shot("upstream-model-probe-single");
+
+    // 全部测试：串行进度 + 取消入口；取消后保留部分结果并标明「已取消」。
+    const allButton = admin.page.getByRole("button", { name: "全部测试", exact: true }).first();
+    assert((await allButton.count()) > 0, "缺少「全部测试」按钮");
+    await allButton.click();
+    const cancelButton = admin.page.getByRole("button", { name: /取消测试/ }).first();
+    await cancelButton.waitFor({ state: "visible", timeout: 8000 }).catch(() => {});
+    assert((await cancelButton.count()) > 0, "全部测试没有运行中进度/取消入口");
+    await cancelButton.click();
+    const cancelled = admin.page.getByText(/已取消/).first();
+    await cancelled.waitFor({ state: "visible", timeout: 10000 }).catch(() => {});
+    assert((await cancelled.count()) > 0, "取消后没有「已取消」标记");
+    await admin.assertSane("上游详情/路由与模型（已取消）");
+    await admin.shot("upstream-model-probe-cancelled");
+
+    // 清空结果：会话内结果可清空。
+    const clearButton = admin.page.getByRole("button", { name: "清空结果", exact: true }).first();
+    assert((await clearButton.count()) > 0, "缺少「清空结果」按钮");
+    await clearButton.click();
+    await admin.page.waitForTimeout(300);
+    const clearedText = await probeCell.innerText().catch(() => "");
+    assert(!/连通|失败|超时|连接失败/.test(clearedText), "清空结果后仍残留探测徽章：" + clearedText);
+    return "单模型结果=" + probeText.replace(/\s+/g, " ").trim() + "；全部测试可取消、结果可清空";
   });
 
   await test("models.two-tabs", "模型管理用「上游模型/公开模型」两个 Tab 承载", async () => {

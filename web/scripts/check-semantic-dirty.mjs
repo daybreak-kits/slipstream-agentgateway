@@ -298,7 +298,7 @@ const actionFiles = [
   ["src/pages/client_keys.tsx", ["rename", "resetKey", "delete", "disable", "enable"]],
   ["src/pages/roles.tsx", ["edit", "delete"]],
   ["src/components/users/users-panel.tsx", ["edit", "delete", "disable", "enable"]],
-  ["src/components/upstreams/models-panel.tsx", ["edit", "delete", "disable", "enable"]],
+  ["src/components/upstreams/models-panel.tsx", ["edit", "delete", "disable", "enable", "testConnection", "fetchModels"]],
   ["src/components/models/cooldown-dialogs.tsx", ["releaseCooldown"]],
   ["src/pages/upstream_detail.tsx", ["testConnection"]],
 ];
