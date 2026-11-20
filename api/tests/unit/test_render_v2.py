@@ -816,63 +816,48 @@ def test_access_log_without_db_url_renders_nothing():
     assert "frontendPolicies" not in cfg
 
 
-# ── M5-a 链路追踪：frontendPolicies.tracing（E19 实测形状） ──────────────────
+# ── ADR-028 适配器遥测：tracing 不是系统策略，只由适配器接收器是否运行决定 ──
 
 
-def test_tracing_disabled_renders_no_block():
+def test_tracing_is_absent_while_the_adapter_receiver_is_off():
+    from l03_adapters.agentgateway import telemetry
+
+    telemetry.set_export_enabled(False)
     cfg = render_config(_ir(), 3600)
     assert "frontendPolicies" not in cfg
 
 
-def test_tracing_enabled_renders_the_e19_shape():
-    from l02_domain.ir import TracingPolicySpec
+def test_tracing_renders_the_e19_shape_while_the_receiver_runs():
+    from l03_adapters.agentgateway import telemetry
 
-    ir = _ir(
-        policies=PoliciesSpec(
-            tracing=TracingPolicySpec(host="127.0.0.1", port=4318, random_sampling=True)
-        )
-    )
-    cfg = render_config(ir, 3600)
+    port = telemetry.trace_port()
+    telemetry.set_export_enabled(True)
+    try:
+        cfg = render_config(_ir(), 3600)
+    finally:
+        telemetry.set_export_enabled(False)
     assert cfg["frontendPolicies"]["tracing"] == {
-        "host": "127.0.0.1:4318",
+        "host": f"127.0.0.1:{port}",
         "protocol": "http",
+        "path": telemetry.TRACE_PATH,
         "randomSampling": "true",
     }
     assert "tracing" not in cfg  # top-level tracing is rejected by AG 1.7 (E19)
 
 
-def test_tracing_sampling_off_stays_a_string():
-    from l02_domain.ir import TracingPolicySpec
-
-    ir = _ir(
-        policies=PoliciesSpec(
-            tracing=TracingPolicySpec(host="collector.local", port=9999, random_sampling=False)
-        )
-    )
-    tracing = render_config(ir, 3600)["frontendPolicies"]["tracing"]
-    assert tracing["host"] == "collector.local:9999"
-    assert tracing["randomSampling"] == "false"
-
-
 def test_tracing_and_access_log_share_frontend_policies():
-    from l02_domain.ir import AccessLogSpec, TracingPolicySpec
+    from l02_domain.ir import AccessLogSpec
+    from l03_adapters.agentgateway import telemetry
 
-    ir = _ir(
-        policies=PoliciesSpec(
-            access_log=AccessLogSpec(database_url="ag-data.db", llm="metadata"),
-            tracing=TracingPolicySpec(host="127.0.0.1", port=4318),
+    telemetry.set_export_enabled(True)
+    try:
+        ir = _ir(
+            policies=PoliciesSpec(
+                access_log=AccessLogSpec(database_url="ag-data.db", llm="metadata")
+            )
         )
-    )
-    frontend = render_config(ir, 3600)["frontendPolicies"]
+        frontend = render_config(ir, 3600)["frontendPolicies"]
+    finally:
+        telemetry.set_export_enabled(False)
     assert set(frontend) == {"accessLog", "tracing"}
 
-
-def test_tracing_rejects_an_empty_host_or_non_http_protocol():
-    from l02_domain.ir import TracingPolicySpec
-
-    with pytest.raises(ValueError, match="host"):
-        render_config(_ir(policies=PoliciesSpec(tracing=TracingPolicySpec(host=" "))), 3600)
-    with pytest.raises(ValueError, match="http"):
-        render_config(
-            _ir(policies=PoliciesSpec(tracing=TracingPolicySpec(protocol="grpc"))), 3600
-        )

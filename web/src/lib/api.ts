@@ -171,6 +171,7 @@ export const ENDPOINTS = {
   reportsHeatmap: "/admin/reports/heatmap",
   health: "/admin/health",
   logs: "/admin/logs",
+  logAttempts: (id: string) => "/admin/logs/" + encodeURIComponent(id) + "/attempts",
   upstreamCreate: "/admin/upstreams",
   upstreamUpdate: (code: string) => "/admin/upstreams/" + code,
   upstreamModelCreate: "/admin/upstream-models",

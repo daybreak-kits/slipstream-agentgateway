@@ -34,13 +34,6 @@ import {
  * （validate → 保存 → apply → 配置版本留档）。恢复默认是既有直接下发动作，不走草稿。
  */
 
-/** M5-b 交底指定文案：说明链路追踪的 span 粒度、接收端与量产采样提醒。 */
-const TRACING_EXPLAIN =
-  "启用后 AG 会把每次上游尝试作为 span 导出到控制面接收器（127.0.0.1:4318）；日志详情可查看请求内路由链；每请求约 4 个 span，量产环境可关闭采样";
-
-const TRACING_DISABLED_HINT = "启用并下发后，新的请求日志会携带路由链数据（历史日志无）。";
-const TRACING_ENABLED_HINT = "已启用并下发：新的请求日志会携带路由链数据（历史日志无）。";
-
 export function PoliciesTab({ data, draft, onDraftChange, canWrite, dirtyCount }: {
   data: PoliciesResponse;
   draft: PolicyConfig | null;
@@ -553,99 +546,6 @@ export function PoliciesTab({ data, draft, onDraftChange, canWrite, dirtyCount }
             </div>
           </SectionCard>
 
-          <SectionCard
-            title="链路追踪"
-            description={data.notes.tracing}
-            actions={<CapabilityBadge capability={caps.tracing} />}
-          >
-            <div className="space-y-3">
-              <div className="flex flex-wrap items-end justify-between gap-3">
-                <Field
-                  label="启用链路追踪（frontendPolicies.tracing）"
-                  hint="关闭时整段不渲染；开启并下发后 AG 才导出 span。"
-                >
-                  <Switch
-                    aria-label="启用链路追踪"
-                    checked={draft.tracing.enabled}
-                    onCheckedChange={(checked) =>
-                      update((next) => {
-                        next.tracing.enabled = checked;
-                      })
-                    }
-                    disabled={!caps.tracing.supported}
-                  />
-                </Field>
-                <Field
-                  label="随机采样 randomSampling"
-                  hint="AG 1.7 默认 false 时不产 span（E19）；默认开，量产环境可关闭采样。"
-                >
-                  <Switch
-                    aria-label="启用随机采样"
-                    checked={draft.tracing.random_sampling}
-                    onCheckedChange={(checked) =>
-                      update((next) => {
-                        next.tracing.random_sampling = checked;
-                      })
-                    }
-                    disabled={!caps.tracing.supported}
-                  />
-                </Field>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-3">
-                <Field label="OTLP 接收地址 host" hint="控制面常驻接收器；默认 127.0.0.1。">
-                  <Input
-                    aria-label="OTLP 接收地址 host"
-                    value={draft.tracing.host}
-                    placeholder="127.0.0.1"
-                    onChange={(event) =>
-                      update((next) => {
-                        next.tracing.host = event.target.value;
-                      })
-                    }
-                    disabled={!caps.tracing.supported}
-                  />
-                </Field>
-                <Field label="端口 port" hint="默认 4318；取值 1-65535。">
-                  <Input
-                    aria-label="OTLP 接收端口"
-                    inputMode="numeric"
-                    value={draft.tracing.port === 0 ? "" : draft.tracing.port}
-                    placeholder="4318"
-                    onChange={(event) =>
-                      update((next) => {
-                        const raw = event.target.value;
-                        if (raw === "") {
-                          next.tracing.port = 0;
-                          return;
-                        }
-                        const parsed = Number(raw);
-                        next.tracing.port = Number.isFinite(parsed)
-                          ? Math.trunc(parsed)
-                          : next.tracing.port;
-                      })
-                    }
-                    disabled={!caps.tracing.supported}
-                  />
-                </Field>
-                <Field label="协议" hint="AG 1.7 仅支持 OTLP/HTTP，不渲染 gRPC。">
-                  <Input aria-label="OTLP 协议" value="OTLP/HTTP" readOnly disabled />
-                </Field>
-              </div>
-
-              <p className="text-2xs leading-relaxed text-body">{TRACING_EXPLAIN}</p>
-              <p className="rounded-md border border-border bg-surface-2 px-2.5 py-1.5 text-2xs text-body">
-                {draft.tracing.enabled
-                  ? "保存并下发后，新的请求日志会携带路由链数据（历史日志无）。"
-                  : TRACING_DISABLED_HINT}
-              </p>
-              {draft.tracing.enabled && !draft.tracing.random_sampling ? (
-                <p className="rounded-md border border-warning bg-warning-soft px-2.5 py-1.5 text-2xs text-warning-text">
-                  采样已关闭：AG 1.7 在 randomSampling=false 时不产 span，日志详情不会出现路由链。
-                </p>
-              ) : null}
-            </div>
-          </SectionCard>
         </>
       ) : (
         <div className="grid gap-3 lg:grid-cols-2">
@@ -760,57 +660,6 @@ export function PoliciesTab({ data, draft, onDraftChange, canWrite, dirtyCount }
             )}
           </SectionCard>
 
-          <SectionCard
-            title="链路追踪"
-            description={data.notes.tracing}
-            actions={<CapabilityBadge capability={caps.tracing} />}
-          >
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                {config.tracing.enabled ? (
-                  <Badge tone="success">已启用</Badge>
-                ) : (
-                  <Badge tone="neutral">未启用（默认关）</Badge>
-                )}
-                <span className="font-mono text-2xs text-body">
-                  {config.tracing.host}:{config.tracing.port}
-                </span>
-                <Badge tone={config.tracing.random_sampling ? "info" : "warning"}>
-                  {config.tracing.random_sampling ? "随机采样开" : "随机采样关"}
-                </Badge>
-              </div>
-              <Fact label="OTLP 接收地址（OTLP/HTTP）">
-                <span className="font-mono">
-                  {config.tracing.host}:{config.tracing.port}
-                </span>
-              </Fact>
-              <Fact label="生效预览">
-                {data.effective.tracing.enabled
-                  ? data.effective.tracing.endpoint +
-                    " · " +
-                    data.effective.tracing.protocol +
-                    " · 采样" +
-                    (data.effective.tracing.random_sampling ? "开" : "关")
-                  : "未启用（frontendPolicies.tracing 不渲染）"}
-              </Fact>
-              <p className="text-2xs leading-relaxed text-body">{TRACING_EXPLAIN}</p>
-              <p
-                className={
-                  "rounded-md border px-2.5 py-1.5 text-2xs " +
-                  (config.tracing.enabled
-                    ? "border-success bg-success-soft text-success-text"
-                    : "border-border bg-surface-2 text-body")
-                }
-              >
-                {config.tracing.enabled ? TRACING_ENABLED_HINT : TRACING_DISABLED_HINT}
-              </p>
-              {config.tracing.enabled && !config.tracing.random_sampling ? (
-                <p className="rounded-md border border-warning bg-warning-soft px-2.5 py-1.5 text-2xs text-warning-text">
-                  采样已关闭：AG 1.7 在 randomSampling=false 时不产 span，日志详情不会出现路由链。
-                </p>
-              ) : null}
-            </div>
-          </SectionCard>
 
           <SectionCard title="配置规模" description="当前控制面行数，仅供策略页参考。">
             <div className="grid grid-cols-2 gap-2 text-2xs text-body sm:grid-cols-4">

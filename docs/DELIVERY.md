@@ -125,8 +125,8 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 3. **表格与分页规范（DESIGN-AUDIT 四期）**：大表表体内部滚动+撑满页底+最小高度、操作列冻结右侧、头身对齐一致、凡表必有列设置；分页 nav 必须 `position:relative`（sr-only 逃逸 ICB 会顶高 html scrollHeight 酿成全站窗口滚动空白，见 §4 红线）。
 4. **语义色=分位数锚定**：日志首字/耗时按当前窗口 `all` 块分位动态着色（≤P50 绿/≤P95 黄/>P95 红），非固定阈值；旧后端无 all 块时降级中性灰。
 5. **模型参数来源**：models.dev 每日自动+手动兑入（只填空、手改永不覆盖、USD 进价按 fx_snapshots 折 CNY、无汇率 skip）；代理用户经 `GET /admin/my/models` 查参数（零金额键）。
-6. **路由链（M5 待立项）**：E19 证实可经 OTel Traces 实现（渲染 `frontendPolicies.tracing` + 控制面 OTLP 接收器 + trace_id join）；`randomSampling` 需显式开启否则无 span；accessLog upstreamCalls 在 1.7.0 静默失效。
+6. **路由链（适配器遥测，ADR-028）**：E19 证实 AG 1.7 逐次尝试上游身份只能经 OTel Traces 获得；该采集收进 AG 适配器私有实现（loopback OTLP 接收器 + AttemptSink），系统只存归一化 `request_attempts`，不再有系统级接收器/trace_spans/tracing 策略配置。accessLog upstreamCalls 在 1.7.0 静默失效。
 7. **conditional × 多密钥为受限组合**（E20/D2）：渲染不展开密钥、兜底至多 1 条且必须末位（AG 硬校验）、成员编排有提示。
 8. 看板 8 卡（缓存/RPM/TPM 自六卡拆出，**只拆不加**）、峰值=窗口内单分钟最大值；热力图 30D 按周/365D 按月（13 行，跨年加年份前缀）。
 
-9. **路由链已实现（M5，2026-11-20）**：策略页「链路追踪」卡（enabled/接收地址/采样，默认关）→ 渲染 `frontendPolicies.tracing`（E19 形状）→ 控制面常驻 OTLP/HTTP 接收器（默认 127.0.0.1:4318，绑定失败降级）→ `trace_spans` 表（复合主键幂等）→ 日志详情「路由链」时间线（每轮上游/状态码语义色/耗时/错误，trace_id join）。边界：仅 OTLP/HTTP protobuf；启用后每请求约 4 span（量产可关采样）；接收器尽力而为（宕机期间 span 丢失）；历史日志（tracing 启用前）无链路。
+9. **路由链已实现（ADR-028 重构，2026-11-20）**：AG 适配器在 `l03_adapters/agentgateway/telemetry.py` 内私有实现 OTLP/HTTP 采集（loopback，默认 127.0.0.1:4318，绑定失败降级）→ 解码后归一化为 `RequestAttempt` → 系统表 `request_attempts`（幂等）→ `GET /admin/logs/{event_id}/attempts` → 日志详情「路由链」时间线（每轮上游/状态码语义色/耗时/错误）。边界：AG 1.7 只 push OTLP（系统仍会多一个适配器内部 loopback 端口）；历史 trace_spans 不迁移；事件在采集端宕机期间丢失。

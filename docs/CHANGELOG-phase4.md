@@ -39,13 +39,20 @@
 
 ## M5 路由链（2026-11-20 追加立项并落地）
 
-- **M5-a**（645aa0c，30 文件 +1897）：OTLP/HTTP 接收器（标准库 wire-format 解码器移植自 E19，零新依赖，l03 层）+ `trace_spans` 表（复合主键幂等，(trace_id,start_ms) 索引）+ `gateway_usage_events.trace_id` 补链（此前丢弃）+ `GET /admin/traces/{trace_id}`（attempts 按 start 复原）+ tracing 渲染（`frontendPolicies.tracing`，E19 形状 golden）+ 留存清理只删 span；**735 passed / 8 skipped EXIT=0**。
-- **M5-b**（1ac3a1f，6 文件 +569）：策略页「链路追踪」卡（启用/接收地址/采样，说明文案）+ 日志详情「路由链」时间线（每轮上游/状态码语义色/耗时/错误类型，根 span 汇总 retry.attempt 与总耗时；无 trace 不渲染）+ mock 两轮样例。
-- 冒烟：策略卡回显 ✓、路由链三轮（503→500→200 failover）红/绿语义色渲染 ✓（截图 web/.scratch/m5-b-trace-chain.png）；`trace_id` 缺失行不渲染该区。
+- **M5-a（已被 ADR-028 取代）**（645aa0c，30 文件 +1897）：当时在系统层实现 OTLP/HTTP 接收器 + `trace_spans` 表 + `GET /admin/traces/{trace_id}` + tracing 渲染。2026-11-20 用户裁定追踪归适配层：接收器/解码/span 形状下沉到 `l03_adapters/agentgateway/telemetry.py`，系统改为存储归一化 `request_attempts`，API 改为 `GET /admin/logs/{event_id}/attempts`，系统级 tracing 配置与 `trace_spans` 删除。
+- **M5-b（已被 ADR-028 取代）**（1ac3a1f，6 文件 +569）：当时做策略页「链路追踪」卡 + 日志详情「路由链」时间线。现策略卡删除，路由链改读 `/admin/logs/{event_id}/attempts`，形状不变（轮次/上游/状态/耗时/错误）。
+- 冒烟（历史）：策略卡回显 ✓、路由链三轮（503→500→200 failover）红/绿语义色渲染 ✓；`trace_id` 缺失行不渲染该区。ADR-028 后策略卡已移除，路由链数据来自适配器归一化尝试。
+
+## W5-W1.7 适配器遥测边界（ADR-028，2026-11-20）
+
+- 架构纠偏：追踪收归数据面适配层。系统删除 `trace_receiver.py`/`routers_traces.py`/`traces.py`、`trace_spans` 表、`GET /admin/traces/{trace_id}` 与策略页 tracing 配置；新增领域对象 `RequestAttempt`/`AttemptSink` 与系统表 `request_attempts`（复合主键幂等，30 天留存），AG 适配器在 `l03_adapters/agentgateway/telemetry.py` 内私有实现 OTLP/HTTP 采集与映射（loopback，端口占用降级）。
+- API/UI：`GET /admin/logs` 列表附 `attempts_count/has_attempts`；新增 `GET /admin/logs/{event_id}/attempts`（upstream_name 由系统解析）；日志详情「路由链」改读归一化尝试，不再读 span 树；策略页「链路追踪」卡删除，能力矩阵新增 `observe.request_attempts`。
+- 文档：新增 ADR-028，更新 adapter-spi §2.2、api-contract、DELIVERY，m5-a/m5-b 标注被取代；contract.ts 重生成。
+- 验证：ruff / tsc / eslint / vite build / check-bundle（首包 gzip 213.8KB）/ check-ui-foundation 37/37 / 术语审计 PASS；全量 pytest **734 passed / 8 skipped，EXIT=0**（742 collected）。
 
 ## 已知边界与遗留（按优先级）
 
-1. **M5 路由链（待立项）**：OTel 接收器 + trace_id join + 日志详情链路展示；量产需采样策略。
+1. **路由链（ADR-028）**：AG 适配器私有 OTLP 采集 + `request_attempts` + `/admin/logs/{id}/attempts`；AG 1.7 需额外 loopback 端口，历史 `trace_spans` 不迁移。
 2. conditional × 多密钥为受限组合（E20/D2 已限流+提示）；`llm.*` 变量类谓词未实测。
 3. 按上游密钥的用量归因不可得（request_logs 只记最终上游）；usage provider 列现带 `#kN` 后缀，按名匹配退化为首匹配（既有近似）。
 4. 密钥删除/迁移后的 stale `keys/*.key` 文件清理（rollout 增量清理，建议项）。

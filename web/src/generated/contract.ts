@@ -139,6 +139,25 @@ export interface LocalRateLimitConfig {
   tokens_per_minute?: number | null;
 }
 
+export interface LogAttemptOut {
+  attempt: number;
+  upstream_ref: string;
+  upstream_name?: string;
+  model?: string;
+  status_code?: number | null;
+  error_type?: string;
+  error_message?: string;
+  duration_ms?: number;
+  outcome?: string;
+  started_at_ms?: number;
+}
+
+export interface LogAttemptsOut {
+  event_id: string;
+  trace_id?: string;
+  attempts?: LogAttemptOut[];
+}
+
 export interface LoginIn {
   username: string;
   password: string;
@@ -229,7 +248,6 @@ export interface PolicyConfig {
   transformations?: TransformationsConfig;
   retry?: RetryConfig | null;
   health?: HealthConfig | null;
-  tracing?: TracingConfig;
 }
 
 export interface PolicyConfigIn {
@@ -377,45 +395,6 @@ export interface TimeoutConfig {
   request_timeout?: string;
   backend_request_timeout?: string;
   response_idle_timeout?: string;
-}
-
-export interface TraceAttemptOut {
-  attempt: number;
-  span_id: string;
-  http_path: string;
-  http_status: number | null;
-  error_type: string;
-  duration_ms: number;
-  start_ms: number;
-}
-
-export interface TraceDetailOut {
-  trace_id: string;
-  spans: TraceSpanOut[];
-  attempts: TraceAttemptOut[];
-}
-
-export interface TraceSpanOut {
-  trace_id: string;
-  span_id: string;
-  parent_span_id: string;
-  kind: string;
-  http_path: string;
-  http_status: number | null;
-  error_type: string;
-  retry_attempt: number | null;
-  start_ms: number;
-  end_ms: number;
-  duration_ms: number;
-  attributes: Record<string, unknown>;
-}
-
-export interface TracingConfig {
-  enabled?: boolean;
-  host?: string;
-  port?: number;
-  protocol?: string;
-  random_sampling?: boolean;
 }
 
 export interface TransformationsConfig {

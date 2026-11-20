@@ -41,6 +41,16 @@ class DataPlaneAdapter(Protocol):
 
 顺序理由：驱动校验不通过时，任何落盘都属于「明知不可用仍写文件」，会污染密钥目录与配置版本历史。
 
+### 2.2 遥测生命周期与 AttemptSink（ADR-028）
+
+`observe.request_attempts` 不是控制面请求路径上的方法，而是应用生命周期入口：
+
+1. 系统启动时 `l03_adapters/registry.py:start_telemetry(app, sink, settings)` 按 `settings.data_plane_adapter` 惰性调用适配器的 `wire_telemetry(app, sink)`；返回的 receiver 挂在 `app.state`，shutdown 时停止。
+2. 适配器启动自己的采集端（AG 1.7 是适配器模块内的 loopback OTLP/HTTP 接收器，监听默认 `127.0.0.1:4318`，可用 `SLIPSTREAM_AG_TRACE_PORT` 改；端口占用则降级为不采集，不阻塞启动）。
+3. 适配器把采集到的 span 解码、按请求归一化为 `RequestAttempt(attempt_no, upstream_ref, model, status_code, error_type, error_message, started_at_ms, duration_ms, outcome)` 序列，调用 `AttemptSink(attempts) -> int`；系统实现按 `(correlation_key, attempt_no)` 幂等 upsert。
+4. 系统只认 `RequestAttempt`，不知道 OTLP、span、trace 树；换 LiteLLM/自研适配器时用 callback/事件/DB 提供同一端口即可。
+5. 采集开关不进入 `/admin/policies`：适配器在采集端可用时自行渲染数据面追踪配置；无该能力的适配器，`GET /admin/policies` 的 `capabilities.request_attempts.supported=false`，UI 隐藏路由链。
+
 ## 3. 能力矩阵
 
 能力是**声明式**的，UI 据此置灰功能并给出原因，而不是假装支持。
@@ -59,6 +69,7 @@ class DataPlaneAdapter(Protocol):
 | `transform.headers` | 请求头改写 | 支持 |
 | `observe.request_log` | 请求日志落库 | 支持 |
 | `observe.prometheus` | 指标 | 支持 |
+| `observe.request_attempts` | 请求尝试链（ADR-028）：每次上游尝试归一化为 `RequestAttempt`，经 `AttemptSink` 交给系统落 `request_attempts`；OTLP/接收器/span 都是适配器内部实现 | 支持（AG 1.7 适配器私有 OTLP 接收器采集；`verified=true`） |
 | `config.validate_only` | 配置预校验 | 支持 |
 | `config.hot_reload` | 热加载 | 支持（P0-R2 待验证对在飞请求的影响） |
 | `usage.read_events` | 增量读用量 | 支持（读其 SQLite） |

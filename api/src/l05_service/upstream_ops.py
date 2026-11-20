@@ -334,7 +334,11 @@ def batch_delete_keys(
             continue
         if len(rows) - len(deleted) <= 1:
             items.append(
-                {"key_id": key_id, "ok": False, "error": "至少保留一把密钥；如需停止调用请直接停用上游"}
+                {
+                    "key_id": key_id,
+                    "ok": False,
+                    "error": "至少保留一把密钥；如需停止调用请直接停用上游",
+                }
             )
             continue
         UPSTREAM_KEY_REPO.delete(session, row)

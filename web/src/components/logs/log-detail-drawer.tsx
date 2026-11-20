@@ -21,14 +21,13 @@ import {
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
-import type { TraceDetailOut } from "@/generated/contract";
-import { api, apiList, ApiError, ENDPOINTS } from "@/lib/api";
+import type { LogAttemptsOut } from "@/generated/contract";
+import { api, ApiError, ENDPOINTS } from "@/lib/api";
 import { fmtInt, fmtMoney6, fmtSeconds } from "@/lib/format";
 import { usePermissions } from "@/lib/permissions";
 import { formatDateTime } from "@/lib/time";
 import type { IntervalTimezone } from "@/lib/time-range";
 import { cn } from "@/lib/utils";
-import type { Upstream } from "@/types";
 
 import {
   fmtCachePct,
@@ -206,8 +205,8 @@ export function LogDetailDrawer({ open, row, timezone, onOpenChange }: LogDetail
             </Alert>
           ) : null}
 
-          {view.trace_id ? (
-            <TraceChainSection traceId={view.trace_id} fallbackDurationMs={view.duration_ms} />
+          {view.has_attempts ? (
+            <TraceChainSection eventId={view.event_id} fallbackDurationMs={view.duration_ms} />
           ) : null}
 
           {showMoney ? (
@@ -317,33 +316,11 @@ export function LogDetailDrawer({ open, row, timezone, onOpenChange }: LogDetail
   );
 }
 
-/** http_path 按上游 baseUrl 的 path 前缀做 best-effort 映射；最长前缀胜出，失败回 null。 */
-function upstreamNameForPath(httpPath: string, upstreams: Upstream[]): string | null {
-  const normalized = httpPath.split("?")[0] ?? httpPath;
-  let bestName: string | null = null;
-  let bestLength = -1;
-  for (const upstream of upstreams) {
-    let prefix = "";
-    try {
-      prefix = new URL(upstream.base_url).pathname.replace(/\/+$/, "");
-    } catch {
-      continue;
-    }
-    if (!prefix) continue;
-    if (normalized !== prefix && !normalized.startsWith(prefix + "/")) continue;
-    if (prefix.length > bestLength) {
-      bestLength = prefix.length;
-      bestName = upstream.name;
-    }
-  }
-  return bestName;
+function attemptTone(status: number | null | undefined): ReturnType<typeof statusTone> {
+  return status === null || status === undefined ? "neutral" : statusTone(status);
 }
 
-function attemptTone(status: number | null): ReturnType<typeof statusTone> {
-  return status === null ? "neutral" : statusTone(status);
-}
-
-function attemptDotClass(status: number | null): string {
+function attemptDotClass(status: number | null | undefined): string {
   const tone = attemptTone(status);
   if (tone === "success") return "bg-success";
   if (tone === "warning") return "bg-warning";
@@ -352,88 +329,80 @@ function attemptDotClass(status: number | null): string {
 }
 
 /**
- * 日志详情「路由链」区（M5-b）：行带 trace_id 才挂载，并发拉 traces 与上游列表；
- * 404/空 attempts 表示没有 span 数据（历史日志或 tracing 未启用），整个区不渲染。
+ * 日志详情「路由链」区（ADR-028）：行带尝试数据才挂载，只拉系统尝试事实；
+ * 上游名、模型、状态均由 API 归一化返回，前端不再猜 baseUrl 前缀。
  */
 function TraceChainSection({
-  traceId,
+  eventId,
   fallbackDurationMs,
 }: {
-  traceId: string;
+  eventId: string;
   fallbackDurationMs: number;
 }) {
-  const traceQuery = useQuery({
-    queryKey: ["trace", traceId],
+  const attemptsQuery = useQuery({
+    queryKey: ["log-attempts", eventId],
     queryFn: ({ signal }) =>
-      api.get<TraceDetailOut>("/admin/traces/" + encodeURIComponent(traceId), { signal }),
-    enabled: traceId.length > 0,
+      api.get<LogAttemptsOut>(ENDPOINTS.logAttempts(eventId), { signal }),
+    enabled: eventId.length > 0,
     staleTime: 30_000,
     retry: false,
   });
-  // 与日志页共用 ["upstreams"] 缓存；按 baseUrl path 前缀匹配 http_path。
-  const upstreamsQuery = useQuery({
-    queryKey: ["upstreams"],
-    queryFn: () => apiList<Upstream>(ENDPOINTS.upstreams),
-    staleTime: 30_000,
-  });
 
-  const detail = traceQuery.data;
-  if (!detail || detail.attempts.length === 0) return null;
-
-  const attempts = [...detail.attempts].sort((a, b) => a.attempt - b.attempt);
-  const root = detail.spans.find((span) => span.kind === "server") ?? null;
-  const upstreams = upstreamsQuery.data?.items ?? [];
-  const totalMs = root?.duration_ms ?? fallbackDurationMs;
+  const attempts = attemptsQuery.data?.attempts ?? [];
+  if (attempts.length === 0) return null;
+  const totalMs = attempts.reduce((sum, attempt) => sum + (attempt.duration_ms ?? 0), 0);
 
   return (
     <CollapsibleSection title="路由链" defaultOpen>
       <div className="space-y-2">
         <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-faint">
           <span>
-            根 span retry.attempt <span className="tnum text-body">{root?.retry_attempt ?? "—"}</span>
-          </span>
-          <span>
-            总耗时 <span className="tnum text-body">{fmtSeconds(totalMs)}</span>
+            总耗时 <span className="tnum text-body">{fmtSeconds(fallbackDurationMs || totalMs)}</span>
           </span>
           <span>
             上游尝试 <span className="tnum text-body">{attempts.length}</span> 轮
           </span>
         </p>
         <ol className="space-y-2">
-          {attempts.map((attempt) => {
-            const upstreamName = upstreamNameForPath(attempt.http_path, upstreams);
-            return (
-              <li key={attempt.span_id} className="relative border-l border-border pl-3">
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    "absolute -left-[3px] top-1.5 h-1.5 w-1.5 rounded-full",
-                    attemptDotClass(attempt.http_status),
-                  )}
-                />
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-2xs">
-                  <span className="font-medium text-title">第 {attempt.attempt} 轮</span>
-                  <span className="text-faint">→</span>
-                  <span
-                    className={upstreamName === null ? "font-mono text-body" : "text-body"}
-                    title={attempt.http_path}
-                  >
-                    {upstreamName ?? (attempt.http_path || "—")}
-                  </span>
-                  <span className="text-faint">·</span>
-                  <Badge tone={attemptTone(attempt.http_status)}>
-                    {attempt.http_status === null ? "无状态" : attempt.http_status}
-                  </Badge>
-                  <span className="text-faint">·</span>
-                  <span className="tnum text-body">{fmtSeconds(attempt.duration_ms)}</span>
-                  <span className="text-faint">·</span>
-                  <span className={attempt.error_type ? "text-danger-text" : "text-faint"}>
-                    错误类型 {attempt.error_type || "—"}
-                  </span>
-                </div>
-              </li>
-            );
-          })}
+          {attempts.map((attempt) => (
+            <li
+              key={`${attempt.attempt}-${attempt.started_at_ms ?? 0}`}
+              className="relative border-l border-border pl-3"
+            >
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "absolute -left-[3px] top-1.5 h-1.5 w-1.5 rounded-full",
+                  attemptDotClass(attempt.status_code),
+                )}
+              />
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-2xs">
+                <span className="font-medium text-title">第 {attempt.attempt} 轮</span>
+                <span className="text-faint">→</span>
+                <span className="text-body" title={attempt.upstream_ref}>
+                  {attempt.upstream_name || attempt.upstream_ref || "—"}
+                </span>
+                {attempt.model ? (
+                  <>
+                    <span className="text-faint">·</span>
+                    <span className="font-mono text-body">{attempt.model}</span>
+                  </>
+                ) : null}
+                <span className="text-faint">·</span>
+                <Badge tone={attemptTone(attempt.status_code)}>
+                  {attempt.status_code === null ? "无状态" : attempt.status_code}
+                </Badge>
+                <span className="text-faint">·</span>
+                <span className="tnum text-body">{fmtSeconds(attempt.duration_ms ?? 0)}</span>
+                {attempt.error_type ? (
+                  <>
+                    <span className="text-faint">·</span>
+                    <span className="text-danger-text">错误类型 {attempt.error_type}</span>
+                  </>
+                ) : null}
+              </div>
+            </li>
+          ))}
         </ol>
       </div>
     </CollapsibleSection>

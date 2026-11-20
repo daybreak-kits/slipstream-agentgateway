@@ -453,3 +453,15 @@
 **理由**：多账号密钥的价值就是分流与互备，锁死一把让其余 19 把成为摆设；AG 原生多 provider 使改动封在适配层（ADR-001），上层无感。
 
 **后果**：upstream_ops.py 重写密钥 CRUD（去 mirror/rotate/set_primary）；rendering/render.py 加密钥维度展开；contract.ts 重生成（UpstreamKey 形状变化）；keys-panel UI 重做（失效标红+批量删除+去主密钥标记）；迁移脚本清空 api_key_enc；E18 实验先行。
+
+## ADR-028 追踪归适配层：系统只存归一化请求尝试，不定义 OTel/接收器/span 表
+
+- 状态：已定（2026-11-20 用户裁决；取代 M5-a 的系统级 OTLP 接收器与 trace_spans 设计）
+
+**背景**：M5-a 把 OTLP/HTTP 接收器、wire-format 解码与 trace_spans 表做在系统层（l06/l05），日志详情直接读 span 树。用户指出这是架构错位：追踪是数据面适配层的职责，系统多一个 server、多一张 OTel 形状的表，会让「换掉 agentgateway、换 LiteLLM 或自研数据面」时上层与数据库都不变这个目标落空；数据库表应按系统自身需求设计。
+
+**决策**：① 系统只定义领域对象「请求尝试链」：一次客户端请求的逐次上游尝试（attempt_no、upstream_ref、model、status_code、error_type、error_message、started_at_ms、duration_ms、outcome），落系统自有表 request_attempts（correlation_key + attempt_no 复合主键，按 correlation_key/started_at 索引），保留期与日志一致（30 天）。② 适配器 SPI 新增能力 observe.request_attempts 与 AttemptSink 端口（适配器把归一化尝试记录交给系统，批量 upsert 幂等）。③ AG 适配器在 l03_adapters/agentgateway/telemetry.py 内私有实现 OTLP/HTTP 接收、解码与映射：loopback 绑定、8MB 上限、白名单解码、端口占用降级、生命周期跟随应用；对外只暴露 attempts。上层不出现 OTLP/trace/span/attributes 概念。④ 删除系统级 trace_receiver.py、routers_traces.py、traces.py、trace_spans 表与系统设置页/网关策略页的 tracing host/port/randomSampling 配置；frontendPolicies.tracing 由 AG 适配器在接收器可用时自行渲染（随机采样固定 "true"），不再由系统策略配置。⑤ API：删除 GET /admin/traces/{trace_id}；新增 GET /admin/logs/{event_id}/attempts（返回归一化尝试，upstream_name 由系统解析）；日志列表增 attempts_count/has_attempts。前端路由链改读该端点。
+
+**理由**：这样系统数据库与 API 只依赖「请求尝试」这一业务事实；AG 的 OTel 采集是适配器实现细节，未来其它适配器可用 callback/事件/DB 提供同一端口。历史 span 树本就不是业务需求，UI 要的是「第几轮、打到哪个上游、什么结果」。
+
+**后果**：request_attempts 取代 trace_spans（旧表不迁移，历史路由链丢失）；l05/l06 不再 import OTel 接收器；AG 适配器仍会监听一个 loopback 端口（AG 1.7 只支持 push OTLP，E19 已证没有其它可靠的逐次尝试上游身份来源），这是适配器边界内的代价；若要求系统绝对零新增监听端口，只能放弃逐次尝试链。AG 能力矩阵以 observe.request_attempts 暴露，其它适配器无该能力时 UI 隐藏路由链。

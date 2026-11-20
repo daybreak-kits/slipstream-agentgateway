@@ -34,7 +34,6 @@ from l02_domain.ir import (
     RegexRuleSpec,
     RetryPolicySpec,
     TimeoutPolicySpec,
-    TracingPolicySpec,
     TransformsPolicySpec,
 )
 from l02_domain.validation import ValidationResult, validate_gateway_ir
@@ -72,15 +71,6 @@ DEFAULT_POLICY_CONFIG: dict = {
     },
     "retry": None,
     "health": None,
-    # M5-a: off by default; when enabled the render path emits
-    # frontendPolicies.tracing and AG posts spans to http://host:port/v1/traces.
-    "tracing": {
-        "enabled": False,
-        "host": "127.0.0.1",
-        "port": 4318,
-        "protocol": "http",
-        "random_sampling": True,
-    },
 }
 
 DEFAULT_GUARDRAIL_CONFIG: dict = {
@@ -210,7 +200,6 @@ def policies_spec_from_config(config: dict) -> PoliciesSpec:
         timeout=TimeoutPolicySpec(*timeout_values) if any(timeout_values) else None,
         retry=_retry_spec(config.get("retry")),
         health=_health_spec(config.get("health")),
-        tracing=_tracing_spec(config.get("tracing")),
     )
 
 
@@ -242,38 +231,6 @@ def _health_spec(raw: object) -> HealthPolicySpec | None:
         consecutive_failures=int(raw.get("consecutive_failures", 1)),
         duration=str(raw.get("duration") or ""),
         restore_health=float(raw.get("restore_health") or 0),
-    )
-
-
-def _tracing_spec(raw: object) -> TracingPolicySpec | None:
-    """M5-a: opt-in AG OTLP/HTTP tracing; absent/disabled renders nothing."""
-    if not isinstance(raw, dict):
-        return None
-    enabled = raw.get("enabled")
-    if isinstance(enabled, str):
-        enabled = enabled.strip().lower() in ("true", "1", "yes", "on")
-    if not enabled:
-        return None
-    host = str(raw.get("host") or "").strip()
-    if not host:
-        raise ValueError("tracing.host 不能为空")
-    try:
-        port = int(raw.get("port", 4318))
-    except (TypeError, ValueError) as exc:
-        raise ValueError("tracing.port 必须是整数") from exc
-    if not 1 <= port <= 65535:
-        raise ValueError("tracing.port 必须在 1..65535")
-    protocol = str(raw.get("protocol") or "http").strip().lower()
-    if protocol != "http":
-        raise ValueError("AG 1.7 OTLP 接收器只支持 http（OTLP/HTTP）")
-    sampling = raw.get("random_sampling", True)
-    if isinstance(sampling, str):
-        sampling = sampling.strip().lower() not in ("false", "0", "no", "off")
-    return TracingPolicySpec(
-        host=host,
-        port=port,
-        protocol=protocol,
-        random_sampling=bool(sampling),
     )
 
 
@@ -425,7 +382,7 @@ def policy_capabilities(adapter: DataPlaneAdapter | None) -> dict:
         "transformations": capability(adapter, "policies.transformations.conditional"),
         "retry": capability(adapter, "policies.retry"),
         "health": capability(adapter, "policies.health"),
-        "tracing": capability(adapter, "frontendPolicies.tracing"),
+        "request_attempts": capability(adapter, "observe.request_attempts"),
         "guardrails_regex": capability(adapter, "policies.guardrails.regex"),
         "guardrails_webhook": capability(adapter, "policies.guardrails.webhook"),
     }
@@ -512,21 +469,6 @@ def policy_effective(config: dict) -> dict:
             }
             if spec.health
             else None
-        ),
-        "tracing": (
-            {
-                "enabled": True,
-                "endpoint": f"{spec.tracing.host}:{spec.tracing.port}",
-                "protocol": spec.tracing.protocol,
-                "random_sampling": spec.tracing.random_sampling,
-            }
-            if spec.tracing
-            else {
-                "enabled": False,
-                "endpoint": "",
-                "protocol": "",
-                "random_sampling": False,
-            }
         ),
     }
 

@@ -304,33 +304,34 @@ class GatewayUsageEventORM(Base):
     ingested_at_ms: Mapped[int] = mapped_column(BigInteger, default=0)
 
 
-class TraceSpanORM(Base):
-    """One received OTLP span (M5-a): the routing-chain fact table.
+class RequestAttemptORM(Base):
+    """One upstream attempt of a client request (ADR-028, W5-W1.7).
 
-    AG 1.7 emits one server root span per request and one client span per upstream
-    attempt; attempt order is recovered by sorting client spans on start_ms (E19:
-    no explicit attempt ordinal exists). (trace_id, span_id) is the primary key so
-    an OTLP export retry cannot duplicate a span without dropping a same-id span
-    from another trace. attributes_json keeps only the decoder's whitelist
-    subset (http/gen_ai/retry/duration keys).
+    The control plane owns the fact shape, not the collection mechanism: adapters
+    normalize their telemetry into :class:`RequestAttempt` and write it here.
+    `correlation_key` is the request-log join key (AG: request_logs.trace_id);
+    `attempt_no` is 1-based execution order. Composite primary key makes an
+    exporter retry idempotent without assuming the adapater can provide a span id.
+    No trace/span/parent/attributes columns exist on purpose.
     """
 
-    __tablename__ = "trace_spans"
-    __table_args__ = (Index("ix_trace_spans_trace_start", "trace_id", "start_ms"),)
+    __tablename__ = "request_attempts"
+    __table_args__ = (
+        Index("ix_request_attempts_correlation_start", "correlation_key", "started_at_ms"),
+    )
 
-    trace_id: Mapped[str] = mapped_column(String(64), primary_key=True, index=True)
-    span_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    parent_span_id: Mapped[str] = mapped_column(String(64), default="")
-    kind: Mapped[str] = mapped_column(String(16), default="")
-    http_path: Mapped[str] = mapped_column(String(512), default="")
-    http_status: Mapped[int] = mapped_column(Integer, default=0)
+    correlation_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    attempt_no: Mapped[int] = mapped_column(Integer, primary_key=True)
+    upstream_ref: Mapped[str] = mapped_column(String(255), default="")
+    model: Mapped[str] = mapped_column(String(255), default="")
+    status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error_type: Mapped[str] = mapped_column(String(64), default="")
-    retry_attempt: Mapped[int] = mapped_column(Integer, default=0)
-    start_ms: Mapped[int] = mapped_column(BigInteger, default=0)
-    end_ms: Mapped[int] = mapped_column(BigInteger, default=0)
+    error_message: Mapped[str] = mapped_column(Text, default="")
+    started_at_ms: Mapped[int] = mapped_column(BigInteger, default=0)
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)
-    attributes_json: Mapped[str] = mapped_column(Text, default="{}")
-    ingested_at_ms: Mapped[int] = mapped_column(BigInteger, default=0)
+    outcome: Mapped[str] = mapped_column(String(16), default="")
+    adapter_id: Mapped[str] = mapped_column(String(32), default="")
+    recorded_at_ms: Mapped[int] = mapped_column(BigInteger, default=0)
 
 
 class UpstreamPriceORM(Base):

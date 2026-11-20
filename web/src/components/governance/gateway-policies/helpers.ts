@@ -70,17 +70,6 @@ export function policyDraftProblem(config: PolicyConfig | null): string | null {
       return "健康驱逐：restore_health 必须是 >= 0 的整数。";
     }
   }
-  // M5-a：只在启用时校验接收地址，关闭时后端整段不渲染。
-  const tracing = config.tracing;
-  if (tracing && tracing.enabled) {
-    if (typeof tracing.host !== "string" || tracing.host.trim() === "") {
-      return "链路追踪：OTLP 接收地址 host 不能为空。";
-    }
-    if (!Number.isInteger(tracing.port) || tracing.port < 1 || tracing.port > 65535) {
-      return "链路追踪：OTLP 接收端口必须是 1-65535 的整数。";
-    }
-    if (tracing.protocol !== "http") return "链路追踪：AG 1.7 只支持 OTLP/HTTP 协议。";
-  }
   return null;
 }
 
@@ -98,8 +87,8 @@ export function jsonEqual(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-/** 流量策略的「修改 N 处」：按顶层配置组计数（cors/鉴权/限流/超时/改写/重试/健康/链路追踪）。 */
-const POLICY_GROUP_KEYS = ["cors", "api_key", "local_rate_limit", "timeout", "transformations", "retry", "health", "tracing"] as const;
+/** 流量策略的「修改 N 处」：按顶层配置组计数（cors/鉴权/限流/超时/改写/重试/健康）。 */
+const POLICY_GROUP_KEYS = ["cors", "api_key", "local_rate_limit", "timeout", "transformations", "retry", "health"] as const;
 
 export function countDirtyPolicies(base: PolicyConfig, draft: PolicyConfig | null): number {
   if (draft === null) return 0;

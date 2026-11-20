@@ -2,8 +2,8 @@
 
 ADR-010 (DECISIONS.md) forbids l06_api from importing l07_jobs, so the job
 wiring lives here, at the top of the dependency graph: l06 builds the app, l07
-starts the runner, and this module composes them. M5-a adds the resident OTLP
-trace receiver on its own port; its bind failure is a warning, never a crash.
+starts the runner, and this module composes them. ADR-028 adds the adapter-owned
+telemetry intake; a bind failure is a warning, never a crash.
 This file is not a numbered layer (no lXX_ prefix), so the downward-import lint
 leaves it alone.
 
@@ -19,8 +19,9 @@ from fastapi import FastAPI
 from sqlalchemy.orm import sessionmaker
 
 from l01_core.settings import get_settings
+from l03_adapters.registry import start_telemetry
+from l05_service.attempts import build_attempt_sink
 from l06_api.app import create_app as build_api_app
-from l06_api.trace_receiver import wire_trace_receiver
 from l07_jobs.wiring import start_runner
 
 
@@ -36,7 +37,8 @@ def create_app(
     if jobs is not None:
         settings = settings.model_copy(update={"jobs_enabled": jobs})
     start_runner(app, app.state.session_factory, settings)
-    # M5-a: the OTLP receiver is a resident passive service on its own port.
-    # A bind failure logs a warning and leaves the control plane serving.
-    wire_trace_receiver(app, app.state.session_factory, settings)
+    # ADR-028: the selected adapter owns its telemetry intake; the composition
+    # root only supplies the normalized-attempt sink. A bind failure degrades to
+    # a warning and never stops the control plane.
+    start_telemetry(app, build_attempt_sink(app.state.session_factory), settings)
     return app

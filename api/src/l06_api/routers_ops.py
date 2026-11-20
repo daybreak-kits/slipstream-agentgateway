@@ -25,14 +25,17 @@ from l04_repo.orm import (
     GatewayUsageEventORM,
     ModelTargetORM,
     PublicModelORM,
+    RequestAttemptORM,
     UpstreamModelORM,
+    UpstreamORM,
     UserORM,
 )
 from l04_repo.repository import get_setting, put_setting
 from l05_service import auth, client_keys
+from l05_service.attempts import attempts_for_event
 from l06_api import field_filter
 from l06_api.deps import page_params, require, session_of
-from l06_api.schemas import PlaygroundRequest
+from l06_api.schemas import LogAttemptOut, LogAttemptsOut, PlaygroundRequest
 
 router = APIRouter(tags=["ops"])
 
@@ -580,6 +583,19 @@ def _model_reference_maps(session: Session):
     return upstream_ids_by_name, public_ids_by_name, priorities
 
 
+def _attempt_counts(session: Session, correlation_keys: list[str]) -> dict[str, int]:
+    """Count normalized attempts for a page in one grouped query."""
+    keys = [key for key in correlation_keys if key]
+    if not keys:
+        return {}
+    rows = session.execute(
+        select(RequestAttemptORM.correlation_key, func.count())
+        .where(RequestAttemptORM.correlation_key.in_(keys))
+        .group_by(RequestAttemptORM.correlation_key)
+    ).all()
+    return {key: int(count) for key, count in rows}
+
+
 def _log_page_items(
     session: Session,
     rows: list[GatewayUsageEventORM],
@@ -608,6 +624,7 @@ def _log_page_items(
     if identities is None:
         identities = _identity_tables_for_rows(session, rows)
     upstream_ids_by_name, public_ids_by_name, priorities = _model_reference_maps(session)
+    attempt_counts = _attempt_counts(session, [row.trace_id for row in rows])
     items = []
     for row in rows:
         public_id = public_ids_by_name.get(row.public_model, "")
@@ -626,6 +643,7 @@ def _log_page_items(
                 cost_micro=cost.amount_micro if cost else None,
                 charge_micro=charge.amount_micro if charge else None,
                 currency=(charge.currency if charge else (cost.currency if cost else "")),
+                attempts_count=attempt_counts.get(row.trace_id or "", 0),
             )
         )
     return items
@@ -668,6 +686,7 @@ def _log_item(
     cost_micro: int | None,
     charge_micro: int | None,
     currency: str,
+    attempts_count: int = 0,
 ) -> dict:
     """One record as the UI consumes it; the drawer reuses this exact shape."""
     user_id, user_name, api_key_label = identity
@@ -708,6 +727,8 @@ def _log_item(
         "has_error": bool(error),
         "has_payload": bool(raw.get("has_payload")),
         "error": error,
+        "attempts_count": attempts_count,
+        "has_attempts": attempts_count > 0,
         "cost_micro": cost_micro,
         "margin_micro": margin,
         "charge_micro": charge_micro,
@@ -792,6 +813,54 @@ def search_logs(
     next_offset = off + limit if off + limit < total else None
     return {"total": total, "items": items, "next_offset": next_offset}
 
+
+
+@router.get("/admin/logs/{event_id}/attempts", response_model=LogAttemptsOut)
+def log_attempts(
+    event_id: str,
+    session: Session = Depends(session_of),
+    principal: auth.Principal = Depends(require("logs:read")),
+) -> LogAttemptsOut:
+    """Normalized upstream attempts for one request log (ADR-028).
+
+    Empty attempts are a normal answer (old log or adapter without telemetry);
+    only a missing log row is 404. Upstream names are resolved here so the
+    adapter-specific upstream_ref never leaks into the console's display logic.
+    """
+    resolved = attempts_for_event(session, event_id)
+    if resolved is None:
+        raise AppError(ErrorCode.NOT_FOUND, f"log entry not found: {event_id}")
+    trace_id, rows = resolved
+    upstream_ids = {row.upstream_ref for row in rows if row.upstream_ref}
+    names = (
+        {
+            upstream.id: upstream.name
+            for upstream in session.scalars(
+                select(UpstreamORM).where(UpstreamORM.id.in_(upstream_ids))
+            )
+        }
+        if upstream_ids
+        else {}
+    )
+    return LogAttemptsOut(
+        event_id=event_id,
+        trace_id=trace_id,
+        attempts=[
+            LogAttemptOut(
+                attempt=row.attempt_no,
+                upstream_ref=row.upstream_ref or "",
+                upstream_name=names.get(row.upstream_ref, ""),
+                model=row.model or "",
+                status_code=row.status_code,
+                error_type=row.error_type or "",
+                error_message=row.error_message or "",
+                duration_ms=row.duration_ms,
+                outcome=row.outcome or "",
+                started_at_ms=row.started_at_ms,
+            )
+            for row in rows
+        ],
+    )
 
 @router.get("/admin/logs/{event_id}")
 def log_detail(

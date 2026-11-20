@@ -1,5 +1,8 @@
 # M5-a 路由链后端：OTLP 接收器 + span 存储 + 查询端点 + tracing 渲染
 
+> **已被 ADR-028 取代（2026-11-20）**：追踪实现收归 AG 适配器，系统不再有 OTLP 接收器、`trace_spans` 表、`/admin/traces/{trace_id}` 与系统级 tracing 配置；本票保留为历史设计记录。现行契约见 `docs/DECISIONS.md` ADR-028、`docs/contracts/adapter-spi.md` §2.2、`docs/api-contract.md` `/admin/logs/{event_id}/attempts`。
+
+
 依据：E19（docs/experiments/P0-RESULTS.md §E19）已裁决 pinned AG 1.7.0 的路由链数据源 = OTel Traces。本票实现后端全链路；M5-b（前端路由链展示+策略页开关 UI）在本票合入后另行派发。
 
 ## 已钉死的事实（E19 实测，不要凭文档推翻）

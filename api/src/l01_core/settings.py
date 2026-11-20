@@ -37,11 +37,6 @@ class Settings(BaseSettings):
     ag_config_filename: str = "config.yaml"
     ag_llm_port: int = 3600
     ag_db_path: str | None = None
-    # M5-a: resident OTLP/HTTP trace receiver (AG only exports while
-    # frontendPolicies.tracing is enabled). Same-host default keeps the
-    # exporter endpoint private; binding failure degrades to a warning.
-    trace_otlp_host: str = "127.0.0.1"
-    trace_otlp_port: int = 4318
     # Official binary used for the pre-apply --validate-only gate: unset
     # auto-detects the pinned path, "" disables the gate (recorded on apply).
     ag_binary: str | None = None

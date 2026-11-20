@@ -10,7 +10,7 @@ import type {
   PoliciesResponse, PolicyConfig,
 } from "./policies";
 import type { RoleDefinition } from "./roles";
-import type { TraceDetailOut } from "@/generated/contract";
+import type { LogAttemptsOut } from "@/generated/contract";
 
 /**
  * Mock 数据开关：只有显式设置 VITE_MOCK=1 才启用（默认关闭，全部走真实 /admin 接口）。
@@ -171,6 +171,8 @@ interface MockLogRow {
   cache_write_tokens: number;
   cache_ratio: number | null;
   throughput_tps: number | null;
+  attempts_count: number;
+  has_attempts: boolean;
   is_stream: boolean;
   has_error: boolean;
   has_payload: boolean;
@@ -218,6 +220,8 @@ const mockLogs: MockLogRow[] = Array.from({ length: 36 }, (_, i) => {
   return {
     event_id: "mev_" + String(1000 + i),
     trace_id,
+    attempts_count: trace_id === "tr_m5b_three" ? 3 : trace_id ? 2 : 0,
+    has_attempts: trace_id.length > 0,
     started_at_ms,
     completed_at_ms: started_at_ms + duration_ms,
     duration_ms,
@@ -330,203 +334,82 @@ function queryMockLogs(params: URLSearchParams): { total: number; items: MockLog
 }
 
 /**
- * M5-b：日志详情路由链的两条演示 trace。
- * tr_m5b_retry：第 1 轮 500 红 → 第 2 轮 200 绿（跨 zai-01 → or-01）；
- * tr_m5b_three：第 1/2 轮 503/500 红 → 第 3 轮 200 绿。
+/**
+ * ADR-028：日志详情路由链的两条演示尝试链（按 trace_id 索引，路由再补 event_id）。
+ * tr_m5b_retry：第 1 轮 500 → 第 2 轮 200（跨 zai-01 → or-01）；
+ * tr_m5b_three：第 1/2 轮 503/500 → 第 3 轮 200。
  */
 const MOCK_TRACE_BASE_MS = Date.parse("2026-11-17T01:04:59");
-const mockTraces: Record<string, TraceDetailOut> = {
+const mockAttempts: Record<string, LogAttemptsOut> = {
   tr_m5b_retry: {
+    event_id: "",
     trace_id: "tr_m5b_retry",
-    spans: [
-      {
-        trace_id: "tr_m5b_retry",
-        span_id: "sp_root_retry",
-        parent_span_id: "",
-        kind: "server",
-        http_path: "/v1/chat/completions",
-        http_status: 200,
-        error_type: "",
-        retry_attempt: 1,
-        start_ms: MOCK_TRACE_BASE_MS,
-        end_ms: MOCK_TRACE_BASE_MS + 212,
-        duration_ms: 212,
-        attributes: {
-          "http.response.status_code": 200,
-          "retry.attempt": 1,
-          "gen_ai.request.model": "glm-5.3",
-          "gen_ai.provider.name": "openai",
-          "gen_ai.usage.input_tokens": 1420,
-          "gen_ai.usage.output_tokens": 264,
-        },
-      },
-      {
-        trace_id: "tr_m5b_retry",
-        span_id: "sp_retry_1",
-        parent_span_id: "sp_root_retry",
-        kind: "client",
-        http_path: "/api/paas/v4/chat/completions",
-        http_status: 500,
-        error_type: "500",
-        retry_attempt: null,
-        start_ms: MOCK_TRACE_BASE_MS + 12,
-        end_ms: MOCK_TRACE_BASE_MS + 72,
-        duration_ms: 60,
-        attributes: {
-          "http.status": 500,
-          "error.type": "500",
-          "agentgateway.outbound.kind": "Primary",
-          "agentgateway.outbound.subtype": "Llm",
-        },
-      },
-      {
-        trace_id: "tr_m5b_retry",
-        span_id: "sp_retry_2",
-        parent_span_id: "sp_root_retry",
-        kind: "client",
-        http_path: "/api/v1/chat/completions",
-        http_status: 200,
-        error_type: "",
-        retry_attempt: null,
-        start_ms: MOCK_TRACE_BASE_MS + 85,
-        end_ms: MOCK_TRACE_BASE_MS + 170,
-        duration_ms: 85,
-        attributes: {
-          "http.status": 200,
-          "agentgateway.outbound.kind": "Primary",
-          "agentgateway.outbound.subtype": "Llm",
-        },
-      },
-    ],
     attempts: [
       {
         attempt: 1,
-        span_id: "sp_retry_1",
-        http_path: "/api/paas/v4/chat/completions",
-        http_status: 500,
+        upstream_ref: "ups_zai",
+        upstream_name: "zai-01",
+        model: "glm-5.3",
+        status_code: 500,
         error_type: "500",
+        error_message: "upstream returned 500",
         duration_ms: 60,
-        start_ms: MOCK_TRACE_BASE_MS + 12,
+        outcome: "error",
+        started_at_ms: MOCK_TRACE_BASE_MS + 12,
       },
       {
         attempt: 2,
-        span_id: "sp_retry_2",
-        http_path: "/api/v1/chat/completions",
-        http_status: 200,
+        upstream_ref: "ups_or",
+        upstream_name: "or-01",
+        model: "glm-5.3",
+        status_code: 200,
         error_type: "",
+        error_message: "",
         duration_ms: 85,
-        start_ms: MOCK_TRACE_BASE_MS + 85,
+        outcome: "ok",
+        started_at_ms: MOCK_TRACE_BASE_MS + 85,
       },
     ],
   },
   tr_m5b_three: {
+    event_id: "",
     trace_id: "tr_m5b_three",
-    spans: [
-      {
-        trace_id: "tr_m5b_three",
-        span_id: "sp_root_three",
-        parent_span_id: "",
-        kind: "server",
-        http_path: "/v1/chat/completions",
-        http_status: 200,
-        error_type: "",
-        retry_attempt: 2,
-        start_ms: MOCK_TRACE_BASE_MS + 3_600_000,
-        end_ms: MOCK_TRACE_BASE_MS + 3_600_300,
-        duration_ms: 300,
-        attributes: {
-          "http.response.status_code": 200,
-          "retry.attempt": 2,
-          "gen_ai.request.model": "glm-flash",
-          "gen_ai.provider.name": "openai",
-          "gen_ai.usage.input_tokens": 980,
-          "gen_ai.usage.output_tokens": 166,
-        },
-      },
-      {
-        trace_id: "tr_m5b_three",
-        span_id: "sp_three_1",
-        parent_span_id: "sp_root_three",
-        kind: "client",
-        http_path: "/api/paas/v4/chat/completions",
-        http_status: 503,
-        error_type: "503",
-        retry_attempt: null,
-        start_ms: MOCK_TRACE_BASE_MS + 3_600_010,
-        end_ms: MOCK_TRACE_BASE_MS + 3_600_058,
-        duration_ms: 48,
-        attributes: {
-          "http.status": 503,
-          "error.type": "503",
-          "agentgateway.outbound.kind": "Primary",
-          "agentgateway.outbound.subtype": "Llm",
-        },
-      },
-      {
-        trace_id: "tr_m5b_three",
-        span_id: "sp_three_2",
-        parent_span_id: "sp_root_three",
-        kind: "client",
-        http_path: "/api/paas/v4/chat/completions",
-        http_status: 500,
-        error_type: "500",
-        retry_attempt: null,
-        start_ms: MOCK_TRACE_BASE_MS + 3_600_070,
-        end_ms: MOCK_TRACE_BASE_MS + 3_600_122,
-        duration_ms: 52,
-        attributes: {
-          "http.status": 500,
-          "error.type": "500",
-          "agentgateway.outbound.kind": "Primary",
-          "agentgateway.outbound.subtype": "Llm",
-        },
-      },
-      {
-        trace_id: "tr_m5b_three",
-        span_id: "sp_three_3",
-        parent_span_id: "sp_root_three",
-        kind: "client",
-        http_path: "/api/v1/chat/completions",
-        http_status: 200,
-        error_type: "",
-        retry_attempt: null,
-        start_ms: MOCK_TRACE_BASE_MS + 3_600_135,
-        end_ms: MOCK_TRACE_BASE_MS + 3_600_275,
-        duration_ms: 140,
-        attributes: {
-          "http.status": 200,
-          "agentgateway.outbound.kind": "Primary",
-          "agentgateway.outbound.subtype": "Llm",
-        },
-      },
-    ],
     attempts: [
       {
         attempt: 1,
-        span_id: "sp_three_1",
-        http_path: "/api/paas/v4/chat/completions",
-        http_status: 503,
+        upstream_ref: "ups_zai",
+        upstream_name: "zai-01",
+        model: "glm-flash",
+        status_code: 503,
         error_type: "503",
+        error_message: "upstream unavailable",
         duration_ms: 48,
-        start_ms: MOCK_TRACE_BASE_MS + 3_600_010,
+        outcome: "error",
+        started_at_ms: MOCK_TRACE_BASE_MS + 3_600_010,
       },
       {
         attempt: 2,
-        span_id: "sp_three_2",
-        http_path: "/api/paas/v4/chat/completions",
-        http_status: 500,
+        upstream_ref: "ups_zai",
+        upstream_name: "zai-01",
+        model: "glm-flash",
+        status_code: 500,
         error_type: "500",
+        error_message: "upstream returned 500",
         duration_ms: 52,
-        start_ms: MOCK_TRACE_BASE_MS + 3_600_070,
+        outcome: "error",
+        started_at_ms: MOCK_TRACE_BASE_MS + 3_600_070,
       },
       {
         attempt: 3,
-        span_id: "sp_three_3",
-        http_path: "/api/v1/chat/completions",
-        http_status: 200,
+        upstream_ref: "ups_or",
+        upstream_name: "or-01",
+        model: "glm-flash",
+        status_code: 200,
         error_type: "",
+        error_message: "",
         duration_ms: 140,
-        start_ms: MOCK_TRACE_BASE_MS + 3_600_135,
+        outcome: "ok",
+        started_at_ms: MOCK_TRACE_BASE_MS + 3_600_135,
       },
     ],
   },
@@ -640,13 +523,6 @@ const DEFAULT_POLICY_CONFIG: PolicyConfig = {
   },
   retry: null,
   health: null,
-  tracing: {
-    enabled: false,
-    host: "127.0.0.1",
-    port: 4318,
-    protocol: "http",
-    random_sampling: true,
-  },
 };
 
 /** 演示存储文档：与默认略有差异（CORS 开 + 超时已配），让只读视图与编辑草稿都有内容可改。 */
@@ -674,7 +550,7 @@ const AG_POLICY_CAPABILITIES: PoliciesResponse["capabilities"] = {
   transformations: { supported: true, verified: true, since_version: "1.7.0", note: "仅全局 llm.policies.transformations 支持 conditional" },
   retry: { supported: true, verified: true, since_version: "1.7.0", note: "渲染为顶层 policies[]（target route internal/llm:request）；llm.policies 仍拒绝 retry（E16/E17）" },
   health: { supported: true, verified: true, since_version: "1.7.0", note: "逐模型 llm.models[].health（unhealthyExpression + eviction）；retry codes 含 4xx 时必须成对（E16/E17）" },
-  tracing: { supported: true, verified: true, since_version: "1.7.0", note: "frontendPolicies.tracing {host,protocol:http,randomSampling:\"true\"} → OTLP/HTTP /v1/traces；每请求 1 server 根 span + 每次上游尝试 1 client span（E19），顶层 tracing 键被 1.7 拒绝" },
+  request_attempts: { supported: true, verified: true, since_version: "1.7.0", note: "AG 适配器内部 OTLP 采集每次上游尝试，归一化为 RequestAttempt；系统只存尝试事实，不接触 OTLP（ADR-028）" },
   guardrails_regex: { supported: true, verified: true, since_version: "1.7.0", note: "llm.policies.guardrails（regex mask/reject/audit + 内置敏感信息规则）" },
   guardrails_webhook: { supported: true, verified: true, since_version: "1.7.0", note: "webhook 护栏仅 reject/audit，target 只能 host（无路径），不支持 scope" },
 };
@@ -687,7 +563,6 @@ const POLICY_NOTES: Record<string, string> = {
   timeout: "humantime 字符串（如 60s/500ms）；留空表示不渲染该字段",
   retry: "请求内重试渲染为顶层 policies[]（target route internal/llm:request），attempts 为首次之后的尝试次数（>=2 才能跨层 failover）；codes 含 4xx 时必须同时配置 health（unhealthy_expression + consecutive_failures）",
   health: "逐模型健康标记与驱逐（llm.models[].health）；表达式单独配置不会驱逐主层（E16/E17），必须带 consecutive_failures >= 1",
-  tracing: "M5-a 链路追踪：启用后渲染 frontendPolicies.tracing，AG 把每次上游尝试作为 OTLP/HTTP span 导出到控制面接收器（默认 127.0.0.1:4318）；random_sampling 必须为开才产 span（AG 默认 false，E19）",
   transformations: "默认响应头删除按 ADR-010 追加在用户规则之后；保护头仅控制面记录",
   guardrails_webhook: "webhook 护栏仅 reject/audit，target 只能是 host（无路径），不支持 scope",
   mcp_http: "pinned AG 1.7 拒绝 http 变体；只支持 sse/stdio，http 会在保存时被 422 拒绝",
@@ -735,14 +610,6 @@ function policyEffective(config: PolicyConfig): PoliciesResponse["effective"] {
     },
     retry: config.retry ? { attempts: config.retry.attempts, codes: [...config.retry.codes], backoff: config.retry.backoff } : null,
     health: config.health ? { ...config.health } : null,
-    tracing: config.tracing.enabled
-      ? {
-          enabled: true,
-          endpoint: config.tracing.host + ":" + config.tracing.port,
-          protocol: config.tracing.protocol,
-          random_sampling: config.tracing.random_sampling,
-        }
-      : { enabled: false, endpoint: "", protocol: "", random_sampling: false },
   };
 }
 
@@ -1738,7 +1605,7 @@ export async function mockRequest<T>(path: string, init?: RequestInit): Promise<
   if (init?.method === "GET" && routePath === "/admin/logs") {
     return queryMockLogs(new URLSearchParams(path.split("?")[1] ?? "")) as T;
   }
-  // —— M5-b：日志详情 + 路由链（GET /admin/logs/{id} 与 /admin/traces/{trace_id}） ——
+  // —— ADR-028：日志详情 + 路由链（GET /admin/logs/{id} 与 /admin/logs/{id}/attempts） ——
   if (init?.method === "GET" && /^\/admin\/logs\/[^/]+$/.test(routePath)) {
     const eventId = routePath.split("/")[3] ?? "";
     const row = mockLogs.find((item) => item.event_id === eventId);
@@ -1758,11 +1625,13 @@ export async function mockRequest<T>(path: string, init?: RequestInit): Promise<
     }
     return { ...structuredClone(row), raw_json: JSON.stringify(raw) } as T;
   }
-  if (init?.method === "GET" && /^\/admin\/traces\/[^/]+$/.test(routePath)) {
-    const traceId = decodeURIComponent(routePath.split("/")[3] ?? "");
-    const detail = mockTraces[traceId];
-    if (!detail) throw new Error("trace not found: " + traceId);
-    return structuredClone(detail) as T;
+  if (init?.method === "GET" && /^\/admin\/logs\/[^/]+\/attempts$/.test(routePath)) {
+    const eventId = decodeURIComponent(routePath.split("/")[3] ?? "");
+    const row = mockLogs.find((item) => item.event_id === eventId);
+    if (!row) throw new Error("日志不存在：" + eventId);
+    const detail = mockAttempts[row.trace_id];
+    if (!detail) return { event_id: eventId, trace_id: "", attempts: [] } as T;
+    return { ...structuredClone(detail), event_id: eventId } as T;
   }
 
   // —— 批量操作：上游/公开模型 enable/disable/delete（契约 3.3） ——

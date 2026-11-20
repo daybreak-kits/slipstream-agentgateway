@@ -256,12 +256,11 @@ class AgentgatewayAdapter:
                     verified=True,
                 ),
                 Capability(
-                    "frontendPolicies.tracing",
+                    "observe.request_attempts",
                     True,
                     "1.7.0",
-                    "frontendPolicies.tracing {host,protocol:http,randomSampling:\"true\"} "
-                    "→ OTLP/HTTP /v1/traces；每请求 1 server 根 span + 每次上游尝试 1 "
-                    "client span（E19），顶层 tracing 键被 1.7 拒绝",
+                    "适配器内部 OTLP 采集每次上游尝试（1 server 根 span + N client "
+                    "span，E19），归一化为 RequestAttempt；系统只存尝试事实，不接触 OTLP",
                     verified=True,
                 ),
                 Capability(

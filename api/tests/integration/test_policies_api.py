@@ -33,6 +33,10 @@ def test_policies_get_exposes_editable_config_and_capabilities(client):
     # reopens; health marks + eviction are per-model configurable.
     assert body["capabilities"]["retry"]["supported"] is True
     assert body["capabilities"]["health"]["supported"] is True
+    # ADR-028: attempt-chain observation is an adapter capability, not a policy.
+    assert body["capabilities"]["request_attempts"]["supported"] is True
+    assert body["capabilities"]["request_attempts"]["verified"] is True
+    assert "tracing" not in body["effective"]
     # Default-off semantic: absent blocks mean the current behavior.
     assert body["effective"]["retry"] is None
     assert body["effective"]["health"] is None
@@ -117,62 +121,6 @@ def test_put_policies_rejects_out_of_range_retry_codes(client):
     )
     assert response.status_code == 422
     assert "retry" in response.text
-
-
-# ── M5-a 链路追踪策略 ──────────────────────────────────────────────────────
-
-
-def test_policies_expose_tracing_default_off(client):
-    body = client.get("/admin/policies").json()
-    assert body["config"]["tracing"] == {
-        "enabled": False,
-        "host": "127.0.0.1",
-        "port": 4318,
-        "protocol": "http",
-        "random_sampling": True,
-    }
-    assert body["effective"]["tracing"] == {
-        "enabled": False,
-        "endpoint": "",
-        "protocol": "",
-        "random_sampling": False,
-    }
-    assert body["capabilities"]["tracing"]["supported"] is True
-    assert body["capabilities"]["tracing"]["verified"] is True
-
-
-def test_put_policies_persists_enabled_tracing_and_dry_run_passes(client):
-    tracing = {
-        "enabled": True,
-        "host": "127.0.0.1",
-        "port": 4318,
-        "protocol": "http",
-        "random_sampling": False,
-    }
-    response = client.put("/admin/policies", json=_policy_body(tracing=tracing))
-    assert response.status_code == 200, response.text
-    body = response.json()
-    assert body["config"]["tracing"] == tracing
-    assert body["effective"]["tracing"] == {
-        "enabled": True,
-        "endpoint": "127.0.0.1:4318",
-        "protocol": "http",
-        "random_sampling": False,
-    }
-    assert client.get("/admin/policies").json()["config"]["tracing"] == tracing
-
-
-def test_put_policies_rejects_invalid_tracing_endpoint(client):
-    response = client.put(
-        "/admin/policies",
-        json=_policy_body(tracing={"enabled": True, "host": "", "port": 0}),
-    )
-    assert response.status_code == 422, response.text
-    response = client.put(
-        "/admin/policies",
-        json=_policy_body(tracing={"enabled": True, "protocol": "grpc"}),
-    )
-    assert response.status_code == 422, response.text
 
 
 def test_put_policies_rejects_invalid_timeout(client):

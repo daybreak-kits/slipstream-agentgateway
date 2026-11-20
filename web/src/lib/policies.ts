@@ -1,5 +1,3 @@
-import type { TracingConfig } from "@/generated/contract";
-
 import { api } from "./api";
 
 /** Response shapes of the editable policy/guardrail/MCP endpoints (ticket 11). */
@@ -45,8 +43,6 @@ export interface PolicyConfig {
     condition: string;
   } | null;
   health: HealthConfig | null;
-  /** M5-a：生成契约里的 tracing 形状（GET /admin/policies 总会补齐默认值）。 */
-  tracing: Required<TracingConfig>;
 }
 
 /** ADR-024 per-model health marks + eviction (llm.models[].health). */
@@ -100,16 +96,10 @@ export interface PoliciesResponse {
       duration: string;
       restore_health: number;
     } | null;
-    tracing: {
-      enabled: boolean;
-      endpoint: string;
-      protocol: string;
-      random_sampling: boolean;
-    };
   };
   counts: PolicyCounts;
   capabilities: Record<
-    "cors" | "api_key" | "local_rate_limit" | "timeout" | "transformations" | "retry" | "health" | "tracing" | "guardrails_regex" | "guardrails_webhook",
+    "cors" | "api_key" | "local_rate_limit" | "timeout" | "transformations" | "retry" | "health" | "request_attempts" | "guardrails_regex" | "guardrails_webhook",
     CapabilityInfo
   >;
   notes: Record<string, string>;

@@ -53,6 +53,7 @@ from l02_domain.ir import (
     TransformsSpec,
     sort_targets,
 )
+from l03_adapters.agentgateway import telemetry
 from l03_adapters.agentgateway.transforms import compile_transforms
 from l03_adapters.spi import Artifact, make_artifact
 from l03_adapters.yaml_dumps import to_yaml
@@ -502,29 +503,23 @@ def _render_access_log(ir: GatewayIR) -> tuple[dict, dict]:
     return config_block, frontend
 
 
-def _render_tracing(ir: GatewayIR) -> dict:
-    """M5-a: frontendPolicies.tracing in the E19-verified AG 1.7 shape.
+def _render_tracing() -> dict:
+    """Adapter-private OTLP export, emitted only while the adapter receiver runs.
 
-    The mount point is frontendPolicies (a top-level `tracing` key is the xDS
-    control-plane root and is rejected by the standalone binary). host+port are
-    one exporter endpoint; randomSampling must be the STRING "true" - AG 1.7
-    defaults to false and silently emits no spans otherwise (E19).
+    ADR-028: tracing is not a control-plane policy. The agentgateway adapter owns
+    both ends of its own telemetry pipe, so the system only stores normalized
+    RequestAttempt facts. E19 pinned the shape: frontendPolicies.tracing, one
+    host:port endpoint, OTLP/HTTP, fixed path, and randomSampling as the STRING
+    "true" (AG 1.7 defaults to false and silently emits no spans otherwise).
     """
-    tracing = ir.policies.tracing
-    if tracing is None:
+    if not telemetry.export_enabled():
         return {}
-    host = tracing.host.strip()
-    if not host:
-        raise ValueError("frontendPolicies.tracing.host 不能为空")
-    if not 1 <= int(tracing.port) <= 65535:
-        raise ValueError("frontendPolicies.tracing.port 必须在 1..65535")
-    if tracing.protocol.lower() != "http":
-        raise ValueError("AG 1.7 的 tracing exporter 只支持 http（OTLP/HTTP）")
     return {
         "tracing": {
-            "host": f"{host}:{int(tracing.port)}",
+            "host": f"{telemetry.TRACE_HOST}:{telemetry.trace_port()}",
             "protocol": "http",
-            "randomSampling": "true" if tracing.random_sampling else "false",
+            "path": telemetry.TRACE_PATH,
+            "randomSampling": "true",
         }
     }
 
@@ -565,6 +560,7 @@ def render_config(ir: GatewayIR, llm_port: int) -> dict:
     for upstream in ir.upstreams:
         providers.append(_render_provider(upstream))
         upstream_by_id[upstream.id] = upstream
+    telemetry.register_upstream_paths((u.id, u.base_url) for u in ir.upstreams)
     models: list[dict] = []
     for model in ir.models:
         upstream = upstream_by_id.get(model.upstream_id)
@@ -631,7 +627,7 @@ def render_config(ir: GatewayIR, llm_port: int) -> dict:
     if mcp is not None:
         config["mcp"] = mcp
     logging_block, frontend_policies = _render_access_log(ir)
-    frontend_policies.update(_render_tracing(ir))
+    frontend_policies.update(_render_tracing())
     if logging_block:
         config["config"] = logging_block
     if frontend_policies:

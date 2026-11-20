@@ -35,3 +35,20 @@ def create(name: str, **kwargs: Any) -> DataPlaneAdapter:
             )
     return factory(**kwargs)
 
+
+
+def start_telemetry(app: Any, sink: Any, settings: Any) -> Any:
+    """Start the selected adapter's optional telemetry intake on the app lifespan.
+
+    The composition root knows the adapter name but not its telemetry transport;
+    each driver owns its collection mechanism and returns a handle (or None).
+    """
+    name = getattr(settings, "data_plane_adapter", "")
+    if name == "agentgateway":
+        from l03_adapters.agentgateway.telemetry import wire_telemetry
+
+        return wire_telemetry(app, sink)
+    return None
+
+
+__all__ = ["create", "register", "start_telemetry"]

@@ -1,5 +1,8 @@
 # M5-b 路由链前端：策略页链路追踪卡 + 日志详情路由链展示
 
+> **已被 ADR-028 取代（2026-11-20）**：本票的策略页「链路追踪」卡已删除；日志详情路由链改读 `GET /admin/logs/{event_id}/attempts`（适配器归一化尝试），不再读 span 树。保留为历史设计记录。
+
+
 前置：M5-a 已合入（OTLP 接收器、trace_spans 表、GET /admin/traces/{trace_id}、GET /admin/logs/{event_id} 出参带 trace_id、tracing 策略配置与渲染、contract.ts 已含新形状）。本票只做 web/src；后端禁区。
 
 ## 范围

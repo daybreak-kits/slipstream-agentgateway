@@ -281,10 +281,9 @@
 | `transformations` | `default_response_header_deletes` + `protected_request_headers`；前者按 ADR-010 追加在用户规则之后 |
 | `retry` | 请求内重试（ADR-024）：`{attempts: 1-10, codes: [400-599], backoff: humantime}`；缺省 null=不启用（现行为）。渲染为顶层 `policies[]` 的 route 级 retry（target `internal/llm:request`），不写入 `llm.policies`（1.7 在该处拒绝 retry）。`attempts` 为首次之后的尝试次数，>=2 才可能跨层 failover |
 | `health` | 逐模型健康标记与驱逐（ADR-024）：`{unhealthy_expression: 非空, consecutive_failures: >=1, duration: humantime, restore_health: >=0}`；缺省 null=不启用。渲染为 `llm.models[].health`。**成对规则**：`retry.codes` 含任一 4xx（400-499）时必须同时给出 `health`（非空表达式 + consecutive_failures>=1），否则 422 `details.errors` 逐行说明（E16/E17：仅 codes 不会换组） |
-| `tracing` | 链路追踪（M5-a，E19）：`{enabled: bool 默认 false, host: "127.0.0.1", port: 4318, protocol: "http", random_sampling: bool 默认 true}`。启用后渲染 `frontendPolicies.tracing {host: "host:port", protocol: "http", randomSampling: "true"\|"false"}`，AG 向控制面常驻 OTLP/HTTP 接收器（默认 `127.0.0.1:4318`，`SLIPSTREAM_TRACE_OTLP_HOST/PORT`）`POST /v1/traces` 导出 span；`randomSampling` 必须是字符串，1.7 默认 false 时无 span。顶层 `tracing` 键会被 1.7 拒绝 |
 
 `effective` 是下发前的可读预览（含 key_auth 语义、令牌桶语义、routing 说明），`capabilities` 是适配器
-能力矩阵子集（`cors/api_key/local_rate_limit/timeout/transformations/retry/health/tracing/guardrails_regex/guardrails_webhook`）。
+能力矩阵子集（`cors/api_key/local_rate_limit/timeout/transformations/retry/health/guardrails_regex/guardrails_webhook`），另有适配器遥测能力 `request_attempts`（ADR-028，不在 `config` 中配置）。
 
 `GET /admin/guardrails` → `{config, defaults, adapter, items, capabilities:{regex,webhook}, note, updated_at_ms}`；
 写法同上。`config` = `{streaming: "Disabled"|"Enabled", request: Guard[], response: Guard[]}`，`Guard` 是
@@ -578,16 +577,17 @@ AES-GCM 密文 + sk-...abcd 掩码。
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | /admin/logs?query=&from_ms=&to_ms=&page_size=&offset=&sort=&order=&has_error= | 请求日志检索 → {total, items, next_offset}；query 支持 `model:x` / `upstream:x` / `user:x` / `key:x` / `status:200`（三位码）/ `status:4xx\|5xx\|2xx…`（区间）/ `latency>ms` / `latency<ms` / `ttft>ms` / `cache>pct` / `stream:true\|false` + 关键词；`user:` 匹配 **user_id 或用户名**（`key:` 已含 user_id），坏 token 一律 422；sort ∈ started_at（默认）/duration_ms/**total_tokens**/cost_micro/charge_micro（按钱排序需对应金额权限），order ∈ asc/desc（默认 desc），has_error=bool 过滤失败请求 |
-| GET | /admin/logs/{event_id}?include_payload= | 单条详情（payload 开关，正文经金额脱敏）；出参带 `trace_id`（AG 启用 tracing 后填充，M5-a） |
+| GET | /admin/logs/{event_id}?include_payload= | 单条详情（payload 开关，正文经金额脱敏）；出参带 `trace_id`（适配器遥测关联键，ADR-028） |
 | GET | /admin/logs/{event_id}/payload | ADR-021 正文读取：设置键 `ag_access_log_llm=full` 时 AG 把 prompt/补全正文落到 `request_log_payloads`，本端点只读取回（AG SQLite 只读连接 + schema 校验）；无该行或正文未存档 → 404；响应过 §0.5 金额脱敏 |
-| GET | /admin/traces/{trace_id} | 权限 `logs:read`。M5-a 路由链：`{trace_id, spans:[{trace_id, span_id, parent_span_id, kind: server\|client, http_path, http_status, error_type, retry_attempt, start_ms, end_ms, duration_ms, attributes}], attempts:[{attempt, span_id, http_path, http_status, error_type, duration_ms, start_ms}]}`。spans 按 `(start_ms, span_id)` 升序；attempts 由 client span 按开始时间复原（序号从 1 起，E19：AG 无显式尝试序号）。无 span → 404 `NOT_FOUND`（前端按无链路数据处理）。数据来源：控制面常驻 OTLP/HTTP 接收器（默认 `127.0.0.1:4318`，`POST /v1/traces`，body ≤8MB，无会话鉴权仅本机监听），AG 渲染 `frontendPolicies.tracing` 后导出；`request_logs.trace_id` 是 join 键 |
+| GET | /admin/logs/{event_id}/attempts | 权限 `logs:read`。路由链（ADR-028）：`{event_id, trace_id, attempts:[{attempt, upstream_ref, upstream_name, model, status_code, error_type, error_message, duration_ms, outcome, started_at_ms}]}`，attempts 按 attempt 升序（1 起）；无尝试记录或日志无 trace_id → 200 空列表；event 不存在 → 404 `NOT_FOUND`。数据来源：适配器遥测归一化的 `request_attempts` 表（AG 适配器内部 OTLP 采集，AttemptSink 写入），系统层不接触 OTel |
 
 列表/详情共用的行字段（**主键名是 `event_id`，不是 `id`**）：
 
 | 字段 | 说明 |
 |---|---|
 | event_id / started_at_ms / completed_at_ms | 标识与时间（completed_at_ms 由 AG 延迟字段随采集落库） |
-| trace_id | AG 启用 `frontendPolicies.tracing` 后的 OTel trace id（请求日志→`/admin/traces/{trace_id}` 的 join 键）；历史日志或未启用时为空串 |
+| trace_id | 适配器遥测关联键（ADR-028）；日志→`/admin/logs/{event_id}/attempts` 的 join 键。历史日志或适配器无遥测时为空串 |
+| attempts_count / has_attempts | 该请求归一化后的上游尝试次数；0/false 表示无路由链（ADR-028；仅列表出参，详情不重复） |
 | duration_ms / time_to_first_token_ms | 总耗时与首字延迟（AG 三延迟字段，ingest 时写入） |
 | http_status / public_model / upstream_model / provider | 请求与路由 |
 | upstream_model_id / target_priority | 上游模型行 id 与成员优先级 |

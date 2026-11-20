@@ -33,7 +33,6 @@ from l06_api.routers_policies import router as policies_router
 from l06_api.routers_pricing_io import router as pricing_io_router
 from l06_api.routers_reports import router as reports_router
 from l06_api.routers_roles import router as roles_router
-from l06_api.routers_traces import router as traces_router
 from l06_api.routers_upstreams import router as upstreams_router
 from l06_api.routers_usage import router as usage_router
 from l06_api.routers_vendors import router as vendors_router
@@ -59,7 +58,6 @@ ALL_ROUTERS = (
     config_router,
     meta_router,
     log_payload_router,
-    traces_router,
 )
 
 

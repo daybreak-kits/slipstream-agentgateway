@@ -31,7 +31,6 @@ from l02_domain.ir import (
     RewriteCondition,
     TargetSpec,
     TimeoutPolicySpec,
-    TracingPolicySpec,
     TransformsSpec,
     UpstreamModelSpec,
     UpstreamSpec,
@@ -170,9 +169,6 @@ def golden_ir() -> GatewayIR:
             # ADR-021 full mode: the golden fixture pins the payload-logging
             # blocks so --validate-only keeps accepting them across upgrades.
             access_log=AccessLogSpec(database_url="ag-data.db", llm="full"),
-            # M5-a: E19-verified frontendPolicies.tracing shape (top-level
-            # tracing is rejected by AG 1.7 standalone).
-            tracing=TracingPolicySpec(host="127.0.0.1", port=4318, random_sampling=True),
         ),
         mcp=McpSpec(
             supported=True,
@@ -191,7 +187,13 @@ def golden_ir() -> GatewayIR:
 
 
 def test_rendered_config_matches_the_golden_fixture():
-    artifact = render_artifact(golden_ir(), llm_port=3600)
+    from l03_adapters.agentgateway import telemetry
+
+    telemetry.set_export_enabled(True)
+    try:
+        artifact = render_artifact(golden_ir(), llm_port=3600)
+    finally:
+        telemetry.set_export_enabled(False)
     assert FIXTURE.exists(), f"missing golden fixture: {FIXTURE}"
     assert artifact.content == FIXTURE.read_text(encoding="utf-8")
 
@@ -228,6 +230,7 @@ def test_golden_contract_has_the_ag_1_7_sections():
         "accessLog:",
         "tracing:",
         'host: "127.0.0.1:4318"',
+        "path: /v1/traces",
         'randomSampling: "true"',
         "visibility: internal",
         "priority: 0",

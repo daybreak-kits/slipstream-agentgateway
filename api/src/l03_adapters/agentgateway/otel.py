@@ -20,9 +20,9 @@ from __future__ import annotations
 
 import struct
 from collections.abc import Iterator
+from dataclasses import dataclass
+from dataclasses import field as dc_field
 from typing import Any
-
-from l02_domain.models import TraceSpanRecord
 
 #: OTLP SpanKind: 0 unspecified, 1 internal, 2 server, 3 client, 4 producer,
 #: 5 consumer. AG 1.7 emits server roots and one client span per upstream try.
@@ -51,6 +51,29 @@ ATTRIBUTE_WHITELIST: frozenset[str] = frozenset(
 ATTRIBUTE_PREFIXES: tuple[str, ...] = ("gen_ai.",)
 
 _NANOS_PER_MS = 1_000_000
+
+
+@dataclass(frozen=True, slots=True)
+class DecodedSpan:
+    """One OTLP span decoded inside the agentgateway adapter (ADR-028).
+
+    Private to the adapter: only the normalized RequestAttempt crosses the
+    adapter boundary. Kept as a dataclass so decoder tests can inspect the
+    wire-level facts without importing a second domain concept.
+    """
+
+    trace_id: str
+    span_id: str
+    parent_span_id: str = ""
+    kind: str = ""
+    http_path: str = ""
+    http_status: int | None = None
+    error_type: str = ""
+    retry_attempt: int | None = None
+    start_ms: int = 0
+    end_ms: int = 0
+    duration_ms: int = 0
+    attributes: dict[str, Any] = dc_field(default_factory=dict)
 
 
 class OtlpDecodeError(ValueError):
@@ -192,7 +215,7 @@ def _as_text(value: Any) -> str:
     return str(value)
 
 
-def _decode_span(raw: bytes) -> TraceSpanRecord:
+def _decode_span(raw: bytes) -> DecodedSpan:
     trace_id = ""
     span_id = ""
     parent_span_id = ""
@@ -224,7 +247,7 @@ def _decode_span(raw: bytes) -> TraceSpanRecord:
     end_ms = end_unix_nano // _NANOS_PER_MS
     delta_ns = end_unix_nano - start_unix_nano
     duration_ms = int(round(delta_ns / _NANOS_PER_MS)) if delta_ns > 0 else 0
-    return TraceSpanRecord(
+    return DecodedSpan(
         trace_id=trace_id,
         span_id=span_id,
         parent_span_id=parent_span_id,
@@ -240,7 +263,7 @@ def _decode_span(raw: bytes) -> TraceSpanRecord:
     )
 
 
-def decode_trace_export(body: bytes) -> tuple[TraceSpanRecord, ...]:
+def decode_trace_export(body: bytes) -> tuple[DecodedSpan, ...]:
     """Decode one ExportTraceServiceRequest body into normalized spans.
 
     The field numbers follow opentelemetry-proto v1.x:
@@ -256,7 +279,7 @@ def decode_trace_export(body: bytes) -> tuple[TraceSpanRecord, ...]:
     half-decoded tree.
     """
     try:
-        spans: list[TraceSpanRecord] = []
+        spans: list[DecodedSpan] = []
         for field, wire, resource_spans in _iter_fields(body):
             if field != 1 or wire != 2:
                 continue
@@ -275,6 +298,7 @@ def decode_trace_export(body: bytes) -> tuple[TraceSpanRecord, ...]:
 
 __all__ = [
     "ATTRIBUTE_PREFIXES",
+    "DecodedSpan",
     "ATTRIBUTE_WHITELIST",
     "OtlpDecodeError",
     "SPAN_KINDS",

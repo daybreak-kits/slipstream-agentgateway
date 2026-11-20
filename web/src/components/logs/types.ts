@@ -3,8 +3,11 @@
 
 export interface LogRow {
   event_id: string;
-  /** M5-a：AG 启用 tracing 后填充；空串 = 该请求没有路由链数据。 */
+  /** ADR-028：适配器遥测关联键；空串 = 该请求没有尝试链数据。 */
   trace_id: string;
+  /** 该请求归一化后的上游尝试次数（0 = 不展示路由链）。 */
+  attempts_count?: number;
+  has_attempts?: boolean;
   started_at_ms: number;
   completed_at_ms: number;
   duration_ms: number;
