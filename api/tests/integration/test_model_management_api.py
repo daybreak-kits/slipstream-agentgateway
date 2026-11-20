@@ -276,7 +276,7 @@ def test_public_model_create_members_and_strategy(client, engine_and_sessionmake
     assert "dup" not in names
 
 
-def test_put_targets_replaces_atomically(client, engine_and_sessionmaker):
+def test_patch_targets_replaces_atomically(client, engine_and_sessionmaker):
     engine, factory = engine_and_sessionmaker
     ids = seed_channel(engine, factory)
     second = _create_upstream_model(client, ids["upstream_id"], name="glm-6-air")
@@ -292,8 +292,8 @@ def test_put_targets_replaces_atomically(client, engine_and_sessionmaker):
     ).json()
     kept_id = created["targets"][0]["id"]
 
-    replaced = client.put(
-        f"/admin/public-models/{created['id']}/targets",
+    replaced = client.patch(
+        f"/admin/public-models/{created['id']}",
         json={
             "targets": [
                 {"upstream_model_id": ids["upstream_model_id"], "priority": 5},
@@ -302,14 +302,14 @@ def test_put_targets_replaces_atomically(client, engine_and_sessionmaker):
         },
     )
     assert replaced.status_code == 200, replaced.text
-    rows = replaced.json()
+    rows = replaced.json()["targets"]
     assert len(rows) == 2
     # Kept member keeps its row id (ids stay stable across a re-declaration).
     assert rows[0]["id"] == kept_id
     assert [row["priority"] for row in rows] == [5, 6]
 
-    shrunk = client.put(
-        f"/admin/public-models/{created['id']}/targets",
+    shrunk = client.patch(
+        f"/admin/public-models/{created['id']}",
         json={"targets": [{"upstream_model_id": second["id"], "priority": 1}]},
     )
     assert shrunk.status_code == 200
@@ -328,10 +328,18 @@ def test_referenced_upstream_model_cannot_be_deleted(client, engine_and_sessionm
     assert blocked.json()["code"] == "CONFLICT"
     assert blocked.json()["details"]["public_model_id"] == ids["public_id"]
 
-    cleared = client.put(
-        f"/admin/public-models/{ids['public_id']}/targets", json={"targets": []}
+    # A member list can never be emptied (at least one member), so freeing the
+    # reference means deleting the alias row itself.
+    emptied = client.patch(
+        f"/admin/public-models/{ids['public_id']}", json={"targets": []}
     )
-    assert cleared.status_code == 200
+    assert emptied.status_code == 422
+    assert (
+        client.delete(f"/admin/upstream-models/{ids['upstream_model_id']}").status_code
+        == 409
+    )
+
+    assert client.delete(f"/admin/public-models/{ids['public_id']}").status_code == 204
     assert (
         client.delete(f"/admin/upstream-models/{ids['upstream_model_id']}").status_code
         == 204

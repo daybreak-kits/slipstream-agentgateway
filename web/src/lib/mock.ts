@@ -1467,69 +1467,55 @@ export async function mockRequest<T>(path: string, init?: RequestInit): Promise<
     }
     return created as T;
   }
-  // 编辑公开模型（PATCH 基本字段）与成员整批替换（PUT .../targets），与既有 PUT 语义一致
+  // 编辑公开模型：基本字段 + 可选 targets 整批替换（ticket 12 单 PATCH；旧 PUT .../targets 已删除）
   if (init?.method === "PATCH" && /^\/admin\/public-models\/(?!batch$)[^/?]+$/.test(path.split("?")[0] ?? "")) {
     const id = (path.split("?")[0] ?? "").split("/")[3] ?? "";
     const row = publicModels.find((p) => p.id === id);
     if (!row) return { error: "not_found" } as T;
-    const body = JSON.parse(String(init.body ?? "{}")) as Partial<PublicModel>;
+    const body = JSON.parse(String(init.body ?? "{}")) as Partial<PublicModel> & {
+      targets?: Array<{ upstream_model_id?: string; priority?: number | null; weight?: number | null; when?: string | null }>;
+    };
     if (body.name !== undefined) row.name = body.name;
     if (body.routing_mode !== undefined) row.routing_mode = body.routing_mode;
     if (body.note !== undefined) row.note = body.note;
     if (body.enabled !== undefined) row.enabled = body.enabled;
     if (body.enabled === true) row.cooldown_until_ms = 0; // 启用同时清掉冷却（GLOSSARY §3）
     if (body.cooldown_until_ms !== undefined) row.cooldown_until_ms = body.cooldown_until_ms;
-    return row as T;
-  }
-  if (init?.method === "PUT" && /^\/admin\/public-models\/[^/?]+\/targets$/.test(path.split("?")[0] ?? "")) {
-    const id = (path.split("?")[0] ?? "").split("/")[3] ?? "";
-    const row = publicModels.find((p) => p.id === id);
-    if (!row) return { error: "not_found" } as T;
-    const body = JSON.parse(String(init.body ?? "{}")) as {
-      targets?: Array<{ upstream_model_id?: string; priority?: number | null; weight?: number | null; when?: string | null }>;
-    };
-    for (let i = modelTargets.length - 1; i >= 0; i--) {
-      const mt = modelTargets[i];
-      if (mt && mt.public_model_id === id) modelTargets.splice(i, 1);
-    }
-    for (const t of body.targets ?? []) {
-      const member = upstreamModels.find((m) => m.id === t.upstream_model_id);
-      mtSeq += 1;
-      modelTargets.push({
-        id: "mt_" + String(mtSeq).padStart(2, "0"),
-        public_model_id: id,
-        upstream_model_id: t.upstream_model_id ?? "",
-        upstream_model_name: member?.name ?? "",
-        upstream_name: member?.upstream_name ?? "",
-        priority: t.priority ?? null,
-        weight: t.weight ?? null,
-        when: t.when ?? null,
-        enabled: true,
-      });
-    }
-    return { saved: modelTargets.filter((mt) => mt.public_model_id === id).length } as T;
-  }
-  if ((init?.method === "PUT" || init?.method === "DELETE") && /^\/admin\/public-models\/[^/?]+$/.test(path.split("?")[0] ?? "")) {
-    const id = (path.split("?")[0] ?? "").split("/")[3] ?? "";
-    const idx = publicModels.findIndex((p) => p.id === id);
-    if (idx < 0) return { error: "not_found" } as T;
-    if (init.method === "DELETE") {
-      publicModels.splice(idx, 1);
+    if (body.targets !== undefined) {
+      // 与真实后端一致：成员清空非法，且整批替换是这一张 PATCH 的一部分。
+      if (body.targets.length === 0) return { error: "at_least_one_member" } as T;
       for (let i = modelTargets.length - 1; i >= 0; i--) {
         const mt = modelTargets[i];
         if (mt && mt.public_model_id === id) modelTargets.splice(i, 1);
       }
-      return { deleted: true } as T;
-    }
-    const body = JSON.parse(String(init.body ?? "{}")) as Partial<PublicModel>;
-    const row = publicModels[idx];
-    if (row) {
-      if (body.name !== undefined) row.name = body.name;
-      if (body.routing_mode !== undefined) row.routing_mode = body.routing_mode;
-      if (body.note !== undefined) row.note = body.note;
-      if (body.enabled !== undefined) row.enabled = body.enabled;
+      for (const t of body.targets) {
+        const member = upstreamModels.find((m) => m.id === t.upstream_model_id);
+        mtSeq += 1;
+        modelTargets.push({
+          id: "mt_" + String(mtSeq).padStart(2, "0"),
+          public_model_id: id,
+          upstream_model_id: t.upstream_model_id ?? "",
+          upstream_model_name: member?.name ?? "",
+          upstream_name: member?.upstream_name ?? "",
+          priority: t.priority ?? null,
+          weight: t.weight ?? null,
+          when: t.when ?? null,
+          enabled: true,
+        });
+      }
     }
     return row as T;
+  }
+  if (init?.method === "DELETE" && /^\/admin\/public-models\/[^/?]+$/.test(path.split("?")[0] ?? "")) {
+    const id = (path.split("?")[0] ?? "").split("/")[3] ?? "";
+    const idx = publicModels.findIndex((p) => p.id === id);
+    if (idx < 0) return { error: "not_found" } as T;
+    publicModels.splice(idx, 1);
+    for (let i = modelTargets.length - 1; i >= 0; i--) {
+      const mt = modelTargets[i];
+      if (mt && mt.public_model_id === id) modelTargets.splice(i, 1);
+    }
+    return { deleted: true } as T;
   }
   // —— 目标绑定：GET 按 public_model_id 过滤；PUT 整批替换 ——
   if (init?.method === "GET" && (path.split("?")[0] ?? "") === "/admin/model-targets") {

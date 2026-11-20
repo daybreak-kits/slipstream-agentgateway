@@ -408,18 +408,27 @@ def replace_public_model_targets(
     targets: list[dict],
     *,
     actor: str = "",
+    require_members: bool = False,
 ) -> list[ModelTargetORM]:
-    """Atomically re-declare one public model's member list (ticket 10).
+    """Atomically re-declare one public model's member list (ticket 10/12).
 
     targets is a list of {upstream_model_id, priority, weight, when}. Existing rows
     are updated in place so their ids stay stable; members that dropped out are
     removed. Validation is identical to the renderer's, so the console can never
     store a routing plan the IR would reject. Members are ordered by priority
     (AG: numeric SMALL first) before the conditional last-member rule is applied.
+
+    require_members=True is the PATCH save path (ticket 12): the final state must
+    still have at least one member, so an empty re-declaration is rejected and a
+    failed save rolls back as a whole.
     """
     public = session.get(PublicModelORM, public_model_id)
     if public is None:
         raise AppError(ErrorCode.NOT_FOUND, f"public model not found: {public_model_id}")
+    if require_members and not targets:
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR, "公开模型至少需要一个成员（members）"
+        )
     existing = {
         row.upstream_model_id: row
         for row in session.scalars(
@@ -487,9 +496,18 @@ def replace_public_model_targets(
 
 
 def set_public_model_routing_mode(
-    session: Session, public: PublicModelORM, routing_mode: str
+    session: Session,
+    public: PublicModelORM,
+    routing_mode: str,
+    *,
+    validate_members: bool = True,
 ) -> None:
-    """Switch strategy only when every existing member still fits the new mode."""
+    """Switch strategy only when every existing member still fits the new mode.
+
+    validate_members=False is the combined PATCH path (ticket 12): the same request
+    re-declares the whole member list, so the old rows are not the final state and
+    must not be validated against the incoming mode (the new list is).
+    """
     from l02_domain.ir import ROUTING_MODES
 
     if routing_mode not in ROUTING_MODES:
@@ -498,23 +516,31 @@ def set_public_model_routing_mode(
             f"unknown routing_mode: {routing_mode}",
             details={"routing_mode": routing_mode, "known": list(ROUTING_MODES)},
         )
-    members = sorted(
-        session.scalars(
-            select(ModelTargetORM).where(
-                ModelTargetORM.public_model_id == public.id
-            )
-        ).all(),
-        key=lambda row: (row.priority, row.id),
-    )
-    for position, row in enumerate(members):
-        validate_target_shape(
-            routing_mode, priority=row.priority, weight=row.weight, when_expr=row.when_expr
+    if validate_members:
+        members = sorted(
+            session.scalars(
+                select(ModelTargetORM).where(
+                    ModelTargetORM.public_model_id == public.id
+                )
+            ).all(),
+            key=lambda row: (row.priority, row.id),
         )
-        if routing_mode == "conditional" and not row.when_expr and position != len(members) - 1:
-            raise AppError(
-                ErrorCode.VALIDATION_ERROR,
-                "切换为 conditional 前，请先给除最后一名以外的成员补上 when",
+        for position, row in enumerate(members):
+            validate_target_shape(
+                routing_mode,
+                priority=row.priority,
+                weight=row.weight,
+                when_expr=row.when_expr,
             )
+            if (
+                routing_mode == "conditional"
+                and not row.when_expr
+                and position != len(members) - 1
+            ):
+                raise AppError(
+                    ErrorCode.VALIDATION_ERROR,
+                    "切换为 conditional 前，请先给除最后一名以外的成员补上 when",
+                )
     public.routing_mode = routing_mode
     session.flush()
 
