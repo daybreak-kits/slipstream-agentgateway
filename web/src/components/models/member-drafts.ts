@@ -24,7 +24,7 @@ export function nextPriority(members: MemberDraft[]): number {
   return max + 1;
 }
 
-/** 现有 PUT /admin/public-models/{id}/targets 的整批替换 payload（按 priority 升序提交）。 */
+/** PATCH /admin/public-models/{id} 的 targets 整批替换 payload（按 priority 升序提交，ticket 12）。 */
 export function targetsPayload(members: MemberDraft[]): Array<{
   upstream_model_id: string;
   priority: number;

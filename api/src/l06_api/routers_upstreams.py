@@ -55,6 +55,9 @@ def _probe_summary(row) -> dict | None:
 
 def _body(session: Session, upstream: UpstreamORM) -> dict:
     probe = upstream_ops.latest_probe(session, upstream.id)
+    # ADR-026: keys are rows now; the retired api_key_enc mirror is only a
+    # pre-migration fallback inside key_count, so derive has_api_key from it.
+    key_count = upstream_ops.key_count(session, upstream)
     model_count = session.scalar(
         select(func.count())
         .select_from(UpstreamModelORM)
@@ -71,10 +74,10 @@ def _body(session: Session, upstream: UpstreamORM) -> dict:
             json.loads(upstream.transforms_json) if upstream.transforms_json else None
         ),
         "max_buffer_bytes": upstream.max_buffer_bytes,
-        "has_api_key": bool(upstream.api_key_enc),
+        "has_api_key": key_count > 0,
         "enabled": upstream.enabled,
         "created_at_ms": upstream.created_at_ms,
-        "key_count": upstream_ops.key_count(session, upstream),
+        "key_count": key_count,
         "model_count": int(model_count or 0),
         "last_probe": _probe_summary(probe),
     }

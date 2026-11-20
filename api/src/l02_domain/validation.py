@@ -224,6 +224,17 @@ def validate_gateway_ir(ir: GatewayIR) -> ValidationResult:
 _PROVIDER_SEQ_SUFFIX = re.compile(r"#\d+$")
 
 
+def provider_base_id(provider: str) -> str:
+    """Merge an ADR-026 key-expanded provider id back to its logical upstream.
+
+    The renderer names every per-key provider "{upstream_id}#{seq}" and usage
+    rows copy that name verbatim; anything comparing providers to upstream ids
+    (E20 warnings, billing attribution) must strip the suffix first. Names that
+    are not key-expanded ids pass through unchanged.
+    """
+    return _PROVIDER_SEQ_SUFFIX.sub("", provider or "")
+
+
 def _conditional_multikey_warning(
     ir: GatewayIR, public: PublicModelSpec, model_upstream_by_id: dict[str, str]
 ) -> str:
@@ -239,12 +250,12 @@ def _conditional_multikey_warning(
     for target in public.targets:
         upstream_id = model_upstream_by_id.get(target.upstream_model_id)
         if upstream_id:
-            bases.add(_PROVIDER_SEQ_SUFFIX.sub("", upstream_id))
+            bases.add(provider_base_id(upstream_id))
     if not bases:
         return ""
     providers_per_base: dict[str, int] = {}
     for upstream in ir.upstreams:
-        base = _PROVIDER_SEQ_SUFFIX.sub("", upstream.id)
+        base = provider_base_id(upstream.id)
         providers_per_base[base] = providers_per_base.get(base, 0) + 1
     multi = sorted(base for base in bases if providers_per_base.get(base, 0) > 1)
     if not multi:

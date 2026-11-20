@@ -53,6 +53,9 @@ def test_new_upstream_has_one_masked_key(client):
     listed = client.get("/admin/upstreams").json()
     row = next(item for item in listed if item["id"] == upstream["id"])
     assert row["key_count"] == 1
+    # ADR-026: the credential lives in the key row; has_api_key is derived from
+    # the key count, not from the retired api_key_enc mirror column.
+    assert row["has_api_key"] is True
     assert row["model_count"] == 0
     assert row["last_probe"] is None
 
@@ -221,6 +224,15 @@ def test_legacy_inline_key_can_be_renamed_before_the_first_extra_key(
     keys = _keys(client, upstream.id)["items"]
     assert [key["id"] for key in keys] == ["legacy"]
     assert keys[0]["masked"] == "…7777"
+    # The list view must keep reporting the pre-migration credential: key_count
+    # falls back to the mirror row and has_api_key derives from that count.
+    row = next(
+        item
+        for item in client.get("/admin/upstreams").json()
+        if item["id"] == upstream.id
+    )
+    assert row["key_count"] == 1
+    assert row["has_api_key"] is True
     renamed = client.patch(
         f"/admin/upstreams/{upstream.id}/keys/legacy", json={"label": "首把密钥"}
     )

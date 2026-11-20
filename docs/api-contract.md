@@ -337,7 +337,7 @@ AG 1.7 拒绝（`mcp.transport.http=false`），保存即 422。渲染到顶层 
 ### 3.2 上游 upstreams
 | 方法 | 路径 | 权限 | 说明 |
 | --- | --- | --- | --- |
-| GET | /admin/upstreams | upstreams:read | 列表；每项含 `has_api_key`、`key_count`、`model_count`、`last_probe` |
+| GET | /admin/upstreams | upstreams:read | 列表；每项含 `has_api_key`（由密钥行数量派生，`has_api_key == key_count > 0`）、`key_count`、`model_count`、`last_probe` |
 | POST | /admin/upstreams | upstreams:write | body {vendor_id?, name?, base_url, api_style, api_key, transforms?, max_buffer_bytes?}；命名规则见下 |
 | GET | /admin/upstreams/{upstream_id} | upstreams:read | 详情（含密钥数、模型数、最近探测、`api_style_source`） |
 | PATCH | /admin/upstreams/{upstream_id} | upstreams:write | 可改 name/base_url/api_style/enabled；`name` 可选（缺省或空白=不改名，显式改名重名 422）；api_style 同创建一样接受 `auto`，落库前解析为具体风格 |
@@ -383,6 +383,7 @@ AG 1.7 拒绝（`mcp.transport.http=false`），保存即 422。渲染到顶层 
 | --- | --- | --- | --- |
 | GET/POST | /admin/upstream-models | upstream_models:read/write | 上游模型列表/创建 |
 | GET/POST | /admin/public-models | public_models:read/write | 对外模型（别名层） |
+| PATCH | /admin/public-models/{id} | public_models:write；body 含 targets 时另需 model_targets:write | **单事务整页保存**（W5 票 12）：基本字段 + routing_mode + enabled + 可选 targets 整批替换，按最终状态校验（至少一个成员、去重、conditional 兜底末位、priority 顺序）；校验失败整体回滚。旧 `PUT /admin/public-models/{id}/targets` 已删除，不保留别名 |
 | GET | /admin/model-targets | model_targets:read | 目标（priority/weight/enabled） |
 | PATCH/DELETE | /admin/model-targets/{target_id} | model_targets:write | 改 priority / enabled，或删除（PATCH 不接受 weight，weight 只在创建时给定） |
 | PATCH | /admin/upstream-models/batch | upstream_models:write | body `{ids:[...], action:"enable"\|"disable"\|"delete"}` → `{changed:[id], missing:[id], action}` |
@@ -646,11 +647,12 @@ PYTHONPATH=src python scripts/seed_demo.py --keep # 仅用于空 schema；已有
 PYTHONPATH=src python -m uvicorn l06_api.app:create_app --factory --port 3700
 ```
 
-seed 覆盖（连续跑两次后的真实计数，幂等）：3 厂商 / 6 上游（zai-01..03、nebula-01、local-01/02）/
-20 上游模型（19 个带成本 cost_input/output_per_1m + 1.2 倍率 markup，1 个故意未定价；6 条上游密钥）/
+seed 覆盖（连续跑两次后的真实计数，幂等）：3 厂商 / 4 上游（zai-01 是**一个渠道三把等权密钥**，
+nebula-01、local-01/02 各一把，共 6 条上游密钥；ADR-026 多密钥平权）/
+16 上游模型（15 个带成本 cost_input/output_per_1m + 1.2 倍率 markup，1 个故意未定价）/
 8 公开模型（6 failover + 2 weighted）/ 16 目标 / 6 用户（根用户 D + 两层代理树，5 把 sk-+64 大写客户端密钥 + 充值流水）/
-13 个模型进价 + 8 个计费价 / 7 天 252 条用量事件（cost 与 charge 各 3 条缺价 unpriced）/ 245 条计费流水 /
-2 条配置版本（operator 张三 superseed / 李四 active）/ 68 条审计 / 12 条 app_settings /
+15 个模型带进价（另 30 条 cache 价目）/ 7 天 252 条用量事件（cost 与 charge 各 3 条缺价 unpriced）/ 245 条计费流水 /
+2 条配置版本（operator 张三 superseed / 李四 active）/ 64 条审计 / 13 条 app_settings /
 2 条可用性规则（ban + cooldown，无排期窗口）/ **3 个管理员**：admin（张三，管理用户 `admin`）、lisi（李四，代理用户 `agent`）、
 wangwu（王五，普通用户 `user`）。默认密码 admin12345，可用 `SLIPSTREAM_DEMO_ADMIN_PASSWORD` 覆盖，
 首次登录后修改。
@@ -658,8 +660,10 @@ wangwu（王五，普通用户 `user`）。默认密码 admin12345，可用 `SLI
 settings 六个可编辑键均已有值：base_currency=CNY、timezone=Asia/Shanghai、
 log_retention_days=30、audit_retention_days=180、default_tokens_per_minute=60000、default_concurrency=8。
 另有策略/护栏/MCP 三份可编辑样例（policy_config / guardrail_config / mcp_config）与
-`priority_semantics=v2` 标记；旧库升级用 `PYTHONPATH=src python scripts/migrate_priority_v2.py`
-（先 dry-run，再 `--apply`；已有 v2 标记时是 no-op）。
+`priority_semantics=v2` 标记。旧库升级：priority 语义用 `PYTHONPATH=src python scripts/migrate_priority_v2.py`，
+多密钥（`upstreams.api_key_enc` 镜像 → `upstream_keys` 行）用 `scripts/migrate_multikey_v2.py`；两者均先 dry-run
+再 `--apply`，已有 v2 标记时是 no-op。新库无需执行多密钥迁移（`init_db` 建库即带 `upstream_keys`，
+seed/CRUD 只写密钥行），跑脚本只会补 `multikey_semantics=v2` 标记。
 
 自检：`python ops/checks/smoke_api.py`（需先起 3700 并已 seed）。当前基线实测 **40/40 通过**
 （含登录、未认证 401、伪造头、限流、logout；smoke 脚本共 30 个 check 调用点，其中两个循环展开后
