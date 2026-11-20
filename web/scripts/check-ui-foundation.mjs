@@ -163,7 +163,7 @@ const render = (element) =>
     createElement(QueryClientProvider, { client: queryClient }, createElement(MemoryRouter, null, element)),
   );
 
-check("BrandLockup：两行品牌锁（驭流 14/600 + SLIPSTREAM 12/500 大写 0.16em）+ logo 36", async () => {
+check("BrandLockup：两行品牌锁（驭流 14/600 + SLIPSTREAM 12/500 大写 0.12em）+ logo 36", async () => {
   const { BrandLockup } = await load("/src/components/layout/sidebar.tsx");
   const html = render(createElement(BrandLockup, { collapsed: false }));
   expect(html.includes("/logo-v10-contrast.svg"), "logo 必须用产品内主用文件 logo-v10-contrast.svg");
@@ -173,7 +173,7 @@ check("BrandLockup：两行品牌锁（驭流 14/600 + SLIPSTREAM 12/500 大写 
   expect(html.includes("驭流"), "第一行中文名缺失");
   expect(html.includes(">Slipstream<"), "第二行英文名缺失（文本内容为 Slipstream）");
   expect(/text-sm[^"]*font-semibold[^"]*tracking-tight/.test(html), "中文名必须是 14px/600/tracking-tight");
-  expect(/text-2xs[^"]*uppercase[^"]*tracking-\[0\.16em\]/.test(html), "英文名必须是 12px/全大写/0.16em");
+  expect(/text-2xs[^"]*uppercase[^"]*tracking-\[0\.12em\]/.test(html), "英文名必须是 12px/全大写/0.12em");
   expect(html.includes("text-muted-foreground"), "英文名必须弱化为 muted-foreground");
 });
 

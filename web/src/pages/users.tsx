@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import { usePermissions } from "@/lib/permissions";
 import { fetchRoles } from "@/lib/roles";
 import type { ApiKey, UserTreeResponse } from "@/types";
+import { PageHeader } from "@/components/layout/page-header";
 
 const TREE_KEY = ["admin-user-tree"] as const;
 const KEYS_KEY = ["admin-api-keys"] as const;
@@ -86,7 +87,11 @@ export function UsersPage() {
   };
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
+      <PageHeader
+        title="用户管理"
+        description="按树或列表维护账号、余额与状态；根用户不可关闭或删除。"
+      />
       {tree.isError ? (
         <ErrorState
           title="用户列表加载失败"

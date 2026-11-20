@@ -295,14 +295,14 @@ export function LogDetailDrawer({ open, row, timezone, onOpenChange }: LogDetail
                     {rawPretty}
                   </pre>
                 ) : (
-                  <p className="text-xs text-faint">
+                  <p className="text-2sm text-faint">
                     该记录没有可解析的原始载荷（has_payload=false 或详情接口未返回 raw_json）。
                   </p>
                 )}
               </CollapsibleSection>
             </div>
           ) : (
-            <p className="text-xs text-faint">暂无详情字段。点击重试重新拉取。</p>
+            <p className="text-2sm text-faint">暂无详情字段。点击重试重新拉取。</p>
           )}
 
           {detailQuery.isFetching && !detailQuery.isPending ? (
@@ -474,7 +474,7 @@ function PayloadSection({ eventId }: { eventId: string }) {
         </div>
       ) : payloadQuery.isError ? (
         isNotFound ? (
-          <div className="rounded-md border border-border bg-surface-2 p-3 text-xs text-body">
+          <div className="rounded-md border border-border bg-surface-2 p-3 text-2sm text-body">
             未记录正文：需在 运营设置 开启请求/响应正文记录（ag_access_log_llm=full）。
             <Link
               to="/ops-settings/system"
@@ -485,7 +485,7 @@ function PayloadSection({ eventId }: { eventId: string }) {
           </div>
         ) : (
           <div className="space-y-2">
-            <p className="text-xs text-danger-text">
+            <p className="text-2sm text-danger-text">
               正文加载失败：{payloadQuery.error instanceof Error ? payloadQuery.error.message : "未知错误"}
             </p>
             <Button variant="outline" size="sm" onClick={() => void payloadQuery.refetch()}>
@@ -507,13 +507,13 @@ function PayloadSection({ eventId }: { eventId: string }) {
 function PayloadBlock({ title, content }: { title: string; content: PrettyPayload }) {
   return (
     <Collapsible defaultOpen className="rounded-md border border-border">
-      <CollapsibleTrigger className="group flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium text-title hover:bg-surface-2">
+      <CollapsibleTrigger className="group flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-2sm font-medium text-title hover:bg-surface-2">
         {title}
         <ChevronDown className="h-3.5 w-3.5 shrink-0 text-faint transition-transform group-data-[state=open]:rotate-180" />
       </CollapsibleTrigger>
       <CollapsibleContent className="border-t border-border">
         {content.empty ? (
-          <p className="p-3 text-xs text-faint">（空）</p>
+          <p className="p-3 text-2sm text-faint">（空）</p>
         ) : (
           <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all p-3 font-mono text-2xs text-body">
             {content.text}
@@ -579,7 +579,7 @@ function CollapsibleSection({
   const controlled = open !== undefined ? { open, onOpenChange } : {};
   return (
     <Collapsible defaultOpen={defaultOpen} {...controlled} className="rounded-lg border border-border">
-      <CollapsibleTrigger className="group flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium text-title hover:bg-surface-2">
+      <CollapsibleTrigger className="group flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-2sm font-medium text-title hover:bg-surface-2">
         {title}
         <ChevronDown className="h-3.5 w-3.5 shrink-0 text-faint transition-transform group-data-[state=open]:rotate-180" />
       </CollapsibleTrigger>
@@ -596,7 +596,7 @@ function FieldGrid({ items }: { items: Array<[string, ReactNode]> }) {
       {items.map(([label, value]) => (
         <div key={label} className="min-w-0">
           <dt className="text-2xs text-faint">{label}</dt>
-          <dd className="mt-0.5 break-all text-xs text-body">{value}</dd>
+          <dd className="mt-0.5 break-all text-2sm text-body">{value}</dd>
         </div>
       ))}
     </dl>

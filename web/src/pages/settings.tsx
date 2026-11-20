@@ -31,6 +31,7 @@ import {
 import { useTheme, type Theme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import type { ApiKey, MySpendResponse, UserPreferences } from "@/types";
+import { PageHeader } from "@/components/layout/page-header";
 
 // docs/api-contract.md：POST /admin/auth/change-password（自助改密，ADR-019）；
 // lib/api.ts 的 ENDPOINTS 没有这条（本工位不改 lib），故在页面内拼写。
@@ -508,12 +509,11 @@ export function SettingsPage() {
   const active = SECTIONS.find((item) => item.key === section) ?? SECTIONS[0]!;
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <p className="text-2sm text-faint">
-          用户设置只影响你自己的账号与浏览器；连接地址来自运营设置，所有用户共用。
-        </p>
-      </div>
+    <div className="space-y-4">
+      <PageHeader
+        title="用户设置"
+        description="只影响你自己的账号与浏览器；连接地址来自运营设置，所有用户共用。"
+      />
 
       <nav aria-label="用户设置子导航" className="flex flex-wrap items-center gap-1 border-b border-border pb-2">
         {SECTIONS.map((item) => (

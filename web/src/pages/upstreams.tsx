@@ -28,6 +28,7 @@ import { formatDateTime, useTimezone } from "@/lib/time";
 import { usePermissions } from "@/lib/permissions";
 import { API_STYLE_LABELS, probeStatusView, type ProbeResultView, type UpstreamRow } from "@/components/upstreams/shared";
 import type { UpstreamBatchResult, Vendor } from "@/types";
+import { PageHeader } from "@/components/layout/page-header";
 
 type BatchAction = "enable" | "disable" | "delete";
 
@@ -359,7 +360,11 @@ export function UpstreamsPage() {
   ];
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
+      <PageHeader
+        title="上游渠道"
+        description="管理供应商连接、密钥与连通性；关闭或冷却会直接影响路由可用性。"
+      />
       <div className="flex flex-wrap items-center gap-2">
         <Input
           value={search}

@@ -36,6 +36,7 @@ import {
   validateBaseUrl,
 } from "@/lib/settings-ia";
 import { cn } from "@/lib/utils";
+import { PageHeader } from "@/components/layout/page-header";
 
 const SETTINGS_KEY = ["settings"] as const;
 const SETTINGS_SCHEMA_KEY = ["settings", "schema"] as const;
@@ -114,7 +115,7 @@ function FieldTile({ field, value, missing, canWrite }: {
       hint={
         <>
           {field.description}
-          {field.key && <span className="ml-1 font-mono text-2xs text-faint">{field.key}</span>}
+          {field.key && <span className="ml-1 break-all font-mono text-2xs text-faint">{field.key}</span>}
           {missing && <Badge tone="warning" className="ml-1">后端未下发 · 默认值</Badge>}
         </>
       }
@@ -286,7 +287,8 @@ function SystemSection({ canWrite, items, groups }: {
 
   return (
     <div className="space-y-3">
-      <SettingsGrid>
+      {/* 系统参数是 7 张窄卡：默认 6 栏在 1440 宽下每卡约 145px，标题会碎成竖排；此处降到 4 栏。 */}
+      <SettingsGrid className="xl:grid-cols-4">
         {allGroups.flatMap((group) =>
           group.fields.map((field) => (
             <FieldTile
@@ -387,9 +389,10 @@ export function OpsSettingsPage() {
 
   return (
     <div className="space-y-3">
-      <p className="text-2sm text-faint">
-        运营设置是控制面级配置：左侧是页面内子导航；这里的改动影响所有用户。
-      </p>
+      <PageHeader
+        title="运营设置"
+        description="控制面级配置：左侧为页面内子导航；这里的改动影响所有控制台用户。"
+      />
       <div className="flex flex-col gap-4 lg:flex-row">
         <nav aria-label="运营设置子导航" className="shrink-0 space-y-0.5 lg:w-44 lg:border-r lg:border-border lg:pr-3">
           {SECTIONS.map((item) => (

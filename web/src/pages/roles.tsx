@@ -17,6 +17,7 @@ import { usePermissions } from "@/lib/permissions";
 import { deleteRole, fetchPermissionGroups, fetchRoles, updateRole } from "@/lib/roles";
 import { fmtInt } from "@/lib/format";
 import type { RoleDefinition } from "@/lib/roles";
+import { PageHeader } from "@/components/layout/page-header";
 
 const ROLES_KEY = ["roles"] as const;
 const PERMISSIONS_KEY = ["permission-groups"] as const;
@@ -202,11 +203,11 @@ export function AdminsPage() {
   const roleList = rolesQ.data ?? [];
 
   return (
-    <div className="space-y-3">
-      <p className="text-2xs text-faint">
-        权限按 7 组分节管理（主数据 / 流量治理 / 治理 / 计费 / 用量 / 账号 / 模型试验）；内置角色权限固定，
-        自定义角色可逐组勾选。删除角色要求该角色下没有成员。
-      </p>
+    <div className="space-y-4">
+      <PageHeader
+        title="角色管理"
+        description="权限按 7 组分节管理；内置角色固定，自定义角色逐组勾选，删除前需清空成员。"
+      />
 
       <div className="flex flex-wrap items-center gap-2">
         <p className="text-2sm text-faint">

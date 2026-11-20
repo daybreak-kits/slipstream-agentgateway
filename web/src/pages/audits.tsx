@@ -18,6 +18,7 @@ import { api, ENDPOINTS } from "@/lib/api";
 import { fmtTime } from "@/lib/format";
 import { ACTION_ICONS } from "@/lib/icons";
 import type { AuditLog, AuditLogList } from "@/types";
+import { PageHeader } from "@/components/layout/page-header";
 
 /**
  * 审计（统一列表规范）：actor/action 下拉筛选 + 统一表列 + 行详情抽屉（detail JSON
@@ -162,7 +163,11 @@ export function AuditLogsPage() {
   };
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-4">
+      <PageHeader
+        title="审计日志"
+        description="记录控制面的写操作与治理动作；按操作者、动作筛选后查看详情。"
+      />
       <div className="flex flex-wrap items-center gap-2">
         <Combobox
           className="w-44"

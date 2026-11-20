@@ -27,6 +27,8 @@ export function deriveSpendMicro(
   cost: string | null | undefined,
   markup: string | null | undefined,
 ): number | null {
+  if (cost === null || cost === undefined || String(cost).trim() === "") return null;
+  if (markup === null || markup === undefined || String(markup).trim() === "") return null;
   const costNum = Number(cost);
   const markupNum = Number(markup);
   if (!Number.isFinite(costNum) || costNum < 0) return null;

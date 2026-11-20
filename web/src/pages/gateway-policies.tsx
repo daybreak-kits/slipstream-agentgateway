@@ -14,6 +14,7 @@ import {
   policyDraftProblem,
   type McpDraftDocument,
 } from "@/components/governance/gateway-policies/helpers";
+import { PageHeader } from "@/components/layout/page-header";
 import { ErrorState, PageToolbar } from "@/components/governance/panel";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -234,7 +235,11 @@ export function GatewayPoliciesPage() {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
+      <PageHeader
+        title="网关策略"
+        description="默认关闭，保持现有行为；重试与健康驱逐只对显式开启的策略生效，保存后统一下发数据面。"
+      />
       <PageToolbar>
         <span className="text-2sm text-faint">
           {dirtyTotal === 0

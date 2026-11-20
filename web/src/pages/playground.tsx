@@ -49,6 +49,7 @@ import {
   type PlaygroundUsage,
 } from "@/lib/playground";
 import type { MyModelOut } from "@/types";
+import { PageHeader } from "@/components/layout/page-header";
 
 /** 后端 /admin/logs 只接受 25/50/100/200 四档 page_size（api deps.page_params）。 */
 const USAGE_LOG_PAGE_SIZE = 25;
@@ -652,7 +653,12 @@ export function PlaygroundPage() {
   const thinkingLabel = THINKING_MODE_LABELS[params.thinkingMode];
 
   return (
-    <div className="flex min-h-0 flex-col gap-3 lg:h-[calc(100vh-8rem)] lg:flex-row">
+    <div className="space-y-3">
+      <PageHeader
+        title="模型试验"
+        description="用公开模型发起真实对话，验证参数与输出；会话只保存在本机浏览器。"
+      />
+      <div className="flex min-h-0 flex-col gap-3 lg:h-[calc(100vh-11rem)] lg:flex-row">
       <aside className="order-2 flex min-h-0 flex-col rounded-lg border border-border bg-surface p-2 lg:order-1 lg:w-60 lg:shrink-0">
         <SessionList
           sessions={state.sessions}
@@ -738,6 +744,7 @@ export function PlaygroundPage() {
         thinkingMode={params.thinkingMode}
         onThinkingModeChange={(mode) => setParams((prev) => ({ ...prev, thinkingMode: mode }))}
       />
+      </div>
     </div>
   );
 }

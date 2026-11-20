@@ -23,7 +23,7 @@ export function BrandLockup({ collapsed }: { collapsed: boolean }) {
         />
         <div className={cn("leading-tight", collapsed && "sr-only")}>
           <p className="text-sm font-semibold tracking-tight text-title">驭流</p>
-          <p className="text-2xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Slipstream</p>
+          <p className="text-2xs font-medium uppercase tracking-[0.12em] text-muted-foreground">Slipstream</p>
         </div>
       </div>
     </div>
@@ -51,7 +51,7 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
           <div key={section.title} className="mt-4 first:mt-1">
             <div
               className={cn(
-                "px-3 pb-1.5 text-2xs font-semibold uppercase tracking-[0.14em] text-muted-foreground",
+                "px-3 pb-1.5 text-2xs font-semibold uppercase tracking-[0.1em] text-muted-foreground",
                 collapsed && "sr-only",
               )}
             >

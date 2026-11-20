@@ -62,6 +62,7 @@ import { SELECT_ALL_VALUE } from "@/lib/select-sentinels";
 import { formatDateTime, useTimezone, type TimezoneMode } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import type { PublicModel, Upstream, UpstreamModel, UserTreeNode } from "@/types";
+import { PageHeader } from "@/components/layout/page-header";
 
 interface AppliedLogFilters {
   draft: LogFilterDraft;
@@ -274,7 +275,11 @@ export function LogsPage() {
   const noMatch = showEmpty && hasActiveLogFilters(applied.draft);
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
+      <PageHeader
+        title="使用日志"
+        description="按时间窗筛选请求；首字与耗时按当前窗口分位上色（≤P50 绿 / ≤P95 黄 / >P95 红 / 缺失灰）。"
+      />
       <form onSubmit={submit} className="space-y-2 rounded-lg border border-border bg-surface p-3">
         <div className="flex flex-wrap items-end gap-2">
           <TimeRangePicker
@@ -358,7 +363,7 @@ export function LogsPage() {
         </div>
 
         {queryError || dirty ? (
-          <p className={cn("text-xs", queryError ? "text-danger-text" : "text-faint")}>
+          <p className={cn("text-2sm", queryError ? "text-danger-text" : "text-faint")}>
             {queryError ?? "筛选已修改，点「查询」生效。"}
           </p>
         ) : null}
@@ -367,7 +372,7 @@ export function LogsPage() {
       {logsQuery.isError && !logsQuery.data ? (
         <div className="rounded-lg border border-border bg-surface px-6 py-12 text-center">
           <p className="text-sm text-danger-text">日志加载失败</p>
-          <p className="mt-1 text-xs text-faint">
+          <p className="mt-1 text-2sm text-faint">
             {logsQuery.error instanceof Error ? logsQuery.error.message : "请检查控制面 API 是否可达"}
           </p>
           <Button variant="outline" size="sm" className="mt-3" onClick={() => void logsQuery.refetch()}>
@@ -511,7 +516,7 @@ function buildLogColumns(spec: LogColumnSpec): ColumnDef<LogRow, unknown>[] {
       enableSorting: false,
       cell: ({ row }) => (
         <div className="min-w-0 whitespace-nowrap">
-          <p className="tnum text-xs text-body">{formatDateTime(row.original.started_at_ms, mode)}</p>
+          <p className="tnum text-2sm text-body">{formatDateTime(row.original.started_at_ms, mode)}</p>
           <p className="mt-0.5">
             <Badge tone={statusTone(row.original.http_status)}>{statusLabel(row.original.http_status)}</Badge>
           </p>
@@ -534,7 +539,7 @@ function buildLogColumns(spec: LogColumnSpec): ColumnDef<LogRow, unknown>[] {
         return (
           <div className="min-w-0">
             <p
-              className="truncate text-xs font-medium text-title"
+              className="truncate text-2sm font-medium text-title"
               title={(item.public_model || "—") + " - " + (item.upstream_model || "—")}
             >
               {(item.public_model || "—") + " - " + (item.upstream_model || "—")}
@@ -550,7 +555,7 @@ function buildLogColumns(spec: LogColumnSpec): ColumnDef<LogRow, unknown>[] {
       enableSorting: false,
       cell: ({ row }) => (
         <div className="min-w-0">
-          <p className="max-w-[120px] truncate text-xs text-body" title={row.original.user_name}>
+          <p className="max-w-[120px] truncate text-2sm text-body" title={row.original.user_name}>
             {row.original.user_name || "—"}
           </p>
           <p className="max-w-[120px] truncate font-mono text-2xs text-faint" title={row.original.user_id}>
@@ -583,7 +588,7 @@ function buildLogColumns(spec: LogColumnSpec): ColumnDef<LogRow, unknown>[] {
         const cacheFraction = cacheHitFraction(item.input_tokens, item.cache_read_tokens, item.cache_write_tokens);
         return (
           <div className="whitespace-nowrap tnum">
-            <p className="text-xs text-body">
+            <p className="text-2sm text-body">
               入{fmtInt(item.input_tokens)} / 出{fmtInt(item.output_tokens)}
             </p>
             <p className="mt-0.5 text-2xs text-faint">
@@ -607,7 +612,7 @@ function buildLogColumns(spec: LogColumnSpec): ColumnDef<LogRow, unknown>[] {
         return (
           <div className="whitespace-nowrap tnum">
             {canSpend ? (
-              <p className="text-xs text-body" title="花费（向用户计费）">
+              <p className="text-2sm text-body" title="花费（向用户计费）">
                 {fmtMoney6(item.charge_micro, item.currency)}
               </p>
             ) : null}

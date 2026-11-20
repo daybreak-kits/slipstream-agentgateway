@@ -38,7 +38,9 @@ export function AppShell() {
           <div className="mx-auto w-full max-w-480 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
             <ErrorBoundary>
               <Suspense fallback={<RouteFallback />}>
-                <Outlet />
+                <div key={location.pathname} className="animate-fade-up">
+                  <Outlet />
+                </div>
               </Suspense>
             </ErrorBoundary>
           </div>

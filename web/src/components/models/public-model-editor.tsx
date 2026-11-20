@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "@/lib/notify";
 
+import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -103,10 +104,10 @@ export function PublicModelEditor({ id }: { id: string }) {
   if (model === null) {
     return (
       <div className="space-y-3">
+        <PageHeader title="编辑公开模型" description="未找到该公开模型，可能已被删除。" />
         <Link to="/models?tab=public" className="inline-flex items-center gap-1 text-2sm text-primary-text hover:underline">
           <ArrowLeft className="h-3.5 w-3.5" /> 返回模型管理
         </Link>
-        <p className="text-2sm text-faint">未找到该公开模型，可能已被删除。</p>
       </div>
     );
   }
@@ -117,11 +118,17 @@ export function PublicModelEditor({ id }: { id: string }) {
         <Link to="/models?tab=public" className="inline-flex items-center gap-1 text-2sm text-primary-text hover:underline">
           <ArrowLeft className="h-3.5 w-3.5" /> 返回模型管理
         </Link>
-        <span className="text-base font-medium text-title">{model.name}</span>
-        <Badge tone="primary">{ROUTING_LABELS[form.routing_mode].label}</Badge>
-        <Badge tone={availabilityTone(model)}>{availabilityText(model)}</Badge>
-        <span className="text-2xs text-faint">保存整页生效；成员保存是整批替换。</span>
       </div>
+      <PageHeader
+        title="编辑公开模型"
+        description={<>公开模型「{model.name}」。保存整页生效；成员保存是整批替换。</>}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge tone="primary">{ROUTING_LABELS[form.routing_mode].label}</Badge>
+            <Badge tone={availabilityTone(model)}>{availabilityText(model)}</Badge>
+          </div>
+        }
+      />
       <Tabs
         items={[
           {

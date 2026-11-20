@@ -155,7 +155,7 @@
   --danger: #dc2626;
   --danger-text: #b91c1c;
   --danger-soft: #fef2f2;
-  --info: #475569;
+  --info: #5b6573;
   --focus-ring: #4f46e5;
 
   /* 徽标 tint（6 组：bg/fg） */
@@ -269,7 +269,7 @@
   --danger: #f87171;
   --danger-text: #f87171;
   --danger-soft: rgba(248, 113, 113, 0.14);
-  --info: #94a3b8;
+  --info: #9ca3af;
   --focus-ring: #a5b4fc;
 
   --badge-flow-bg: rgba(96, 165, 250, 0.16);

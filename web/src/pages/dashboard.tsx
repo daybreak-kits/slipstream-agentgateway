@@ -2,6 +2,8 @@ import { useCallback, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { DashboardKpis } from "@/components/dashboard/metric-cards";
+import { RequestChain } from "@/components/layout/request-chain";
+import { PageHeader } from "@/components/layout/page-header";
 import { HeatmapCard } from "@/components/dashboard/heatmap";
 import { LatencyCards } from "@/components/dashboard/latency-cards";
 import {
@@ -14,6 +16,7 @@ import {
 import { TrendPanel } from "@/components/dashboard/trend-panel";
 import { useReportsFlow, useReportsLatency, useReportsTimeseries } from "@/components/dashboard/use-reports";
 import { TimeRangePicker, type TimeWindow } from "@/components/time-range-picker";
+import { Button } from "@/components/ui/button";
 
 /**
  * 看板 v3（F1 重构）：区间选择器 → 八卡 → 趋势（柱形/面积/分流）→ 延迟分位 → 热力图。
@@ -51,17 +54,40 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-4">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-h1 font-semibold tracking-tight text-title">看板</h1>
-          <p className="mt-1 text-2sm text-faint">
+      <PageHeader
+        title="看板"
+        description={
+          <>
             调用量、词元、成本与花费
             {currency ? ` · 金额币种 ${currency}` : ""}
             {timezone ? ` · 时区 ${timezone}` : ""}
-          </p>
+          </>
+        }
+        actions={<TimeRangePicker value={timeWindow} onChange={setTimeWindow} />}
+      />
+
+      <section className="overflow-hidden rounded-card border border-border bg-surface shadow-card">
+        <div aria-hidden="true" className="h-px w-full bg-blueprint opacity-80" />
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
+          <div className="min-w-0">
+            <h2 className="text-sm font-semibold text-title">请求链路</h2>
+            <p className="mt-0.5 text-2xs text-faint">
+              一次调用穿过三层寻址；切换下方「分流」可看真实流量的走向。
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setView("flow");
+              document.getElementById("trend-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
+          >
+            查看分流
+          </Button>
         </div>
-        <TimeRangePicker value={timeWindow} onChange={setTimeWindow} />
-      </header>
+        <RequestChain className="px-4 py-4" />
+      </section>
 
       <DashboardKpis
         data={series.data}
@@ -71,6 +97,7 @@ export function DashboardPage() {
         onRetry={() => void series.refetch()}
       />
 
+      <div id="trend-panel">
       <TrendPanel
         window={timeWindow}
         view={view}
@@ -88,6 +115,7 @@ export function DashboardPage() {
         flowError={flow.isError ? flow.error : undefined}
         onFlowRetry={() => void flow.refetch()}
       />
+      </div>
 
       <LatencyCards
         window={timeWindow}

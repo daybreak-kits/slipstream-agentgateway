@@ -26,6 +26,7 @@ import { effectiveBaseUrl, useConnection } from "@/lib/settings-ia";
 import { useTimezone } from "@/lib/time";
 import { formatIntervalDateTime } from "@/lib/time-range";
 import { cn } from "@/lib/utils";
+import { PageHeader } from "@/components/layout/page-header";
 
 /**
  * 快速上手（ADR-023 #1）：三步上手 + 网关连接信息 + 页顶系统健康带。
@@ -295,6 +296,10 @@ export function OverviewPage() {
 
   return (
     <div className="space-y-6">
+      <PageHeader
+        title="快速上手"
+        description="三步接入：签发连接密钥 → 选择公开模型 → 发起第一条请求。"
+      />
       <HealthBand />
 
       <section className="space-y-3">

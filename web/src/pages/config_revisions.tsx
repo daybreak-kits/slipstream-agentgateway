@@ -20,6 +20,7 @@ import { ACTION_ICONS } from "@/lib/icons";
 import { revisionStatusMeta } from "@/lib/revision-status";
 import { usePermissions } from "@/lib/permissions";
 import type { ConfigRevision } from "@/types";
+import { PageHeader } from "@/components/layout/page-header";
 
 /**
  * 配置版本（统一列表规范）：版本号/操作人/状态徽标/时间/备注 + 详情抽屉
@@ -219,8 +220,11 @@ export function ConfigRevisionsPage() {
   ];
 
   return (
-    <div className="space-y-2">
-      <p className="text-2xs text-faint">配置发布不可变：每次变更新建版本并指向上一个版本；回滚生成新版本而不是原地改。</p>
+    <div className="space-y-4">
+      <PageHeader
+        title="配置版本"
+        description="配置发布不可变：每次变更新建版本；回滚生成新版本，而不是原地修改历史。"
+      />
       <DataTable
         columns={columns}
         data={q.data?.items}

@@ -18,6 +18,7 @@ import { OneTimeSecretDialog } from "@/components/users/one-time-secret-dialog";
 import { ENDPOINTS, api } from "@/lib/api";
 import { usePermissions } from "@/lib/permissions";
 import type { ApiKey } from "@/types";
+import { PageHeader } from "@/components/layout/page-header";
 
 const KEYS_QUERY_KEY = ["api-keys"] as const;
 
@@ -212,11 +213,11 @@ export function ClientKeysPage() {
   ];
 
   return (
-    <div className="space-y-2">
-      <p className="text-2xs text-faint">
-        密钥只显示掩码；点行内复制图标会经审计化接口取回明文并写入剪贴板（留审计记录属预期行为）。
-        每用户最多 50 把；余额耗尽后请求返回 429，充值在用户管理页进行。
-      </p>
+    <div className="space-y-4">
+      <PageHeader
+        title="连接密钥"
+        description="密钥只显示掩码；复制明文会写入审计记录。每用户最多 50 把，余额耗尽后请求返回 429。 "
+      />
       {canWrite && (
         <div className="flex items-center justify-end">
           <Button variant="primary" size="sm" onClick={() => setIssueOpen(true)}>

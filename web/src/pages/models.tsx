@@ -16,6 +16,7 @@ import {
 } from "@/components/models/model-vocab";
 import { PublicModelEditor } from "@/components/models/public-model-editor";
 import { UpstreamModelDialog } from "@/components/models/upstream-model-dialog";
+import { PageHeader } from "@/components/layout/page-header";
 import { ModelsTable, type ModelColumn } from "@/components/models/table";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
@@ -392,6 +393,7 @@ function UpstreamTab() {
       key: "targets",
       label: "被引用",
       className: "text-right tnum",
+      headerClassName: "whitespace-nowrap",
       cell: (row) => <span className="text-2sm">{formatCount(row.target_count ?? 0)}</span>,
     },
     {
@@ -505,7 +507,7 @@ function UpstreamTab() {
   return (
     <div className="space-y-3">
       <p className="text-2xs text-faint">
-        上游模型是技术记录（类型、参数、进价、可用性）；公开模型通过成员引用它。关闭是人工长期措施，冷却到期自动恢复。
+        关闭是人工长期措施，冷却到期自动恢复。
         {ENABLE_SEMANTICS_NOTE}
       </p>
       <ModelsTable<UpstreamModel>
@@ -864,7 +866,7 @@ function PublicTab() {
       label: "策略",
       cell: (row) => (
         <div>
-          <Badge tone="primary">{row.routing_mode}</Badge>
+          <Badge tone="primary">{ROUTING_LABELS[row.routing_mode].label}</Badge>
           <div className="mt-1 max-w-64 text-2xs text-faint">{ROUTING_LABELS[row.routing_mode].desc}</div>
         </div>
       ),
@@ -1007,12 +1009,18 @@ export function ModelsPage() {
   if (editorMatch) return <PublicModelEditor id={editorMatch.params.id ?? ""} />;
   const initialKey = params.get("tab") === "public" ? "public" : "upstream";
   return (
-    <Tabs
-      initialKey={initialKey}
-      items={[
-        { key: "upstream", label: "上游模型", content: <UpstreamTab /> },
-        { key: "public", label: "公开模型", content: <PublicTab /> },
-      ]}
-    />
+    <div className="space-y-4">
+      <PageHeader
+        title="模型管理"
+        description="上游模型是技术记录；公开模型是对外别名，通过成员引用上游模型。"
+      />
+      <Tabs
+        initialKey={initialKey}
+        items={[
+          { key: "upstream", label: "上游模型", content: <UpstreamTab /> },
+          { key: "public", label: "公开模型", content: <PublicTab /> },
+        ]}
+      />
+    </div>
   );
 }
