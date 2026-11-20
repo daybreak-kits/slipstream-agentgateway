@@ -283,7 +283,7 @@ const INTERACTIONS = {
   },
   "/upstreams/:id": async (s) => {
     let clicked = 0;
-    for (const label of ["连接与模型", "路由与映射", "请求与响应", "其他设置"]) {
+    for (const label of ["连接与模型", "路由与模型", "请求与响应", "其他设置"]) {
       const tab = s.page.getByRole("tab", { name: label, exact: true }).first();
       if ((await tab.count()) === 0) continue;
       await tab.click();

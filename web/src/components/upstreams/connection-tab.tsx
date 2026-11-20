@@ -186,7 +186,7 @@ export function ConnectionTab({
               onClick={onGoModels}
               className="mt-2 text-2sm text-primary transition-colors hover:underline"
             >
-              前往路由与映射
+              前往路由与模型
             </button>
           </CardContent>
         </Card>

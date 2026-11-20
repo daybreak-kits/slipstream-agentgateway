@@ -934,6 +934,134 @@ check("术语表 §5：RPM 2 位、TPM 整数、缓存命中率 1 位", () => {
   includesAll(text, ["RPM", "TPM", "千分位整数", "1 位小数"], "GLOSSARY §5 数字口径");
 });
 
+// ---------- 5. 上游「路由与模型」测试入口（W5 ticket 07） ----------
+check("上游详情 Tab：四页签含「路由与模型」，旧「路由与映射」全站清零", async () => {
+  const shared = await load("/src/components/upstreams/shared.ts");
+  expect(Array.isArray(shared.UPSTREAM_TABS), "shared.ts 必须导出 UPSTREAM_TABS（Tab 文案单一来源）");
+  expect(shared.UPSTREAM_TABS.length === 4, "上游详情必须四个 Tab，实际 " + shared.UPSTREAM_TABS.length);
+  const labels = shared.UPSTREAM_TABS.map((item) => item.label);
+  includesAll(labels.join("、"), ["连接与模型", "路由与模型", "请求与响应", "其他设置"], "上游详情 Tab");
+  const routing = shared.UPSTREAM_TABS.find((item) => item.key === "routing");
+  expect(routing && routing.label === "路由与模型", "路由与模型 Tab 的 key 必须是 routing");
+  const stale = [];
+  for (const file of sourceFiles()) {
+    if (readFileSync(file, "utf8").includes("路由与映射")) stale.push(rel(file));
+  }
+  expect(stale.length === 0, "仍有旧文案「路由与映射」：" + stale.join("、"));
+});
+
+check("列表页「测试」：只跳转详情「路由与模型」Tab，不再发测试请求/不再全局 pending", async () => {
+  const text = read("src/pages/upstreams.tsx");
+  includesAll(text, ["upstreamRoutingHref"], "列表页测试跳转");
+  expect(!text.includes("ENDPOINTS.upstreamTest"), "列表页不得再调用 test-connection 端点");
+  expect(!text.includes("test.mutate"), "列表页不得再持有 test-connection mutation");
+  expect(!text.includes("test.isPending"), "列表页不得用全局 pending 禁用所有行");
+  expect(!text.includes("测试中…"), "列表页不再出现「测试中…」");
+  const shared = await load("/src/components/upstreams/shared.ts");
+  const href = shared.upstreamRoutingHref("up_01");
+  expect(href === "/upstreams/up_01?tab=routing", "跳转地址必须带 ?tab=routing，实际 " + href);
+});
+
+check("详情页 URL 参数：?tab=routing 定位「路由与模型」，非法值回落连接与模型", async () => {
+  const shared = await load("/src/components/upstreams/shared.ts");
+  expect(typeof shared.resolveUpstreamTab === "function", "shared.ts 必须导出 resolveUpstreamTab");
+  expect(shared.resolveUpstreamTab("routing") === "routing", "?tab=routing 必须解析为 routing");
+  expect(shared.resolveUpstreamTab("transforms") === "transforms", "合法页签必须原样解析");
+  expect(shared.resolveUpstreamTab(null) === "connection", "缺省页签必须是连接与模型");
+  expect(shared.resolveUpstreamTab("routingx") === "connection", "非法页签必须回落连接与模型");
+  const page = read("src/pages/upstream_detail.tsx");
+  includesAll(page, ["useSearchParams", "resolveUpstreamTab", "UPSTREAM_TABS"], "详情页 URL 参数接线");
+});
+
+check("路由与模型面板：单模型/全部测试 + 密钥选择 + 串行进度可取消 + 结果仅会话内", () => {
+  const panel = read("src/components/upstreams/models-panel.tsx");
+  includesAll(
+    panel,
+    [
+      "全部测试", "拉取模型", "测试结果", "选择测试密钥", "清空结果",
+      "probe.run(", "probe.cancel", "probe.clear", "probe.session",
+    ],
+    "路由与模型面板接线",
+  );
+  // 逐模型 POST models/probe、会话状态与取消在探测模块里；结果/进度组件在 view 模块（面板只组合）。
+  const probe = read("src/components/upstreams/model-probe.ts");
+  includesAll(
+    probe,
+    ["ENDPOINTS.upstreamModelsProbe", "AbortController", "MODEL_PROBE_REQUEST_TIMEOUT_MS", "probeReducer"],
+    "模型探测模块接线",
+  );
+  const view = read("src/components/upstreams/model-probe-view.tsx");
+  includesAll(view, ["取消测试", "ModelProbeProgress", "ModelProbeBadge"], "模型探测展示组件");
+  const detail = read("src/pages/upstream_detail.tsx");
+  expect(!detail.includes("获取上游模型"), "模型拉取入口已移入「路由与模型」面板（拉取模型）");
+});
+
+check("模型探测纯逻辑：结果徽章语义/失败与超时分类/串行进度/取消", async () => {
+  const probe = await load("/src/components/upstreams/model-probe.ts");
+  const item = (patch) => ({ model_id: "um_01", model: "glm-5.3", ok: true, status: 200, latency_ms: 123, error_type: "", message: "", ...patch });
+  const ok = probe.probeResultView(item({}));
+  expect(ok.label === "连通" && ok.tone === "success", "成功行必须是 连通/success，实际 " + ok.label + "/" + ok.tone);
+  expect(ok.latencyText === "123 ms", "成功行必须显示延迟，实际 " + ok.latencyText);
+  const fail = probe.probeResultView(item({ ok: false, status: 401, error_type: "http", message: "上游返回 HTTP 401：invalid key（sk-***）" }));
+  expect(fail.label === "失败" && fail.tone === "danger", "HTTP 失败行必须是 失败/danger");
+  expect(fail.detail.includes("HTTP 401") && fail.detail.includes("sk-***"), "失败行必须展示后端已脱敏的错误信息");
+  const timeout = probe.probeResultView(item({ ok: false, status: 0, error_type: "timeout", message: "请求超时（20 秒）" }));
+  expect(timeout.label === "超时" && timeout.tone === "warning", "超时行必须是 超时/warning");
+  const refused = probe.probeResultView(item({ ok: false, status: 0, error_type: "connection", message: "连接失败：boom" }));
+  expect(refused.label === "连接失败" && refused.tone === "danger", "连接失败行必须是 连接失败/danger");
+
+  let session = probe.emptyProbeSession();
+  expect(session.running === false && session.done === 0 && session.total === 0, "空会话必须是未运行/0 进度");
+  session = probe.probeReducer(session, { type: "start", total: 22, keyId: "" });
+  expect(session.running === true && session.total === 22, "start 后必须进入运行中并记录总数");
+  session = probe.probeReducer(session, { type: "begin", modelId: "um_01" });
+  expect(session.currentModelId === "um_01", "begin 必须标记当前模型");
+  session = probe.probeReducer(session, { type: "item", item: item({}) });
+  expect(session.done === 1 && session.results.um_01.ok === true, "item 必须累加进度并保存会话结果");
+  expect(session.currentModelId === null, "item 后必须清空当前模型");
+  const summary = probe.probeSummary(session);
+  expect(summary.done === 1 && summary.total === 22 && summary.ok === 1 && summary.failed === 0, "进度摘要必须如实统计");
+  expect(summary.percent === 5, "1/22 进度必须四舍五入为 5%，实际 " + summary.percent);
+  session = probe.probeReducer(session, { type: "finish", cancelled: true });
+  expect(session.running === false && session.cancelled === true, "finish(cancelled) 必须结束运行并标记已取消");
+  const cleared = probe.probeReducer(session, { type: "reset" });
+  expect(cleared.running === false && cleared.done === 0 && Object.keys(cleared.results).length === 0, "reset 必须清空会话结果");
+
+  // 行内单模型「测试」只更新该行、不清空本次会话其他结果；「全部测试」整体重测。
+  let merged = probe.probeReducer(probe.emptyProbeSession(), { type: "start", total: 1, keyId: "", reset: false });
+  merged = probe.probeReducer(merged, { type: "item", item: item({ model_id: "um_a" }) });
+  merged = probe.probeReducer(merged, { type: "start", total: 1, keyId: "", reset: false });
+  merged = probe.probeReducer(merged, {
+    type: "item",
+    item: item({ model_id: "um_b", ok: false, status: 500, error_type: "http", message: "上游返回 HTTP 500" }),
+  });
+  expect(Object.keys(merged.results).length === 2, "单模型测试必须保留本次会话其他行的结果");
+  const rerun = probe.probeReducer(merged, { type: "start", total: 2, keyId: "", reset: true });
+  expect(Object.keys(rerun.results).length === 0, "全部测试必须整体重测（清空旧结果）");
+});
+
+check("模型探测展示：失败行红色错误、超时琥珀、进度 N/M 与取消入口（SSR）", async () => {
+  const probe = await load("/src/components/upstreams/model-probe.ts");
+  const probeView = await load("/src/components/upstreams/model-probe-view.tsx");
+  const okHtml = render(createElement(probeView.ModelProbeBadge, { item: { model_id: "a", model: "glm", ok: true, status: 200, latency_ms: 123, error_type: "", message: "" } }));
+  expect(okHtml.includes("连通"), "成功徽章必须渲染「连通」");
+  expect(okHtml.includes("bg-success-soft"), "成功徽章必须用 success 语义色");
+  expect(okHtml.includes("123 ms"), "成功徽章必须显示延迟");
+  const failHtml = render(createElement(probeView.ModelProbeBadge, { item: { model_id: "b", model: "glm", ok: false, status: 401, latency_ms: 80, error_type: "http", message: "上游返回 HTTP 401：invalid key" } }));
+  expect(failHtml.includes("失败") && failHtml.includes("bg-danger-soft"), "失败徽章必须是 danger 语义色");
+  expect(failHtml.includes("HTTP 401"), "失败行必须展示脱敏错误信息");
+  expect(failHtml.includes("text-danger-text"), "失败信息必须用危险语义色");
+  const timeoutHtml = render(createElement(probeView.ModelProbeBadge, { item: { model_id: "c", model: "glm", ok: false, status: 0, latency_ms: 0, error_type: "timeout", message: "请求超时（20 秒）" } }));
+  expect(timeoutHtml.includes("超时") && timeoutHtml.includes("bg-warning-soft"), "超时徽章必须是 warning 语义色");
+
+  let session = probe.probeReducer(probe.emptyProbeSession(), { type: "start", total: 22, keyId: "" });
+  session = probe.probeReducer(session, { type: "begin", modelId: "um_03" });
+  const html = render(createElement(probeView.ModelProbeProgress, { session, onCancel: () => {} }));
+  expect(html.includes("/22"), "进度必须显示 N/M");
+  expect(html.includes("取消测试"), "运行中必须有取消入口");
+  expect(html.includes("bg-info") || html.includes("bg-primary"), "进度条必须用信息蓝/主色");
+});
+
 // ---------- run ----------
 const failures = [];
 server = await createServer({
