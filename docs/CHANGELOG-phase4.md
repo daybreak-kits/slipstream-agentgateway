@@ -75,7 +75,7 @@
 - 新增 `POST /admin/upstreams/{id}/models/probe`（模型探测，权限 `upstream_models:write`，串行 20s，不落库/不写 probes/不触发下发）；`discover-models` 正名为「模型拉取」。
 - 新增 `GET /admin/reports/flow?collapse=...` 隐藏阶段后端投影（守恒、至少 2 段；默认输出不变；前端 splice 删除）。
 - 日志列表行新增 `requested_model / attempts_count / has_attempts / attempts_error`（动态 dict，不进入 `contract.ts`，由 pytest `test_logs_requested_model` 等覆盖）；详情/抽屉复用「路由链」组件。
-- chunk 与统计基线：pytest 836 passed / 18 warnings；首包 gzip 212.9 KB / 75 chunk；check-ui-foundation 73/73；check-semantic-dirty 40/40。
+- chunk 与统计基线：pytest 836 passed / 18 warnings；首包 gzip 213.1 KB / 75 chunk；check-ui-foundation 75/75；check-semantic-dirty 41/41。
 - **ADR-027 冷却互斥**：单次与周期互斥（409，details 恒三键 `{blocking_rule_ids, cooldown_until_ms, window_end_ms}` 两形状）；note-only PATCH 放行；结构变更清窗口例外；关闭不参与互斥；公开模型冷却写操作 422；解除只删一次性托管规则（周期窗口只写 skip，规则保留）；写后立即 `Rollout.apply`（reason model-cooldown/model-release/model-enable/model-disable）。
 - 多密钥：渲染 provider 名 `{model}#k{seq}`、密钥文件名 `{id}#{seq}.key`；conditional 模式每目标只展开首把（E20 既定裁决）。
 - UI：上游详情四 Tab 第二 Tab 改名「路由与模型」（模型并入、健康并入「连接与模型」）；公开模型单页三段 + 分层成员 chip；分流图图例隐藏阶段；日志模型列两行 +「N 次尝试」；KPI 八卡；上游模型 100vh 抽屉；操作列 sticky 与头身对齐；语义色五档/脏标记/toast 统一。

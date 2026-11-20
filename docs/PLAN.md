@@ -1,6 +1,6 @@
 # Slipstream 方案（二期同步稿）
 
-> **历史快照（二期，2026-11-18）**：本文件保留二期方案与当时数字（如 23 页面组件/29 路由/首包 193.8 KB/pytest 315），这些数字**已过时**；五期现行口径见 `docs/DELIVERY.md` §7、`docs/GLOSSARY.md` §8 与 `docs/api-contract.md`（27 路由/19 页面模块/15 导航/836 passed/首包 212.9 KB）。
+> **历史快照（二期，2026-11-18）**：本文件保留二期方案与当时数字（如 23 页面组件/29 路由/首包 193.8 KB/pytest 315），这些数字**已过时**；五期现行口径见 `docs/DELIVERY.md` §7、`docs/GLOSSARY.md` §8 与 `docs/api-contract.md`（27 路由/19 页面模块/15 导航/836 passed/首包 213.1 KB）。
 
 - 状态：**二期已完成**，ticket 01–22 全部合入 `phase2/integration`（2026-11-18，本地提交未 push）。
 - 范围：全新系统，与旧 3680 系统无继承关系。

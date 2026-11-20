@@ -15,7 +15,7 @@
 | 数据面适配 | `api/src/l03_adapters/` | `DataPlaneAdapter` 八方法 SPI + `mock` + `agentgateway` 渲染/下发/回滚/用量拉取；IR 在 `l02_domain/ir.py`；AG 1.7 `--validate-only` 门禁；priority 旧→新语义迁移脚本 | 契约测试 + 渲染快照 + 真实二进制校验 + 迁移集成测试 |
 | 管理台 | `web/`（Vite+React+TS+Tailwind v4） | **27 条路由 = 17 个功能页 + 登录 + 404 + 8 个旧入口重定向页**，共 **19 个页面模块**。功能页：快速上手、数据看板（柱形/面积/分流三 Tab + 分流隐藏阶段 + 热力图 7D/30D/365D + 8 KPI 卡）、使用日志（模型列两行 +「N 次尝试」路由链 + 费用两行 + 详情抽屉）、上游管理 + 上游详情（四 Tab：连接与模型/路由与模型/请求与响应/其他设置；逐模型探测/拉取模型/逐把密钥测试）、模型管理（上游模型/公开模型两 Tab；公开模型「编辑」进整页 `/models/public/:id` 单事务保存 + 成员 chip）、价目管理（成本+倍率可编辑、公开模型加权平均价只读）、模型试验、连接密钥、用户（树/代理）、角色管理（权限矩阵）、网关策略（流量策略/护栏/MCP 三 Tab）、审计、配置版本、用户设置、运营设置（连接地址/系统参数/运行信息） | `tsc --noEmit` exit 0；`eslint` 0 error；`vite build` 成功 |
 | 导航 IA | `web/src/components/layout/nav-items.ts`（清单唯一来源 `web/src/routes.ts` → `ops/checks/routes.json`） | 侧栏四组、**15 个一级导航项**（运营设置 3 个二级分区在页内子导航，不重复挂侧栏）：常规（快速上手/数据看板/使用日志）、配置（上游管理/模型管理/价目管理）、工具（模型试验）、系统（连接密钥/用户管理/角色管理/网关策略/审计/配置版本/用户设置/运营设置） | route-audit（27 路由 / 19 页面 / 15 导航）+ 浏览器验收 |
-| 前端包体 | `web/scripts/check-bundle.mjs` | 路由级 code-split；首包 gzip **212.9 KB**，共 **75 个 JS chunk**，echarts 惰性 chunk 148.2 KB | `check:bundle` PASS（maxFirstLoad 220 / minChunks 20 / maxChunk 400） |
+| 前端包体 | `web/scripts/check-bundle.mjs` | 路由级 code-split；首包 gzip **213.1 KB**，共 **75 个 JS chunk**，echarts 惰性 chunk 148.2 KB | `check:bundle` PASS（maxFirstLoad 220 / minChunks 20 / maxChunk 400） |
 | 验收自动化 | `ops/checks/` | `acceptance_browser.mjs`（Playwright 端到端，五期矩阵见 §7）、`interaction_audit.mjs`（全站逐控件交互审计）、`terminology_audit.mjs`（web 文案术语门禁，不扫 docs）、`route-audit.mjs`、`smoke_api.py`；`docs/ACCEPTANCE.md` 为人工核对清单 | 五期 `--strict` 全绿（证据见 §7） |
 | 实验结论 | `docs/experiments/P0-RESULTS.md` | E1~E20：重试、热加载、健康、internal/404、failover 打平、sqlite 日志表、P2C 同层选路、transformations 头体改写、预算语义、keyHash、额度桶、retry 支持面、OTel 逐次尝试、多密钥展开/conditional 首条独占（E14–E20 详见 P0-RESULTS 与 CHANGELOG-phase4） | 隔离实例实测，全程未碰生产 AG |
 | 文档 | `docs/` | PLAN、CHANGELOG-phase2、CHANGELOG-phase4、GLOSSARY、FEATURE-PARITY、api-contract、DELIVERY、DECISIONS（ADR-001…028）、contracts/*、ACCEPTANCE、DESIGN-AUDIT、plans/w5-correctness-rework | — |
@@ -50,7 +50,7 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 ## 3. 验收证据（二期当时；五期基线见 §7）
 
 - 后端：`cd api && PYTHONPATH=src python -m pytest tests -q` → **315 passed**（二期当时；五期为 836 passed）（含单端口 SPA 托管 4 个新用例）；`ruff check src tests` → All checks passed；`python ops/checks/smoke_api.py` → **40/40 PASS**（overview 与 margin 同窗口口径、has_api_key、登录/退出/限流/未认证 401、设置往返、审计筛选、账单/看板/模型管理等）。
-- 前端门禁：`npx tsc --noEmit` exit 0；`npx eslint src --max-warnings 0` exit 0；`npm run build` exit 0；`npm run check:bundle` PASS（二期当时首包 gzip **193.8 KB**、**66** 个 JS chunk；五期为 212.9 KB / 75 chunk）。
+- 前端门禁：`npx tsc --noEmit` exit 0；`npx eslint src --max-warnings 0` exit 0；`npm run build` exit 0；`npm run check:bundle` PASS（二期当时首包 gzip **193.8 KB**、**66** 个 JS chunk；五期为 213.1 KB / 75 chunk）。
 - 路由审计：`node ops/checks/route-audit.mjs` exit 0（二期当时 29 条路由；五期为 27 条路由 / 19 页面模块 / 15 导航项，含旧入口重定向与动态路由的显式放行）。
 - UI 基础层：`node web/scripts/check-ui-foundation.mjs` → **37/37**（指标卡图标/间距/页面接线/术语「词元」「花费」）。
 - 组件原语化：`4826e50` 把 17 个文件里的原生 `button/select/checkbox/textarea/input/table` 与手写 tabs/分页/主题卡统一到 `components/ui`（Radix Tabs、Pagination、ToggleGroup、Table、Card 等）；tsc/eslint/build 全绿，check-ui-foundation 37/37；规范与逐项清单见 `docs/DESIGN-AUDIT.md`「组件原语化整改」。
@@ -67,7 +67,7 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 2. **同层路由**由 AG 的 P2C 决定（健康 + 延迟 EWMA），控制面只配 failover 的 priority 分层与 weighted 权重；不支持“轮询/最小连接”的假实现（ADR-012/014）。
 3. **MCP 支持 sse/stdio**：顶层 `mcp.targets` 已实测通过 pinned AG 1.7 `--validate-only`；http 变体与 `url` 字段被二进制拒绝，后端 422、前端置灰。
 4. **`/admin/reports/trend` 是遗留日桶端点**（`metric + range` 7d/30d/90d，未知值回退 30d）；v2 看板与报表走 `/admin/reports/timeseries` 等端点，支持任意区间（today/24h/7d/30d/365d）与 `from_ms/to_ms` 自定义窗口、`bucket=auto` 小时/日桶；桑基 flow 与 overview 金额已跟随时间窗。
-5. **前端包体**：已做路由级 code-split，五期基线首包 gzip **212.9 KB**、**75** 个 JS chunk；最大 chunk 为 echarts（gzip 148.2 KB），后续可继续按页面细化拆包（playground/params-panel.tsx 常量外移）。二期当时的 193.8 KB/66 chunk 已过时。
+5. **前端包体**：已做路由级 code-split，五期基线首包 gzip **213.1 KB**、**75** 个 JS chunk；最大 chunk 为 echarts（gzip 148.2 KB），后续可继续按页面细化拆包（playground/params-panel.tsx 常量外移）。二期当时的 193.8 KB/66 chunk 已过时。
 6. **上游密钥不回显**：`GET /admin/upstreams/{id}/keys` 只回 masked/key_suffix，明文只在创建/轮换时返回一次；上游列表用 `has_api_key` 与 `key_count`（只统计 `upstream_keys` 行，不读退役的 `api_key_enc`；旧库未迁移时为 0，前端提示运行 `migrate_multikey_v2`）。连接密钥（旧称客户端密钥，后端 `/admin/api-keys`）才有 `sk-…abcd` 掩码 + 审计化 reveal。
 7. **控制台会话是绝对过期（12h，无滑动续期）**；生产必须设 `SLIPSTREAM_COOKIE_SECURE=1` 并置于 TLS 之后，开发环境默认允许 http。
 8. **字段级权限是“缺键”不是 null**：无 `billing:cost` 时成本/毛利键消失，无 `billing:spend` 时花费/余额键消失；前端必须按键存在性判断，不能把 null 当无权限。
@@ -175,7 +175,7 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 ### 7.4 五期门禁基线（2026-11-21 实测）
 
 - 后端：`pytest` **836 passed / 18 warnings / EXIT=0**；`ruff check src tests` All checks passed；`gen_ts.py --check` PASS（contract.ts 最新）；`smoke_api.py` **40/40 PASS**。
-- 前端：`tsc --noEmit` 0；`eslint src` 0；`vite build` 成功；`check:bundle` PASS（首包 gzip **212.9 KB** / **75** chunk / echarts 148.2 KB）；`check-ui-foundation` **73/73**；`check-semantic-dirty` **40/40**；`terminology_audit --strict` **error 0 · warn 0**（范围：web 文案，不含 docs）。
+- 前端：`tsc --noEmit` 0；`eslint src` 0；`vite build` 成功；`check:bundle` PASS（首包 gzip **213.1 KB** / **75** chunk / echarts 148.2 KB）；`check-ui-foundation` **75/75**；`check-semantic-dirty` **41/41**；`terminology_audit --strict` **error 0 · warn 0**（范围：web 文案，不含 docs）。
 - 路由审计：`route-audit` 路由 **27** / 页面模块 **19** / 导航 **15**；OpenAPI **99 路径 / 133 操作**。
 - 浏览器验收：矩阵与证据见 ticket 18（`node ops/checks/acceptance_browser.mjs --channel msedge --strict`，单端口 3700 同源托管；新交互覆盖公开模型单页/chip、日志 attempts、分流隐藏轴、sticky/数字/语义色/脏标记、模型探测、冷却互斥）。
 

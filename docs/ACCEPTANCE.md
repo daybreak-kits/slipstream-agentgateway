@@ -198,8 +198,8 @@ node ops/checks/acceptance_browser.mjs --admin admin:admin12345 --user wangwu:ad
 
 ### 5.7 工程与交付（Story 47–50）
 
-1. `cd web && npm run build && node scripts/check-bundle.mjs`：入口 chunk 与 `echarts` 分离；五期基线为首包 gzip **212.9 KB**、**75** 个 JS chunk、echarts 独立 148.2 KB（以 `check-bundle` PASS 为准；三期旧基线 147.73/47.04/151.94 已过时）。
-2. `bash ops/checks/verify_web.sh`：tsc/eslint/route-audit 全过；`node web/scripts/check-ui-foundation.mjs`（73/73）+ `check-semantic-dirty.mjs`（40/40）；`python ops/checks/smoke_api.py` 全 PASS。
+1. `cd web && npm run build && node scripts/check-bundle.mjs`：入口 chunk 与 `echarts` 分离；五期基线为首包 gzip **213.1 KB**、**75** 个 JS chunk、echarts 独立 148.2 KB（以 `check-bundle` PASS 为准；三期旧基线 147.73/47.04/151.94 已过时）。
+2. `bash ops/checks/verify_web.sh`：tsc/eslint/route-audit 全过；`node web/scripts/check-ui-foundation.mjs`（75/75）+ `check-semantic-dirty.mjs`（41/41）；`python ops/checks/smoke_api.py` 全 PASS。
 3. 每张 ticket 合并前：`node ops/checks/acceptance_browser.mjs --only <check-id>` 或本表对应行；新增页面必须同时补一条检查。
 
 ## 6. 浏览器 MCP 手测路径（无 Playwright 时的替代）
