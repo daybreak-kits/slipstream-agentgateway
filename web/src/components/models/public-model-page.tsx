@@ -6,8 +6,9 @@ import { SectionCard } from "@/components/governance/panel";
 import { PageHeader } from "@/components/layout/page-header";
 import { availabilityText, availabilityTone } from "@/components/models/availability";
 import { Field } from "@/components/models/field";
+import { conditionalFallback, memberLabeler } from "@/components/models/member-chip";
+import { MemberChipFlow } from "@/components/models/member-chip-flow";
 import { type MemberDraft, validateMembers } from "@/components/models/member-drafts";
-import { MemberBoard } from "@/components/models/member-editor";
 import { ROUTING_LABELS, toInt } from "@/components/models/model-vocab";
 import {
   PERMISSION_SCOPE,
@@ -29,9 +30,9 @@ import type { PublicModel, RoutingMode, UpstreamModel } from "@/types";
  * 只读摘要），页头 h1 + 状态 + 脏标记，底部只有一个「保存」。
  *
  * 容器（public-model-editor.tsx）负责取数、草稿与单 PATCH 提交；这里只接收
- * props 渲染用户能看到的 DOM，SSR 门禁（check-semantic-dirty.mjs 第 8 段）直接
- * 断言这份 DOM，不进入组件内部状态。成员 chip 流归 ticket 14，本票仍复用
- * MemberBoard 的成员编辑能力，保存语义不受影响。
+ * props 渲染用户能看到的 DOM，SSR 门禁（check-semantic-dirty.mjs 第 9 段）直接
+ * 断言这份 DOM，不进入组件内部状态。成员编排是 ticket 14 的分层 chip 流：
+ * 成员名统一「上游渠道/模型」，点击 chip 编辑 priority/weight/when。
  */
 export interface PublicModelPageViewProps {
   model: PublicModel;
@@ -57,25 +58,6 @@ function SummaryRow({ label, children }: { label: string; children: ReactNode })
       <div className="min-w-0 flex-1 text-2sm text-body">{children}</div>
     </div>
   );
-}
-
-/** 成员展示名：上游模型名 · 所属上游；列表缺失时回退到服务端 join 名或 id。 */
-function memberLabel(
-  member: MemberDraft,
-  upstreamModels: UpstreamModel[],
-  fallbackNames: Map<string, string>,
-): string {
-  const model = upstreamModels.find((item) => item.id === member.upstream_model_id);
-  if (model) return model.name + (model.upstream_name ? " · " + model.upstream_name : "");
-  return fallbackNames.get(member.upstream_model_id) ?? member.upstream_model_id;
-}
-
-/** conditional 末位兜底成员：按 priority 排序后的最后一位，且 when 留空。 */
-function conditionalFallbackOf(form: PublicModelForm): MemberDraft | null {
-  if (form.routing_mode !== "conditional" || form.members.length === 0) return null;
-  const sorted = [...form.members].sort((left, right) => toInt(left.priority) - toInt(right.priority));
-  const last = sorted[sorted.length - 1];
-  return last !== undefined && last.when.trim() === "" ? last : null;
 }
 
 export function PublicModelPageView({
@@ -109,9 +91,9 @@ export function PublicModelPageView({
   const statusText = availabilityText(statusRow);
   const statusTone = availabilityTone(statusRow);
 
-  const fallback = conditionalFallbackOf(form);
-  const fallbackLabel =
-    fallback === null ? null : memberLabel(fallback, upstreamModels, fallbackNames);
+  const labelOf = memberLabeler(upstreamModels, fallbackNames);
+  const fallback = conditionalFallback(form.members, labelOf, form.routing_mode);
+  const fallbackLabel = fallback === null ? null : fallback.label;
   const layerPriorities = Array.from(
     new Set(form.members.map((member) => toInt(member.priority))),
   ).sort((left, right) => left - right);
@@ -229,33 +211,39 @@ export function PublicModelPageView({
         </fieldset>
       </SectionCard>
 
-      <SectionCard title="成员编排" description="保存时按 priority 整批替换；priority 数值小优先。">
-        <div className="space-y-3">
-          <p className="text-2xs text-faint" data-slot="member-rules">
-            规则：至少保留 1 个成员；成员不可重复；conditional 模式只有末位成员可以留空 when（兜底）。
-          </p>
-          <fieldset disabled={controlsDisabled} className="m-0 min-w-0 border-0 p-0">
-            <MemberBoard
-              members={form.members}
-              upstreamModels={upstreamModels}
-              fallbackNames={fallbackNames}
-              mode={form.routing_mode}
-              onChange={onMembersChange}
-            />
-          </fieldset>
-          {fallbackLabel !== null ? (
-            <p className="text-2xs text-info-text" data-slot="conditional-fallback">
-              条件路由末位兜底：{fallbackLabel}（when 留空，前面成员都不命中时使用）
+      <SectionCard title="成员编排" description="保存时按 priority 整批替换；priority 数值小优先，同层 P2C 平权。">
+        <DirtyField
+          dirty={dirty.isDirtyField("members")}
+          onReset={() => onResetField("members")}
+          resetLabel="恢复成员编排"
+        >
+          <div className="space-y-3">
+            <p className="text-2xs text-faint" data-slot="member-rules">
+              规则：至少保留 1 个成员；成员不可重复；conditional 模式只有末位成员可以留空 when（兜底）。
             </p>
-          ) : null}
-          {memberErrors.length > 0 ? (
-            <ul className="space-y-0.5 text-2xs text-danger-text" data-slot="member-errors">
-              {memberErrors.map((error) => (
-                <li key={error}>● {error}</li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
+            <fieldset disabled={controlsDisabled} className="m-0 min-w-0 border-0 p-0">
+              <MemberChipFlow
+                members={form.members}
+                upstreamModels={upstreamModels}
+                fallbackNames={fallbackNames}
+                mode={form.routing_mode}
+                onChange={onMembersChange}
+              />
+            </fieldset>
+            {fallbackLabel !== null ? (
+              <p className="text-2xs text-info-text" data-slot="conditional-fallback">
+                条件路由末位兜底：{fallbackLabel}（when 留空，前面成员都不命中时使用）
+              </p>
+            ) : null}
+            {memberErrors.length > 0 ? (
+              <ul className="space-y-0.5 text-2xs text-danger-text" data-slot="member-errors">
+                {memberErrors.map((error) => (
+                  <li key={error}>● {error}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        </DirtyField>
       </SectionCard>
 
       <SectionCard title="只读摘要" description="按当前草稿计算的渲染语义；保存后生效。">
@@ -270,7 +258,7 @@ export function PublicModelPageView({
           <SummaryRow label="成员构成">
             {form.members.length} 个成员
             {form.members.length > 0
-              ? " · " + layerPriorities.length + " 个 priority 层（" + layerPriorities.join(" / ") + "）"
+              ? "；" + layerPriorities.length + " 个 priority 层（" + layerPriorities.join(" / ") + "）"
               : ""}
             {form.routing_mode === "failover" ? "；按 priority 数值小优先逐层尝试" : null}
           </SummaryRow>
