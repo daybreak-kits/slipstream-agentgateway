@@ -22,6 +22,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { ActionButton } from "@/components/ui/action-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -418,39 +419,50 @@ function UpstreamTab() {
       headerClassName: "min-w-64",
       cell: (row: UpstreamModel) => (
         <div className="flex flex-wrap gap-1">
-          <Button variant="ghost" size="dense" onClick={() => setDialog({ open: true, initial: row })}>
-            <ACTION_ICONS.edit className="h-3.5 w-3.5" /> 编辑
-          </Button>
+          <ActionButton action="edit" size="dense" onClick={() => setDialog({ open: true, initial: row })}>
+            编辑
+          </ActionButton>
           {row.enabled ? (
-            <Button variant="ghost" size="dense" onClick={() => availability.mutate({ id: row.id, action: "disable" })}>
-              <ACTION_ICONS.disable className="h-3.5 w-3.5" /> 关闭
-            </Button>
+            <ActionButton
+              action="disable"
+              size="dense"
+              onClick={() => availability.mutate({ id: row.id, action: "disable" })}
+            >
+              关闭
+            </ActionButton>
           ) : (
-            <Button variant="ghost" size="dense" onClick={() => availability.mutate({ id: row.id, action: "enable" })}>
-              <ACTION_ICONS.enable className="h-3.5 w-3.5" /> 启用
-            </Button>
+            <ActionButton
+              action="enable"
+              size="dense"
+              onClick={() => availability.mutate({ id: row.id, action: "enable" })}
+            >
+              启用
+            </ActionButton>
           )}
           {/* ADR-025 + ticket 02：冷却中行内只保留一个「解除」（不再同时出现「冷却」），
               单次规则删除；命中周期窗口时后端只跳过本窗口并保留周期规则。 */}
           {isCooling(row) ? (
-            <Button variant="ghost" size="dense" onClick={() => availability.mutate({ id: row.id, action: "release" })}>
-              <ACTION_ICONS.releaseCooldown className="h-3.5 w-3.5" /> 解除
-            </Button>
+            <ActionButton
+              action="releaseCooldown"
+              size="dense"
+              onClick={() => availability.mutate({ id: row.id, action: "release" })}
+            >
+              解除
+            </ActionButton>
           ) : (
-            <Button variant="ghost" size="dense" onClick={() => setCooldownFor(row)}>
-              <ACTION_ICONS.cooldown className="h-3.5 w-3.5" /> 冷却
-            </Button>
+            <ActionButton action="cooldown" size="dense" onClick={() => setCooldownFor(row)}>
+              冷却
+            </ActionButton>
           )}
-          <Button
-            variant="ghost"
+          <ActionButton
+            action="delete"
             size="dense"
-            className="text-danger-text"
             disabled={(row.target_count ?? 0) > 0}
             title={(row.target_count ?? 0) > 0 ? "被公开模型引用，先移除成员再删除" : undefined}
             onClick={() => setDeleting(row)}
           >
-            <ACTION_ICONS.delete className="h-3.5 w-3.5" /> 删除
-          </Button>
+            删除
+          </ActionButton>
         </div>
       ),
     } as ModelColumn<UpstreamModel>] : []),
@@ -468,20 +480,30 @@ function UpstreamTab() {
       {selected.size > 0 ? (
         <>
           <span className="text-2xs text-faint">已选 <span className="tnum font-medium text-title">{selected.size}</span></span>
-          <Button variant="outline" size="sm" disabled={batch.isPending} onClick={() => runBatch("enable")}>
-            <ACTION_ICONS.enable className="h-3.5 w-3.5" /> 批量启用
-          </Button>
-          <Button variant="outline" size="sm" disabled={batch.isPending} onClick={() => runBatch("disable")}>
-            <ACTION_ICONS.disable className="h-3.5 w-3.5" /> 批量关闭
-          </Button>
+          <ActionButton
+            action="enable"
+            variant="outline"
+            disabled={batch.isPending}
+            onClick={() => runBatch("enable")}
+          >
+            批量启用
+          </ActionButton>
+          <ActionButton
+            action="disable"
+            variant="outline"
+            disabled={batch.isPending}
+            onClick={() => runBatch("disable")}
+          >
+            批量关闭
+          </ActionButton>
           {canCost ? (
             <Button variant="outline" size="sm" onClick={() => setBatchPrice(true)}>
               <ACTION_ICONS.batchPrice className="h-3.5 w-3.5" /> 批量改价
             </Button>
           ) : null}
-          <Button variant="ghost" size="sm" className="text-danger-text" disabled={batch.isPending} onClick={() => setBatchDelete(true)}>
-            <ACTION_ICONS.delete className="h-3.5 w-3.5" /> 批量删除
-          </Button>
+          <ActionButton action="delete" disabled={batch.isPending} onClick={() => setBatchDelete(true)}>
+            批量删除
+          </ActionButton>
           <Button variant="ghost" size="sm" disabled={batch.isPending} onClick={() => setSelected(new Set())}>
             <ACTION_ICONS.clear className="h-3.5 w-3.5" /> 清除选择
           </Button>
@@ -916,21 +938,29 @@ function PublicTab() {
             <ACTION_ICONS.copy className="h-3.5 w-3.5" />
           </Button>
           {/* ADR-025：编辑+成员合并为整页编辑器入口；新建仍走简化弹窗。 */}
-          <Button variant="ghost" size="dense" onClick={() => openEditor(row)}>
-            <ACTION_ICONS.edit className="h-3.5 w-3.5" /> 编辑
-          </Button>
+          <ActionButton action="edit" size="dense" onClick={() => openEditor(row)}>
+            编辑
+          </ActionButton>
           {row.enabled ? (
-            <Button variant="ghost" size="dense" onClick={() => availability.mutate({ id: row.id, action: "disable" })}>
-              <ACTION_ICONS.disable className="h-3.5 w-3.5" /> 关闭
-            </Button>
+            <ActionButton
+              action="disable"
+              size="dense"
+              onClick={() => availability.mutate({ id: row.id, action: "disable" })}
+            >
+              关闭
+            </ActionButton>
           ) : (
-            <Button variant="ghost" size="dense" onClick={() => availability.mutate({ id: row.id, action: "enable" })}>
-              <ACTION_ICONS.enable className="h-3.5 w-3.5" /> 启用
-            </Button>
+            <ActionButton
+              action="enable"
+              size="dense"
+              onClick={() => availability.mutate({ id: row.id, action: "enable" })}
+            >
+              启用
+            </ActionButton>
           )}
-          <Button variant="ghost" size="dense" className="text-danger-text" onClick={() => setDeleting(row)}>
-            <ACTION_ICONS.delete className="h-3.5 w-3.5" /> 删除
-          </Button>
+          <ActionButton action="delete" size="dense" onClick={() => setDeleting(row)}>
+            删除
+          </ActionButton>
         </div>
       ),
     } as ModelColumn<PublicModel>] : []),
@@ -945,15 +975,25 @@ function PublicTab() {
   const toolbarEnd = canWrite && selected.size > 0 ? (
     <>
       <span className="text-2xs text-faint">已选 <span className="tnum font-medium text-title">{selected.size}</span></span>
-      <Button variant="outline" size="sm" disabled={batch.isPending} onClick={() => runBatch("enable")}>
-        <ACTION_ICONS.enable className="h-3.5 w-3.5" /> 批量启用
-      </Button>
-      <Button variant="outline" size="sm" disabled={batch.isPending} onClick={() => runBatch("disable")}>
-        <ACTION_ICONS.disable className="h-3.5 w-3.5" /> 批量关闭
-      </Button>
-      <Button variant="ghost" size="sm" className="text-danger-text" disabled={batch.isPending} onClick={() => setBatchDelete(true)}>
-        <ACTION_ICONS.delete className="h-3.5 w-3.5" /> 批量删除
-      </Button>
+      <ActionButton
+        action="enable"
+        variant="outline"
+        disabled={batch.isPending}
+        onClick={() => runBatch("enable")}
+      >
+        批量启用
+      </ActionButton>
+      <ActionButton
+        action="disable"
+        variant="outline"
+        disabled={batch.isPending}
+        onClick={() => runBatch("disable")}
+      >
+        批量关闭
+      </ActionButton>
+      <ActionButton action="delete" disabled={batch.isPending} onClick={() => setBatchDelete(true)}>
+        批量删除
+      </ActionButton>
       <Button variant="ghost" size="sm" disabled={batch.isPending} onClick={() => setSelected(new Set())}>
         <ACTION_ICONS.clear className="h-3.5 w-3.5" /> 清除选择
       </Button>

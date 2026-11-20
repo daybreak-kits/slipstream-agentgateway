@@ -28,6 +28,7 @@ from l06_api.schemas import (
     UpstreamKeyCreate,
     UpstreamKeyPatch,
     UpstreamKeyTestIn,
+    UpstreamModelProbeIn,
     UpstreamPatch,
     UpstreamProbeIn,
 )
@@ -293,6 +294,34 @@ def import_models(
     )
     session.commit()
     return {"upstream_id": upstream_id, **result}
+
+
+@router.post(
+    "/{upstream_id}/models/probe",
+    dependencies=[Depends(require("upstream_models:write"))],
+)
+def probe_models(
+    upstream_id: str,
+    payload: UpstreamModelProbeIn,
+    session: Session = Depends(session_of),
+) -> dict:
+    """Probe this upstream's stored models with one minimal chat each (ticket 05).
+
+    Serial by design (the console shows progress model by model), 20s per model,
+    results returned for this call only - no probe row, key test or model row is
+    written. model_write is upstream_models:write in the permission registry.
+    """
+    upstream = _load(session, upstream_id)
+    model_ids = list(payload.model_ids)
+    if payload.model_id:
+        model_ids.insert(0, payload.model_id)
+    return upstream_ops.probe_models(
+        session,
+        upstream,
+        model_ids=model_ids,
+        key_id=payload.key_id,
+        secret_box=_secret_box(),
+    )
 
 
 @router.patch("/batch", dependencies=[Depends(require("upstreams:write"))])

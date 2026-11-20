@@ -7,6 +7,7 @@ import { toast } from "@/lib/notify";
 import { DataTable } from "@/components/data-table";
 import { ErrorState } from "@/components/governance/panel";
 import { RoleDrawer, type RoleFormValues } from "@/components/roles/role-drawer";
+import { ActionButton } from "@/components/ui/action-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -173,27 +174,22 @@ export function AdminsPage() {
               </Button>
             ) : (
               canManageRoles && (
-                <Button
-                  variant="ghost"
+                <ActionButton
+                  action="edit"
                   size="dense"
                   onClick={() => {
                     setEditingRole(role);
                     setDrawerOpen(true);
                   }}
                 >
-                  <ACTION_ICONS.edit className="h-3.5 w-3.5" /> 编辑
-                </Button>
+                  编辑
+                </ActionButton>
               )
             )}
             {!role.builtin && canManageRoles && (
-              <Button
-                variant="ghost"
-                size="dense"
-                className="text-danger-text"
-                onClick={() => setDeleteTarget(role)}
-              >
-                <ACTION_ICONS.delete className="h-3.5 w-3.5" /> 删除
-              </Button>
+              <ActionButton action="delete" size="dense" onClick={() => setDeleteTarget(role)}>
+                删除
+              </ActionButton>
             )}
           </div>
         );

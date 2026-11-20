@@ -100,7 +100,7 @@ export function LogDetailDrawer({ open, row, timezone, onOpenChange }: LogDetail
   };
 
   const targetFields: Array<[string, ReactNode]> = [
-    ["公开模型", view.public_model || "—"],
+    ["请求模型", view.requested_model || "—"],
     ["上游模型", view.upstream_model || "—"],
     ["目标层级", view.target_priority === null ? "—" : "P" + view.target_priority],
     ["厂商", view.provider || "—"],
@@ -172,7 +172,7 @@ export function LogDetailDrawer({ open, row, timezone, onOpenChange }: LogDetail
         <div className="space-y-4 p-4">
           <div className="flex flex-wrap items-center gap-2">
             <Badge tone={statusTone(view.http_status)}>{statusLabel(view.http_status)}</Badge>
-            <span className="text-sm font-medium text-title">{view.public_model || "—"}</span>
+            <span className="text-sm font-medium text-title">{view.requested_model || "—"}</span>
             <span className="text-faint">→</span>
             <span className="text-sm text-body">{upstreamLabel(view)}</span>
             {view.is_stream ? <Badge tone="info">流式</Badge> : null}

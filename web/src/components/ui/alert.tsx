@@ -10,6 +10,7 @@ const alertVariants = cva(
     variants: {
       variant: {
         default: "border-border bg-surface-2 text-body",
+        info: "border-info bg-info-soft text-info-text",
         destructive: "border-danger bg-danger-soft text-danger-text",
         warning: "border-warning bg-warning-soft text-warning-text",
         success: "border-success bg-success-soft text-success-text",
@@ -23,6 +24,7 @@ const alertVariants = cva(
 
 const icons = {
   default: Info,
+  info: Info,
   destructive: AlertCircle,
   warning: TriangleAlert,
   success: CheckCircle2,

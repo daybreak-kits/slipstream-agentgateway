@@ -31,6 +31,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import type { SemanticTone } from "@/lib/semantic-tone";
+
 /**
  * 动作动词 → lucide 图标单一来源（DESIGN-AUDIT 四期增补 §12，W4-A1）。
  *
@@ -107,3 +109,44 @@ export const ACTION_ICONS = {
 } as const satisfies Record<string, LucideIcon>;
 
 export type ActionIconKey = keyof typeof ACTION_ICONS;
+
+/**
+ * 动作动词 → 语义 tone 单一来源（spec §7 / DESIGN-AUDIT §12）。
+ *
+ * 启用=成功绿、关闭/冷却=警示琥珀、解除=成功绿、测试=信息蓝、删除=危险红、编辑=中性。
+ * 页面用 components/ui/action-button 的 ActionButton 消费本表，不再各自写 text-danger-text。
+ */
+export const ACTION_TONES = {
+  edit: "neutral",
+  rename: "neutral",
+  delete: "danger",
+  disable: "warning",
+  enable: "success",
+  testConnection: "info",
+  fetchModels: "neutral",
+  refresh: "neutral",
+  copy: "neutral",
+  view: "neutral",
+  add: "neutral",
+  cooldown: "warning",
+  releaseCooldown: "success",
+  periodic: "neutral",
+  resetKey: "neutral",
+  issueKey: "neutral",
+  recharge: "neutral",
+  adjustBalance: "neutral",
+  addUser: "neutral",
+  transactions: "neutral",
+  undo: "neutral",
+  restore: "neutral",
+  save: "neutral",
+  import: "neutral",
+  selectFile: "neutral",
+  dryRun: "neutral",
+  deploy: "neutral",
+  rawJson: "neutral",
+  search: "neutral",
+  clear: "neutral",
+  members: "neutral",
+  batchPrice: "neutral",
+} as const satisfies Record<ActionIconKey, SemanticTone>;
