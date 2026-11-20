@@ -22,7 +22,6 @@ import {
   cacheHitFraction,
   cacheRatioText,
   marginFraction,
-  modelTypeLabel,
   statusLabel,
   statusTone,
 } from "@/components/logs/format";
@@ -61,7 +60,7 @@ import { usePermissions } from "@/lib/permissions";
 import { SELECT_ALL_VALUE } from "@/lib/select-sentinels";
 import { formatDateTime, useTimezone, type TimezoneMode } from "@/lib/time";
 import { cn } from "@/lib/utils";
-import type { PublicModel, Upstream, UpstreamModel, UserTreeNode } from "@/types";
+import type { PublicModel, Upstream, UserTreeNode } from "@/types";
 import { PageHeader } from "@/components/layout/page-header";
 
 interface AppliedLogFilters {
@@ -84,7 +83,7 @@ const STATUS_OPTIONS: Array<{ value: LogStatusFilter; label: string }> = [
 /** DataTable 列设置菜单的展示名（表头是函数/自定义节点时需要显式给出）。 */
 const LOG_COLUMN_LABELS: Record<string, string> = {
   datetime: "日期时间",
-  model: "模型 · 路由",
+  model: "模型",
   user: "用户",
   key: "密钥",
   tokens: "词元",
@@ -120,11 +119,6 @@ export function LogsPage() {
     queryKey: ["users"],
     queryFn: () => apiList<UserTreeNode>(ENDPOINTS.users),
   });
-  const upstreamModelsQ = useQuery({
-    queryKey: ["upstream-models"],
-    queryFn: () => apiList<UpstreamModel>(ENDPOINTS.upstreamModels),
-  });
-
   const logsQuery = useQuery({
     queryKey: [
       "logs",
@@ -196,13 +190,6 @@ export function LogsPage() {
       })),
     [usersQ.data],
   );
-  // 接口类型 join：按行的 upstream_model_id 精确匹配（列表接口 200 条上限，见报告）。
-  const modelTypes = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const model of upstreamModelsQ.data?.items ?? []) map.set(model.id, model.model_type);
-    return map;
-  }, [upstreamModelsQ.data]);
-
   const dirty = !filterDraftEqual(draft, applied.draft);
 
   useEffect(() => {
@@ -264,10 +251,9 @@ export function LogsPage() {
         onOpen: openDetail,
         canCost,
         canSpend,
-        modelTypes,
         latencyAll,
       }),
-    [mode, sort, handleSort, openDetail, canCost, canSpend, modelTypes, latencyAll],
+    [mode, sort, handleSort, openDetail, canCost, canSpend, latencyAll],
   );
 
   const total = logsQuery.data?.total ?? 0;
@@ -471,7 +457,6 @@ interface LogColumnSpec {
   onOpen: (row: LogRow) => void;
   canCost: boolean;
   canSpend: boolean;
-  modelTypes: Map<string, string>;
   /** 延迟报表 all 块（W4-F）：耗时列语义色的分位锚；加载中/旧后端缺位时中性灰。 */
   latencyAll?: AllSamplesLatency;
 }
@@ -508,7 +493,7 @@ function LatencyLine({
 
 /** 两行式单元格（DESIGN-AUDIT §2）：主行 primary、次行 muted；数字列右对齐 tnum。 */
 function buildLogColumns(spec: LogColumnSpec): ColumnDef<LogRow, unknown>[] {
-  const { mode, sort, onSort, onOpen, canCost, canSpend, modelTypes, latencyAll } = spec;
+  const { mode, sort, onSort, onOpen, canCost, canSpend, latencyAll } = spec;
   const columns: ColumnDef<LogRow, unknown>[] = [
     {
       id: "datetime",
@@ -525,26 +510,26 @@ function buildLogColumns(spec: LogColumnSpec): ColumnDef<LogRow, unknown>[] {
     },
     {
       id: "model",
-      header: "模型 · 路由",
+      // 两行式（D4）：第一行=客户端请求的公开模型，第二行=实际响应的上游模型，中间轻分割。
+      // 流式/优先级/接口类型不混进这两行（需要时在详情抽屉看）。
+      header: "模型",
       enableSorting: false,
       cell: ({ row }) => {
         const item = row.original;
-        const routeSecond = [
-          item.is_stream ? "流式" : "非流",
-          item.target_priority === null ? null : "P" + item.target_priority,
-          modelTypeLabel(modelTypes.get(item.upstream_model_id)),
-        ]
-          .filter(Boolean)
-          .join(" · ");
         return (
           <div className="min-w-0">
             <p
               className="truncate text-2sm font-medium text-title"
-              title={(item.public_model || "—") + " - " + (item.upstream_model || "—")}
+              title={item.requested_model || "—"}
             >
-              {(item.public_model || "—") + " - " + (item.upstream_model || "—")}
+              {item.requested_model || "—"}
             </p>
-            <p className="mt-0.5 truncate text-2xs text-faint">{routeSecond || "—"}</p>
+            <p
+              className="mt-0.5 truncate border-t border-border/60 pt-0.5 text-2xs text-faint"
+              title={item.upstream_model || "—"}
+            >
+              {item.upstream_model || "—"}
+            </p>
           </div>
         );
       },

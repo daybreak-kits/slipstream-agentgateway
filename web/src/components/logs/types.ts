@@ -13,7 +13,11 @@ export interface LogRow {
   duration_ms: number;
   time_to_first_token_ms: number;
   http_status: number;
+  /** 账本归因列：仍是记录到的模型（混合形态下=最终上游模型），不当作请求模型展示。 */
   public_model: string;
+  /** 客户端请求的公开模型（AG attributes_json.agw.ai.original_model）；旧行/缺失为空串，UI 显示「—」。 */
+  requested_model: string;
+  /** 实际响应的上游模型。 */
   upstream_model: string;
   upstream_model_id: string;
   target_priority: number | null;

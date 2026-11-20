@@ -60,7 +60,38 @@ def _as_bool(value: object) -> bool:
     return str(value).strip().lower() in {"true", "1", "yes", "on", "stream"}
 
 
+def _attributes_of(raw: dict) -> dict:
+    """Parsed AG attributes_json (one JSON-text column inside the raw row).
+
+    Old/full-form rows may omit the column and malformed text is tolerated here:
+    both degrade to an empty mapping so no log read can 500 on surplus history.
+    """
+    attrs = raw.get("attributes_json")
+    if isinstance(attrs, str) and attrs.strip():
+        try:
+            attrs = json.loads(attrs)
+        except ValueError:
+            return {}
+    return attrs if isinstance(attrs, dict) else {}
+
+
+#: Mixed-form AG request logs carry the client-requested public model here; the
+#: full-form direct rows only record the final upstream model (E17-M2 evidence).
+_REQUESTED_MODEL_ATTR = "agw.ai.original_model"
+
 _STREAM_ATTR_KEYS = ("gen_ai.request.stream", "gen_ai.request.is_stream", "stream")
+
+
+def _requested_model(raw: dict) -> str:
+    """Client-requested public model, or "" when the row cannot answer.
+
+    Ticket 03: the AG adapter only knows the final upstream model, which the
+    ledger already stores as public_model. The displayed request model comes
+    from attributes_json.agw.ai.original_model; missing/malformed/old rows stay
+    blank ("—" in the UI) and are never backfilled from the recorded models.
+    """
+    value = _attributes_of(raw).get(_REQUESTED_MODEL_ATTR)
+    return value if isinstance(value, str) else ""
 
 
 def _is_stream(raw: dict, ttft_ms: int) -> bool:
@@ -68,16 +99,10 @@ def _is_stream(raw: dict, ttft_ms: int) -> bool:
     for key in ("is_stream", "stream"):
         if key in raw:
             return _as_bool(raw[key])
-    attrs = raw.get("attributes_json")
-    if isinstance(attrs, str) and attrs.strip():
-        try:
-            attrs = json.loads(attrs)
-        except ValueError:
-            attrs = None
-    if isinstance(attrs, dict):
-        for key in _STREAM_ATTR_KEYS:
-            if key in attrs:
-                return _as_bool(attrs[key])
+    attrs = _attributes_of(raw)
+    for key in _STREAM_ATTR_KEYS:
+        if key in attrs:
+            return _as_bool(attrs[key])
     return ttft_ms > 0
 
 
@@ -708,6 +733,9 @@ def _log_item(
         "time_to_first_token_ms": row.time_to_first_token_ms,
         "http_status": row.http_status,
         "public_model": row.public_model,
+        # Ticket 03: the public model the client asked for, derived from the raw
+        # row; blank on old rows instead of reusing the ledger's recorded model.
+        "requested_model": _requested_model(raw),
         "upstream_model": row.upstream_model,
         "upstream_model_id": upstream_model_id,
         "target_priority": target_priority,
