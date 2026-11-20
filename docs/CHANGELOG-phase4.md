@@ -37,6 +37,12 @@
 - web：tsc / eslint / build / check-bundle（首包 gzip 210.8KB）/ check-ui-foundation（37/37）/ 术语 strict（error 0）全绿；verify_web 3/3。
 - 终局视觉检查：20+ 路由 × 两视口（1333×643 / 1999×965）**窗口级溢出全部为 0**（①事故修复全域验证），控制台零错误。
 
+## M5 路由链（2026-11-20 追加立项并落地）
+
+- **M5-a**（645aa0c，30 文件 +1897）：OTLP/HTTP 接收器（标准库 wire-format 解码器移植自 E19，零新依赖，l03 层）+ `trace_spans` 表（复合主键幂等，(trace_id,start_ms) 索引）+ `gateway_usage_events.trace_id` 补链（此前丢弃）+ `GET /admin/traces/{trace_id}`（attempts 按 start 复原）+ tracing 渲染（`frontendPolicies.tracing`，E19 形状 golden）+ 留存清理只删 span；**735 passed / 8 skipped EXIT=0**。
+- **M5-b**（1ac3a1f，6 文件 +569）：策略页「链路追踪」卡（启用/接收地址/采样，说明文案）+ 日志详情「路由链」时间线（每轮上游/状态码语义色/耗时/错误类型，根 span 汇总 retry.attempt 与总耗时；无 trace 不渲染）+ mock 两轮样例。
+- 冒烟：策略卡回显 ✓、路由链三轮（503→500→200 failover）红/绿语义色渲染 ✓（截图 web/.scratch/m5-b-trace-chain.png）；`trace_id` 缺失行不渲染该区。
+
 ## 已知边界与遗留（按优先级）
 
 1. **M5 路由链（待立项）**：OTel 接收器 + trace_id join + 日志详情链路展示；量产需采样策略。

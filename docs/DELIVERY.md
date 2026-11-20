@@ -128,3 +128,5 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 6. **路由链（M5 待立项）**：E19 证实可经 OTel Traces 实现（渲染 `frontendPolicies.tracing` + 控制面 OTLP 接收器 + trace_id join）；`randomSampling` 需显式开启否则无 span；accessLog upstreamCalls 在 1.7.0 静默失效。
 7. **conditional × 多密钥为受限组合**（E20/D2）：渲染不展开密钥、兜底至多 1 条且必须末位（AG 硬校验）、成员编排有提示。
 8. 看板 8 卡（缓存/RPM/TPM 自六卡拆出，**只拆不加**）、峰值=窗口内单分钟最大值；热力图 30D 按周/365D 按月（13 行，跨年加年份前缀）。
+
+9. **路由链已实现（M5，2026-11-20）**：策略页「链路追踪」卡（enabled/接收地址/采样，默认关）→ 渲染 `frontendPolicies.tracing`（E19 形状）→ 控制面常驻 OTLP/HTTP 接收器（默认 127.0.0.1:4318，绑定失败降级）→ `trace_spans` 表（复合主键幂等）→ 日志详情「路由链」时间线（每轮上游/状态码语义色/耗时/错误，trace_id join）。边界：仅 OTLP/HTTP protobuf；启用后每请求约 4 span（量产可关采样）；接收器尽力而为（宕机期间 span 丢失）；历史日志（tracing 启用前）无链路。
