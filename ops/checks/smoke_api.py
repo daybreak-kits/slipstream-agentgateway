@@ -344,9 +344,11 @@ def main() -> int:
 
         def check_prices() -> None:
             assert items_of(c.ok(c.get("/admin/prices/upstream"))), "upstream prices empty"
-            assert items_of(c.ok(c.get("/admin/prices/charge"))), "charge prices empty"
+            # W5/ADR-017：「花费 = 成本 × 倍率」派生后 charge_prices 的 API 已退役；
+            # 公开模型售价（成员加权派生）改用只读端点校验。
+            assert items_of(c.ok(c.get("/admin/prices/public-models"))), "public model prices empty"
 
-        c.check("GET /admin/prices/{upstream,charge}", check_prices)
+        c.check("GET /admin/prices/{upstream,public-models}", check_prices)
 
         def check_trend() -> None:
             body = c.ok(c.get("/admin/reports/trend", params={"metric": "charge_micro", "range": "7d"}))

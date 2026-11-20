@@ -211,4 +211,3 @@ grep -rn "bg-gradient\|text-gradient\|drop-shadow\|blur-\|hover:scale\|animate-p
 cd web && node scripts/check-ui-foundation.mjs && node scripts/check-semantic-dirty.mjs
 node ops/checks/acceptance_browser.mjs --channel msedge --strict   # 单端口 3700，含 §18 新交互
 ```
-

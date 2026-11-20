@@ -949,28 +949,46 @@ async function auditShell(page, sessionState) {
     }
   }
 
-  // 4) 主题三态（切完恢复浅色）
-  const themeButtons = header.locator('button[aria-label*="浅色"], button[aria-label*="深色"], button[aria-label*="系统"]');
-  const themeCount = await themeButtons.count();
-  for (let i = 0; i < themeCount; i += 1) {
-    await themeButtons.nth(i).click({ timeout: 2000 }).catch(() => {});
-    await page.waitForTimeout(200);
-  }
-  const readTheme = async () => evalGuarded(page, () => ({ html: document.documentElement.className, dataTheme: document.documentElement.getAttribute("data-theme") || "", colorScheme: getComputedStyle(document.documentElement).colorScheme })).catch(() => null);
-  const themeBefore = await readTheme();
-  const darkBtn = header.locator('button[aria-label*="深色"]').first();
-  if ((await darkBtn.count()) > 0) {
-    await darkBtn.click({ timeout: 2000 }).catch(() => {});
-    await page.waitForTimeout(300);
-    const darkened = await readTheme();
-    if (!darkened || (darkened.html === (themeBefore && themeBefore.html) && darkened.dataTheme === (themeBefore && themeBefore.dataTheme) && darkened.colorScheme === (themeBefore && themeBefore.colorScheme))) {
-      addIssue(label, "interaction", "点击「深色」主题后页面主题没有变化（class/data-theme/color-scheme 都没变）");
+  // 4) 主题三态：顶栏下拉菜单（触发按钮 aria-label=切换主题，选项为 menuitemradio）
+  const readTheme = async () =>
+    evalGuarded(page, () => ({
+      html: document.documentElement.className,
+      dataTheme: document.documentElement.getAttribute("data-theme") || "",
+      colorScheme: getComputedStyle(document.documentElement).colorScheme,
+    })).catch(() => null);
+  const pickTheme = async (name) => {
+    const trigger = header.locator('button[aria-label="切换主题"]').first();
+    if ((await trigger.count()) === 0) return false;
+    await trigger.click({ timeout: 2000 }).catch(() => {});
+    await page.waitForTimeout(250);
+    const item = page.getByRole("menuitemradio", { name, exact: true }).first();
+    if ((await item.count()) === 0) {
+      await page.keyboard.press("Escape").catch(() => {});
+      return false;
     }
-    const lightBtn = header.locator('button[aria-label*="浅色"]').first();
-    if ((await lightBtn.count()) > 0) await lightBtn.click().catch(() => {});
-    await page.waitForTimeout(200);
+    await item.click({ timeout: 2000 }).catch(() => {});
+    await page.waitForTimeout(300);
+    return true;
+  };
+  const themeBefore = await readTheme();
+  if (!(await pickTheme("深色"))) {
+    addIssue(label, "interaction", "顶栏缺少主题切换入口（button[aria-label=\"切换主题\"] + 深色/浅色/跟随系统菜单项）");
   } else {
-    addIssue(label, "interaction", "顶栏缺少「深色」主题按钮（仅找到 " + (await themeCount) + " 个主题按钮）");
+    const darkened = await readTheme();
+    if (
+      !darkened ||
+      (darkened.html === (themeBefore && themeBefore.html) &&
+        darkened.dataTheme === (themeBefore && themeBefore.dataTheme) &&
+        darkened.colorScheme === (themeBefore && themeBefore.colorScheme))
+    ) {
+      addIssue(label, "interaction", "切换「深色」后页面主题没有变化（class/data-theme/color-scheme 都没变）");
+    }
+    if (!(await pickTheme("浅色"))) {
+      addIssue(label, "interaction", "主题菜单缺少「浅色」项");
+    } else if (((await readTheme()) || { html: "" }).html.includes("dark")) {
+      addIssue(label, "interaction", "切换「浅色」后仍是深色主题");
+    }
+    if (!(await pickTheme("跟随系统"))) addIssue(label, "interaction", "主题菜单缺少「跟随系统」项");
   }
 
   if (sessionState.pageErrors.length > sessionState.pageErrorBase) {

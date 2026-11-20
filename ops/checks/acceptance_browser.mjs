@@ -275,7 +275,8 @@ async function main() {
     assert(await logo.first().isVisible(), "登录页 logo 不可见");
     const text = await admin.page.locator("body").innerText();
     assertIncludes(text, "驭流", "登录页文案");
-    assertIncludes(text, "Slipstream", "登录页文案");
+    // 品牌副行被 text-transform: uppercase 渲染为 SLIPSTREAM，正文 innerText 因此不含原大小写；按不区分大小写断言。
+    assertIncludes(text.toLowerCase(), "slipstream", "登录页文案");
     admin.assertNoNewErrors(before, "登录页");
     await admin.shot("login-brand");
     return "title=" + title;
@@ -357,18 +358,20 @@ async function main() {
     await admin.visit("/", "全局概览");
     const html = admin.page.locator("html");
     const before = (await html.getAttribute("class")) ?? "";
-    await admin.page.getByRole("radio", { name: "深色", exact: true }).first().click();
-    await admin.page.waitForTimeout(300);
+    // 主题入口是顶栏下拉菜单（触发按钮 aria-label=切换主题，选项角色 menuitemradio）。
+    const pickTheme = async (label) => {
+      await admin.page.getByRole("button", { name: "切换主题" }).first().click();
+      await admin.page.getByRole("menuitemradio", { name: label, exact: true }).first().click();
+      await admin.page.waitForTimeout(300);
+    };
+    await pickTheme("深色");
     assert(((await html.getAttribute("class")) ?? "").includes("dark"), "切到深色后 <html> 没有 dark class");
-    await admin.page.getByRole("radio", { name: "浅色", exact: true }).first().click();
-    await admin.page.waitForTimeout(300);
+    await pickTheme("浅色");
     assert(!((await html.getAttribute("class")) ?? "").includes("dark"), "切到浅色后 <html> 仍是 dark");
     await admin.shot("shell-theme-light");
-    await admin.page.getByRole("radio", { name: "深色", exact: true }).first().click();
-    await admin.page.waitForTimeout(300);
+    await pickTheme("深色");
     await admin.shot("shell-theme-dark");
-    await admin.page.getByRole("radio", { name: "跟随系统", exact: true }).first().click();
-    await admin.page.waitForTimeout(300);
+    await pickTheme("跟随系统");
     const after = (await html.getAttribute("class")) ?? "";
     assert(before.includes("dark") === after.includes("dark"), "恢复跟随系统后主题与初始不一致");
     return "浅色/深色/跟随系统 均可切换";
@@ -492,23 +495,27 @@ async function main() {
     await admin.ensureAuthed();
     const from = admin.consoleErrors.length;
     await admin.visit("/pricing", "价目管理");
-    const inputs = admin.page.locator('input[aria-label$="输入成本单价"]');
+    // 现行口径：上游进价表行内编辑（aria-label=<模型> 入价成本单价），改值后点同行「保存」落盘。
+    const inputs = admin.page.locator('input[aria-label$="入价成本单价"]');
+    await inputs.first().waitFor({ state: "visible", timeout: 15000 }).catch(() => {});
     assert((await inputs.count()) > 0, "价目表没有可编辑的成本单价输入框");
     const input = inputs.first();
     const original = await input.inputValue();
     assert(original !== "", "首个模型没有成本价，无法验证编辑保存");
     const bumped = (Number(original) + 1).toFixed(6);
+    const rowSave = () => admin.page.locator("tbody tr").filter({ has: inputs.first() }).getByRole("button", { name: /保存/ }).first();
     await input.fill(bumped);
-    await input.press("Enter");
+    await rowSave().waitFor({ state: "visible", timeout: 10000 }).catch(() => {});
+    await rowSave().click();
     await admin.page.getByText("价目已保存").first().waitFor({ state: "visible", timeout: 10000 });
     await admin.shot("pricing-edit-saved");
     await input.fill(original);
-    await input.press("Enter");
+    await rowSave().click();
     await admin.page.waitForTimeout(1500);
     admin.assertNoNewErrors(from, "价目编辑");
     await admin.page.reload({ waitUntil: "domcontentloaded" });
     await admin.settle();
-    const restored = await admin.page.locator('input[aria-label$="输入成本单价"]').first().inputValue();
+    const restored = await admin.page.locator('input[aria-label$="入价成本单价"]').first().inputValue();
     assert(Number(restored) === Number(original), "成本价未还原：" + restored + " != " + original);
     await admin.shot("pricing-edit-restored");
     return "成本单价可编辑保存并已还原为 " + original;
@@ -636,6 +643,8 @@ async function main() {
     // 单模型测试：行内「测试」→ 测试结果列出现 连通/失败/超时/连接失败（会话内徽章）。
     const probeCell = admin.page.locator("tbody tr").first().locator("td").nth(4);
     const rowTestButton = admin.page.locator("tbody tr").first().getByRole("button", { name: "测试", exact: true }).first();
+    // 行操作按钮按写权限渲染（auth/me 返回后才出现），先等按钮可见再断言。
+    await rowTestButton.waitFor({ state: "visible", timeout: 10000 }).catch(() => {});
     assert((await rowTestButton.count()) > 0, "模型行内缺少「测试」按钮");
     await rowTestButton.click();
     const deadline = Date.now() + 30000;
@@ -650,6 +659,7 @@ async function main() {
 
     // 全部测试：串行进度 + 取消入口；取消后保留部分结果并标明「已取消」。
     const allButton = admin.page.getByRole("button", { name: "全部测试", exact: true }).first();
+    await allButton.waitFor({ state: "visible", timeout: 10000 }).catch(() => {});
     assert((await allButton.count()) > 0, "缺少「全部测试」按钮");
     await allButton.click();
     const cancelButton = admin.page.getByRole("button", { name: /取消测试/ }).first();
@@ -837,8 +847,8 @@ async function main() {
     const missing = PLAYGROUND_PARAMS.filter((param) => !lower.includes(param.toLowerCase()));
     assert(missing.length === 0, "参数面板缺少 " + missing.length + " 项：" + missing.join("、"));
     // 第 20 项是模型选择入口：按钮文案在有选中模型时会变成模型名，用 title 定位
-    const modelTrigger = admin.page.locator('button[title="选择对外模型与思考等级"]').first();
-    assert((await modelTrigger.count()) > 0, "缺少模型选择入口（button[title=\"选择对外模型与思考等级\"]）");
+    const modelTrigger = admin.page.locator('button[title="选择公开模型与思考等级"]').first();
+    assert((await modelTrigger.count()) > 0, "缺少模型选择入口（button[title=\"选择公开模型与思考等级\"]）");
     await admin.shot("playground-params");
     return PLAYGROUND_PARAMS.length + " 项参数 + 模型选择入口 = " + (PLAYGROUND_PARAMS.length + 1) + " 项";
   });
@@ -857,8 +867,8 @@ async function main() {
 
   await test("playground.model-dialog", "模型选择对话框可打开且可搜索", async () => {
     await admin.visit("/playground", "模型试验");
-    const trigger = admin.page.locator('button[title="选择对外模型与思考等级"]').first();
-    assert((await trigger.count()) > 0, "找不到模型选择入口（button[title=\"选择对外模型与思考等级\"]）");
+    const trigger = admin.page.locator('button[title="选择公开模型与思考等级"]').first();
+    assert((await trigger.count()) > 0, "找不到模型选择入口（button[title=\"选择公开模型与思考等级\"]）");
     await trigger.click();
     const dialog = admin.page.locator('[role="dialog"]').last();
     await dialog.waitFor({ state: "visible", timeout: 5000 });
@@ -892,11 +902,11 @@ async function main() {
   });
 
   /* ---------- 信息架构（spec 目标态） ---------- */
-  await test("nav.spec-labels", "导航术语为 模型试验/上游管理/连接密钥/价目管理（公开模型为模型管理 Tab）", async () => {
+  await test("nav.spec-labels", "导航术语为 模型试验/上游渠道/连接密钥/价目管理（公开模型为模型管理 Tab）", async () => {
     await admin.ensureAuthed();
     const links = await admin.navLinks();
     const labels = links.map((l) => l.label);
-    const required = ["模型试验", "上游管理", "连接密钥", "价目管理"];
+    const required = ["模型试验", "上游渠道", "连接密钥", "价目管理"];
     const missing = required.filter((label) => !labels.includes(label));
     assert(missing.length === 0, "导航缺少：" + missing.join("、") + "；当前为 " + labels.join("/"));
     for (const old of ["游乐场", "客户端密钥", "上游", "对外模型", "封禁"]) {
@@ -1048,7 +1058,12 @@ async function main() {
     const visited = await admin.visit("/logs", "使用日志");
     assert(visited.text.includes("模型"), "日志表缺少「模型」列");
     assert(visited.text.includes("尝试"), "日志表缺少「尝试」列");
-    assert(/计费|成本/.test(visited.text), "日志费用列缺少「计费/成本」两行文案");
+    // 费用列两行：金额行 title=花费（向用户计费），明细行 title=成本（付上游进价）；可见文本只有金额，标签在 title 属性上。
+    const chargeLine = admin.page.locator('p[title^="花费"]');
+    const costLine = admin.page.locator('p[title^="成本"]');
+    await chargeLine.first().waitFor({ state: "visible", timeout: 10000 }).catch(() => {});
+    assert((await chargeLine.count()) > 0, "日志费用列缺少「花费」行");
+    assert((await costLine.count()) > 0, "日志费用列缺少「成本」行（两行展示）");
     const chainButtons = admin.page.getByRole("button", { name: /次尝试的路由链/ });
     const noChain = admin.page.getByText("无链路记录", { exact: true });
     const hasAttempts = (await chainButtons.count()) > 0;

@@ -3,3 +3,6 @@ dist/
 *.local
 .env
 .DS_Store
+
+# 本地实验/旧构建残留（含旧 CSS/JS 里的类名）：Tailwind v4 自动扫描会把它们带进构建、污染首包基线
+.scratch/
