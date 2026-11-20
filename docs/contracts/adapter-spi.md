@@ -121,7 +121,7 @@ class DataPlaneAdapter(Protocol):
 
 - `render` 幂等：同 IR 两次渲染字节一致
 - `render` 覆盖全部 IR 字段：IR 里每个字段都有对应断言
-- `validate` 能拒绝非法 IR（重复对外模型名、优先级为负、目标指向禁用上游等）
+- `validate` 能拒绝非法 IR（重复公开模型名、优先级为负、目标指向禁用上游等）
 - `apply` 成功后 `status` 的 config hash 与 artifact hash 一致
 - `apply` 失败后配置回滚到上一版
 - `usage` 幂等：同一游标拉两次不产生重复事件

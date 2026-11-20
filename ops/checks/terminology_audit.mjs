@@ -15,7 +15,10 @@
  *      不在字符串或 JSX 文本里，不会被误报。输出里的「已跳过 API 字段」计数给出命中量，
  *      用来证明排除规则确实生效（而不是把源码里所有 token 都当违规）。
  *   3. 对象字面量的键（形如 "token amounts ...": "中文"）是后端文案的映射键，不是 UI 文案，跳过。
- *   4. 严重级按旧词存量分两档，避免新词表把既有文案一巴掌打死（有存量时精确调规则，
+ *   4. 扫描范围固定为 web 文案（web/src + index.html + public），**不含 docs/ 与 README**：
+ *      历史 ADR 原文、调研快照与交付文档不参与门禁，docs 术语由 docs/GLOSSARY.md 与
+ *      docs/ACCEPTANCE.md/§0.1 人工核对（ticket 17）。
+ *   5. 严重级按旧词存量分两档，避免新词表把既有文案一巴掌打死（有存量时精确调规则，
  *      不改业务代码）：
  *      error —— 已废且存量已清零（W6 清零后提升）的旧词：tokens/Tokens/收费/qax/qianxin/
  *               调用模型/调用名/调用串/计划窗口/游乐场/裸「渠道」（含「上游」前缀的
@@ -23,7 +26,7 @@
  *      warn  —— 仍有启发式存量的旧词：单数 token（指代查询条件时应为「关键词/查询项」，
  *               指代用量时应为「词元」）。默认不失败，只提示人工判断；--strict 时
  *               升级为失败。
- *   5. 已知启发式：小写单词字符串（如 type: "tokens" 的枚举值）视为数据，不判违规；
+ *   6. 已知启发式：小写单词字符串（如 type: "tokens" 的枚举值）视为数据，不判违规；
  *      模板插值（美元符 + 花括号）视为代码并替换为空。改动判定前请先读 tokenIsUiCopy()。
  *
  * 用法：
@@ -422,6 +425,7 @@ if (asJson) {
   console.log(JSON.stringify({ ok, strict, scannedFiles, candidates, skippedApiFields, errors, warnings, checks }, null, 2));
 } else {
   console.log("# 术语审计（web/src 文案）");
+  console.log("范围：web/src 的 .ts/.tsx/.css 文案 + index.html + public 资产；不含 docs/ 与 README（历史 ADR 原文、调研快照不在门禁内，docs 术语按 docs/GLOSSARY.md 人工核对，ticket 17）。");
   console.log(
     "扫描文件 " + scannedFiles + " 个 · 文案候选 " + candidates + " 条 · 已跳过 API 字段/标识符 " + skippedApiFields + " 处",
   );

@@ -7,7 +7,7 @@
 - **DESIGN-AUDIT 四期规范**：表格四条（表头点击排序/头身对齐一致+操作列冻结右侧/大表表体内部滚动/分页规划含 sr-only 红线）、看板两行×每行 6 卡响应式（只拆不加）、表格撑满页底+最小高度、列设置强制、语义色=分位数锚定（≤P50 绿/P75 黄锚/P95 红）、lucide 图标映射表、**操作显隐一律查 RBAC 权限键**。
 - **ADR-025**：可用性措施（冷却两种模式）只归属上游模型；公开模型仅 启用/关闭。
 - **ADR-026**：多密钥平权——每把上游密钥展开为一个独立 AG 上游（`{model}#k{seq}` 别名 + virtualModel 同层 targets，E18 裁决形态）；**废除主密钥**（is_primary/镜像/轮换全部退役）；空上游非法（创建 422 + 删空 409，匿名探测分支随之移除）。
-- **ADR-024 修正注记**：路由链可视化由「永久砍定」修正为「**可经 OTel Traces 实现，列 M5 待立项**」（E19：`frontendPolicies.tracing` → 每次上游尝试一个 client span，request_logs.trace_id 可 join；本批不含）。
+- **ADR-024 修正注记**：路由链可视化由「永久砍定」修正为「可经 OTel Traces 实现」。该方向最终由 **ADR-028 落地**（2026-11-20，M5-a/M5-b 被取代）：AG 适配器内部私有实现 OTLP/HTTP → 归一化 `RequestAttempt` → `request_attempts` → `GET /admin/logs/{event_id}/attempts`；**系统层不出现 OTel/trace/span 概念**，系统级接收器、`trace_spans` 表与 `GET /admin/traces/{trace_id}` 均已删除。`request_logs` 1 请求 1 行不变。
 
 ## 修复与改造（工票 → 提交）
 
@@ -15,8 +15,8 @@
 |---|---|---|
 | A1 | 4fdb813 | 表格基建壳层：**分页 sr-only 逃逸 ICB 修复**（全站窗口滚动空白事故根因）、表体内部滚动（撑满页底+min-h-80）、头身对齐镜像、列设置强制+缺 storageKey 告警、lib/icons 图标单一来源、logs/upstreams/models/models-panel 接入；顺手修 stableColumnRenderer 可见列下标错位与列设置菜单不可勾回两个既有缺陷 |
 | A2+M | 6e37ff6 / dfa2d8e | 扫尾重映射销号（图标/对齐/空表头「操作」/语义色）+ 弹窗守卫补尾；**mock 契约对齐**（网关策略三端点 shape、/admin/connection、角色 CRUD mock） |
-| B | 7feedec / 0ec7849 | 看板 8 卡（只拆不加）：**均价单位修复**（¥2,658,543.95 → 元级正确值）、缓存卡（命中率）、RPM/TPM 双卡带**分钟峰值**（后端一条 SQL GROUP BY 分钟取 MAX）；热力图 30D 按周/365D 按月（352 定框零滚动）；桑基隐藏段跨接 splice（隐藏后仍连通单图） |
-| C | c2a0a09 | 冷却双模式弹窗（单次 1/3/6/12/24/72h 预设 + 周期紧凑编辑）；公开模型整页编辑器 `/models/public/:id`（Tab1 基本信息+策略 / Tab2 双栏成员编排）；上游模型编辑器三处归一；价格 2 位（<0.01 升 4 位）+ 未设置标注 |
+| B | 7feedec / 0ec7849 | 看板 8 卡（只拆不加）：**均价单位修复**（¥2,658,543.95 → 元级正确值）、缓存卡（命中率）、RPM/TPM 双卡带**分钟峰值**（后端一条 SQL GROUP BY 分钟取 MAX）；热力图 30D 按周/365D 按月（352 定框零滚动）；桑基隐藏段跨接 splice（隐藏后仍连通单图；**历史实现，五期已取代**：前端 splice 删除，改后端 `collapse` 路径投影重算，守恒且至少保留 2 段） |
+| C | c2a0a09 | 冷却双模式弹窗（单次 1/3/6/12/24/72h 预设 + 周期紧凑编辑）；公开模型整页编辑器 `/models/public/:id`（当时为 Tab1 基本信息+策略 / Tab2 双栏成员编排；**五期已收敛为单页三段 + 分层成员 chip + 唯一保存**，ticket 13/14）；上游模型编辑器三处归一；价格 2 位（<0.01 升 4 位）+ 未设置标注 |
 | D | 8f000c2 / 6c1676d | **多密钥平权落地**：密钥展开 N 上游（E18 形态）、禁同名渲染自检、去 is_primary/镜像/轮换、逐把测试（失效标红）+批量删除、迁移 CLI；名称解锁（后端 ADR-023 改名路径本就支持）、keys-panel 重做、页签琥珀圆点、匿名分支删除 |
 | D2 | 17c981a / 5c0b60c | **E20 缺陷修正**：conditional targets 不做密钥展开（E20：同谓词 first-match 首条独占 40:0）、兜底不变量收紧为 AG 真实约束（至多 1 条无 when 且必须末位）、成员编排 conditional×多密钥提示行 |
 | E | 830ba64 | 用户管理单页合并（双页签删除，控制台徽章仅标识）、**操作显隐一律查权限键**、角色 roles:write 门禁+内置只读摘要、顶栏用户菜单（设置/改密/主题写服务端偏好/退出）、全局搜索加用户/角色、routes.json 重生成、停用→关闭 |
@@ -55,6 +55,28 @@
 1. **路由链（ADR-028）**：AG 适配器私有 OTLP 采集 + `request_attempts` + `/admin/logs/{id}/attempts`；AG 1.7 需额外 loopback 端口，历史 `trace_spans` 不迁移。
 2. conditional × 多密钥为受限组合（E20/D2 已限流+提示）；`llm.*` 变量类谓词未实测。
 3. 按上游密钥的用量归因不可得（request_logs 只记最终上游）；usage provider 列现带 `#kN` 后缀，按名匹配退化为首匹配（既有近似）。
-4. 密钥删除/迁移后的 stale `keys/*.key` 文件清理（rollout 增量清理，建议项）。
+4. ~~密钥删除/迁移后的 stale `keys/*.key` 文件清理（rollout 增量清理，建议项）~~ → **已实现（五期 ticket 16）**：apply 成功后按本次 `key_files` 白名单 prune 受管 `keys/*.key`（目录外/非 .key/子目录/链接不碰，失败仅 warning 不阻断；`dry_run` 可预览计划，ADR-026 补记）。
 5. 批量改价弹窗双实现合并、`/admin/admins` mock 桩与 governance/types.ts 旧类型残留、4 个未使用依赖（react-avatar/progress/scroll-area/react-hook-form）——归后续清理票。
-6. 365D 热力图实际 13 行（跨年月加年份前缀）；上游列表页测试按钮仍为整体 test-connection（编辑器页已是逐把）。
+6. ~~365D 热力图实际 13 行~~（现为按月 12 行，跨年加年份前缀）；~~上游列表页测试按钮仍为整体 test-connection~~（五期已改为：列表「测试」跳转详情「路由与模型」Tab，逐模型探测/逐把密钥测试都在编辑器页）。
+
+## 五期（W5）变更记录（2026-11-21 收口，ticket 17）
+
+五期 ticket 01–16 已合入本地 `w5/integration`（未 push）；能力摘要与已知边界见 `docs/DELIVERY.md` §7。本节只记五期对既有行为/契约的变更。
+
+### 破坏性变更（无兼容别名）
+
+- 删除 `PUT /admin/public-models/{id}/targets`：公开模型保存改单 `PATCH /admin/public-models/{id}`，targets 随基本字段/路由模式/enabled 一次事务提交（按最终状态校验，失败整体回滚；旧端点不保留别名）。`contract.ts` 已重生成，无残留。
+- 删除 `GET /admin/traces/{trace_id}`、系统级 tracing 配置面与 `trace_spans` 表：路由链改 `GET /admin/logs/{event_id}/attempts` + `request_attempts`（ADR-028）。
+- 删除 `upstream_keys.is_primary` 列与主密钥/轮换端点：旧库启动时幂等 `DROP COLUMN`（ADR-026 补记）。
+- 旧入口 `/cost`、`/revenue`、`/unpriced` 删除（不是重定向）；`/bills` 已于三期删除（ADR-023）。
+
+### 新增与语义变更
+
+- 新增 `POST /admin/upstreams/{id}/models/probe`（模型探测，权限 `upstream_models:write`，串行 20s，不落库/不写 probes/不触发下发）；`discover-models` 正名为「模型拉取」。
+- 新增 `GET /admin/reports/flow?collapse=...` 隐藏阶段后端投影（守恒、至少 2 段；默认输出不变；前端 splice 删除）。
+- 日志列表行新增 `requested_model / attempts_count / has_attempts / attempts_error`（动态 dict，不进入 `contract.ts`，由 pytest `test_logs_requested_model` 等覆盖）；详情/抽屉复用「路由链」组件。
+- chunk 与统计基线：pytest 836 passed / 18 warnings；首包 gzip 212.9 KB / 75 chunk；check-ui-foundation 73/73；check-semantic-dirty 40/40。
+- **ADR-027 冷却互斥**：单次与周期互斥（409，details 恒三键 `{blocking_rule_ids, cooldown_until_ms, window_end_ms}` 两形状）；note-only PATCH 放行；结构变更清窗口例外；关闭不参与互斥；公开模型冷却写操作 422；解除只删一次性托管规则（周期窗口只写 skip，规则保留）；写后立即 `Rollout.apply`（reason model-cooldown/model-release/model-enable/model-disable）。
+- 多密钥：渲染 provider 名 `{model}#k{seq}`、密钥文件名 `{id}#{seq}.key`；conditional 模式每目标只展开首把（E20 既定裁决）。
+- UI：上游详情四 Tab 第二 Tab 改名「路由与模型」（模型并入、健康并入「连接与模型」）；公开模型单页三段 + 分层成员 chip；分流图图例隐藏阶段；日志模型列两行 +「N 次尝试」；KPI 八卡；上游模型 100vh 抽屉；操作列 sticky 与头身对齐；语义色五档/脏标记/toast 统一。
+

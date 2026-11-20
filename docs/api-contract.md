@@ -1,4 +1,4 @@
-# Slipstream 控制面 API 契约（二期同步稿）
+# Slipstream 控制面 API 契约（五期现行稿）
 
 控制面 base URL：`http://127.0.0.1:3700`
 
@@ -8,7 +8,7 @@
 > - 分页档位固定 **25/50/100/200**（默认 50），`page_size` 超出档位一律 **422** `VALIDATION_ERROR`；
 >   `offset ≥ 0`，负数 422。唯一来源 `api/src/l06_api/deps.py:ALLOWED_PAGE_SIZES`。
 
-> 基线：`phase2/integration`（2026-11-18）。**ticket 01–22 全部已合入**，本文覆盖最终接口面（OpenAPI 实测 89 条路径 / 125 个操作）。
+> 基线：`w5/integration`（2026-11-21，五期 ticket 01–16 全部合入）。本文覆盖最终接口面（OpenAPI 实测 **99 条路径 / 133 个操作**，不含 `/docs`、`/openapi.json`）。基线数字重跑命令见 §6/§7；`web/src/generated/contract.ts` 由 `ops/contract/gen_ts.py` 从同一 OpenAPI 生成，`--check` 防手改。
 
 本文是前后端契约的人类解释与语义基准（Lead 决策，2026-11-17）；组件 schema 的机器可读
 副本由 `python ops/contract/gen_ts.py` 从 FastAPI OpenAPI 生成到
@@ -16,7 +16,9 @@
 处理（t7 改），不为旧路径加兼容层——只有 /admin/settings、/admin/audit-logs、
 /admin/config/revisions/latest、/admin/overview 四个入口是 task-170 新增的补齐接口。
 
-二期同步：真实认证、三角色 RBAC、字段级金额权限、上游多密钥、策略/护栏/MCP 可编辑（ticket 02/03/09/11）；计费/价目/看板/日志/设置/账单/用户层级（ticket 04/05/06/10/12/13/14/16/17）；seed 与 priority 迁移（ticket 19）。
+二期同步（历史）：真实认证、三角色 RBAC、字段级金额权限、上游多密钥、策略/护栏/MCP 可编辑（ticket 02/03/09/11）；计费/价目/看板/日志/设置/账单/用户层级（ticket 04/05/06/10/12/13/14/16/17）；seed 与 priority 迁移（ticket 19）。
+
+五期同步（W5，2026-11-21）：模型探测 `POST /admin/upstreams/{id}/models/probe` 与「模型拉取」`discover-models` 术语分工（ticket 05）；请求尝试链 `GET /admin/logs/{event_id}/attempts` 与日志行 `requested_model/attempts_count/has_attempts/attempts_error`（ADR-028、ticket 03/04）；公开模型单事务整页保存（ticket 12，旧 `PUT /admin/public-models/{id}/targets` 删除）；报表分流隐藏阶段后端 `collapse` 投影（ticket 01）；冷却单次/周期互斥 409（ticket 02，ADR-027）；多密钥 `keys/*.key` 白名单清理（ticket 16，ADR-026 补记）。
 
 ## 0. 通用约定
 
@@ -51,7 +53,8 @@
   管理员可自建角色（`admin_roles` 行），内置角色权限不可改、不可删，仍有成员的自定义角色不可删。
   旧角色名只用于迁移：owner→admin、operator→agent、viewer→user。
 - 权限键共 41 个，注册表在 `l05_service/rbac.py`，`GET /admin/permissions` 返回分组与 keys；
-  每个接口的权限列写的是权限键；缺权限统一 403 `FORBIDDEN`。
+  每个接口的权限列写的是权限键；缺权限统一 403 `FORBIDDEN`。五期没有新增权限键：模型探测复用
+  `upstream_models:write`，公开模型 PATCH 携带 `targets` 时复用 `model_targets:write`（对照见 §3.2/§3.3）。
 - 字段级金额权限见 §0.5：无 `billing:cost` 时成本/毛利键直接缺失；无 `billing:spend` 时
   花费/余额键直接缺失。
 
@@ -348,13 +351,16 @@ AG 1.7 拒绝（`mcp.transport.http=false`），保存即 422。渲染到顶层 
 | DELETE | /admin/upstreams/{id}/keys/{key_id} | upstreams:write | 最后一把 409「至少保留一把密钥；如需停止调用请直接停用上游」 |
 | POST | /admin/upstreams/{id}/keys/batch-delete | upstreams:write | body {ids[]}；逐把删除并返回逐把结果 `{items:[{key_id, ok, error?}], deleted}`；最后一把以 per-item 错误拒绝 |
 | POST | /admin/upstreams/{id}/keys/test | upstreams:write | body {api_style?}；逐把按 base_url 发最小鉴权请求，返回 `{items:[{key_id, ok, status_code, latency_ms, error}]}`；结果落每把的 last_test_json/last_test_at_ms |
-| POST | /admin/upstreams/{id}/test-connection | upstreams:write | 8s 超时，写 `upstream_probes`；返回 kind/status/http_status/latency_ms/model_count/tested_at_ms + 协议探测三字段（见下） |
-| POST | /admin/upstreams/{id}/discover-models | upstreams:write | 探测候选模型，不自动建记录；响应同样带协议探测三字段 |
+| POST | /admin/upstreams/{id}/test-connection | upstreams:write | **整体连通性探测**：8s 超时，写 `upstream_probes`；返回 kind/status/http_status/latency_ms/model_count/tested_at_ms + 协议探测三字段（见下）。与逐模型「模型探测」不同（见下一行） |
+| POST | /admin/upstreams/{id}/models/probe | upstream_models:write | **模型探测**（ticket 05）：body `{model_id?, model_ids?: string[≤200], key_id?}`（`extra=forbid`，请求不能带 base_url/api_style/自由凭证，只能是库内 id）；`model_id` 会补在 `model_ids` 前、去重后按顺序探测，空列表 422「model_ids 不能为空」。只接受本上游已保存的上游模型：未知 id/他上游 id → 422 `VALIDATION_ERROR`「只能探测该上游已存在的模型」，details 仅在命中时带 `unknown_model_ids` / `foreign_model_ids`。`api_style` 仍是 `auto`（尚未解析）→ 422「api_style 尚未解析（auto），无法探测」。`key_id` 指定该上游的一把密钥，缺省取第一把密钥行。服务端**串行**逐模型发一次最小 chat，单模型 20s 超时（`MODEL_PROBE_TIMEOUT_SECONDS`）；返回 `{upstream_id, key_id, items:[{model_id, model, ok, status, latency_ms, error_type, message}]}`，`error_type ∈ http / timeout / connection`（2xx 时为空串），message 已按密钥脱敏。**不落库、不写 `upstream_probes`/密钥测试结果/审计、不触发配置下发**，结果只用于本次响应 |
+| POST | /admin/upstreams/{id}/discover-models | upstreams:write | **模型拉取**：拉取候选模型清单，不自动建记录；响应同样带协议探测三字段 |
 | POST | /admin/upstreams/{id}/import-models | upstreams:write | body {names, model_type}，创建缺失的上游模型 |
 | PATCH | /admin/upstreams/batch | upstreams:write | body {ids, action: enable\|disable\|delete}；逐项处理，被引用的删除单独失败 |
 | GET | /admin/upstreams/{id}/transforms | transforms:read | 返回 `{upstream_id, transforms}`，transforms 为 4 段规则或 `null` |
 | PUT | /admin/upstreams/{id}/transforms | transforms:write | 整体替换 4 段规则 |
 | POST | /admin/upstreams/{id}/transforms/preview | transforms:read | body 为 4 段完整规则（本段用草稿覆盖）→ `{upstream_id, before, after, skipped, notes}`；不落库 |
+
+权限对照（易写错，ticket 17 核对）：`test-connection`、`keys/test`、`discover-models`、`import-models`、上游 `batch` 都是 `upstreams:write`；逐模型 `models/probe` 是 `upstream_models:write`（权限注册表注释里的 `model_write` 即该键，ticket 05）；`transforms` 为 `transforms:read` / `transforms:write`；上游密钥 CRUD 为 `upstreams:write`。
 
 命名与厂商可选（ADR-023 #6，工单 D）：
 
@@ -382,13 +388,13 @@ AG 1.7 拒绝（`mcp.transport.http=false`），保存即 422。渲染到顶层 
 | 方法 | 路径 | 权限 | 说明 |
 | --- | --- | --- | --- |
 | GET/POST | /admin/upstream-models | upstream_models:read/write | 上游模型列表/创建 |
-| GET/POST | /admin/public-models | public_models:read/write | 对外模型（别名层） |
-| PATCH | /admin/public-models/{id} | public_models:write；body 含 targets 时另需 model_targets:write | **单事务整页保存**（W5 票 12）：基本字段 + routing_mode + enabled + 可选 targets 整批替换，按最终状态校验（至少一个成员、去重、conditional 兜底末位、priority 顺序）；校验失败整体回滚。旧 `PUT /admin/public-models/{id}/targets` 已删除，不保留别名 |
+| GET/POST | /admin/public-models | public_models:read/write | 公开模型（PublicModel，别名层）；创建可带初始 targets，保存后按同一事务规则校验成员 |
+| PATCH | /admin/public-models/{id} | public_models:write；body 含 `targets` 时另需 model_targets:write | **单事务整页保存**（W5 票 12）：`name / routing_mode / note / enabled / targets` 一次提交。`targets` **缺省=成员不变；给定=全量替换**（`null`/`[]` 最终 0 成员 → 422，`require_members`）；`targets` 键存在才要求 `model_targets:write`；body 携带 `cooldown_until_ms` → 422「公开模型不支持冷却：冷却只属于上游模型（ADR-025）」；`enabled` 变更触发写后立即下发（reason `model-enable`/`model-disable`，`on_failure=keep-booked`）；响应 body 顶层带 `window_skip`（启用命中周期窗口时 `{rule_ids, skip_until_ms, message}`，否则 null）。按最终状态校验（至少一个成员、去重、conditional 兜底末位、priority 顺序），失败整体回滚。旧 `PUT /admin/public-models/{id}/targets` 已删除，不保留别名 |
 | GET | /admin/model-targets | model_targets:read | 目标（priority/weight/enabled） |
 | PATCH/DELETE | /admin/model-targets/{target_id} | model_targets:write | 改 priority / enabled，或删除（PATCH 不接受 weight，weight 只在创建时给定） |
-| PATCH | /admin/upstream-models/batch | upstream_models:write | body `{ids:[...], action:"enable"\|"disable"\|"delete"}` → `{changed:[id], missing:[id], action}` |
-| PATCH | /admin/public-models/batch | public_models:write | 同上 |
-| PATCH | /admin/model-targets/batch | model_targets:write | 同上 |
+| PATCH | /admin/upstream-models/batch | upstream_models:write | body `{ids:[...], action:"enable"\|"disable"\|"delete"\|"cooldown"\|"release", cooldown_until_ms?}`；`cooldown` 必须给 `cooldown_until_ms`（否则 422）；返回 `{action, changed:[id], missing:[id], failed:[{id, code, message, details}], window_skipped?}`（`enable` 时逐行给出被跳过的周期窗口 `[{id, rule_ids, skip_until_ms, message}]`）。冷却互斥命中行只进 `failed[]`，整批不失败（ADR-027） |
+| PATCH | /admin/public-models/batch | public_models:write | 同结构，但 `action` 只接受 `enable`\|`disable`\|`delete`；`cooldown`/`release` → 422「公开模型不支持冷却：冷却只属于上游模型（ADR-025）」 |
+| PATCH | /admin/model-targets/batch | model_targets:write | 同结构，`action` 只接受 `enable`\|`disable`\|`delete`；`cooldown`/`release` → 422「成员没有冷却语义；请对上游模型设置冷却」 |
 | POST | /admin/upstream-models/{id}/adopt-modelsdev | upstream_models:write | **从 models.dev 兑入单条**（W4-H）：先尽力刷新快照（失败降级用库内 `model_dev_snapshots`），按模型名匹配（精确优先，大小写不敏感且唯一才回退；不做模糊猜测），**只填空键**（0/False/默认单模态/NULL 进价视为空，手改永不覆盖）→ `AdoptModelsDevResult {id, name, matched, status, provider, model, refreshed, results{键→filled\|skipped-manual\|skipped-no-fx\|no-match}, filled[], params_source}` |
 | POST | /admin/upstream-models/adopt-modelsdev | upstream_models:write | **同步 models.dev（批量）**（W4-H）：全部上游模型一次兑入，返回 `{refreshed, snapshot{providers,models,fetched_at_ms}, total, matched, filled_models, filled_keys, no_match, items[]}`；控制台「同步 models.dev」按钮与每日 job（`models_dev_sync`，SLIPSTREAM_JOBS_ENABLED=0 可停）共用同一服务 |
 | GET | /admin/upstream-models/modelsdev-status | upstream_models:read | **库内 models.dev 快照摘要**（W4-H）：只读 `model_dev_snapshots`、不发网络请求 → `ModelsDevSnapshotStatus {models, providers, fetched_at_ms}`；`fetched_at_ms=0` 表示从未同步，控制台工具条据此显示「上次同步」|
@@ -406,9 +412,9 @@ W4-H 兑入语义：
 
 批量语义：`changed` 是实际处理到的 id，`missing` 是不存在的 id（不报错、不中断），整批一次提交。
 
-不变量（`api/src/l02_domain/validation.py` + 渲染器双重校验）：每个对外模型至少一个启用目标；
+不变量（`api/src/l02_domain/validation.py` + 渲染器双重校验）：每个公开模型至少一个启用目标；
 failover 目标 `priority` 为正整数（升序优先，同值=同层）；weighted 目标 `weight` 为正整数，
-表示**相对比例**（不归一化）；权重链**按 IR 顺序**渲染、不按权重排序（W4）；封禁/冷却目标不渲染。
+表示**相对比例**（不归一化）；权重链**按 IR 顺序**渲染、不按权重排序（W4）；关闭/冷却目标不渲染。
 
 ### 3.4 用户、余额、连接密钥（UI 名；后端 /admin/api-keys）
 | 方法 | 路径 | 权限 | 说明 |
@@ -440,25 +446,32 @@ AES-GCM 密文 + sk-...abcd 掩码。
 ### 3.5 可用性规则
 | 方法 | 路径 | 权限 | 说明 |
 | --- | --- | --- | --- |
-| GET | /admin/availability-rules | availability:read | 列表（封禁 ban / 冷却 cooldown，含周期 schedule） |
-| POST | /admin/availability-rules | availability:write | 创建；body `{kind, scope, scope_id, recurrence?, expires_at_ms?, schedule_json?, note?}` |
-| PATCH | /admin/availability-rules/{rule_id} | availability:write | 部分更新；合并后整条重新校验，未知 id 返回 404 |
+| GET | /admin/availability-rules | availability:read | 列表（`kind` 枚举 `ban` / `cooldown`，含周期 schedule）。`ban` 是内部历史名，UI 与文案统一称「关闭」 |
+| POST | /admin/availability-rules | availability:write | 创建；body `{kind, scope, scope_id, recurrence?, expires_at_ms?, schedule_json?, note?}`；冷却两种形状互斥，冲突 409（ADR-027） |
+| PATCH | /admin/availability-rules/{rule_id} | availability:write | 部分更新；合并后整条重新校验，未知 id 404。仅改 `note`（或重发相同值）不做互斥校验；结构字段真变化时清该规则的窗口例外并重跑互斥 |
 | DELETE | /admin/availability-rules/{rule_id} | availability:write | 删除规则；托管规则会同步清理行投影，成功 204 |
 
 - 规则 API 是完整 CRUD：周期规则创建后仍可编辑/删除；删除周期规则不会误删模型行内的一次性冷却（反之亦然）。
-- `scope` 接受 `upstream` / `upstream_model` / `public_model` / `model_target`；`scope_id` 必须指向存在的实体，否则 422 `VALIDATION_ERROR`。
+- `scope` 接受 `upstream` / `upstream_model` / `public_model` / `model_target`；`scope_id` 必须指向存在的实体，否则 422 `VALIDATION_ERROR`。冷却只归上游模型：`kind=cooldown` 且 `scope=public_model` → 422「公开模型不支持冷却：冷却只属于上游模型（ADR-025）」。
 - `recurrence` ∈ once / daily / weekly / monthly；一次性冷却必须给 `expires_at_ms`，
   周期冷却必须给 `schedule_json.windows[{start,end,days?,days_of_month?}]`（HH:MM，半开区间
   `[start,end)`，允许跨零点；跨零点时 weekly 的 `days` / monthly 的 `days_of_month` 按窗口开始日计算）。
 - 模型行内的 `enabled` / `cooldown_until_ms` 仍是兼容接口：写入落到确定性的 `rule_row_<hash>`
   托管一次性规则，`cooldown_until_ms` 只是规则表的投影；读取以 `availability.state` 为准（ADR-004）。
+- **冷却互斥（ADR-027，取代 ADR-004 的叠加口径）**：同一 scope 的单次冷却与周期冷却互斥，规则创建/改期与模型行冷却写入都走同一校验。
+  - 单次冷却生效期间创建/改期周期规则 → 409 `CONFLICT`「单次冷却生效期间不能创建或改期周期冷却；请先解除单次冷却」。
+  - 周期窗口生效期间设置单次冷却 → 409 `CONFLICT`「周期冷却窗口生效期间不能设置单次冷却；请等窗口结束或先跳过本窗口」；窗口外、已 skip 当前窗口后可写。
+  - 409 `details` 恒为三键 `{blocking_rule_ids, cooldown_until_ms, window_end_ms}`：挡周期规则时 `cooldown_until_ms > 0, window_end_ms = 0`；挡单次规则时 `cooldown_until_ms = 0, window_end_ms = max(当前窗口结束)`。批量冷却把冲突项放进 `failed[]`，不整体失败。
+  - 关闭（行 `enabled=false` 或历史 `ban` 规则）是独立措施，不参与冷却互斥。
+- **解除语义（ADR-027）**：行 PATCH `cooldown_until_ms=0` = 删除当前生效的单次托管规则；命中周期窗口时只写一次性例外 `skip_until_ms=窗口结束`，**不删除周期规则**，下一窗口照常冷却。窗口内「启用」同样只跳过当前窗口，不解除周期规则。
 - 模型行可用性视图（`availability` 对象，工单 G）为 `{state, cooldown_until_ms, window_skip_until_ms}`：
-  `window_skip_until_ms` > 0 表示「启用」动作把周期规则的**当前窗口**跳过一次（一次性例外截止时刻，
+  `window_skip_until_ms` > 0 表示「启用/解除」把周期规则的**当前窗口**跳过一次（一次性例外截止时刻，
   窗口期行可正常使用）；规则本身保留，下一窗口照常冷却。批量启用返回 `window_skipped:[{id, rule_ids,
   skip_until_ms, message}]`（无跳过则为空数组），单条启用 PATCH/POST 在行体顶层返回 `window_skip:
-  {rule_ids, skip_until_ms, message}`（无跳过为 null）。解除冷却（cooldown_until_ms=0）会连带清除窗口例外。
+  {rule_ids, skip_until_ms, message}`（无跳过为 null）。
+- 可用性状态词表与判定统一由 `availability.evaluate` 给出：`normal / cooling / closed`，`closed` 优先（ADR-004）。
 
-渲染时封禁/冷却目标会被剔除（E3 实测：AG 健康状态不跨重启持久，所以必须控制面持久化并剔除）。
+渲染时关闭/冷却目标会被剔除（E3 实测：AG 健康状态不跨重启持久，所以必须控制面持久化并剔除）。
 
 ### 3.6 角色、权限矩阵与管理员账号
 | 方法 | 路径 | 权限 | 说明 |
@@ -497,7 +510,7 @@ AES-GCM 密文 + sk-...abcd 掩码。
 | GET | /admin/reports/latency?range=&tz= | {range, from_ms, to_ms, timezone, paired_samples, min_samples, ttft:{samples, p50_ms, p75_ms, p95_ms, p99_ms}, total:{...}, **all:{samples, ttft:{samples, p50_ms, p75_ms, p95_ms}, total:{samples, p50_ms, p75_ms, p95_ms}}**, estimate_note}（W4-F，2026-11-20）。**窗口规则：都缺省=全时段**（from_ms=0/to_ms=0、range 回显 "all"）；给任一则必须成对否则 422；显式 range 枚举保持原行为。`all` 块=**全样本分位**（不过滤配对，非流式请求 ttft=0 也计入，供日志页分位语义色）；`ttft`/`total` 两块仍为**配对样本**口径（ttft>0 且 duration>0）；各块独立套 MIN_PERCENTILE_SAMPLES（<5 全 null，只有 samples）。overview 端点内嵌的 latency 同样带 all 块 |
 | GET | /admin/reports/timeseries?range=7d&bucket=auto&dimension=combo&metric=&metrics=&top_n=10&tz= | {range, bucket, dimension, metric, metrics:[...], from_ms, to_ms, timezone, currency, points:[{bucket_start_ms, label, total, values}], members:[{id, label, total, share, requests, tokens, cost_micro, charge_micro, totals?}], totals:{requests, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, tokens, cost_micro, charge_micro, error_count, active_minutes}, metric_total, folded_members, fx_missing, estimate_note}。dimension ∈ combo/upstream/channel（综合模型/上游模型/上游渠道）；**`metrics=cost_micro,charge_micro` 逗号多指标一次返回**：points[].values 变为 {member_id:{<metric>:value}}，members 增 `totals:{<metric>:total}`；单数 `metric` 向后兼容（values 为 {member_id:value} 平面结构）；top_n 1..50，超出排名的成员折叠为 `other:<dimension>`（label「其他（N）」） |
 | GET | /admin/reports/heatmap?range=7d\|30d\|365d&metric=tokens\|cost\|spend&tz= | {range, mode:"weekday_hour"\|"date_hour", metric, from_ms, to_ms, timezone, currency, columns:[{key,label}×24], rows:[{key, label, values:[24]}], max, total, fx_missing, estimate_note}。7d=星期×小时，30d/365d=日期×小时 |
-| GET | /admin/reports/flow?range=&metric=&from_ms=&to_ms=&tz=&collapse= | 五段桑基 `{metric, nodes, node_meta, links:[{source, target, requests, tokens, value, cost_micro?, charge_micro?}], stages, totals, range, from_ms, to_ms, timezone, currency, fx_missing, estimate_note}`。`collapse` 为逗号分隔的阶段 id（`user,key,model,upstream,channel`，去重、忽略空白项），服务端按完整五元组路径投影：隐藏阶段从路径中删除、其余可见阶段按原顺序连边，节点/边与金额严格守恒（charge 只记首条可见边、cost 只记末条可见边、totals 按完整路径累计一次），`stages` 只返回可见段；未知阶段或隐藏后少于 2 段 → 422（details 带 collapse/allowed）；缺省与空值不改输出（与旧实现逐字节一致）。 |
+| GET | /admin/reports/flow?range=&metric=&from_ms=&to_ms=&tz=&collapse= | 五段桑基 `{metric, nodes, node_meta, links:[{source, target, requests, tokens, value, cost_micro?, charge_micro?}], stages, totals, range, from_ms, to_ms, timezone, currency, fx_missing, estimate_note}`。`collapse` 为逗号分隔的阶段 id（`user,key,model,upstream,channel`，去重、忽略空白项），服务端按完整五元组路径投影：隐藏阶段从路径中删除、其余可见阶段按原顺序连边，节点/边与金额严格守恒（charge 只记首条可见边、cost 只记末条可见边、totals 按完整路径累计一次），`stages` 只返回可见段；未知阶段 → 422 `VALIDATION_ERROR`，details `{collapse, allowed:[user,key,model,upstream,channel]}`；隐藏后少于 2 段 → 422，details `{collapse}`（即最多隐藏 3 段）。`metric` 只认 `requests`/`tokens`，其它值静默回退 `requests`（不 422）；本端点**没有 `top_n`**（top_n 仅 timeseries，隐藏用 `collapse`）；显式 `from_ms/to_ms` 成对窗口优先于 `range`，回显 `range="custom"`；缺省与空 `collapse` 时输出与旧五段实现逐字节一致（默认图不变）。 |
 | GET | /admin/reports/margin | {from_ms, to_ms（回显实际生效窗口；省略/<=0 = 全时段，to_ms 取 now+1ms）, report_currency, by_currency:{<cur>:{charge_micro, cost_micro, margin_micro, fx_rate_micro_to_report}}, report_currency_margin_micro, report_currency_charge_micro, report_currency_cost_micro, fx_missing:[string], estimate_note}。报表币种自身 fx_rate=1000000（无需快照）；外币缺汇率时总额为 null 且列出 fx_missing，补 PUT /admin/fx 后立即折算；失败请求的空币种行不计入任何桶 |
 
 ### 4.2 用量
@@ -588,9 +601,11 @@ AES-GCM 密文 + sk-...abcd 掩码。
 |---|---|
 | event_id / started_at_ms / completed_at_ms | 标识与时间（completed_at_ms 由 AG 延迟字段随采集落库） |
 | trace_id | 适配器遥测关联键（ADR-028）；日志→`/admin/logs/{event_id}/attempts` 的 join 键。历史日志或适配器无遥测时为空串 |
+| requested_model | 客户端请求的公开模型名（来自 AG 属性 `attributes_json.agw.ai.original_model`）；旧行/属性缺失时为空串，UI 显示「—」，**不以 `public_model` 回填**（ticket 03） |
 | attempts_count / has_attempts | 该请求归一化后的上游尝试次数；0/false 表示无路由链（ADR-028；仅列表出参，详情不重复） |
+| attempts_error | 行级 `error` 为空且 `http_status ≥ 400` 时，用最近一次尝试的错误摘要补位（仅列表出参；ticket 04） |
 | duration_ms / time_to_first_token_ms | 总耗时与首字延迟（AG 三延迟字段，ingest 时写入） |
-| http_status / public_model / upstream_model / provider | 请求与路由 |
+| http_status / public_model / upstream_model / provider | 请求与路由（`public_model` 为实际命中的公开模型名，可能不等于 `requested_model`） |
 | upstream_model_id / target_priority | 上游模型行 id 与成员优先级 |
 | user_id / user_name / api_key_id / api_key_label | 身份（密钥为掩码 `sk-…后缀`；密钥已删时为空串） |
 | input_tokens / output_tokens / total_tokens / cache_read_tokens / cache_write_tokens | 词元五列（缓存列原始值，未并入输入） |
@@ -599,6 +614,8 @@ AES-GCM 密文 + sk-...abcd 掩码。
 | has_error / has_payload / error | 失败标记 / 正文存档标记 / 错误文本 |
 | cost_micro / margin_micro / charge_micro / currency | 三账金额 + 币种（受 §0.5 字段级权限约束，缺权限键缺失） |
 | estimate | true：token 数为估算口径（cache 折叠进 input，stage B 待核） |
+
+注意：`GET /admin/logs` 的列表行是**动态 dict**，`requested_model / attempts_count / has_attempts / attempts_error` 不进入 `web/src/generated/contract.ts`（gen_ts 只覆盖 Pydantic 响应模型）；这些字段由本表 + pytest（`api/tests/integration/test_logs_requested_model.py` 等）与实际响应约束，不要声称契约生成检查覆盖了它们。
 
 ### 4.5 配置下发
 | 方法 | 路径 | 说明 |
@@ -610,7 +627,9 @@ AES-GCM 密文 + sk-...abcd 掩码。
 | GET | /admin/config/revisions/latest | 最新一条（见 2.5） |
 
 `POST /admin/config/apply` 与 `rollback` 统一走 `l05_service.rollout.Rollout`（唯一 apply/rollback/status/history 入口）；
-`operator` 取当前 principal，失败策略由调用方显式选择（`raise` 或 `keep-booked`）。响应模型 `ConfigRevisionOut.status`
+`operator` 取当前 principal，失败策略由调用方显式选择（`raise` 或 `keep-booked`）。
+
+受管密钥文件清理（ticket 16 / ADR-026 补记）：apply 成功后 best-effort 清理 **`<ag_config_dir>/keys` 下、直接位于该目录的普通 `*.key` 文件**，白名单 = 本次 render 的 `key_files`（路径按 `normcase(abspath)` 比较，Windows 不分大小写）。目录外、非 `.key`、子目录与符号链接永不触碰；旧版单密钥文件名 `{upstream_id}.key` 与上一版 `{id}#{seq}.key` 都会按白名单判定为陈旧。`rendering.prune_key_files(key_files, dry_run=True)` 只返回计划 `{dry_run, stale, deleted, failed}`；rollout 在 apply 成功后才删除，删除失败只记 warning、不把成功 apply 变失败（可人工按日志清理）。响应模型 `ConfigRevisionOut.status`
 是 OpenAPI 枚举 `RevisionStatus`（`active | superseded | failed`），前端不再手写第三套词表。
 
 ### 4.6 Playground
@@ -647,7 +666,7 @@ PYTHONPATH=src python scripts/seed_demo.py --keep # 仅用于空 schema；已有
 PYTHONPATH=src python -m uvicorn l06_api.app:create_app --factory --port 3700
 ```
 
-seed 覆盖（连续跑两次后的真实计数，幂等）：3 厂商 / 4 上游（zai-01 是**一个渠道三把等权密钥**，
+seed 覆盖（连续跑两次后的真实计数，幂等）：3 厂商 / 4 上游（zai-01 是**一个上游三把等权密钥**，
 nebula-01、local-01/02 各一把，共 6 条上游密钥；ADR-026 多密钥平权）/
 16 上游模型（15 个带成本 cost_input/output_per_1m + 1.2 倍率 markup，1 个故意未定价）/
 8 公开模型（6 failover + 2 weighted）/ 16 目标 / 6 用户（根用户 D + 两层代理树，5 把 sk-+64 大写客户端密钥 + 充值流水）/
@@ -684,6 +703,8 @@ seed/CRUD 只写密钥行），跑脚本只会补 `multikey_semantics=v2` 标记
 HTTPS + `SameSite=None; Secure`，本 ticket 不启用。
 
 ## 8. 附录：逐接口 curl + 真实响应（2026-11-17 03:2x 对 3700 实测）
+
+> **历史实测快照**：端点、字段与错误语义以正文（§0–§7）为准；此后删除的端点（`PUT /admin/public-models/{id}/targets`、`GET /admin/traces/{trace_id}`）与新增端点（`POST .../models/probe`、`GET .../attempts`、flow `collapse`）不逐一回填本附录。示例响应里的旧字段（如单密钥时代的 `channel` 措辞）按「上游/公开模型」理解。
 
 所有示例共用：
 

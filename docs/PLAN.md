@@ -1,5 +1,7 @@
 # Slipstream 方案（二期同步稿）
 
+> **历史快照（二期，2026-11-18）**：本文件保留二期方案与当时数字（如 23 页面组件/29 路由/首包 193.8 KB/pytest 315），这些数字**已过时**；五期现行口径见 `docs/DELIVERY.md` §7、`docs/GLOSSARY.md` §8 与 `docs/api-contract.md`（27 路由/19 页面模块/15 导航/836 passed/首包 212.9 KB）。
+
 - 状态：**二期已完成**，ticket 01–22 全部合入 `phase2/integration`（2026-11-18，本地提交未 push）。
 - 范围：全新系统，与旧 3680 系统无继承关系。
 - 已合并 ticket：01–22 全部；逐项记录见 `docs/CHANGELOG-phase2.md`，交付与验收见 `docs/DELIVERY.md`。
@@ -12,7 +14,7 @@
 
 **做（当前已落地）**
 
-- 上游 / 上游密钥（每上游最多 20 把）/ 上游模型 / 公开模型 / 目标 / 优先级 / 封禁 / 冷却 / 连接密钥（后端 `/admin/api-keys`）
+- 上游 / 上游密钥（每上游最多 20 把，平权——ADR-026）/ 上游模型 / 公开模型 / 目标 / 优先级 / 关闭（历史名「封禁」）/ 冷却 / 连接密钥（后端 `/admin/api-keys`）
 - 配置渲染 → AG 1.7 校验 → 原子下发 → 版本留档 → 一键回滚
 - 用量拉取、定价、账本、日聚合、看板
 - 真实控制台登录、数据库会话、三角色 RBAC、字段级金额权限
@@ -108,7 +110,7 @@ slipstream/
 |  | `upstream_keys` | 上游密钥组：label、密文、suffix、~~is_primary~~。**每上游最多 20 把**；ADR-026 已废除主密钥与镜像，每把密钥平权展开为独立 AG 上游；至少保留一把，删除最后一把返回 409 |
 |  | `upstream_probes` | 连通测试/发现模型的追加记录：kind、status、http_status、latency_ms、model_count、tested_at_ms |
 |  | `upstream_models` | 上游模型：upstream_id、name、model_type、价格（input/output/cache_read/cache_write，每百万 token） |
-|  | `public_models` | 对外模型：name（唯一）、enabled、备注 |
+|  | `public_models` | 公开模型：name（唯一）、enabled、备注 |
 |  | `model_targets` | 目标：public_model_id → upstream_model_id、**priority（升序）**、enabled |
 |  | `api_keys` | 客户端密钥：user_id、前缀、hash、密文、enabled、额度 |
 |  | `users` | 使用者 |
@@ -230,7 +232,7 @@ slipstream/
 
 - 路由级 `React.lazy` + Suspense，每页独立 chunk；echarts/recharts 走 manualChunks，按需加载。
 - 当前基线 `check:bundle`：首包 **gzip 193.8 KB**；共 **66** 个 JS chunk；echarts 惰性 chunk gzip 148.2 KB；阈值 maxFirstLoad=220 KB、minChunks=20、maxChunk=400 KB，检查 PASS。
-- 页面 **23 个页面组件 = 19 个功能页 + 登录 + 404 + 2 个旧入口重定向页**，共 29 条路由；导航四组按页面类型：**常规 / 配置 / 工具 / 系统**。
+- 页面（五期口径）：**19 个页面模块 = 17 个功能页 + 登录 + 404**，共 **27 条路由**（含 8 条旧入口重定向）；**15 个一级导航项**（运营设置 3 段为页内子导航）。二期当时的「23 页面组件/29 路由」已过时，以 `web/src/routes.ts` + `ops/checks/route-audit.mjs` 为准。
 - 术语：token 统一“词元”，收费统一“花费”，成本保留“成本”；公开模型、连接密钥、模型试验、价目管理为最终 UI 命名。
 
 ## 17. 范围外 / 后续

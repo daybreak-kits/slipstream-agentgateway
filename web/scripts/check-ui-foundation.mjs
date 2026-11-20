@@ -1088,6 +1088,27 @@ check("成员编排：展示名统一「上游渠道/模型」，术语不单用
   }
 });
 
+// ---------- 五期：分流图隐藏阶段（ticket 01）----------
+check("分流图隐藏阶段：前端不做跨接重连，隐藏集合作为后端 collapse 参数", () => {
+  const chart = read("src/components/dashboard/flow-chart.tsx");
+  expect(!chart.includes("splice"), "flow-chart.tsx 仍在前端 splice 重接桑基边（W5 已改后端 collapse 投影）");
+  includesAll(chart, ["hiddenStages", "canHideMore", "至少保留两个可见阶段"], "分流图隐藏阶段守卫");
+  const reports = read("src/components/dashboard/use-reports.ts");
+  includesAll(reports, ["collapse", 'params.set("collapse", hidden)'], "flow collapse 请求参数");
+  const panel = read("src/components/dashboard/trend-panel.tsx");
+  includesAll(panel, ["hiddenStages", "collapse: hiddenStages"], "看板 hiddenStages 接线");
+});
+
+check("分流图隐藏阶段：mock 不重算投影，隐藏到两段即禁用请求", () => {
+  const mocks = read("src/components/dashboard/report-mocks.ts");
+  includesAll(mocks, ["mockFlow(metric", "mock 层不重算投影"], "mock 投影口径");
+  const panel = read("src/components/dashboard/trend-panel.tsx");
+  expect(
+    /FLOW_STAGES\.length - hiddenStages\.length >= 2/.test(panel),
+    "隐藏后不足两段时必须禁用 flow 请求（至少保留 2 段）",
+  );
+});
+
 // ---------- run ----------
 const failures = [];
 server = await createServer({

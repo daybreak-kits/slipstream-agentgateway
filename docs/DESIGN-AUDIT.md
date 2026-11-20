@@ -1,9 +1,11 @@
 # 设计巡检记录（unslop 轻量轮）
 
 - 时间：2026-11-18
-- 对象：`web/src`（管理台 23 个页面组件 + 布局/外壳 + 设计 token）
+- 对象：`web/src`（五期口径 19 个页面模块 = 17 功能页 + 登录 + 404，另有布局/外壳与设计 token；二期巡检当时为 23 个页面组件）
 - 方法：静态检索设计 tells（渐变/发光/emoji/主色/动效/阴影/字体）+ 交互审计逐页截图目视 + `web/src/index.css` token 表核对。
 - 结论：**未发现典型 AI 味**（渐变文字、霓虹发光、emoji 标签、玻璃拟态、多主色混用、夸张 hover 缩放）；仅 2 处渐变属有意设计，已登记如下。
+
+> **五期（W5）状态**：五期能力已全部实现（路由链/冷却互斥/多密钥平权/公开模型单页等），本文件 §1–§17 为实现与规范记录；五期的实现落点、门禁证据与验收矩阵见 §17/§18。与实现冲突的旧描述已就地修正并标注（2026-11-21 ticket 17 收口）。
 
 ## 逐项核对
 
@@ -15,8 +17,8 @@
 | emoji 标签 | 无 | `web/src` 无 emoji；图标统一 `lucide-react` |
 | 夸张动效 | 无 | `animate-pulse` 仅 3 处：流式输出光标（`components/playground/message-list.tsx:318`）、指标加载态（`components/ui/metric-pills.tsx:62`）、骨架屏（`components/ui/skeleton.tsx:4`）；`animate-spin` 仅 `components/ui/spinner.tsx:7` 且带 `motion-reduce:animate-none`；无 `hover:scale`/`hover:-translate` |
 | 字体与圆角 | 统一 token | `--font-sans: Inter, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif`；`--font-mono: "JetBrains Mono"`；圆角 6/8/12/16（`--radius-*`，`web/src/index.css:11-17`） |
-| 图表连线渐变 | 有意设计 | `components/dashboard/flow-chart.tsx:131` `lineStyle: { color: "gradient", opacity: 0.26 }`：ECharts sankey 连线按源/目标色渐变，透明度已压低，不构成发光感 |
-| toast 遮挡表单 | 已修 | `components/ui/sonner.tsx` Toaster `position="bottom-right"`（7abfb6b），不再遮右上角筛选；`web/src/main.tsx` 不再覆盖 position |
+| 图表连线渐变 | 有意设计 | `web/src/components/dashboard/flow-chart.tsx` 的 sankey `lineStyle`（`color: "gradient"`, `opacity: 0.26`）：连线按源/目标色渐变，透明度已压低，不构成发光感；该文件同时承载分流图隐藏阶段的图例交互（§18 工单 01） |
+| toast 遮挡表单 | 已修 | 统一策略在 `web/src/lib/toast-policy.ts`（`TOAST_POSITION="top-right"`、`TOAST_OFFSET={top:80,right:16}`、3000ms、最多 3 条）；`components/ui/sonner.tsx` 的 Toaster 用 `position={TOAST_POSITION}` / 同一 offset，`web/src/main.tsx` 不覆盖。7abfb6b 的 `bottom-right` 方案已废弃（会压住表格底部与 sticky 操作列），本表旧描述已按实际修正 |
 | 控件可读名称 | 已修 | `pages/settings.tsx` 显示名/邮件通知/浏览器通知/周报摘要/个人简介补 `aria-label`；三个通知开关改由 `NOTIFY_PREFS` 列表统一渲染 |
 | 登录页固定配色 | 保留 | `--login-*` 是登录域专用（不随主题的深色画布），`web/src/index.css:186-194`；未改 |
 
@@ -92,7 +94,7 @@ grep -rn "bg-gradient\|text-gradient\|drop-shadow\|blur-\|hover:scale\|animate-p
 
 - 三档确认（`ui/confirm-dialog`，取消在左、危险在右，正文写明不可逆后果）：① 删除（单条/批量）红色确认；② 重置密钥确认 + 新密钥仅明文展示一次；③ 批量删除 >10 条需手动输入「删除」二字。
 - 启用/关闭/冷却/解除等可逆操作**不弹确认**。
-- toast：sonner 单一 Toaster（top-right，下移 80px 避开 64px 顶栏与页面操作行）；**统一 3 秒自动消失**（`lib/toast-policy` 强制，调用方不可延长）且关闭按钮常驻；每条 toast 同时写入顶栏通知中心，需要持续可见的反馈回看历史；复制成功统一「已复制」；API 错误统一 `describeApiError` 文案。
+- toast：sonner 单一 Toaster（top-right，下移 80px 避开 64px 顶栏与页面操作行；**最多同时 3 条**）；**统一 3 秒自动消失**（`lib/toast-policy` 强制，调用方不可延长）且关闭按钮常驻；每条 toast 同时写入顶栏通知中心，需要持续可见的反馈回看历史；复制成功统一「已复制」；API 错误统一 `describeApiError` 文案。
 
 ### 5. 数字与格式化（`lib/format` 单一来源，禁止页面自写）
 
@@ -112,12 +114,12 @@ grep -rn "bg-gradient\|text-gradient\|drop-shadow\|blur-\|hover:scale\|animate-p
 ### 6. 动效
 
 - 只 transition color/background/border/opacity/transform，用具名类（`transition-colors` 等），禁止 `transition-all`。
-- 补装 `tailwindcss-animate`（当前缺失，所有 `animate-in/zoom-95/slide-in-from-*` 类失效）后才允许这些类；浮层动效 = fade + 上移 95ms 一档。
+- 动画类走 `tw-animate-css`（Tailwind v4 等价替代 tailwindcss-animate）：`web/src/index.css` 顶部已 `@import "tw-animate-css"`，`animate-in/zoom-95/slide-in-from-*` 均可用（五期已落，历史「补装 tailwindcss-animate」条目不成立）；浮层动效 = fade + 上移 95ms 一档。
 - 无循环动画（例外：流式光标、骨架屏、spinner 带 `motion-reduce:animate-none`）。
 
 ### 7. 术语门禁
 
-- `ops/checks/terminology_audit.mjs` 同步三期词表：允许「上游渠道」「关闭/启用」「快速上手」「代理用户」；UI 禁裸「渠道」、禁「封禁」（文案层）；随账单移除删除旧路由文案。
+- `ops/checks/terminology_audit.mjs` 为唯一术语门禁（现行 8 条规则）：`收费`、厂商名 `qax|qianxin`、`Tokens`、单数 `Token`（warn）、裸「渠道」（`上游渠道` 复合词放行）、`调用模型|调用名|调用串|计划窗口|游乐场`、`封禁|对外模型|客户端密钥`、`令牌`；扫描范围是 `web/src` + `index.html` + `public`（**不含 docs/**，脚本输出会打印该口径，见 §18 与 recon §11）。允许「上游渠道」「关闭/启用」「快速上手」「代理用户」；UI 禁裸「渠道」、禁「封禁」。五期文档收口另用人工清单核对 docs 内旧术语（该脚本不扫 docs，见 recon §11）。
 
 
 ## 四期·表格与分页规范（2026-11-19 用户定案）
@@ -128,8 +130,8 @@ grep -rn "bg-gradient\|text-gradient\|drop-shadow\|blur-\|hover:scale\|animate-p
 - 表头整格可点即排序，循环 升 → 降 → 取消（取消=回默认序），箭头指示当前方向；可排序列鼠标 hover 有可点暗示，不可序列无箭头。
 
 ### 2. 对齐与冻结
-- **同列的表头与表体对齐方式必须一致**：数值列右对齐（`tnum`），文本列左对齐，状态/徽章列选定一种后头身一致。列定义的对齐类必须同时作用于 `th` 与 `td`（现 `ModelColumn.className` 只上 td、列头永远左对齐，是已定案要修的缺陷）。
-- **操作列 = 最后一列 + 水平冻结**（`sticky right-0` + 背景与分割阴影），小屏横向滚动时操作始终可见；所有页面操作列统一靠尾部。
+- **同列的表头与表体对齐方式必须一致**：数值列右对齐（`tnum`），文本列左对齐，状态/徽章列选定一种后头身一致。列定义的对齐类必须同时作用于 `th` 与 `td`。**已实现（W5）**：`web/src/lib/table-columns.ts` 为 align/sticky 单一来源，`DataTable/ModelsTable/PriceTable` 头身同用；`web/scripts/check-ui-foundation.mjs` 有「列元数据 align/sticky 头身同用、冻结列在最后一列、垂直居中」断言（历史 `ModelColumn.className` 只上 td 的缺陷已修）。
+- **操作列 = 最后一列 + 水平冻结**（`sticky right-0` + 背景与分割阴影），小屏横向滚动时操作始终可见；所有页面操作列统一靠尾部。**已实现（W5）**：`web/src/components/ui/table.tsx` 给冻结列补不透明行底色（`--row-hover` 联动），`check-ui-foundation.mjs` 断言行操作文件必须在列元数据声明 `sticky:"right"` 且冻结列位于最后一列。
 
 ### 3. 滚动：表格内部滚动，页面不滚
 - 大表一律**表体内部滚动**：滚动区内表头吸顶；筛选行、工具行、分页条都在滚动区外常驻。
@@ -158,8 +160,8 @@ grep -rn "bg-gradient\|text-gradient\|drop-shadow\|blur-\|hover:scale\|animate-p
 ### 10. 列设置强制
 - 凡是表格必须有列设置（列显隐 + 持久化）；无列可隐的极简表（如密钥面板小表）例外需注明。
 
-### 11. 延迟语义色 = 分位数锚定
-- 首字/耗时的语义色**不锁死绝对毫秒值**，按当前时间窗的分位数动态锚定：**≤P50 绿、P50–P95 黄（P75 为黄色锚点）、>P95 红**；分位数来自报表延迟端点，随窗口刷新。
+### 11. 延迟分位色（阈值色，独立于 §17 语义色五档）
+- 首字/耗时的分位色**不锁死绝对毫秒值**，按当前时间窗的分位数动态锚定：**≤P50 绿、P50–P95 黄（P75 为黄色锚点）、>P95 红**；分位数来自报表延迟端点（`all` 全样本块），随窗口刷新。实现见 `web/src/components/logs/latency-tone.ts`（日志耗时竖色条 + 标签），与 §17 的 success/warning/info/danger/neutral 五档语义色是两套机制：本节的绿/黄/红只表示延迟分位阈值，不得与语义色函数混用或互相覆盖。
 
 ### 12. 图标体系（lucide-react 单一来源）
 - 动作动词 → 图标映射表集中一处（`lib/icon` 或等价）：编辑=Pencil、删除=Trash2、关闭=Ban、启用=Play、测试连接=PlugZap、刷新=RefreshCw、复制=Copy、详情/查看=Eye、添加=Plus、冷却=Timer/Snowflake、周期=CalendarClock、批量=Layers、导出=Download、导入=Upload。
@@ -185,3 +187,28 @@ grep -rn "bg-gradient\|text-gradient\|drop-shadow\|blur-\|hover:scale\|animate-p
 - 动作语义色单一来源 `lib/icons.ACTION_TONES`：启用=success、关闭/冷却=warning、解除=success、测试=info、删除=danger、编辑=neutral；行内操作统一用 `ui/action-button`（图标 + 文字双编码，不只靠颜色）。
 - 脏标记原语：`lib/dirty-fields`（diffFields/sameArray/sameSet/sameJson）+ `lib/use-dirty-fields` + `ui/dirty-field`（DirtyField 字段 2px 警示条/浅底/「已修改」点/恢复该项；DirtyCountBadge 区块计数；DirtySummary/DirtyFooter 底部「未保存 N 项 + 恢复全部」；DirtySaveButton 脏=主按钮、干净=中性 disabled、保存中进度）。只标变更字段，保存成功由父级回填 baseline 清标记，失败保留标记与输入。
 - toast 策略集中 `lib/toast-policy`：统一 3 秒、右上（offset top 80）避开顶栏/表格底部/sticky 操作列；持续反馈进通知中心（`lib/notification-store`）。
+
+## 18. 五期（W5）实现清单（2026-11-21 收口）
+
+> 本节是五期能力的实现落点与可复验证据，供 ticket 18 浏览器验收与后续回归对照；历史巡检结论（§1–§17）继续有效，冲突处已就地修正。
+
+| 工单 | 能力 | 实现落点 | 门禁/验收证据 |
+| --- | --- | --- | --- |
+| 01 | 分流图隐藏阶段（后端路径投影，非前端 splice） | 后端 `api/src/l05_service/aggregates.py:build_flow(collapse=)`：按完整五元组路径投影，隐藏段从路径删除、其余可见段按序连边，requests/tokens 每边守恒、charge 只记首条可见边、cost 只记末条可见边、totals 按完整路径累计一次，`stages` 只返回可见段；`api/src/l06_api/routers_reports.py:flow` 校验未知阶段与「至少保留 2 段」。前端 `components/dashboard/flow-chart.tsx`（图例隐藏/恢复、`canHideMore = visibleStages.length > 2` 守卫、不足两段时提示「至少保留两个可见阶段」）、`trend-panel.tsx`（hiddenStages state → collapse 查询参数）、`use-reports.ts`（仅把 hidden 排序拼成逗号串传后端）、`report-mocks.ts`（mock 明确不重算投影）。默认空 collapse 输出与旧五段实现逐字节一致 | `check-ui-foundation.mjs`「分流图隐藏阶段」断言组（无前端 splice、hiddenStages 作为 collapse 请求参数、至少 2 段守卫、mock 不重算）；浏览器：图例点击 → network 带 collapse → 单图连通且 totals 不变、最少 2 段不可再隐藏、恢复 |
+| 03/04 | 日志模型列两行 +「N 次尝试」popover + 费用两行 | `pages/logs.tsx`：模型列两行（公开模型 / 请求模型 → 上游模型）、费用列两行（计费/成本）；`components/logs/request-attempt-chain.tsx`（`RequestAttemptChain`、`RequestAttemptChainPopover`、「无链路记录」空态）、`use-log-attempts.ts`（读 `GET /admin/logs/{event_id}/attempts`）、`log-detail-drawer.tsx` 复用同一链组件（不维护第二套尝试行渲染）。后端行字段 `requested_model / attempts_count / has_attempts / attempts_error` | `check-ui-foundation.mjs`：路由链 2 次尝试/展开详情/无 attempts 显示「无链路记录」不伪造、「N 次尝试」按钮与日志页接线、mock 多尝试失败行；api-contract §4.4 字段表 + `api/tests/integration/test_logs_requested_model.py` |
+| 05/07 | 模型探测 vs 模型拉取（术语分工） | 模型探测：`components/upstreams/model-probe-view.tsx`（逐模型徽章「连通/失败/超时/连接失败」、全部探测 + 取消、清空结果；仅本上游已存模型），后端 `POST /admin/upstreams/{id}/models/probe`（权限 `upstream_models:write`、串行、单模型 20s、不落库/不写 probes）。模型拉取：`components/upstreams/discover-dialog.tsx` + `discover-models`（拉候选清单、不自动建记录；旧名「发现模型」废弃） | `check-ui-foundation.mjs` 探测组件断言；api-contract §3.2 权限对照；术语表「模型探测/模型拉取」词条；浏览器：api_style=auto 时 422 提示、探测不落库 |
+| 06 | 表格操作列 sticky / 头身对齐 / 行节奏 | `lib/table-columns.ts`（align/sticky 单一来源）+ `components/ui/table.tsx`（th/td 同用、冻结列不透明行底色、`--z-sticky`）+ `components/models/table.tsx`（sticky 表头、筛选行、行尾批量）；页面表全部走 DataTable/ModelsTable/PriceTable | `check-ui-foundation.mjs`：列元数据 align/sticky 头身同用、冻结列在最后一列、垂直居中、行操作文件必须声明 `sticky:"right"` |
+| 08 | 数字口径 | `lib/format.ts` 单一来源：`fmtInt` 千分位整数（计数/词元/TPM/尝试次数）、`fmtRpm` 两位小数、`fmtPct` 一位、`fmtMoney` 两位、`fmtMoneyAvg` 四位、单价 <0.01 升四位；图表轴才允许 `fmtCount` K/M/B | `check-ui-foundation.mjs`「数字格式」断言；本文件 §5 表 |
+| 09 | 语义色五档 / 脏标记 / toast | `lib/semantic-tone.ts`（五档 tone → 文字/浅底/描边）、`lib/icons.ts:ACTION_TONES`、`lib/dirty-fields.ts` + `lib/use-dirty-fields.ts` + `ui/dirty-field.tsx`、`lib/toast-policy.ts` + `lib/notification-store`；token 在 `index.css`（§17） | `web/scripts/check-semantic-dirty.mjs` 40 条（tone 五档/ACTION_TONES/脏标记原语/toast 3s 右上 80px/抽屉与设置页接线/冷却互斥） |
+| 10 | KPI 八卡八形 + 图标映射 | `components/dashboard/metric-cards.tsx`（8 卡：请求量/词元/缓存/费用/成本·毛利率/P50 延迟/RPM/TPM；每卡一个分类 tint 图形）、`lib/metric-icons.ts`（图标单一来源） | `check-ui-foundation.mjs`：八卡图标语义与分类色、不得再用 info 灰；本文件 §12/§14 |
+| 11 | 上游模型抽屉 100vh | `components/models/upstream-model-drawer.tsx`：右侧 100vh、四组内容（连接与模型/路由与模型/请求与响应/其他设置）、内部滚动、固定底栏、字段级脏标记；760–860px 视口自适应 | `check-semantic-dirty.mjs`「上游模型满高抽屉」；浏览器 760/860 两档 + 内部滚动/保存后关闭 |
+| 13 | 公开模型单页编辑器 | 路由 `/models/public/:id`（`web/src/routes.ts`）→ `components/models/public-model-page.tsx` + `public-model-editor.tsx` + `public-model-form.ts`：页头 + 基本信息 + 成员编排三段、底部唯一保存；单 `PATCH /admin/public-models/{id}` 一次提交整页（name/routing_mode/note/enabled/targets），双权限（`public_models:write` + 含 targets 时 `model_targets:write`）、脏标记、失败保留输入并回滚；列表「编辑」进单页，不再回列表弹窗 | `check-semantic-dirty.mjs`：单 PATCH 载荷/双权限/三段/唯一「保存」/失败保留/成员校验/接线（零 PUT targets）；浏览器 network 断言同 |
+| 14 | 成员 chip 编排 | `components/models/member-chip.ts`（成员名「上游渠道/模型」、按 priority 分层、同层保序、conditional 末位兜底）、`member-chip-flow.tsx`（分层 chip 流、候选按上游分组搜索）、`member-drafts.ts`、`member-editor.tsx` | `check-semantic-dirty.mjs`：member-chip / MemberChipFlow / MemberChipEditor / 成员脏标记与「成员 chip 流替换 MemberBoard」共 5 条；浏览器：分组搜索、conditional 末位、增删成员、脏标记 |
+
+复验命令（与 §「复跑方式」并用）：
+
+```bash
+cd web && node scripts/check-ui-foundation.mjs && node scripts/check-semantic-dirty.mjs
+node ops/checks/acceptance_browser.mjs --channel msedge --strict   # 单端口 3700，含 §18 新交互
+```
+
