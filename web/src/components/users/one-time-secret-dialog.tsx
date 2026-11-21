@@ -2,6 +2,8 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
+import { useState } from "react";
+import { copyText } from "@/lib/clipboard";
 import { toast } from "@/lib/notify";
 
 interface OneTimeSecretDialogProps {
@@ -26,9 +28,22 @@ export function OneTimeSecretDialog({
   secret,
   onClose,
 }: OneTimeSecretDialogProps) {
-  const copy = () => {
-    void navigator.clipboard.writeText(secret);
-    toast.success("已复制");
+  const [copying, setCopying] = useState(false);
+  const copy = async () => {
+    if (copying) return;
+    setCopying(true);
+    try {
+      const ok = await copyText(secret);
+      if (ok) {
+        toast.success("已复制");
+      } else {
+        toast.error("复制失败", {
+          description: "浏览器剪贴板不可用或未授权，请手动抄录下方明文。",
+        });
+      }
+    } finally {
+      setCopying(false);
+    }
   };
   return (
     <Dialog
@@ -46,7 +61,7 @@ export function OneTimeSecretDialog({
           {secret}
         </p>
         <DialogFooter>
-          <Button onClick={copy}>复制</Button>
+          <Button onClick={copy} disabled={copying}>复制</Button>
           <Button variant="ghost" onClick={onClose}>
             关闭
           </Button>
