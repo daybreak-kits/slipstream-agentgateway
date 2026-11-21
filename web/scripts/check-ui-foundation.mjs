@@ -1506,14 +1506,44 @@ check("分流图隐藏阶段：前端不做跨接重连，隐藏集合作为后�
   includesAll(panel, ["hiddenStages", "collapse: hiddenStages"], "看板 hiddenStages 接线");
 });
 
-check("分流图隐藏阶段：mock 不重算投影，隐藏到两段即禁用请求", () => {
+check("分流图隐藏阶段：mock 按路径投影 collapse（W6 票 17），隐藏到两段即禁用请求", () => {
   const mocks = read("src/components/dashboard/report-mocks.ts");
-  includesAll(mocks, ["mockFlow(metric", "mock 层不重算投影"], "mock 投影口径");
+  includesAll(mocks, ["FLOW_PATHS", "flowChainOf", "flowMatchNodes"], "mock 路径投影与闭包复用");
   const panel = read("src/components/dashboard/trend-panel.tsx");
   expect(
     /FLOW_STAGES\.length - hiddenStages\.length >= 2/.test(panel),
     "隐藏后不足两段时必须禁用 flow 请求（至少保留 2 段）",
   );
+});
+
+// ---------- W6 ticket 17：分流图重构与搜索/focus ----------
+check("分流图票 17：replaceMerge 替换 series、轴右竖排、搜索左、无已隐藏芯片块", () => {
+  const chart = read("src/components/dashboard/flow-chart.tsx");
+  includesAll(
+    chart,
+    [
+      'id: "flow-sankey"',
+      "replaceMerge: [\"series\"]",
+      'data-slot="flow-stage-axis"',
+      'data-slot="flow-search-input"',
+      "仅显示搜索目标",
+      "chart-frame",
+    ],
+    "分流图票 17 结构",
+  );
+  expect(!chart.includes("已隐藏："), "flow-chart 不得再渲染「已隐藏」芯片块（卡片高度跳动源）");
+  const dash = read("src/pages/dashboard.tsx");
+  expect(!dash.includes("RequestChain"), "看板不得再引用 RequestChain（独立请求链路面板已删，组件留给登录页）");
+  includesAll(dash, ["查看分流"], "页头必须保留查看分流入口");
+  includesAll(
+    read("src/components/dashboard/flow-search.ts"),
+    ["flowChainOf", "flowSearchView", "flowMatchNodes"],
+    "搜索闭包纯函数层",
+  );
+  const panel = read("src/components/dashboard/trend-panel.tsx");
+  includesAll(panel, ["FLOW_SERVER_SEARCH_MIN_NODES", "serverNarrowed"], "大数据搜索必须走后端 q（前端不硬算）");
+  const hooks = read("src/components/dashboard/use-reports.ts");
+  includesAll(hooks, ["focus", "q", "topN"], "flow hook 透传 focus/q/topN（后端聚合过滤）");
 });
 
 // ---------- 六期：错误治理（W6 ticket 07）----------
@@ -1988,6 +2018,106 @@ check("密钥弹窗：只有复制与关闭两个同尺寸按钮，复制反馈�
   expect(!src.includes("useState"), "关闭即失效：弹窗不得在前端缓存明文");
   const clientKeys = read("src/pages/client_keys.tsx");
   expect(!clientKeys.includes("showRecopy"), "调用方不得再传 showRecopy");
+});
+
+// ---------- 十二、登录页视觉与自适应（W6 ticket 12）----------
+// 登录页是未登录用户看到的第一个界面：三态主题、渐变背景、密码显隐、错误零位移、
+// 三档宽度都钉在这里。SSR 渲染真实 LoginPage（useQuery 失败回落表单，正好是登录态），
+// 通知中心推送等无法 SSR 的契约用源码接线断言兜底。
+const renderLogin = async () => {
+  const { LoginPage } = await load("/src/pages/login.tsx");
+  const { AUTH_ME_QUERY_KEY } = await load("/src/lib/auth.ts");
+  // 共享 queryClient 在前面的 KPI 检查里可能已缓存 me：登录页拿到 me.data 会渲染
+  // <Navigate> 而不是表单，先清掉再渲染，保证落到登录表单分支。
+  queryClient.removeQueries({ queryKey: AUTH_ME_QUERY_KEY });
+  return render(createElement(LoginPage));
+};
+
+/** 从源码里截出 data-slot 元素的开标签，断言类与属性走的是同一处声明。 */
+const loginTagOf = (source, slot) => {
+  const at = source.indexOf('data-slot="' + slot + '"');
+  expect(at >= 0, "登录页缺少 data-slot=" + slot);
+  return source.slice(at, source.indexOf(">", at) + 1);
+};
+
+check("登录页：低对比浅色渐变背景——login-gradient 工具类就位且纯静态不动画", () => {
+  const css = read("src/index.css");
+  expect(css.includes("@utility login-gradient"), "index.css 必须定义 @utility login-gradient");
+  const start = css.indexOf("@utility login-gradient");
+  const block = css.slice(start, css.indexOf("}", start) + 1);
+  expect(block.includes("gradient("), "login-gradient 必须是渐变背景（不是纯色）");
+  expect(block.includes("color-mix(in oklab"), "渐变必须用 color-mix 半透明混合（低对比，不遮正文）");
+  expect(block.includes("var(--"), "渐变色必须走语义 token，明暗主题自适应");
+  expect(!/animation|animate|@keyframes/.test(block), "login-gradient 必须静态：不得含 animation/keyframes（票12：静态不动画）");
+  const page = read("src/pages/login.tsx");
+  expect(page.includes("login-gradient"), "登录页根容器必须使用 login-gradient");
+  expect(!page.includes("animate-"), "登录页不得使用任何 animate-* 动效类（背景静态）");
+});
+
+check("登录页：三态主题复用全站 useTheme——不另起 theme 存储，选项带 aria-pressed", async () => {
+  const page = read("src/pages/login.tsx");
+  expect(page.includes('from "@/lib/theme"'), "登录页必须复用 @/lib/theme 的 useTheme（全站同一份主题状态与持久化）");
+  expect(!page.includes("localStorage"), "登录页不得直接读写 localStorage（主题持久化归 lib/theme 单一来源）");
+  expect(!page.includes("slipstream.theme"), "登录页不得私存主题 key（与 index.html 反闪烁脚本/lib/theme 同源）");
+  const html = await renderLogin();
+  expect(html.includes('data-slot="login-theme"'), "登录页必须渲染三态主题切换器（login-theme）");
+  for (const name of ["浅色", "深色", "跟随系统"]) {
+    expect(html.includes('aria-label="' + name + '"'), "主题切换器缺少选项：" + name);
+  }
+  expect((html.match(/aria-pressed="/g) ?? []).length >= 3, "三态选项必须带 aria-pressed 可访问状态");
+});
+
+check("登录页：密码显隐切换——Eye/EyeOff 图标按钮带 aria-pressed 与槽位", async () => {
+  const page = read("src/pages/login.tsx");
+  expect(/import\s*\{[^}]*\bEye\b/.test(page) && page.includes("EyeOff"), "登录页必须用 lucide Eye/EyeOff 图标做显隐切换");
+  const html = await renderLogin();
+  expect(html.includes('type="password"'), "密码框默认隐藏（type=password）");
+  expect(html.includes('data-slot="login-password-toggle"'), "显隐按钮必须带 login-password-toggle 槽位");
+  expect(html.includes('aria-label="显示密码"'), "显隐按钮默认可访问名必须是「显示密码」");
+  expect(html.includes('aria-label="隐藏密码"') === false, "默认态不得泄漏显示态可访问名（aria-label 随状态切换）");
+  expect(html.includes('aria-pressed="false"'), "显隐按钮必须带 aria-pressed 初始态（false）");
+  expect(page.includes("aria-pressed={showPassword}"), "显隐按钮必须接线 aria-pressed={showPassword}（可访问状态）");
+  expect(page.includes('showPassword ? "隐藏密码" : "显示密码"'), "可访问名必须随显隐状态切换");
+});
+
+check("登录页：错误区固定预留高度——字段 aria-invalid 标红、详情进通知中心", () => {
+  const page = read("src/pages/login.tsx");
+  const errorTag = loginTagOf(page, "login-error");
+  expect(/\bh-10\b/.test(errorTag), "错误区必须固定 h-10 高度（错误出现时按钮零位移，user story 50）");
+  expect(errorTag.includes('aria-live="polite"'), "错误区必须 aria-live=polite（出现时播报，不抢焦点）");
+  expect((page.match(/aria-invalid=\{Boolean\(error\)\}/g) ?? []).length >= 2, "用户名与密码两个输入都必须接线 aria-invalid={Boolean(error)}");
+  expect(page.includes("border-danger"), "出错字段必须有 danger 红边（border-danger）");
+  expect(page.includes("pushErrorNotificationOnce"), "登录失败详情必须进通知中心（复用票07 pushErrorNotificationOnce）");
+  expect(page.includes('from "@/lib/notification-store"'), "通知推送必须走 lib/notification-store 单一来源（不另起通知通道）");
+});
+
+check("登录页：底部提示区预留固定空间——单行省略、hover 显示完整详情", () => {
+  const page = read("src/pages/login.tsx");
+  const hintTag = loginTagOf(page, "login-hint");
+  expect(hintTag.includes("title="), "提示区必须带 title 展示完整详情（hover 可读）");
+  expect(/\btruncate\b/.test(hintTag), "提示区必须 truncate 超长省略（不换行推挤）");
+  expect(/\bh-5\b/.test(hintTag), "提示区必须预留固定 h-5 高度（不随文案增减位移）");
+});
+
+check("登录页：登录框三档宽度 384/460/576（1x/1.2x/1.5x）+ 矮视口压缩契约", () => {
+  const page = read("src/pages/login.tsx");
+  includesAll(page, ["max-w-[384px]", "md:max-w-[460px]", "2xl:max-w-[576px]"], "登录框三档宽度（user story 32）");
+  const css = read("src/index.css");
+  expect(css.includes("@media (max-height: 480px)"), "index.css 必须有矮视口压缩规则（667×375 横屏提交按钮免滚可见，user story 33）");
+  const mediaStart = css.indexOf("@media (max-height: 480px)");
+  const mediaBlock = css.slice(mediaStart, css.indexOf("}", mediaStart) + 1);
+  expect(mediaBlock.includes("login-landscape-hide"), "矮视口规则必须隐藏登录页装饰行（login-landscape-hide）");
+  expect(page.includes("login-landscape-hide"), "登录页装饰行必须挂 login-landscape-hide（横屏压缩）");
+});
+
+check("登录页 SSR：渐变根容器、三档宽度列、错误区/提示区始终渲染（预留空间）", async () => {
+  const html = await renderLogin();
+  expect(html.includes("login-gradient"), "登录页根容器必须有 login-gradient");
+  expect(
+    html.includes("max-w-[384px]") && html.includes("md:max-w-[460px]") && html.includes("2xl:max-w-[576px]"),
+    "登录框列必须带三档宽度类（渲染输出可见，不只源码声明）",
+  );
+  expect(html.includes('data-slot="login-error"') && html.includes('data-slot="login-hint"'), "错误区与底部提示区必须始终渲染（无错误时也占位）");
 });
 
 // ---------- run ----------

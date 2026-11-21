@@ -26,6 +26,10 @@
  *   7. 375 用 CDP 模拟粗指针，断言按钮触控目标 ≥44px、表格行高 ≥40px；
  *   8. 静态断点审计：只允许 Tailwind 默认断点，禁止 --breakpoint-* 自定义 token
  *      与 min-[…]/max-[…] 裸断点；图表/表格响应式容器 token 必须在位。
+ *   9. （W6 ticket 12）登录页专项（未登录独立上下文）：375/667×375/768/1536 四档
+ *      三态主题切换与持久化、登录框三档宽度 384/460/576、密码显隐 aria-pressed、
+ *      登录失败错误区固定 h-10 按钮零位移 + 字段标红 + 详情进通知中心、
+ *      667×375 横屏提交按钮免滚可见可点、登录成功/失败流程回归。
  *
  * 运行：
  *   node ops/checks/responsive_matrix.mjs                 # 自动在 3777 起隔离站点
@@ -1185,6 +1189,163 @@ async function assertPublicModelSaveRollback(page, fixtures) {
   return "500 拦截：错误内联+值/脏标记保留；解除后真保存：脏清零+服务端已更新";
 }
 
+/* W6 ticket 17：分流图播种——矩阵站点没有 relay 流量，直接向隔离 SQLite 写
+ * usage/charge 行（与 api/tests/integration/test_reports_flow_focus.py 同一張
+ * 路径表），让分流图有确定性的 9 节点闭包可供搜索断言。 */
+let flowSeeded = false;
+async function ensureFlowSeeded(page, fixtures) {
+  if (flowSeeded) return;
+  flowSeeded = true;
+  void fixtures;
+  const serverDir = path.join(OUT, "server");
+  const databaseFile = path.join(serverDir, "matrix.db").replace(/\\/g, "/");
+  const script = path.join(OUT, "seed-flow-events.py");
+  fs.writeFileSync(
+    script,
+    [
+      "import sys, time",
+      "from sqlalchemy import create_engine",
+      "from sqlalchemy.orm import sessionmaker",
+      "from l04_repo.orm import ChargeEntryORM, GatewayUsageEventORM, UserORM",
+      "",
+      'engine = create_engine("sqlite:///" + sys.argv[1])',
+      "Session = sessionmaker(bind=engine, future=True)",
+      "now = int(time.time() * 1000)",
+      'USERS = [("usr_mflow_a", "流甲"), ("usr_mflow_b", "流乙"), ("usr_mflow_c", "流丙")]',
+      "PATHS = [",
+      '    ("usr_mflow_a", "matrixflow公开甲", "matrixflow上游A", "matrixflow渠道X"),',
+      '    ("usr_mflow_a", "matrixflow公开甲", "matrixflow上游B", "matrixflow渠道Y"),',
+      '    ("usr_mflow_b", "matrixflow公开甲", "matrixflow上游A", "matrixflow渠道Y"),',
+      '    ("usr_mflow_b", "matrixflow公开乙", "matrixflow上游A", "matrixflow渠道X"),',
+      '    ("usr_mflow_c", "matrixflow公开乙", "matrixflow上游B", "matrixflow渠道X"),',
+      '    ("usr_mflow_c", "matrixflow公开丙", "matrixflow上游A", "matrixflow渠道X"),',
+      '    ("usr_mflow_a", "matrixflow公开乙", "matrixflow上游A", "matrixflow渠道Y"),',
+      '    ("usr_mflow_b", "matrixflow公开丙", "matrixflow上游B", "matrixflow渠道Y"),',
+      '    ("usr_mflow_a", "matrixflow公开丙", "matrixflow上游B", "matrixflow渠道X"),',
+      "]",
+      "with Session() as session:",
+      '    if session.get(GatewayUsageEventORM, "evt_mflow_0") is not None:',
+      '        print("already")',
+      "        raise SystemExit(0)",
+      "    for user_id, name in USERS:",
+      "        if session.get(UserORM, user_id) is None:",
+      "            session.add(UserORM(id=user_id, name=name, balance_micro=0, created_at_ms=now))",
+      "    for index, (user_id, public_model, upstream_model, provider) in enumerate(PATHS):",
+      "        at = now - 3_600_000 * (index + 1)",
+      '        event_id = "evt_mflow_%d" % index',
+      "        session.add(GatewayUsageEventORM(",
+      "            event_id=event_id,",
+      "            started_at_ms=at,",
+      "            completed_at_ms=at + 1000,",
+      "            duration_ms=1000,",
+      "            time_to_first_token_ms=100,",
+      "            http_status=200,",
+      "            public_model=public_model,",
+      "            upstream_model=upstream_model,",
+      "            provider=provider,",
+      "            input_tokens=10,",
+      "            output_tokens=5,",
+      "            total_tokens=15,",
+      "        ))",
+      "        session.add(ChargeEntryORM(",
+      '            id="ce_" + event_id,',
+      "            gateway_event_id=event_id,",
+      "            user_id=user_id,",
+      "            amount_micro=1000,",
+      '            currency="CNY",',
+      '            status="ok",',
+      "            created_at_ms=at,",
+      "        ))",
+      "    session.commit()",
+      'print("seeded")',
+      "",
+    ].join("\n"),
+  );
+  const python = pythonExecutable();
+  const result = spawnSync(python, [script, databaseFile], {
+    encoding: "utf8",
+    env: { ...process.env, PYTHONPATH: path.join(API_ROOT, "src") },
+    windowsHide: true,
+  });
+  if (result.status !== 0) {
+    throw new MatrixError("分流播种失败：" + (result.stderr || result.stdout || "").slice(0, 400));
+  }
+}
+
+/* W6 ticket 17：分流搜索专项——页头入口、无独立请求链路面板、无「已隐藏」芯片块、
+ * 隐藏阶段卡片高度稳定、阶段轴在右/搜索在左（窄屏堆叠）、搜索高亮链路计数、
+ * 仅显示链路、清除恢复全图。期望计数来自上方播种的 9 条路径（确定性）。 */
+async function assertFlowSearch(page, width, fixtures) {
+  await ensureFlowSeeded(page, fixtures);
+  await goto(page, "/dashboard");
+  // 1. 看板不再有独立「请求链路」面板；「查看分流」入口移到页头仍可达。
+  assert((await page.getByText("请求链路", { exact: true }).count()) === 0, "看板仍渲染独立请求链路面板");
+  const entry = page.getByRole("button", { name: "查看分流" });
+  assert(await visible(entry), width + " 页头缺少「查看分流」入口");
+  await entry.click();
+  const canvas = page.locator('[role="img"][aria-label*="桑基"]');
+  await canvas.waitFor({ state: "visible", timeout: 10_000 });
+  await page.waitForTimeout(700);
+
+  // 2. 无「已隐藏」芯片块；阶段轴在右（≥lg）/堆叠在画布下（<lg），搜索在左。
+  assert((await page.getByText("已隐藏：", { exact: true }).count()) === 0, "「已隐藏」芯片块仍存在");
+  const search = page.locator('[data-slot="flow-search-input"]');
+  const axis = page.locator('[data-slot="flow-stage-axis"]');
+  assert(await visible(search), width + " 分流搜索框不可见");
+  assert(await visible(axis), width + " 分流阶段轴不可见");
+  const searchBox = await boxOf(search);
+  const axisBox = await boxOf(axis);
+  const canvasBox = await boxOf(canvas);
+  if (width >= 1024) {
+    assert(searchBox.x < canvasBox.x + 2, width + " 搜索框不在画布左上（轴右搜索左）");
+    assert(axisBox.x >= canvasBox.x + canvasBox.width - 1, width + " 阶段轴不在画布右侧");
+  } else {
+    assert(axisBox.y >= canvasBox.y + canvasBox.height - 1, width + " 窄屏阶段轴未堆叠在画布下方");
+    assert(searchBox.y <= canvasBox.y, width + " 窄屏搜索框不在画布上方");
+  }
+
+  // 3. 高度稳定：隐藏一个阶段前后，趋势卡片高度不变（芯片块已删，W5 跳动源）。
+  const trendCard = page.locator('[data-slot="card"]').filter({ hasText: "用量趋势" }).first();
+  const cardHeight = async () => (await boxOf(trendCard)).height;
+  await page.waitForTimeout(300);
+  const heightBefore = await cardHeight();
+  await axis.getByRole("button", { name: "公开模型" }).click();
+  await page.waitForTimeout(1_200);
+  const heightAfter = await cardHeight();
+  assert(Math.abs(heightAfter - heightBefore) <= 1, width + " 隐藏阶段后卡片高度跳动：" + heightBefore + " → " + heightAfter);
+  assert((await page.getByText("已隐藏：", { exact: true }).count()) === 0, width + " 隐藏后出现「已隐藏」芯片块");
+  await axis.getByRole("button", { name: "公开模型" }).click();
+  await page.waitForTimeout(900);
+
+  // 4. 搜索高亮：命中 1（公开甲），闭包 = 3 用户 + key + 上游A/B + 渠道X/Y。
+  await search.fill("公开甲");
+  const status = page.locator('[data-slot="flow-search-status"]');
+  await page.waitForTimeout(400);
+  const highlightText = (await status.innerText()).trim();
+  assert(
+    highlightText === "命中 1 · 链路 9 节点 / 10 边",
+    width + " 搜索高亮状态不符（期望 命中 1 · 链路 9 节点 / 10 边）：" + highlightText,
+  );
+
+  // 5. 仅显示搜索目标：只保留该链；清除后恢复全图。
+  const onlyToggle = page.getByRole("switch", { name: "仅显示搜索目标" });
+  assert(await visible(onlyToggle), width + " 缺少「仅显示搜索目标」开关");
+  await onlyToggle.click();
+  await page.waitForTimeout(500);
+  const onlyText = (await status.innerText()).trim();
+  assert(
+    onlyText === "仅显示链路：9 节点 / 10 边",
+    width + " 仅显示链状态不符：" + onlyText,
+  );
+  await search.fill("");
+  await page.waitForTimeout(500);
+  const clearedText = (await status.innerText()).trim();
+  assert(clearedText === "", width + " 清除搜索后未恢复全图（状态残留）：" + clearedText);
+  assert(!(await onlyToggle.isEnabled()), width + " 清除搜索后「仅显示」开关应禁用");
+  await shot(page, width + "-flow-search");
+  return "轴右搜索左（" + Math.round(axisBox.x - canvasBox.x) + "px）· 高度 " + Math.round(heightBefore) + "→" + Math.round(heightAfter) + " 稳定 · 搜索高亮 9/10 · 仅显示链 · 清除恢复";
+}
+
 /* W6 ticket 15：成员编排专项——左6右6行内编辑（行内字段随策略收敛）、行内编辑变脏
  * 页头计数联动、候选按上游分组 chip 搜索固定滚动区外、加入成员走 chip。
  * 375 只验堆叠 + chip 加入 + 搜索；1536 全量并含大列表预算（300 候选时页面高度有界）。
@@ -1328,6 +1489,217 @@ async function assertMemberBoard(page, width, fixtures) {
   return "行内字段随策略收敛、脏计数联动、chip 加入/移除往返、搜索固定" + (width >= 1024 ? "、大列表高度有界" : "");
 }
 
+/* W6 ticket 12：登录页专项——三态主题（复用全站 slipstream.theme 存储）、登录框三档
+ * 宽度（384/460/576）、密码显隐、错误零位移（错误区固定 h-10 + 字段 aria-invalid +
+ * 失败详情进通知中心）、667×375 横屏免滚可见提交按钮、成功/失败流程回归。
+ * 全部跑在未登录的独立上下文里，不污染主矩阵的已登录会话。 */
+async function openLoginContext(width, height) {
+  const context = await browser.newContext({
+    viewport: { width, height },
+    baseURL: baseUrl(),
+    locale: "zh-CN",
+  });
+  const loginPage = await context.newPage();
+  loginPage.setDefaultTimeout(PLAYWRIGHT_TIMEOUT);
+  await loginPage.goto(baseUrl() + "/login", { waitUntil: "domcontentloaded", timeout: 30_000 });
+  await loginPage.waitForTimeout(400);
+  return { context, loginPage };
+}
+
+async function assertLoginTheme(width, height) {
+  const { context, loginPage } = await openLoginContext(width, height);
+  try {
+    const switcher = loginPage.locator('[data-slot="login-theme"]');
+    assert(await visible(switcher), width + " 下登录页主题切换器不可见");
+    for (const name of ["浅色", "深色", "跟随系统"]) {
+      assert(await visible(loginPage.getByRole("button", { name, exact: true })), width + " 下主题选项不可见：" + name);
+    }
+    const stored = () => loginPage.evaluate(() => localStorage.getItem("slipstream.theme"));
+    const isDark = () => loginPage.evaluate(() => document.documentElement.classList.contains("dark"));
+    // 深色：显式选择立即生效并持久化（全站 slipstream.theme，不另起存储）。
+    await loginPage.getByRole("button", { name: "深色", exact: true }).click();
+    await loginPage.waitForTimeout(250);
+    assert(await isDark(), width + " 下选深色后 html 未切 .dark");
+    assert((await stored()) === "dark", width + " 下选深色后 slipstream.theme 未持久化为 dark");
+    // 刷新后仍是深色：持久化生效（index.html 反闪烁脚本同源，刷新无白闪回退）。
+    await loginPage.reload({ waitUntil: "domcontentloaded" });
+    await loginPage.waitForTimeout(400);
+    assert(await isDark(), width + " 下刷新后深色主题丢失（持久化失效）");
+    assert(await visible(switcher), width + " 下刷新后主题切换器不可见");
+    // 跟随系统：矩阵默认 prefers-color-scheme=light → 应回落浅色。
+    await loginPage.getByRole("button", { name: "跟随系统", exact: true }).click();
+    await loginPage.waitForTimeout(250);
+    assert(!(await isDark()), width + " 下跟随系统应回落浅色（矩阵 prefers-color-scheme=light）");
+    assert((await stored()) === "system", width + " 下跟随系统未持久化为 system");
+    // 浅色：显式选择。
+    await loginPage.getByRole("button", { name: "浅色", exact: true }).click();
+    await loginPage.waitForTimeout(250);
+    assert(!(await isDark()), width + " 下选浅色后 html 仍有 .dark");
+    assert((await stored()) === "light", width + " 下选浅色未持久化为 light");
+    await shot(loginPage, "login-theme-" + width);
+    return "深色生效+持久化、刷新保持、跟随系统回落浅色、浅色生效（slipstream.theme 全站同源）";
+  } finally {
+    await context.close().catch(() => {});
+  }
+}
+
+async function assertLoginWidths() {
+  const cases = [
+    { width: 640, height: 900, expect: 384, tier: "基础 384" },
+    { width: 768, height: 1024, expect: 460, tier: "md 460" },
+    { width: 1536, height: 864, expect: 576, tier: "2xl 576" },
+  ];
+  const measured = [];
+  for (const item of cases) {
+    const { context, loginPage } = await openLoginContext(item.width, item.height);
+    try {
+      const card = loginPage.locator('[data-slot="login-card"]');
+      assert(await visible(card), item.width + " 下登录卡片不可见");
+      const box = await boxOf(card);
+      const actual = Math.round(box.width);
+      measured.push(item.width + "→" + actual);
+      assert(
+        Math.abs(box.width - item.expect) <= 2,
+        item.width + " 下登录框宽度 " + actual + "px ≠ " + item.tier + "px（user story 32 三档 384/460/576）",
+      );
+      await shot(loginPage, "login-width-" + item.width);
+    } finally {
+      await context.close().catch(() => {});
+    }
+  }
+  return "三档实测 " + measured.join("、") + "（±2px）";
+}
+
+async function assertLoginPasswordToggle(width) {
+  const { context, loginPage } = await openLoginContext(width, 667);
+  try {
+    const password = loginPage.locator("#login-password");
+    const toggle = loginPage.locator('[data-slot="login-password-toggle"]');
+    assert(await visible(toggle), width + " 下密码显隐按钮不可见");
+    assert((await password.getAttribute("type")) === "password", "密码框默认必须隐藏");
+    assert((await toggle.getAttribute("aria-pressed")) === "false", "显隐按钮初始 aria-pressed 必须是 false");
+    await toggle.click();
+    await loginPage.waitForTimeout(150);
+    assert((await password.getAttribute("type")) === "text", "点击显隐按钮后密码必须可见（type=text）");
+    assert((await toggle.getAttribute("aria-pressed")) === "true", "显示态 aria-pressed 必须是 true");
+    assert((await toggle.getAttribute("aria-label")) === "隐藏密码", "显示态可访问名必须是「隐藏密码」");
+    await toggle.click();
+    await loginPage.waitForTimeout(150);
+    assert((await password.getAttribute("type")) === "password", "再次点击后密码必须重新隐藏");
+    assert((await toggle.getAttribute("aria-pressed")) === "false", "隐藏态 aria-pressed 必须回到 false");
+    await shot(loginPage, "login-password-toggle-" + width);
+    return "密码显示/隐藏往返可用，aria-pressed 与可访问名随状态切换";
+  } finally {
+    await context.close().catch(() => {});
+  }
+}
+
+/** 错误零位移（照票 14 手法）：提交前后逐像素量按钮/错误区矩形；同时断言字段标红、
+ * aria-invalid、详情进通知中心（slipstream.notifications.v1 是通知中心的唯一数据源）。 */
+async function assertLoginErrorZeroShift(width, height) {
+  const { context, loginPage } = await openLoginContext(width, height);
+  try {
+    const rectsOf = () =>
+      loginPage.evaluate(() => {
+        const rect = (node) => {
+          if (!node) return null;
+          const box = node.getBoundingClientRect();
+          return { x: box.x, y: box.y, w: box.width, h: box.height };
+        };
+        const area = document.querySelector('[data-slot="login-error"]');
+        const input = document.querySelector("#login-username");
+        return {
+          button: rect(document.querySelector('button[type="submit"]')),
+          area: rect(area),
+          areaHeight: area ? getComputedStyle(area).height : "",
+          borderColor: input ? getComputedStyle(input).borderColor : "",
+          ariaInvalid: input ? input.getAttribute("aria-invalid") : "",
+        };
+      });
+    await loginPage.fill("#login-username", ADMIN_CRED.user);
+    await loginPage.fill("#login-password", "matrix-wrong-password-" + Date.now().toString(36));
+    await loginPage.waitForTimeout(150);
+    const before = await rectsOf();
+    assert(before.ariaInvalid !== "true", "提交前输入框不应已标红（aria-invalid 提前置位）");
+    assert(Math.round(parseFloat(before.areaHeight)) === 40, "错误区固定高度应为 40px（h-10），实际 " + before.areaHeight);
+    await loginPage.click('button[type="submit"]');
+    await loginPage.locator('[data-slot="login-error"] p').first().waitFor({ state: "visible", timeout: 10_000 });
+    await loginPage.waitForTimeout(300);
+    const after = await rectsOf();
+    assert(after.ariaInvalid === "true", "登录失败后用户名输入框必须 aria-invalid=true（user story 49）");
+    const rgb = (after.borderColor.match(/\d+/g) ?? []).map(Number);
+    assert(
+      rgb.length >= 3 && rgb[0] > rgb[1] && rgb[0] > rgb[2] && after.borderColor !== before.borderColor,
+      "出错字段边框必须是红色系且相对正常态有变化（正常 " + before.borderColor + " → 失败 " + after.borderColor + "）",
+    );
+    const shift = (label, left, right) =>
+      JSON.stringify(left) === JSON.stringify(right) ? "" : label + " " + JSON.stringify(left) + " → " + JSON.stringify(right) + "；";
+    const shifts = shift("提交按钮", before.button, after.button) + shift("错误区", before.area, after.area);
+    assert(shifts === "", width + " 登录失败后布局位移（按钮必须零位移）：" + shifts.trim());
+    assertInViewport(
+      { x: after.button.x, y: after.button.y, width: after.button.w, height: after.button.h },
+      width,
+      height,
+      "错误出现后的提交按钮",
+    );
+    const notifications = await loginPage.evaluate(() => JSON.parse(localStorage.getItem("slipstream.notifications.v1") || "[]"));
+    const entry = notifications.find((item) => item.kind === "error" && item.title === "登录失败");
+    assert(entry, "登录失败必须写入通知中心历史（slipstream.notifications.v1 缺「登录失败」条目）");
+    const inlineError = (await loginPage.locator('[data-slot="login-error"] p').first().innerText()).trim();
+    assert(
+      typeof entry.description === "string" && entry.description.includes(inlineError),
+      "通知中心详情必须包含内联错误全文（内联：「" + inlineError + "」）",
+    );
+    await shot(loginPage, "login-error-zero-shift-" + width);
+    return "按钮/错误区逐像素零位移，错误区恒 40px，字段红色系边框+aria-invalid，详情进通知中心";
+  } finally {
+    await context.close().catch(() => {});
+  }
+}
+
+async function assertLoginLandscapeSubmit() {
+  const { context, loginPage } = await openLoginContext(667, 375);
+  try {
+    const submit = loginPage.locator('button[type="submit"]');
+    assert(await visible(submit), "667×375 横屏提交按钮不可见");
+    const box = await boxOf(submit);
+    assertInViewport(box, 667, 375, "横屏提交按钮");
+    await assertClickableAtCenter(loginPage, submit, "横屏提交按钮");
+    await shot(loginPage, "login-landscape-667x375");
+    return "提交按钮 y=" + Math.round(box.y) + "…" + Math.round(box.y + box.height) + " 免滚可见可点（user story 33）";
+  } finally {
+    await context.close().catch(() => {});
+  }
+}
+
+async function assertLoginFlowRegression() {
+  const { context, loginPage } = await openLoginContext(768, 1024);
+  try {
+    // 失败流程：内联错误可见（固定区文案），不推挤布局。
+    await loginPage.fill("#login-username", ADMIN_CRED.user);
+    await loginPage.fill("#login-password", "matrix-not-the-password");
+    await loginPage.click('button[type="submit"]');
+    const inline = loginPage.locator('[data-slot="login-error"] p').first();
+    await inline.waitFor({ state: "visible", timeout: 10_000 });
+    assert((await inline.innerText()).trim().length > 0, "登录失败必须显示内联错误文案");
+    // 成功流程：正确凭据后离开 /login 进入控制台。
+    await loginPage.fill("#login-username", ADMIN_CRED.user);
+    await loginPage.fill("#login-password", ADMIN_CRED.pass);
+    await loginPage.click('button[type="submit"]');
+    const deadline = Date.now() + 45_000;
+    while (Date.now() < deadline) {
+      if (!new URL(loginPage.url()).pathname.startsWith("/login")) break;
+      await loginPage.waitForTimeout(200);
+    }
+    const landed = new URL(loginPage.url()).pathname;
+    assert(!landed.startsWith("/login"), "登录成功后未离开 /login（超时）");
+    await shot(loginPage, "login-flow-success");
+    return "失败路径内联错误可见；成功路径进入控制台（" + landed + "）";
+  } finally {
+    await context.close().catch(() => {});
+  }
+}
+
 async function assertCoarsePointer(page) {
   // 复用已登录 cookies，在独立的移动+触摸上下文里测，避免影响主矩阵的桌面指针环境。
   const storageState = await page.context().storageState();
@@ -1451,6 +1823,18 @@ async function main() {
       }
     });
   }
+
+  // W6 ticket 12：登录页专项（未登录独立上下文，不污染主矩阵会话）。
+  await test("login.theme.375", "375 登录页三态主题切换与持久化", () => assertLoginTheme(375, 667));
+  await test("login.theme.667x375", "667×375 横屏登录页三态主题切换可见", () => assertLoginTheme(667, 375));
+  await test("login.theme.768", "768 登录页三态主题切换与持久化", () => assertLoginTheme(768, 1024));
+  await test("login.theme.1536", "1536 登录页三态主题切换与持久化", () => assertLoginTheme(1536, 864));
+  await test("login.widths", "登录框三档宽度 384/460/576（640/768/1536 实测）", () => assertLoginWidths());
+  await test("login.password-toggle", "375 登录页密码显隐切换与 aria-pressed", () => assertLoginPasswordToggle(375));
+  await test("login.error-zero-shift", "375 登录失败错误区固定、按钮零位移、字段标红、详情进通知中心", () =>
+    assertLoginErrorZeroShift(375, 667));
+  await test("login.landscape", "667×375 横屏提交按钮免滚可见可点", () => assertLoginLandscapeSubmit());
+  await test("login.flow.regression", "登录成功与失败流程回归", () => assertLoginFlowRegression());
 
   // 登录一次，后续只改视口；cookie 与 localStorage 在同一上下文内保持。
   const context = await browser.newContext({
@@ -1577,6 +1961,12 @@ async function main() {
           await test("member-board." + label, label + " 成员编排行内编辑与分组候选", () =>
             assertMemberBoard(page, width, fixtures));
         }
+      }
+      // W6 ticket 17：分流搜索专项（375 窄屏堆叠布局 + 1536 桌面轴右/搜索左，
+      // 两档都断言入口、高度稳定、搜索高亮、仅显示链与清除恢复）。
+      if (width === 375 || width === 1536) {
+        await test("flow-search." + label, label + " 分流图搜索聚焦专项（入口/高度/轴右搜索左/仅显示链）", () =>
+          assertFlowSearch(page, width, fixtures));
       }
     }
     await test("runtime.console", "五档交互无新增 console error / 未捕获异常", () => {

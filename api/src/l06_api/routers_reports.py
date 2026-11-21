@@ -37,6 +37,7 @@ from l01_core.timeutil import now_ms
 from l05_service import aggregates, auth, rbac
 from l05_service.prices import margin_report
 from l06_api.deps import require, session_of
+from l06_api.schemas import FlowReportOut
 
 router = APIRouter(tags=["reports"])
 
@@ -395,7 +396,7 @@ def heatmap(
     return payload
 
 
-@router.get("/admin/reports/flow")
+@router.get("/admin/reports/flow", response_model=FlowReportOut)
 def flow(
     session: Session = Depends(session_of),
     principal: auth.Principal = Depends(require("reports:read")),
@@ -405,6 +406,9 @@ def flow(
     to_ms: int | None = None,
     tz: str = "",
     collapse: str = "",
+    focus: str = "",
+    q: str = "",
+    top_n: int = 0,
 ) -> dict:
     """Five-stage Sankey: 用户 → 连接密钥 → 公开模型 → 上游模型 → 上游.
 
@@ -416,6 +420,14 @@ def flow(
     restricts the link aggregation to that window; the all-time default only
     survives when neither param is given. Payload "range" reads "custom" for
     an explicit window. See _window_override.
+
+    W6 ticket 17 adds optional narrowing for production-scale graphs; all three
+    default to blank/0 and keep the payload byte-identical (collapse golden):
+
+    * focus=<node id> - keep that node's ancestor+descendant chain;
+    * q=<text> - keep every label (case-insensitive) match's chain;
+    * top_n=<n> - per stage keep the top-n nodes by metric value and fold the
+      tail into other:<stage> aggregate nodes (0=off, negative is a 422).
     """
     if metric not in ("requests", "tokens"):
         metric = "requests"
@@ -434,6 +446,12 @@ def flow(
             "collapse 后至少保留 2 个阶段",
             details={"collapse": hidden},
         )
+    if top_n < 0:
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR,
+            "top_n 必须为不小于 0 的整数",
+            details={"top_n": top_n},
+        )
     zone = _timezone(session, tz)
     override = _window_override(from_ms, to_ms)
     if override is not None:
@@ -450,6 +468,9 @@ def flow(
         to_ms=window_to,
         metric=metric,
         collapse=hidden or None,
+        focus=focus,
+        q=q,
+        top_n=top_n,
     )
     payload["range"] = range_key or "all"
     payload["from_ms"] = window_from
