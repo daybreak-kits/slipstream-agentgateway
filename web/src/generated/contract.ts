@@ -542,8 +542,9 @@ export interface UpstreamPatch {
 }
 
 export interface UpstreamPriceCreate {
-  vendor_id: string;
-  upstream_model: string;
+  vendor_id?: string | null;
+  upstream_model?: string | null;
+  upstream_model_id?: string | null;
   item: string;
   unit_price_micro: number;
   currency?: string;

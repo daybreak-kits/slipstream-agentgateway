@@ -342,13 +342,23 @@ class RequestAttemptORM(Base):
 
 
 class UpstreamPriceORM(Base):
-    """Vendor cost book, versioned: new row per price change, history never rewritten."""
+    """Cache cost book, versioned: new row per price change, history never rewritten.
+
+    Two scope keys coexist while the vendor domain is removed (W7 t02): the
+    upstream model row (upstream_model_id, the key the vendor key is replaced
+    by) and the legacy vendor_id + upstream_model pair (dropped together with
+    the vendor domain in t03). A row carries exactly one of them, so the other
+    columns stay NULL - no row is priced twice.
+    """
 
     __tablename__ = "upstream_prices"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    vendor_id: Mapped[str] = mapped_column(String(64), index=True)
-    upstream_model: Mapped[str] = mapped_column(String(255))
+    vendor_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    upstream_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    upstream_model_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("upstream_models.id"), nullable=True, index=True
+    )
     item: Mapped[str] = mapped_column(String(16))  # input|output|cache_read|cache_write|request
     unit_price_micro: Mapped[int] = mapped_column(BigInteger)  # per 1M tokens, or per request
     currency: Mapped[str] = mapped_column(String(8), default="CNY")

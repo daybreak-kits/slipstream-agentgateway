@@ -250,8 +250,17 @@ class RefundCreate(BaseModel):
 
 
 class UpstreamPriceCreate(BaseModel):
-    vendor_id: str
-    upstream_model: str = Field(min_length=1, max_length=255)
+    """One cache price version: the scope key, the item and the price itself.
+
+    The scope key is the upstream model row (upstream_model_id); the vendor_id +
+    upstream_model pair is the legacy key that stays until the vendor domain is
+    removed. Exactly one of the two forms must be filled - the service rejects
+    a missing or mixed key instead of guessing a scope.
+    """
+
+    vendor_id: str | None = None
+    upstream_model: str | None = Field(default=None, min_length=1, max_length=255)
+    upstream_model_id: str | None = None
     item: str = Field(pattern=r"^(input|output|cache_read|cache_write|request)$")
     unit_price_micro: int = Field(ge=0)
     currency: str = Field(default="CNY", min_length=1, max_length=8)
