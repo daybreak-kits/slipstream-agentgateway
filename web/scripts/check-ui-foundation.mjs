@@ -42,9 +42,9 @@ const includesAll = (haystack, needles, label) => {
 };
 
 // ---------- 1. 构建入口与品牌资产 ----------
-check("index.html：页签标题为「驭流 Slipstream · LLM API 网关」", () => {
+check("index.html：页签标题为「驭流 Slipstream · 模型接口网关」", () => {
   const html = read("index.html");
-  expect(/<title>驭流 Slipstream · LLM API 网关<\/title>/.test(html), "title 未改回驭流品牌全称");
+  expect(/<title>驭流 Slipstream · 模型接口网关<\/title>/.test(html), "title 未改回驭流品牌全称（含新对外名）");
   expect(/<html lang="zh-CN">/.test(html), "lang 必须是 zh-CN");
 });
 
@@ -888,7 +888,7 @@ check("PriceTable：可排列表头常驻未排序 ArrowUpDown（SSR 渲染）",
   const columns = [
     { key: "name", label: "名称", cell: (row) => row.name },
     { key: "price", label: "单价", sortable: true, sortValue: (row) => row.price, cell: (row) => String(row.price) },
-    { key: "note", label: "备注", cell: () => "—" },
+    { key: "note", label: "备注", cell: () => "-" },
   ];
   const html = render(
     createElement(PriceTable, {
@@ -957,7 +957,7 @@ check("数字格式：整数一律千分位、四舍五入到整数（计数/词
   expect(fmt.fmtInt(1234567) === "1,234,567", "fmtInt(1234567) 应为千分位整数");
   expect(fmt.fmtInt(565920.4) === "565,920", "fmtInt 必须先取整再千分位");
   expect(fmt.fmtInt(-1234.6) === "-1,235", "fmtInt 负数也要千分位且四舍五入");
-  expect(fmt.fmtInt(null) === "—" && fmt.fmtInt(Number.NaN) === "—", "fmtInt 缺值/非有限值应显示「—」");
+  expect(fmt.fmtInt(null) === "-" && fmt.fmtInt(Number.NaN) === "-", "fmtInt 缺值/非有限值应显示半角横线「-」");
   expect(fmt.formatCount === undefined, "formatCount 旧别名必须删除（统一用 fmtInt）");
 });
 
@@ -967,17 +967,17 @@ check("数字格式：图表轴紧凑计数只保留整数（无 K/M/B 小数）
   expect(fmt.fmtCount(565920) === "566K", "565920 应四舍五入为 566K，不得有小数");
   expect(fmt.fmtCount(1_500_000) === "2M", "1.5M 应取整为 2M");
   expect(fmt.fmtCount(999_999) === "1M", "进位到 1000K 时必须升到 M");
-  expect(fmt.fmtCount(Number.NaN) === "—", "fmtCount 非有限值应显示「—」");
+  expect(fmt.fmtCount(Number.NaN) === "-", "fmtCount 非有限值应显示「-」");
 });
 
 check("数字格式：RPM 两位小数、百分比一位小数", async () => {
   const fmt = await load("/src/lib/format.ts");
   expect(fmt.fmtRpm(2572.014583) === "2,572.01", "RPM 必须固定两位小数（整数部分千分位）");
   expect(fmt.fmtRpm(0) === "0.00", "RPM 0 也要两位小数");
-  expect(fmt.fmtRpm(null) === "—", "RPM 缺值显示「—」");
+  expect(fmt.fmtRpm(null) === "-", "RPM 缺值显示「-」");
   expect(fmt.fmtPct(0.4148) === "41.5%", "比例（0–1）必须一位小数百分比");
   expect(fmt.fmtPct(0) === "0.0%" && fmt.fmtPct(1) === "100.0%", "百分比边界值固定一位小数");
-  expect(fmt.fmtPct(null) === "—", "百分比缺值显示「—」");
+  expect(fmt.fmtPct(null) === "-", "百分比缺值显示「-」");
   expect(fmt.fmtPctPoint(41.48) === "41.5%", "已是百分数的值（如 cache_ratio）直接一位小数");
 });
 
@@ -986,7 +986,7 @@ check("数字格式：金额表格两位、单请求均值四位、取消六位�
   expect(fmt.fmtMoney(2_000_000, "CNY") === "¥2.00", "金额默认两位小数");
   expect(fmt.fmtMoney(-1_500_000, "CNY") === "-¥1.50", "负数符号必须在货币符号之前");
   expect(fmt.fmtMoney(1_500_000, "USD") === "$1.50", "币种符号按 currency 选择");
-  expect(fmt.fmtMoney(null) === "—", "金额缺值显示「—」，不渲染 0");
+  expect(fmt.fmtMoney(null) === "-", "金额缺值显示「-」，不渲染 0");
   expect(fmt.fmtMoneyAvg(3_400, "CNY") === "¥0.0034", "单请求金额/均值必须四位小数");
   expect(fmt.fmtMoneyAvg(1_234_567) === "¥1.2346", "单请求金额四位小数四舍五入");
   expect(fmt.fmtMoney6 === undefined && fmt.fmtYuan === undefined && fmt.fmtMicroYuan === undefined, "6 位小数与旧别名必须删除");
@@ -997,7 +997,7 @@ check("数字格式：单价 2 位、不足 0.01 升 4 位；单价统一从 lib
   const fmt = await load("/src/lib/format.ts");
   expect(fmt.fmtPricePerM("2") === "¥2.00/M", "模型行进价两位小数 + /M");
   expect(fmt.fmtPricePerM("0.005") === "¥0.0050/M", "不足 0.01 的单价必须升到 4 位");
-  expect(fmt.fmtPricePerM(null) === "—", "未配置单价显示「—」");
+  expect(fmt.fmtPricePerM(null) === "-", "未配置单价显示「-」");
   expect(fmt.fmtPriceAmount("2", "USD") === "$2.00", "公开模型售价按币种两位小数");
   expect(fmt.fmtUnitPriceMicro(2_000_000, "CNY") === "¥2.00", "微单位单价按两位小数展示");
   expect(fmt.fmtUnitPriceMicro(5_000, "CNY") === "¥0.0050", "微单位小单价升到四位");
@@ -1007,7 +1007,7 @@ check("数字格式：吞吐与文件大小格式化也收敛到 lib/format", as
   const fmt = await load("/src/lib/format.ts");
   expect(fmt.fmtThroughput(42.34) === "42.3", "吞吐 <100 保留一位小数");
   expect(fmt.fmtThroughput(1234.5) === "1,235", "吞吐 >=100 取整并千分位（不得用 toLocaleString 自拼）");
-  expect(fmt.fmtThroughput(0) === "—", "无吞吐显示「—」");
+  expect(fmt.fmtThroughput(0) === "-", "无吞吐显示「-」");
   expect(fmt.fmtFileSize(800) === "800 B", "文件大小 B 档");
   expect(fmt.fmtFileSize(1536) === "1.5 KB", "文件大小 KB 档一位小数");
   expect(fmt.fmtFileSize(2 * 1024 * 1024) === "2.0 MB", "文件大小 MB 档一位小数");

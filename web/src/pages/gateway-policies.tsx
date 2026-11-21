@@ -141,7 +141,7 @@ export function GatewayPoliciesPage() {
       }
       if (checked.length === 0) return;
       if (failures.length === 0) {
-        toast.success(checked.join("、") + " 通过 AG 1.7 校验", {
+        toast.success(checked.join("、") + " 通过数据面校验", {
           description: warnings.length > 0 ? warnings.join("；") : "可以保存并下发",
         });
       } else {

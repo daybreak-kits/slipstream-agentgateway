@@ -460,7 +460,7 @@ async function main() {
     assert(cacheValue === "无缓存" || COUNT_RE.test(cacheValue), "缓存必须千分位整数或「无缓存」，实际：" + cacheValue);
     const p50 = valueOf("P50 延迟");
     assert(
-      /^\d+\.\d{2}s$/.test(p50) || p50 === "—" || p50.startsWith("样本不足"),
+      /^\d+\.\d{2}s$/.test(p50) || p50 === "-" || p50.startsWith("样本不足"),
       "P50 延迟必须两位小数秒或占位，实际：" + p50,
     );
 

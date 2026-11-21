@@ -36,7 +36,7 @@ export function RawJsonEditor({
         <p className="text-2xs text-danger-text">{error}</p>
       ) : (
         <p className="text-2xs text-faint">
-          {description ?? "直接编辑后端文档；保存前会在浏览器做 JSON 语法校验，服务端仍会做 IR/AG 1.7 校验。"}
+          {description ?? "直接编辑后端文档；保存前会在浏览器做 JSON 语法校验，服务端仍会做 IR 与数据面校验。"}
         </p>
       )}
     </div>

@@ -85,7 +85,7 @@ class DataPlaneAdapter(Protocol):
 5. 确认通过后写 `<filename>.hash` marker（内容 = artifact 的 sha256），供 `status` 比对
 6. 失败路径返回 `ApplyResult(ok=False, rolled_back=True, message=...)`，上层归档一条 `status="failed"` 版本并抛 `APPLY_FAILED`；成功路径归档 `status="active"` 并把旧版本置 `superseded`
 
-**官方二进制预校验（ticket 08，ADR-010 E8）**：注入 validator 时，在步骤 1 之后、写目标文件之前多一步——
+**官方二进制预校验（ticket 08，ADR-010 E8）**：注入 validator 时，在步骤 1 之后、写目标文件之前多一步：
 
 0. 把候选配置写进**目标目录**（AG 按配置文件所在目录解析 `params.apiKey.file`），跑 `agentgateway --validate-only -f <candidate>`；候选文件随后删除。拒绝时**不碰**目标文件与 marker，返回 `ApplyResult(ok=False, errors=(...), validation_note="...")`，错误文本来自二进制 stderr（去掉 `Error: ` 前缀、截断到可展示长度），上层原样放进 `APPLY_FAILED.details.errors`。二进制不存在时跳过校验但把 note 记录到 apply 结果与 revision 行（`validation_note`），绝不静默当作通过；`--validate-only` 通过不代表业务不变量成立（E8：它接受 `priority=0`），所以上层 IR 自校验仍然必须先跑。
 

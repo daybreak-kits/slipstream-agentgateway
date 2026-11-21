@@ -4,7 +4,7 @@ The AG wire row records the final upstream model in the ledger's public_model
 column and carries the client-facing name in wire attributes; the adapter
 decodes it into UsageEvent.requested_model at ingest time (ADR-029). The log
 API only reads the neutral column: old/legacy rows and rows without the fact
-degrade to an empty string (rendered as "—"), never to a made-up public name.
+degrade to an empty string (rendered as "-"), never to a made-up public name.
 """
 
 from __future__ import annotations

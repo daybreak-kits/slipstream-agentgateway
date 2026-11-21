@@ -8,12 +8,12 @@
 > - 分页档位固定 **25/50/100/200**（默认 50），`page_size` 超出档位一律 **422** `VALIDATION_ERROR`；
 >   `offset ≥ 0`，负数 422。唯一来源 `api/src/l06_api/deps.py:ALLOWED_PAGE_SIZES`。
 
-> 基线：`w5/integration`（2026-11-21，五期 ticket 01–16 全部合入）。本文覆盖最终接口面（OpenAPI 实测 **99 条路径 / 133 个操作**，不含 `/docs`、`/openapi.json`）。基线数字重跑命令见 §6/§7；`web/src/generated/contract.ts` 由 `ops/contract/gen_ts.py` 从同一 OpenAPI 生成，`--check` 防手改。
+> 基线：`w5/integration`（2026-11-21，五期 ticket 01 至 16 全部合入）。本文覆盖最终接口面（OpenAPI 实测 **99 条路径 / 133 个操作**，不含 `/docs`、`/openapi.json`）。基线数字重跑命令见 §6/§7；`web/src/generated/contract.ts` 由 `ops/contract/gen_ts.py` 从同一 OpenAPI 生成，`--check` 防手改。
 
 本文是前后端契约的人类解释与语义基准（Lead 决策，2026-11-17）；组件 schema 的机器可读
 副本由 `python ops/contract/gen_ts.py` 从 FastAPI OpenAPI 生成到
 `web/src/generated/contract.ts`，`--check` 在 CI/本地防止手改。凡前端调用与两者不符，按前端 bug
-处理（t7 改），不为旧路径加兼容层——只有 /admin/settings、/admin/audit-logs、
+处理（t7 改），不为旧路径加兼容层：只有 /admin/settings、/admin/audit-logs、
 /admin/config/revisions/latest、/admin/overview 四个入口是 task-170 新增的补齐接口。
 
 二期同步（历史）：真实认证、三角色 RBAC、字段级金额权限、上游多密钥、策略/护栏/MCP 可编辑（ticket 02/03/09/11）；计费/价目/看板/日志/设置/账单/用户层级（ticket 04/05/06/10/12/13/14/16/17）；seed 与 priority 迁移（ticket 19）。
@@ -89,7 +89,7 @@
   `web/src/generated/contract.ts:PAGE_SIZE_TIERS`，前端分页器不再复制一份。
 - `offset` ≥ 0，负数 → 422。
 - 返回形态（2026-11-17 03:27 Lead 实测确认，前端不得再猜）：
-  - **列表型：裸数组 `[item, ...]`** —— vendors / upstreams / upstream-models /
+  - **列表型：裸数组 `[item, ...]`**：vendors / upstreams / upstream-models /
     public-models / model-targets / users / api-keys / availability-rules /
     config/revisions / cost/entries / charge/entries / prices/*。
   - **分页信封：只有两处** `/admin/logs` 与 `/admin/audit-logs`，
@@ -152,7 +152,7 @@ sanitize。W6 票05 起 API 不再返回字符串化的原始 wire 行（`raw_js
   base_currency（CNY|USD，默认 CNY）、timezone（默认 Asia/Shanghai）、log_retention_days（int 1..365，默认 30）、
   audit_retention_days（int 7..3650，默认 180）、default_tokens_per_minute（int 0..1_000_000，默认 60000）、
   default_concurrency（int 0..1000，默认 8）、gateway_base_url（http(s) URL，留空自动取当前 host+3600）、
-  ag_access_log_llm（metadata|full，默认 metadata；ADR-021 请求正文日志全局开关——metadata 只存元数据，
+  ag_access_log_llm（metadata|full，默认 metadata；ADR-021 请求正文日志全局开关：metadata 只存元数据，
   full 额外落 prompt/补全正文到 `request_log_payloads`，随 log_retention_days 一并清理）。
 
 ### 2.2 GET /admin/settings/schema
@@ -367,7 +367,7 @@ AG 1.7 拒绝（`mcp.transport.http=false`），保存即 422。渲染到顶层 
 
 - `vendor_id` **可空**：不带厂商也能建上游；返回体里 `vendor_id`/`vendor` 相应可为 null（前端 F3 兼容）。
 - 名称取值顺序：请求带 `name` 用请求值（重名 422，与其他实体一致）；未带 name 且显式指定 vendor 时沿用
-  `{slug}-NN` 计数器；vendor 也缺省时由 base_url 生成——取 host:port，`www.abc.com:8080` → `www-abc-com-8080`
+  `{slug}-NN` 计数器；vendor 也缺省时由 base_url 生成：取 host:port，`www.abc.com:8080` → `www-abc-com-8080`
   （http/https 默认端口 80/443 去掉、非 [a-z0-9] 字符折叠为 `-`、重名追加 `-2`/`-3`）。
 
 协议自动探测（工单 C，向后兼容）：
@@ -439,7 +439,7 @@ failover 目标 `priority` 为正整数（升序优先，同值=同层）；weig
 | POST | /admin/api-keys/{key_id}/rotate | apikeys:write | 轮换，返回新明文一次 |
 | POST | /admin/api-keys/{key_id}/reveal | apikeys:write | 解密回显（审计留痕） |
 
-约束（ADR-019/023）：用户表已统一——username 唯一且不可改（缺省由 name 派生、冲突追加 `-2`），密码必填，
+约束（ADR-019/023）：用户表已统一：username 唯一且不可改（缺省由 name 派生、冲突追加 `-2`），密码必填，
 创建响应带 `initial_password`（12 位大小写+数字+符号随机，**仅此一次**，请求显式给 password 则用之）。
 连接密钥一用户最多 50 把（任意状态合计，第 51 把 409 CONFLICT）；库里只存 sha256:<hex> +
 AES-GCM 密文 + sk-...abcd 掩码。
@@ -574,7 +574,7 @@ AES-GCM 密文 + sk-...abcd 掩码。
   全部通过才逐条 UPDATE 模型行价格字段（`enabled`/`cooldown`/`model_type` 等非价格字段永不改动，
   行内出现未知键直接 422）。
 - 成功响应：`{"changed": 1, "missing": [], "skipped": 0}`（changed=实际更新的行数；skipped=只有定位无
-  价格字段的行数；missing 恒为空数组——未知模型已在校验阶段整批拒绝）。
+  价格字段的行数；missing 恒为空数组：未知模型已在校验阶段整批拒绝）。
 
 ```json
 // 请求（部分字段缺失=不动）
@@ -604,7 +604,7 @@ AES-GCM 密文 + sk-...abcd 掩码。
 |---|---|
 | event_id / started_at_ms / completed_at_ms | 标识与时间（completed_at_ms 由 AG 延迟字段随采集落库） |
 | correlation_key | 跨请求日志与尝试链的中性关联键（ADR-028/029）；日志→`/admin/logs/{event_id}/attempts` 的 join 键。历史日志或适配器无遥测时为空串（票05 前的 `trace_id` 列名已由 init_db 回填为中性列） |
-| requested_model | 客户端请求的公开模型名（适配器在采集时从 wire 属性归一化，系统不再解析 raw）；旧行/缺失时为空串，UI 显示「—」，**不以 `public_model` 回填**（ticket 03/05） |
+| requested_model | 客户端请求的公开模型名（适配器在采集时从 wire 属性归一化，系统不再解析 raw）；旧行/缺失时为空串，UI 显示「-」，**不以 `public_model` 回填**（ticket 03/05） |
 | attempts_count / has_attempts | 该请求归一化后的上游尝试次数；0/false 表示无路由链（ADR-028；仅列表出参，详情不重复） |
 | last_failure_status / last_failure_error_type / last_failure_error_message | 最近一次失败尝试的事实字段（HTTP 状态码 / 上游错误类型 / 上游错误文案）；无失败尝试时依次为 null / 空串 / 空串。服务层只回事实、不拼 UI 摘要：行级错误文案由前端 `web/src/components/logs/error-summary.ts` 的 `rowErrorText` 唯一拼装（列表与详情抽屉同形；ticket 04） |
 | duration_ms / time_to_first_token_ms | 总耗时与首字延迟（AG 三延迟字段，ingest 时写入） |
@@ -643,7 +643,7 @@ AES-GCM 密文 + sk-...abcd 掩码。
 ### 4.7 用户花费与逐请求台账（ticket 16/17）
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | /admin/bills/my-spend?range=30d&scope=self\|subtree&user_id=&tz= | billing:spend（subtree 另需 billing:subtree，客户 403）。返回 {range, bucket, timezone, from_ms, to_ms, scope, all_users, user:{id,name,role}\|null, summary:{charges/costs/margins per currency + report_currency 汇总}, series:[{start_ms,label,...}], by_user:[...], by_model:[...]}——登录者本人节点或可见子树的花费/成本/毛利聚合；`user_id` 用于子树页切换分支（须可见）。比值/占比由前端计算 |
+| GET | /admin/bills/my-spend?range=30d&scope=self\|subtree&user_id=&tz= | billing:spend（subtree 另需 billing:subtree，客户 403）。返回 {range, bucket, timezone, from_ms, to_ms, scope, all_users, user:{id,name,role}\|null, summary:{charges/costs/margins per currency + report_currency 汇总}, series:[{start_ms,label,...}], by_user:[...], by_model:[...]}：登录者本人节点或可见子树的花费/成本/毛利聚合；`user_id` 用于子树页切换分支（须可见）。比值/占比由前端计算 |
 | GET | /admin/billing/ledger?page_size=&offset= | ledger:read。**逐请求金额台账**（裸数组）：每条用量事件的 cost（成本账）/ charge（花费账）/ margin = charge - cost / markup = charge÷cost（cost 为 0 或未配价时 null）；按 created_at_ms 降序；金额字段过 §0.5 字段级过滤，无 billing:cost 时 cost/margin 键缺失 |
 
 ## 5. 前端旧路径 → 契约基准（t7 修复清单）
@@ -707,7 +707,7 @@ HTTPS + `SameSite=None; Secure`，本 ticket 不启用。
 
 ## 8. 附录：逐接口 curl + 真实响应（2026-11-17 03:2x 对 3700 实测）
 
-> **历史实测快照**：端点、字段与错误语义以正文（§0–§7）为准；此后删除的端点（`PUT /admin/public-models/{id}/targets`、`GET /admin/traces/{trace_id}`）与新增端点（`POST .../models/probe`、`GET .../attempts`、flow `collapse`）不逐一回填本附录。示例响应里的旧字段（如单密钥时代的 `channel` 措辞）按「上游/公开模型」理解。
+> **历史实测快照**：端点、字段与错误语义以正文（§0 至 §7）为准；此后删除的端点（`PUT /admin/public-models/{id}/targets`、`GET /admin/traces/{trace_id}`）与新增端点（`POST .../models/probe`、`GET .../attempts`、flow `collapse`）不逐一回填本附录。示例响应里的旧字段（如单密钥时代的 `channel` 措辞）按「上游/公开模型」理解。
 
 所有示例共用：
 

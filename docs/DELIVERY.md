@@ -2,7 +2,7 @@
 
 本仓为 Slipstream：**agentgateway 当数据面黑盒 + 自建控制面/管理台**（B+ 架构，见 docs/PLAN.md 与 docs/DECISIONS.md）。
 
-状态：二期 ticket 01–22 **全部合入** `phase2/integration`；三期（W1–W7）、四期（多密钥平权/路由链/看板八卡等，M1–M4）与五期（W5 ticket 01–16）均已合入本地 `w5/integration`（未 push），五期门禁与验收基线见 §7。历史逐项变更见 `docs/CHANGELOG-phase2.md`、`docs/CHANGELOG-phase4.md`；五期变更见 §7 与 `docs/CHANGELOG-phase4.md`「五期（W5）变更记录」。
+状态：二期 ticket 01 至 22 **全部合入** `phase2/integration`；三期（W1 至 W7）、四期（多密钥平权/路由链/看板八卡等，M1 至 M4）与五期（W5 ticket 01 至 16）均已合入本地 `w5/integration`（未 push），五期门禁与验收基线见 §7。历史逐项变更见 `docs/CHANGELOG-phase2.md`、`docs/CHANGELOG-phase4.md`；五期变更见 §7 与 `docs/CHANGELOG-phase4.md`「五期（W5）变更记录」。
 
 > 阅读提示：§1 已按五期现状更新（OpenAPI/pytest/路由/包体等基线数字）；§3 是二期验收证据原样保留，五期复跑证据见 §7；§6 为三期历史交付段。
 
@@ -16,9 +16,9 @@
 | 管理台 | `web/`（Vite+React+TS+Tailwind v4） | **27 条路由 = 17 个功能页 + 登录 + 404 + 8 个旧入口重定向页**，共 **19 个页面模块**。功能页：快速上手、数据看板（柱形/面积/分流三 Tab + 分流隐藏阶段 + 热力图 7D/30D/365D + 8 KPI 卡）、使用日志（模型列两行 +「N 次尝试」路由链 + 费用两行 + 详情抽屉）、上游管理 + 上游详情（四 Tab：连接与模型/路由与模型/请求与响应/其他设置；逐模型探测/拉取模型/逐把密钥测试）、模型管理（上游模型/公开模型两 Tab；公开模型「编辑」进整页 `/models/public/:id` 单事务保存 + 成员 chip）、价目管理（成本+倍率可编辑、公开模型加权平均价只读）、模型试验、连接密钥、用户（树/代理）、角色管理（权限矩阵）、网关策略（流量策略/护栏/MCP 三 Tab）、审计、配置版本、用户设置、运营设置（连接地址/系统参数/运行信息） | `tsc --noEmit` exit 0；`eslint` 0 error；`vite build` 成功 |
 | 导航 IA | `web/src/components/layout/nav-items.ts`（清单唯一来源 `web/src/routes.ts` → `ops/checks/routes.json`） | 侧栏四组、**15 个一级导航项**（运营设置 3 个二级分区在页内子导航，不重复挂侧栏）：常规（快速上手/数据看板/使用日志）、配置（上游管理/模型管理/价目管理）、工具（模型试验）、系统（连接密钥/用户管理/角色管理/网关策略/审计/配置版本/用户设置/运营设置） | route-audit（27 路由 / 19 页面 / 15 导航）+ 浏览器验收 |
 | 前端包体 | `web/scripts/check-bundle.mjs` | 路由级 code-split；首包 gzip **213.1 KB**，共 **75 个 JS chunk**，echarts 惰性 chunk 148.2 KB | `check:bundle` PASS（maxFirstLoad 220 / minChunks 20 / maxChunk 400） |
-| 验收自动化 | `ops/checks/` | `acceptance_browser.mjs`（Playwright 端到端，五期矩阵见 §7）、`interaction_audit.mjs`（全站逐控件交互审计）、`terminology_audit.mjs`（web 文案术语门禁，不扫 docs）、`route-audit.mjs`、`smoke_api.py`；`docs/ACCEPTANCE.md` 为人工核对清单 | 五期 `--strict` 全绿（证据见 §7） |
-| 实验结论 | `docs/experiments/P0-RESULTS.md` | E1~E20：重试、热加载、健康、internal/404、failover 打平、sqlite 日志表、P2C 同层选路、transformations 头体改写、预算语义、keyHash、额度桶、retry 支持面、OTel 逐次尝试、多密钥展开/conditional 首条独占（E14–E20 详见 P0-RESULTS 与 CHANGELOG-phase4） | 隔离实例实测，全程未碰生产 AG |
-| 文档 | `docs/` | PLAN、CHANGELOG-phase2、CHANGELOG-phase4、GLOSSARY、FEATURE-PARITY、api-contract、DELIVERY、DECISIONS（ADR-001…028）、contracts/*、ACCEPTANCE、DESIGN-AUDIT、plans/w5-correctness-rework | — |
+| 验收自动化 | `ops/checks/` | `acceptance_browser.mjs`（Playwright 端到端，五期矩阵见 §7）、`interaction_audit.mjs`（全站逐控件交互审计）、`terminology_audit.mjs`（web 文案 + 现行 docs 术语门禁，含 em/en dash 棘轮）、`route-audit.mjs`、`smoke_api.py`；`docs/ACCEPTANCE.md` 为人工核对清单 | 五期 `--strict` 全绿（证据见 §7） |
+| 实验结论 | `docs/experiments/P0-RESULTS.md` | E1~E20：重试、热加载、健康、internal/404、failover 打平、sqlite 日志表、P2C 同层选路、transformations 头体改写、预算语义、keyHash、额度桶、retry 支持面、OTel 逐次尝试、多密钥展开/conditional 首条独占（E14 至 E20 详见 P0-RESULTS 与 CHANGELOG-phase4） | 隔离实例实测，全程未碰生产 AG |
+| 文档 | `docs/` | PLAN、CHANGELOG-phase2、CHANGELOG-phase4、GLOSSARY、FEATURE-PARITY、api-contract、DELIVERY、DECISIONS（ADR-001…028）、contracts/*、ACCEPTANCE、DESIGN-AUDIT、plans/w5-correctness-rework | - |
 
 ## 2. 怎么跑（Windows 单机）
 
@@ -84,7 +84,7 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 
 ## 6. 三期交付段（2026-11-19，重构收口）
 
-三期 = 病根修复（W1）+ 全站页面重构（W2–W5）+ 清理与浏览器验收（W6），已合入本地 `main`（未 push）。路由收口为 **26 条 = 16 功能页 + 登录 + 404 + 8 旧入口重定向页**；侧栏 4 组、**15 个一级入口 + 运营设置 3 个二级分区 = 18 个导航项**（清单唯一来源 `web/src/routes.ts` → `ops/checks/routes.json`；**五期已收口为 27 条 = 17 功能页 + 登录 + 404 + 8 重定向，侧栏 15 个一级入口，见 §7**）。逐批变更见 `docs/CHANGELOG-phase2.md` 后续提交与 `docs/FRONTEND-PLAN.md` 各工位「已完成」标注。
+三期 = 病根修复（W1）+ 全站页面重构（W2 至 W5）+ 清理与浏览器验收（W6），已合入本地 `main`（未 push）。路由收口为 **26 条 = 16 功能页 + 登录 + 404 + 8 旧入口重定向页**；侧栏 4 组、**15 个一级入口 + 运营设置 3 个二级分区 = 18 个导航项**（清单唯一来源 `web/src/routes.ts` → `ops/checks/routes.json`；**五期已收口为 27 条 = 17 功能页 + 登录 + 404 + 8 重定向，侧栏 15 个一级入口，见 §7**）。逐批变更见 `docs/CHANGELOG-phase2.md` 后续提交与 `docs/FRONTEND-PLAN.md` 各工位「已完成」标注。
 
 ### 6.1 功能摘要
 
@@ -96,7 +96,7 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 | W4 密钥 + 用户 + 角色 | 连接密钥（掩码常驻 + 审计化 reveal + 一次性明文弹窗 + 签发入口）；用户管理 API 用户/控制台账号两 Tab（ADR-019）；角色管理权限矩阵（41 权限键） |
 | W5 策略 + 审计 + 配置 + 设置 | 网关策略三 Tab 合并页（流量策略/护栏/MCP，validate→保存→apply→版本留档）；审计；配置版本；用户设置/运营设置；登录/404 |
 | W6 清理 + 验收 | 后端：conftest 临时目录进程隔离、契约补录（缓存词元/上游改名可选/可用性窗口跳读）；前端：ENDPOINTS 归并、死代码删除、mock 补桩、术语 error 档；浏览器：26 路由/32 URL 逐页四查 + 七流程端到端（三期口径；五期为 27 路由/33 URL，见 §7） |
-| W7 迁移终版（M1–M4） | 渲染层迁移落地 ADR-024 混合形态（gateways + llm.gateways + 顶层 policies[] 的 internal/llm:request 重试）；网关策略页「请求内重试 + 健康驱逐」配置面（M3）；日志检索与摄取管线 SQL 化（P2-7/8）；终版全量回归与文档收敛 |
+| W7 迁移终版（M1 至 M4） | 渲染层迁移落地 ADR-024 混合形态（gateways + llm.gateways + 顶层 policies[] 的 internal/llm:request 重试）；网关策略页「请求内重试 + 健康驱逐」配置面（M3）；日志检索与摄取管线 SQL 化（P2-7/8）；终版全量回归与文档收敛 |
 
 ### 6.2 门禁结果（2026-11-19 三期当时，五期基线见 §7）
 
@@ -117,16 +117,16 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 
 1. **请求内重试默认关闭，可按策略开启**（ADR-024/M3 取代早期「AG 1.7 零重试」结论）：网关策略页可开「请求内重试」+「健康标记与驱逐」；`retry.codes` 含 4xx 时必须成对配置 `health.unhealthyExpression` 与 `eviction.consecutiveFailures>=1`（保存前校验 + 渲染层兜底），关闭即回到默认透传。边界：**流式响应首字节后中断不切换目标**；**request_logs 仍 1 请求 1 行**（无尝试级日志，重试不产生额外行）；同一层内仍是 P2C 概率选路。
 2. **image 类型上游模型不记词元**：无法计费，模型管理行内提示「AG 不记词元」。
-3. **请求/响应正文日志默认不落库**：日志库引导已缺省化——未配置时渲染层仍产出 `config.logging.database.url`（AG 库默认文件名 `ag-data.db`）且 `llm=metadata`，新库开箱即有用量/请求日志数据源；运营设置开 `ag_access_log_llm=full` 才记录正文（metadata 默认，仅元数据），正文随留存周期清理。
+3. **请求/响应正文日志默认不落库**：日志库引导已缺省化：未配置时渲染层仍产出 `config.logging.database.url`（AG 库默认文件名 `ag-data.db`）且 `llm=metadata`，新库开箱即有用量/请求日志数据源；运营设置开 `ag_access_log_llm=full` 才记录正文（metadata 默认，仅元数据），正文随留存周期清理。
 4. **日志接口类型 join 为前端实现，upstream-models 列表 200 条分页上限**：模型列表接口本身分页上限 200 条；请求日志的名称回填由前端按页内 id 自行 join。
 5. **热力图 30 天以上档位行内滚动**：行虚拟化（30d+ 行内滚），非整页展开。
 6. **审计时间筛选未做**：审计其余筛选（动作/操作者/对象）可用，时间范围筛选待后续。
 
-**ADR-024 混合形态（终版落地）**：渲染层迁移最初按 AG 1.7「完整形态」（`gateways` + AI 组）设计，但 1.7 的路由只能匹配 path/method/query/header/host，**读不到请求体里的 model**，一个 route 只对应一个 AI 后端，AI 组也没有 weight——若全部公开模型走同一路径/body，无法区分模型，会塌缩到同一后端并丢失各模型的 failover 链与健康策略，因此简化的「纯完整形态」被推翻。终版采用混合形态：模型路由与 failover/weighted/conditional 仍由 `llm.models`/`llm.virtualModels` 表达；网关面迁到 `gateways` + `llm.gateways`；请求内 retry 以顶层 `policies[]` 挂到内部路由 `internal/llm:request`。强制项：每个上游必须带自己的 `apiKey.file`（否则 AG 会把客户端 Authorization 透传到上游）、baseUrl 必须是绝对 http(s)、https 上游渲染 `models[].tls.hostname`。金样 `api/tests/contract/fixtures/ag_1_7_full_config.yaml` 由真实 1.7 二进制 `--validate-only` 校验。
+**ADR-024 混合形态（终版落地）**：渲染层迁移最初按 AG 1.7「完整形态」（`gateways` + AI 组）设计，但 1.7 的路由只能匹配 path/method/query/header/host，**读不到请求体里的 model**，一个 route 只对应一个 AI 后端，AI 组也没有 weight：若全部公开模型走同一路径/body，无法区分模型，会塌缩到同一后端并丢失各模型的 failover 链与健康策略，因此简化的「纯完整形态」被推翻。终版采用混合形态：模型路由与 failover/weighted/conditional 仍由 `llm.models`/`llm.virtualModels` 表达；网关面迁到 `gateways` + `llm.gateways`；请求内 retry 以顶层 `policies[]` 挂到内部路由 `internal/llm:request`。强制项：每个上游必须带自己的 `apiKey.file`（否则 AG 会把客户端 Authorization 透传到上游）、baseUrl 必须是绝对 http(s)、https 上游渲染 `models[].tls.hostname`。金样 `api/tests/contract/fixtures/ag_1_7_full_config.yaml` 由真实 1.7 二进制 `--validate-only` 校验。
 
 ## 四期交付注记（2026-11-20，详见 docs/CHANGELOG-phase4.md）
 
-1. **多密钥平权（ADR-026）**：每把上游密钥 = 一个独立 AG 上游（`{model}#k{seq}`，E18 形态）；failover/weighted 下密钥级平权分流（P2C 概率性，非均匀），**conditional 模式密钥平权不生效（E20）**——每目标仅用第一把密钥且成员编排有提示；按上游密钥分账不可得（request_logs 只记最终上游）。
+1. **多密钥平权（ADR-026）**：每把上游密钥 = 一个独立 AG 上游（`{model}#k{seq}`，E18 形态）；failover/weighted 下密钥级平权分流（P2C 概率性，非均匀），**conditional 模式密钥平权不生效（E20）**：每目标仅用第一把密钥且成员编排有提示；按上游密钥分账不可得（request_logs 只记最终上游）。
 2. **主密钥概念废除**：is_primary/镜像/轮换端点全部退役；空上游非法（创建 422 + 删最后一把 409）。多密钥迁移触发路径：**旧库**跑 `api/scripts/migrate_multikey_v2.py`（dry-run 默认；`--apply` 把镜像转成首把密钥行、清空镜像、写 `multikey_semantics=v2`，之后 no-op）；**新库**无需执行（`init_db` 建库即带 `upstream_keys`，seed/CRUD 只写密钥行，跑脚本仅补标记）。
 3. **表格与分页规范（DESIGN-AUDIT 四期）**：大表表体内部滚动+撑满页底+最小高度、操作列冻结右侧、头身对齐一致、凡表必有列设置；分页 nav 必须 `position:relative`（sr-only 逃逸 ICB 会顶高 html scrollHeight 酿成全站窗口滚动空白，见 §4 红线）。
 4. **语义色=分位数锚定**：日志首字/耗时按当前窗口 `all` 块分位动态着色（≤P50 绿/≤P95 黄/>P95 红），非固定阈值；旧后端无 all 块时降级中性灰。
@@ -139,7 +139,7 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 
 ## 7. 五期（W5）交付段（2026-11-21 收口）
 
-五期 ticket 01–16 已合入本地 `w5/integration`（未 push），本票（ticket 17）做文档/契约/术语/ADR 收口；ticket 18 负责全站浏览器验收。ADR 范围扩到 **ADR-001…028**（新增 ADR-027「冷却互斥与解除语义」；ADR-028「追踪归适配层」已取代 M5 系统级 OTLP/span 方案）。
+五期 ticket 01 至 16 已合入本地 `w5/integration`（未 push），本票（ticket 17）做文档/契约/术语/ADR 收口；ticket 18 负责全站浏览器验收。ADR 范围扩到 **ADR-001…028**（新增 ADR-027「冷却互斥与解除语义」；ADR-028「追踪归适配层」已取代 M5 系统级 OTLP/span 方案）。
 
 ### 7.1 能力摘要（按票）
 
@@ -151,7 +151,7 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 - **08 数字口径**：计数/词元/TPM/尝试次数千分位整数、RPM 两位、百分比一位、金额两位（`lib/format.ts` 单一来源）。
 - **09 语义色/脏标记/toast**：语义色五档 token + `ACTION_TONES`；`dirty-fields` 原语与字段级脏标记；toast 统一 3s/右上 80px/最多 3 条。
 - **10 看板八卡**：请求量/词元/缓存/费用/成本·毛利率/P50 延迟/RPM/TPM，八卡八形 + 图标单一来源。
-- **11 上游模型抽屉**：100vh 右侧抽屉、内部滚动、固定底栏、脏标记，760–860px 自适应。
+- **11 上游模型抽屉**：100vh 右侧抽屉、内部滚动、固定底栏、脏标记，760 至 860px 自适应。
 - **12 公开模型单事务**：公开模型保存改单 `PATCH`（基本字段 + routing_mode + enabled + targets 一次提交），旧 `PUT .../targets` 删除、无别名；双权限（`public_models:write` + 条件 `model_targets:write`）。
 - **13 公开模型单页**：列表「编辑」进入 `/models/public/:id` 单页三段（页头 + 基本信息 + 成员编排 + 底部唯一保存），失败回滚并保留输入。
 - **14 成员 chip**：成员编排改分层 chip（按 priority 分层、conditional 末位兜底、候选按上游分组搜索、成员脏标记）。

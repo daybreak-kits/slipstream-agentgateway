@@ -216,8 +216,8 @@ function ImportDialog({ onClose, queryClient }: { onClose: () => void; queryClie
                   {rowErrors.map((row) => (
                     <TR key={row.index}>
                       <TD className="py-1.5 tnum">{row.index + 1}</TD>
-                      <TD className="py-1.5 font-mono text-2xs">{row.id ?? "—"}</TD>
-                      <TD className="py-1.5">{row.name ?? "—"}</TD>
+                      <TD className="py-1.5 font-mono text-2xs">{row.id ?? "-"}</TD>
+                      <TD className="py-1.5">{row.name ?? "-"}</TD>
                       <TD className="py-1.5 text-danger-text">{row.message}</TD>
                     </TR>
                   ))}

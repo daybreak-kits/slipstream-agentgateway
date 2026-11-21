@@ -537,15 +537,15 @@ function buildLogColumns(spec: LogColumnSpec): ColumnDef<LogRow, unknown>[] {
           <div className="min-w-0">
             <p
               className="truncate text-2sm font-medium text-title"
-              title={item.requested_model || "—"}
+              title={item.requested_model || "-"}
             >
-              {item.requested_model || "—"}
+              {item.requested_model || "-"}
             </p>
             <p
               className="mt-0.5 truncate border-t border-border/60 pt-0.5 text-2xs text-faint"
-              title={item.upstream_model || "—"}
+              title={item.upstream_model || "-"}
             >
-              {item.upstream_model || "—"}
+              {item.upstream_model || "-"}
             </p>
           </div>
         );
@@ -576,7 +576,7 @@ function buildLogColumns(spec: LogColumnSpec): ColumnDef<LogRow, unknown>[] {
       cell: ({ row }) => (
         <div className="min-w-0">
           <p className="max-w-[120px] truncate text-2sm text-body" title={row.original.user_name}>
-            {row.original.user_name || "—"}
+            {row.original.user_name || "-"}
           </p>
           <p className="max-w-[120px] truncate font-mono text-2xs text-faint" title={row.original.user_id}>
             {row.original.user_id}
@@ -593,7 +593,7 @@ function buildLogColumns(spec: LogColumnSpec): ColumnDef<LogRow, unknown>[] {
           className="block max-w-[140px] truncate font-mono text-2xs text-body"
           title={row.original.api_key_label || row.original.api_key_id}
         >
-          {row.original.api_key_label || "—"}
+          {row.original.api_key_label || "-"}
         </span>
       ),
     },
@@ -640,7 +640,7 @@ function buildLogColumns(spec: LogColumnSpec): ColumnDef<LogRow, unknown>[] {
             {canCost ? (
               <p className="mt-0.5 text-2xs text-faint" title="成本（付上游进价）">
                 本 {fmtMoney(item.cost_micro, item.currency)}
-                {canSpend ? " · 利 " + (marginPct === null ? "—" : fmtPct(marginPct)) : null}
+                {canSpend ? " · 利 " + (marginPct === null ? "-" : fmtPct(marginPct)) : null}
               </p>
             ) : null}
           </div>
@@ -660,7 +660,7 @@ function buildLogColumns(spec: LogColumnSpec): ColumnDef<LogRow, unknown>[] {
         return (
           <div
             className="flex flex-col items-end gap-0.5 whitespace-nowrap tnum"
-            title="色条按当前窗口分位动态着色：≤P50 绿、P50–P95 黄、>P95 红；灰色 = 样本不足或零值"
+            title="色条按当前窗口分位动态着色：≤P50 绿、P50 至 P95 黄、>P95 红；灰色 = 样本不足或零值"
           >
             <LatencyLine
               label="首字"

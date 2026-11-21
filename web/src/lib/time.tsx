@@ -62,6 +62,6 @@ export function formatDateTimeParts(
 
 export function formatDateTime(ms: number | null | undefined, mode: TimezoneMode): string {
   const parts = formatDateTimeParts(ms, mode);
-  if (!parts) return "—";
+  if (!parts) return "-";
   return `${parts.date} ${parts.time}`;
 }

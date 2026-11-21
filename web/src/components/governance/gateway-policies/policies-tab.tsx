@@ -210,7 +210,7 @@ export function PoliciesTab({ data, draft, onDraftChange, canWrite, dirtyCount }
                   disabled={!caps.api_key.supported}
                 />
               </Field>
-              <Field label="模式（AG 1.7 仅支持 strict）">
+              <Field label="模式（仅支持 strict）">
                 <Select
                   value={draft.api_key.mode}
                   onValueChange={(value) => update((next) => { next.api_key.mode = value as "strict"; })}
@@ -607,9 +607,9 @@ export function PoliciesTab({ data, draft, onDraftChange, canWrite, dirtyCount }
               <p className="text-2xs text-faint">未配置超时（AG 默认）。</p>
             ) : (
               <div className="space-y-2">
-                <Fact label="requestTimeout">{data.effective.timeout.request_timeout || "—"}</Fact>
-                <Fact label="backendRequestTimeout">{data.effective.timeout.backend_request_timeout || "—"}</Fact>
-                <Fact label="responseIdleTimeout">{data.effective.timeout.response_idle_timeout || "—"}</Fact>
+                <Fact label="requestTimeout">{data.effective.timeout.request_timeout || "-"}</Fact>
+                <Fact label="backendRequestTimeout">{data.effective.timeout.backend_request_timeout || "-"}</Fact>
+                <Fact label="responseIdleTimeout">{data.effective.timeout.response_idle_timeout || "-"}</Fact>
               </div>
             )}
           </SectionCard>
@@ -644,12 +644,12 @@ export function PoliciesTab({ data, draft, onDraftChange, canWrite, dirtyCount }
                 <Fact label="请求内重试">
                   {config.retry === null
                     ? "未启用"
-                    : "attempts " + config.retry.attempts + " · codes " + config.retry.codes.join("/") + " · backoff " + (config.retry.backoff || "—")}
+                    : "attempts " + config.retry.attempts + " · codes " + config.retry.codes.join("/") + " · backoff " + (config.retry.backoff || "-")}
                 </Fact>
                 <Fact label="健康标记与驱逐">
                   {config.health === null
                     ? "未启用"
-                    : config.health.unhealthy_expression + " · 连续 " + config.health.consecutive_failures + " 次 · duration " + (config.health.duration || "—") + " · restore " + config.health.restore_health}
+                    : config.health.unhealthy_expression + " · 连续 " + config.health.consecutive_failures + " 次 · duration " + (config.health.duration || "-") + " · restore " + config.health.restore_health}
                 </Fact>
                 <ul className="space-y-0.5 text-2xs text-faint">
                   <li>· 同层组内切换为 P2C 概率性，不保证切到指定目标。</li>

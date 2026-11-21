@@ -112,7 +112,7 @@ export function CachePricesSection() {
       if (!entry) {
         entry = {
           vendorId,
-          vendorName: vendorNames.get(vendorId) ?? row.vendor_name ?? (vendorId || "—"),
+          vendorName: vendorNames.get(vendorId) ?? row.vendor_name ?? (vendorId || "-"),
           model: row.upstream_model,
           read: null,
           write: null,

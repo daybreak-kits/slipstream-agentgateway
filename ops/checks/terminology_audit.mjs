@@ -35,6 +35,12 @@
  *   node ops/checks/terminology_audit.mjs --json       # 机器可读（CI）
  *   node ops/checks/terminology_audit.mjs --root <repo>
  *   node ops/checks/terminology_audit.mjs --boundary-only   # 只跑边界词表节（ticket 06，见下）
+ *   node ops/checks/terminology_audit.mjs --update-baseline # 把 em/en dash 当前残留写入 baseline JSON
+ *
+ * em dash 分类与 baseline 棘轮（W6 ticket 20）：UI 文案层 em dash（缺值→「-」、区间→「至」、
+ * 正文→标点）与 en dash 区间一律 error；现行 docs（README + 现行规范/契约文档）单独扫描。
+ * 棘轮规则（em-dash / en-dash-range / docs-em-dash / docs-en-dash）按 ops/checks/
+ * terminology_baseline.json 放行存量残留，新增违规 EXIT=1；其余规则零容忍。
  *
  * 边界词表节（W6 ticket 06 / ADR-029 §6）：扫描 web/src 字符串/模板字面量与 JSX 文本，
  * 数据面列名（trace_id、span_id、parent_span_id、attributes_json）、wire 词（gen_ai_*、
@@ -86,6 +92,8 @@ if (!fs.existsSync(srcDir)) {
 function scanStringLiterals(source) {
   const literals = [];
   let i = 0;
+  const REGEX_PRECEDERS = new Set(["(", "[", "{", ",", ";", "=", ":", "!", "&", "|", "?", "+", "-", "*", "%", "~", "^", "<", ">"]);
+  const REGEX_KEYWORDS = /^(return|typeof|case|in|of|new|delete|void|do|else|yield|await)$/;
   while (i < source.length) {
     const ch = source[i];
     const next = source[i + 1];
@@ -97,6 +105,35 @@ function scanStringLiterals(source) {
       i += 2;
       while (i < source.length && !(source[i] === "*" && source[i + 1] === "/")) i += 1;
       i += 2;
+      continue;
+    }
+    // 正则字面量判定（ticket 20）：message-list.tsx 等文件的 regex 体含反引号/引号，
+    // 旧词法器会把它当字符串吞掉后续代码。按「前一个非空白字符」判定表达式位置。
+    if (ch === "/" && next !== "/" && next !== "*") {
+      let k = i - 1;
+      while (k >= 0 && /\s/.test(source[k])) k -= 1;
+      const prev = k >= 0 ? source[k] : "";
+      const wordBefore = k >= 0 ? /[\w$]+$/.exec(source.slice(0, k + 1)) : null;
+      const isRegex =
+        prev === "" ||
+        REGEX_PRECEDERS.has(prev) ||
+        (wordBefore !== null && REGEX_KEYWORDS.test(wordBefore[0]));
+      if (isRegex) {
+        i += 1;
+        let inClass = false;
+        while (i < source.length) {
+          const c = source[i];
+          if (c === "\\") { i += 2; continue; }
+          if (c === "\n") break; // 防御：正则字面量不跨行
+          if (c === "[") inClass = true;
+          else if (c === "]") inClass = false;
+          else if (c === "/" && !inClass) { i += 1; break; }
+          i += 1;
+        }
+        while (i < source.length && /[a-z]/i.test(source[i])) i += 1; // flags
+        continue;
+      }
+      i += 1; // 除法等普通斜杠
       continue;
     }
     if (ch === '"' || ch === "'" || ch === "\u0060") {
@@ -155,7 +192,9 @@ function scanJsxText(source) {
     if (/=>|\/\/|\/\*|\b(const|function|return|let|var|import|export)\b/.test(text)) continue;
     const hasCjk = /[\u4e00-\u9fa5]/.test(text);
     const shortLatin = text.trim().length <= 40 && /^[A-Za-z0-9 .,:!?·()\-]+$/.test(text.trim());
-    if (!hasCjk && !shortLatin) continue;
+    // 缺值占位常直接写成 JSX 文本「—」或「-」（ticket 20）：无中文也无拉丁字母，单独放行。
+    const dashOnly = /^[—–-]+$/.test(text.trim());
+    if (!hasCjk && !shortLatin && !dashOnly) continue;
     out.push({ start: match.index + 1, end: match.index + 1 + text.length, text, kind: "jsx-text" });
   }
   return out;
@@ -261,6 +300,41 @@ const RULES = [
     allow: () => true,
     suggestion: "旧词「令牌」已禁用：连接令牌→连接密钥，用量令牌→词元，登录令牌→登录凭证",
   },
+  {
+    // W6 ticket 20：产品对外名统一「模型接口网关」，旧英文产品名（LLM API GATEWAY / LLM 网关）
+    // 从 UI 与页面 title 移除（SYSTEM-BOUNDARY §6.2）。品牌「驭流 Slipstream」不受影响。
+    id: "product-name",
+    severity: "error",
+    pattern: /LLM API GATEWAY|LLM API 网关|LLM 网关|API GATEWAY/gi,
+    allow: () => true,
+    suggestion: "产品对外名统一「模型接口网关」；旧英文产品名不得出现在 UI 与页面 title",
+  },
+  {
+    // W6 ticket 20：数据面版本语句不得出现在系统 UI 文案（SYSTEM-BOUNDARY §6.2）。
+    // 「AG 1.7 不支持/拒收」之类的表述由适配器经 capability_note 提供中性文案（票05 端口模式）。
+    id: "ag-version-copy",
+    severity: "error",
+    pattern: /AG 1\.7|pinned AG/gi,
+    allow: () => true,
+    suggestion: "数据面版本语句不进 UI 文案：改中性表述（如「数据面拒收/不支持」），能力文案走适配器 capability_note",
+  },
+  {
+    // W6 ticket 20：UI 文案层 em dash 分类替换——缺值占位统一半角横线「-」，正文破折号改
+    // 标点；中文破折号 —— 只保留在注释、归档、ADR 原文（注释已被词法器剥离）。
+    id: "em-dash",
+    severity: "error",
+    pattern: /—/g,
+    allow: () => true,
+    suggestion: "缺值占位用「-」；数字/时间/版本区间用「至」；正文破折号改「，/：」；注释、归档、ADR 原文豁免",
+  },
+  {
+    // W6 ticket 20：区间统一「至」（含 en dash）。en dash 在 UI 文案里只可能是区间或占位。
+    id: "en-dash-range",
+    severity: "error",
+    pattern: /–/g,
+    allow: () => true,
+    suggestion: "区间统一用「至」（如 1 至 128、P50 至 P95）；注释、归档、ADR 原文豁免",
+  },
 ];
 
 const SKIP_MODULE_SPECIFIER = /^(@\/|\.{1,2}\/|node:|https?:)/;
@@ -277,6 +351,10 @@ function isCopyCandidate(candidate, source) {
   if (candidate.kind === "template" && /=>|\bconst\b|\bfunction\b/.test(text)) return false;
   if (SKIP_MODULE_SPECIFIER.test(text.trim())) return false;
   if (SKIP_FILE_LIKE.test(text.trim()) && !/[\u4e00-\u9fa5]/.test(text)) return false;
+  // 纯横线占位（ticket 20）：「—」既无中文也无拉丁字母，旧判定直接漏检 99+ 处缺值占位。
+  if (/^[—–\s]+$/.test(text)) return true;
+  // 含 em/en dash 的字符串一律是文案候选（数字区间如 "1–"/"0–20" 无字母，旧判定漏检）。
+  if (/[—–]/.test(text)) return true;
   if (!/[\u4e00-\u9fa5A-Za-z]/.test(text)) return false;
   if (candidate.kind === "string" && SKIP_CLASS_LIKE.test(text) && !/[A-Z]/.test(text)) return false;
   // 对象键：字符串后面紧跟冒号（允许空白），是数据映射键而不是渲染文案。
@@ -433,7 +511,155 @@ function scanFile(file) {
 
 walk(srcDir);
 
-const errors = findings.filter((f) => f.severity === "error");
+/* ------------------------------------------------------------------ *
+ * 3b. 现行 docs 扫描（W6 ticket 20：em dash 分类替换 + 产品名统一）
+ *
+ * 只扫「现行文档」：README + 现行规范/契约/交付/验收文档 + docs/contracts。
+ * 排除（不进门禁，属「注释、归档、ADR 原文」豁免口径）：DECISIONS.md（ADR 原文）、
+ * AUDIT-WEB/FEATURE-PARITY/FRONTEND-PLAN/PLAN.md（历史快照与历史计划）、
+ * CHANGELOG-*（归档日志）、docs/research|experiments|plans|agents/**。
+ * 剥离代码围栏（``` … ```，示例输出不得改）、行内代码与 HTML 注释后再判定。
+ * ------------------------------------------------------------------ */
+
+const DOCS_RULES = [
+  {
+    id: "docs-em-dash",
+    pattern: /—/g,
+    suggestion: "表格空值/缺值用「-」；正文破折号按语义改「，/：/（）」；ADR 原文与归档不在扫描清单内",
+  },
+  {
+    id: "docs-en-dash",
+    pattern: /–/g,
+    suggestion: "数字/时间/版本区间统一用「至」（含 ticket/Story/实验编号区间）",
+  },
+  {
+    id: "docs-product-name",
+    pattern: /LLM API GATEWAY|LLM API 网关|LLM 网关|API GATEWAY/gi,
+    suggestion: "产品对外名统一「模型接口网关」；旧英文产品名不得出现在现行 docs",
+  },
+];
+
+const CURRENT_DOCS = [
+  "README.md",
+  "docs/api-contract.md",
+  "docs/GLOSSARY.md",
+  "docs/DESIGN-AUDIT.md",
+  "docs/ACCEPTANCE.md",
+  "docs/DELIVERY.md",
+  "docs/SYSTEM-BOUNDARY.md",
+  "docs/contracts/adapter-spi.md",
+  "docs/contracts/billing.md",
+  "docs/contracts/ir-and-rendering.md",
+  "docs/contracts/transforms-compiler.md",
+];
+
+const ARCHIVED_DOCS = [
+  "docs/DECISIONS.md（ADR 原文）",
+  "docs/AUDIT-WEB.md / docs/FEATURE-PARITY.md（历史快照对照）",
+  "docs/FRONTEND-PLAN.md / docs/PLAN.md（历史计划/方案快照）",
+  "docs/CHANGELOG-*.md（归档日志）",
+  "docs/research/**、docs/experiments/**、docs/plans/**（调研与历史计划归档）",
+];
+
+/** 剥离代码围栏/行内代码/HTML 注释；等长替换保行号。 */
+function stripDocsNoise(source) {
+  let out = source.replace(/```[\s\S]*?(?:```|$)/g, (m) => m.replace(/[^\n]/g, " "));
+  out = out.replace(/`[^`\n]*`/g, (m) => " ".repeat(m.length));
+  out = out.replace(/<!--[\s\S]*?-->/g, (m) => m.replace(/[^\n]/g, " "));
+  return out;
+}
+
+const docsScanned = [];
+for (const rel of CURRENT_DOCS) {
+  const full = path.join(rootDir, rel);
+  if (!fs.existsSync(full)) continue;
+  docsScanned.push(rel);
+  const source = stripDocsNoise(fs.readFileSync(full, "utf8"));
+  const offsets = buildLineIndex(source);
+  for (const rule of DOCS_RULES) {
+    rule.pattern.lastIndex = 0;
+    let match;
+    while ((match = rule.pattern.exec(source))) {
+      if (match[0].length === 0) {
+        rule.pattern.lastIndex += 1;
+        continue;
+      }
+      const at = locate(offsets, match.index);
+      findings.push({
+        file: rel,
+        line: at.line,
+        column: at.column,
+        rule: rule.id,
+        severity: "error",
+        match: match[0].trim(),
+        snippet: source.split("\n")[at.line - 1].trim().slice(0, 120),
+        kind: "docs",
+        suggestion: rule.suggestion,
+      });
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * 3c. baseline 棘轮（W6 ticket 20）
+ *
+ * RATCHET_RULES 内的规则允许 baseline 记录残留（ops/checks/terminology_baseline.json，
+ * 形如 { "<rule>": { "<file>": <count> } }）：超出 baseline 的新增违规 EXIT=1，
+ * baseline 内的残留只提示不失败（分批清理）。其余规则（旧词/边界/产品名/AG 版本语句）
+ * 零容忍，不吃 baseline。--update-baseline 把当前残留写入 JSON。
+ * ------------------------------------------------------------------ */
+
+const RATCHET_RULES = new Set(["em-dash", "en-dash-range", "docs-em-dash", "docs-en-dash"]);
+const BASELINE_PATH = path.join(HERE, "terminology_baseline.json");
+const updateBaseline = flags.has("update-baseline");
+
+function loadBaseline() {
+  try {
+    return JSON.parse(fs.readFileSync(BASELINE_PATH, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+const baseline = loadBaseline();
+const bucketCounts = new Map();
+for (const f of findings) {
+  if (!RATCHET_RULES.has(f.rule)) continue;
+  const key = f.rule + "|" + f.file;
+  bucketCounts.set(key, (bucketCounts.get(key) ?? 0) + 1);
+}
+
+let newBeyondBaseline = 0;
+const baselineKept = [];
+for (const [key, count] of bucketCounts) {
+  const sep = key.indexOf("|");
+  const rule = key.slice(0, sep);
+  const file = key.slice(sep + 1);
+  const allowed = baseline[rule]?.[file] ?? 0;
+  if (count > allowed) {
+    newBeyondBaseline += count - allowed;
+  } else {
+    for (const f of findings) {
+      if (f.rule === rule && f.file === file) {
+        f.suppressed = true;
+        baselineKept.push(f);
+      }
+    }
+  }
+}
+
+if (updateBaseline) {
+  const next = {};
+  for (const f of findings) {
+    if (!RATCHET_RULES.has(f.rule)) continue;
+    next[f.rule] ??= {};
+    next[f.rule][f.file] = (next[f.rule][f.file] ?? 0) + 1;
+  }
+  fs.writeFileSync(BASELINE_PATH, JSON.stringify(next, null, 2) + "\n", "utf8");
+  console.log("baseline 已写入 " + BASELINE_PATH);
+}
+
+const errors = findings.filter((f) => f.severity === "error" && !f.suppressed);
 const warnings = findings.filter((f) => f.severity === "warn");
 
 if (boundaryOnly) {
@@ -466,7 +692,7 @@ if (boundaryOnly) {
  * 4. 页面 title 与 logo 资产
  * ------------------------------------------------------------------ */
 
-const EXPECTED_TITLE = "驭流 Slipstream · LLM API 网关";
+const EXPECTED_TITLE = "驭流 Slipstream · 模型接口网关";
 const checks = [];
 function check(id, title, ok, detail) {
   checks.push({ id, title, ok: Boolean(ok), detail });
@@ -483,9 +709,9 @@ check(
 );
 check(
   "page-title-old",
-  "页面标题不再回退为「Slipstream 管理台」",
-  !/Slipstream\s*管理台/.test(indexHtml),
-  "web/index.html 标题/文本中不得出现旧回退标题",
+  "页面标题不再回退为「Slipstream 管理台」且不含旧英文产品名（LLM API 网关等）",
+  !/Slipstream\s*管理台/.test(indexHtml) && !/LLM API GATEWAY|LLM API 网关|LLM 网关|API GATEWAY/i.test(indexHtml),
+  "web/index.html 标题/文本中不得出现旧回退标题或旧英文产品名（W6 ticket 20）",
 );
 
 const faviconMatch = indexHtml.match(/<link[^>]+rel="icon"[^>]*>/i);
@@ -549,11 +775,31 @@ const assetsFailed = checks.filter((c) => !c.ok);
 const ok =
   errors.length === 0 &&
   boundaryFindings.length === 0 &&
+  newBeyondBaseline === 0 &&
   assetsFailed.length === 0 &&
   (!strict || warnings.length === 0);
 
 if (asJson) {
-  console.log(JSON.stringify({ ok, strict, scannedFiles, candidates, skippedApiFields, errors, warnings, boundaryFindings, checks }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        ok,
+        strict,
+        scannedFiles,
+        candidates,
+        skippedApiFields,
+        docsScanned,
+        newBeyondBaseline,
+        baselineKept: baselineKept.length,
+        errors,
+        warnings,
+        boundaryFindings,
+        checks,
+      },
+      null,
+      2,
+    ),
+  );
 } else {
   console.log("# 术语审计（web/src 文案）");
   console.log("范围：web/src 的 .ts/.tsx/.css 文案 + index.html + public 资产；不含 docs/ 与 README（历史 ADR 原文、调研快照不在门禁内，docs 术语按 docs/GLOSSARY.md 人工核对，ticket 17）。");
@@ -561,11 +807,12 @@ if (asJson) {
     "扫描文件 " + scannedFiles + " 个 · 文案候选 " + candidates + " 条 · 已跳过 API 字段/标识符 " + skippedApiFields + " 处",
   );
   console.log("");
-  if (errors.length === 0) {
-    console.log("✓ 未发现禁用旧词（error 级：tokens/收费/qax/裸渠道/代理用户/普通用户/调用模型/调用名/调用串/计划窗口/游乐场/封禁/对外模型/客户端密钥/令牌）");
+  const webErrors = errors.filter((f) => !f.rule.startsWith("docs-"));
+  if (webErrors.length === 0) {
+    console.log("✓ 未发现禁用旧词（error 级：tokens/收费/qax/裸渠道/代理用户/普通用户/调用模型/调用名/调用串/计划窗口/游乐场/封禁/对外模型/客户端密钥/令牌/旧产品名/AG 版本语句/em dash/en dash 区间）");
   } else {
-    console.log("✗ 禁用旧词 " + errors.length + " 处（error，必须修）：");
-    for (const v of errors) {
+    console.log("✗ 禁用旧词/UI 文案违规 " + webErrors.length + " 处（error，必须修）：");
+    for (const v of webErrors) {
       console.log("  " + v.file + ":" + v.line + ":" + v.column + "  [" + v.rule + "] 「" + v.match + "」");
       console.log("    片段：" + v.snippet);
       console.log("    建议：" + v.suggestion);
@@ -597,13 +844,45 @@ if (asJson) {
     }
   }
   console.log("");
+  console.log("# 现行 docs 扫描（W6 ticket 20：em dash 分类 + 产品名）");
+  console.log(
+    "范围：" + docsScanned.join("、") +
+      "；剥离代码围栏/行内代码/HTML 注释后判定。豁免（不在清单）：",
+  );
+  for (const a of ARCHIVED_DOCS) console.log("  - " + a);
+  const docsErrs = findings.filter((f) => f.rule.startsWith("docs-") && !f.suppressed);
+  const docsKept = findings.filter((f) => f.rule.startsWith("docs-") && f.suppressed);
+  if (docsErrs.length === 0) {
+    console.log(
+      "✓ 现行 docs 无 em dash / en dash 区间 / 旧产品名违规" +
+        (docsKept.length > 0 ? "（baseline 残留 " + docsKept.length + " 处，见下）" : ""),
+    );
+  } else {
+    console.log("✗ 现行 docs 违规 " + docsErrs.length + " 处（超出 baseline 的新增，必须修）：");
+    for (const v of docsErrs) {
+      console.log("  " + v.file + ":" + v.line + ":" + v.column + "  [" + v.rule + "] 「" + v.match + "」");
+      console.log("    片段：" + v.snippet);
+      console.log("    建议：" + v.suggestion);
+    }
+  }
+  console.log("");
+  console.log("# baseline 棘轮（W6 ticket 20）");
+  console.log(
+    "棘轮规则：em-dash / en-dash-range / docs-em-dash / docs-en-dash；baseline=" +
+      BASELINE_PATH + "（" + (baselineKept.length > 0 ? baselineKept.length + " 处残留" : "空，零容忍") + "）" +
+      "；新增违规 " + newBeyondBaseline + " 处。",
+  );
+  for (const v of baselineKept) {
+    console.log("  ~ " + v.file + ":" + v.line + "  [" + v.rule + "] " + v.snippet.slice(0, 80));
+  }
+  console.log("");
   console.log("# 页面 title 与 logo 资产");
   for (const c of checks) console.log((c.ok ? "✓ " : "✗ ") + c.title + (c.ok ? "" : " —— " + c.detail));
   console.log("");
   console.log(
     ok
-      ? "RESULT PASS（error " + errors.length + " · warn " + warnings.length + " · 边界 " + boundaryFindings.length + " · 资产 " + (checks.length - assetsFailed.length) + "/" + checks.length + "）"
-      : "RESULT FAIL（error " + errors.length + " · warn " + warnings.length + " · 边界 " + boundaryFindings.length + " · 资产问题 " + assetsFailed.length + " 处）",
+      ? "RESULT PASS（error " + errors.length + " · warn " + warnings.length + " · 边界 " + boundaryFindings.length + " · baseline 残留 " + baselineKept.length + " · 资产 " + (checks.length - assetsFailed.length) + "/" + checks.length + "）"
+      : "RESULT FAIL（error " + errors.length + " · warn " + warnings.length + " · 边界 " + boundaryFindings.length + " · baseline 新增 " + newBeyondBaseline + " · 资产问题 " + assetsFailed.length + " 处）",
   );
 }
 

@@ -23,7 +23,7 @@ function memberValue(member: TimeseriesMember, metric: TrendMetric, currency: st
   if (metric === "money") {
     // 费用口径：优先显示花费（charge），缺花费账再退成本；占比由后端首序列（成本）驱动。
     const value = member.totals?.charge_micro ?? member.charge_micro ?? member.totals?.cost_micro ?? member.cost_micro;
-    return value === undefined ? "—" : fmtMoney(value, currency);
+    return value === undefined ? "-" : fmtMoney(value, currency);
   }
   return fmtInt(member.total);
 }

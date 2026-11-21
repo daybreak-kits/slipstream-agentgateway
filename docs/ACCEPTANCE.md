@@ -1,12 +1,12 @@
 # 浏览器验收清单（ACCEPTANCE，五期收口）
 
 > 本文件把 `.scratch/phase2/spec.md` 的 **50 条 User Stories** 映射成可执行的验收清单：每条给出「验证方式 + 证据位置 + 当前状态」。
-> 基线：`w5/integration`（2026-11-21，五期 ticket 01–16 全部合入；二期 01–22 仍全绿）。
+> 基线：`w5/integration`（2026-11-21，五期 ticket 01 至 16 全部合入；二期 01 至 22 仍全绿）。
 > 历史说明：§4 表中 `⏳ ticket xx` 与「PENDING」是二期 ticket 20 首次运行时的快照；**五期已把这些票号对应能力全部实现**，状态一律按 §0.1「五期验收矩阵」与 §7.2 更新后的行理解，最终以 ticket 18 的 `--strict` 报告为准。
 
 ## 0. 一句话结论（2026-11-18 最终）
 
-- **全部 ticket 已合入**：二期 ticket 01–22 均在 `phase2/integration`；二期 `--strict` 全站验收 **PASS 25 / FAIL 0 / PENDING 0 / SKIP 0**（证据 `ops/checks/.logs/acceptance/20261118-210648/report.md`）。**五期（W5）** ticket 01–16 已合入 `w5/integration`，脚本矩阵扩到 §0.1 的 7 组新交互；五期 `--strict` 的 PASS 总数与截图证据由 ticket 18 填入 §7.2（本文件不预写数字）。
+- **全部 ticket 已合入**：二期 ticket 01 至 22 均在 `phase2/integration`；二期 `--strict` 全站验收 **PASS 25 / FAIL 0 / PENDING 0 / SKIP 0**（证据 `ops/checks/.logs/acceptance/20261118-210648/report.md`）。**五期（W5）** ticket 01 至 16 已合入 `w5/integration`，脚本矩阵扩到 §0.1 的 7 组新交互；五期 `--strict` 的 PASS 总数与截图证据由 ticket 18 填入 §7.2（本文件不预写数字）。
 - **自动覆盖**：品牌/登录/错误密码、管理员主导航逐页加载（无错误边界/NaN/undefined、console 无 error）、网关策略三 Tab（策略/护栏/MCP）编辑入口、上游详情**四 Tab**（连接与模型/路由与模型/请求与响应/其他设置）、模型试验 20 参数与会话操作、设置 IA（用户/运营）、普通用户/代理用户入口与接口权限、命令面板、主题三态、看板三 Tab/热力图区间（Radix Tabs，←/→ 键盘可切换）、价目编辑与还原、术语与 logo 资产；五期新增矩阵见 §0.1。
 - **五期收口（2026-11-21）**：ADR-027 冷却互斥、ADR-028 路由链、公开模型单页、日志两行+尝试链、分流隐藏阶段、表格 sticky/数字/语义色/脏标记、模型探测均已进脚本（§0.1）。
 - 术语审计已从 FAIL 修到 PASS（`node ops/checks/terminology_audit.mjs` exit 0）；**注意扫描范围是 web 文案（`web/src` + `index.html` + `public`），不含 docs/**，docs 术语由本清单人工核对（ticket 17 收口）。
@@ -93,7 +93,7 @@ node ops/checks/acceptance_browser.mjs --admin admin:admin12345 --user wangwu:ad
 
 ## 4. 50 条 User Story → 验收映射（总表）
 
-> **状态列读取规则（五期）**：表中「⏳ 票号」「PENDING 票号」是二期 ticket 20 的快照；对应能力已在五期 ticket 01–16 合入，一律视为 ✅。具体证据以 §0.1 五期矩阵、§7.2 更新行与 ticket 18 报告为准；仍为 🟡/「部分」的行表示需要人工核对或依赖外部条件（如像素基线、写操作下发）。
+> **状态列读取规则（五期）**：表中「⏳ 票号」「PENDING 票号」是二期 ticket 20 的快照；对应能力已在五期 ticket 01 至 16 合入，一律视为 ✅。具体证据以 §0.1 五期矩阵、§7.2 更新行与 ticket 18 报告为准；仍为 🟡/「部分」的行表示需要人工核对或依赖外部条件（如像素基线、写操作下发）。
 
 | # | User Story（摘要） | 维度 | 验证方式（脚本 check / 命令 / 步骤） | 证据 | 状态 |
 |---|---|---|---|---|---|
@@ -146,18 +146,18 @@ node ops/checks/acceptance_browser.mjs --admin admin:admin12345 --user wangwu:ad
 | 47 | 前端路由级 code-split（echarts 不拖首屏） | 工程 | 手动：`cd web && npx vite build`，检查入口 chunk 与 `echarts` 独立 chunk；ticket 18 已合 | build 输出 | 🟡 |
 | 48 | 渲染出的 AG 配置先通过 `--validate-only` | 接口·工程 | 后端渲染契约测试：`cd api && python -m pytest -q`；`ops/experiments` 证据 | pytest 汇总 | 🟡 |
 | 49 | 权限/计费/看板聚合/渲染产物都有自动化测试 | 工程 | pytest + `verify_web.sh` + `terminology_audit.mjs` + 本脚本 | 各日志 | ✅ |
-| 50 | 每张 ticket 都能在浏览器或 API 上独立验证 | 工程 | 本表 + `acceptance_browser.mjs --only <id>`；五期票 01–16 已合，本文档票 17 收口 | 本文件 | ✅ |
+| 50 | 每张 ticket 都能在浏览器或 API 上独立验证 | 工程 | 本表 + `acceptance_browser.mjs --only <id>`；五期票 01 至 16 已合，本文档票 17 收口 | 本文件 | ✅ |
 
 ## 5. 手动项操作卡（按主题）
 
-### 5.1 品牌与 UI 规范（Story 1–3、39–41）
+### 5.1 品牌与 UI 规范（Story 1 至 3、39 至 41）
 
-1. 打开 `/login`：页签标题必须是「驭流 Slipstream · LLM API 网关」，favicon 为 `/logo-v10-contrast.svg`，品牌锁同时出现「驭流」与「Slipstream」。
+1. 打开 `/login`：页签标题必须是「驭流 Slipstream · 模型接口网关」，favicon 为 `/logo-v10-contrast.svg`，品牌锁同时出现「驭流」与「Slipstream」。
 2. 登录后 1440×900 逐页截图，对照 `docs/research/phase2/OLD-UI-SPEC.md` 检查字号 11/12/13/14、控件高度 28/32/36/40/44、圆角 6/8/12/16、间距基数 4、阴影 card/pop；按钮默认 primary，空态、Toaster 主题跟随。
 3. 检查侧栏分组标题与顺序；spec 目标是「页面类型」等固定分组，价目管理归入「系统」。
 4. 模型试验：一行 3 个参数、一屏可见；参数悬停有说明；20 项与 `web/src/lib/playground-params.ts` 一致（脚本已自动比对 20 项文案）。
 
-### 5.2 上游与模型（Story 4–14）
+### 5.2 上游与模型（Story 4 至 14）
 
 1. `/upstreams` → 任一行「详情」：**四个 Tab**「连接与模型 / 路由与模型 / 请求与响应 / 其他设置」都存在（模型并入路由与模型，健康并入连接与模型）；「连接与模型」支持多行密钥与**逐把**连通测试；「路由与模型」有逐模型「测试」（**模型探测**）、「拉取模型」（`discover-models`，不自动建记录）、重试/健康策略；「请求与响应」可保存改写；「其他设置」含连接地址与运行参数。
 2. 删除保护：被公开模型引用的上游模型不能删（尝试删除应报错/置灰）。
@@ -165,7 +165,7 @@ node ops/checks/acceptance_browser.mjs --admin admin:admin12345 --user wangwu:ad
 4. `/models` 公开模型 Tab：新建时输入名称应提示相似上游模型；列表「编辑」进入整页 `/models/public/:id`（单 PATCH 整页保存、成员编排分层 chip、conditional 末位兜底、价格只读且为成员加权平均）。
 5. 可用性：**没有独立页**（`availability.removed` 断言）。措施只属上游模型（ADR-025）：行内单按钮「冷却」弹窗内切单次/周期，冷却中「解除」；单次与周期互斥 409（详情 `blocking_rule_ids` 可定位），note-only PATCH 放行；公开模型无冷却入口且写操作 422（ADR-027）。
 
-### 5.3 看板与日志（Story 15–21、32–33、43–44）
+### 5.3 看板与日志（Story 15 至 21、32 至 33、43 至 44）
 
 1. `/dashboard`：柱形/面积/分流三 Tab + 8 KPI 卡 + 7D/30D/365D 热力图 + 延迟分位。**分流图隐藏阶段**：点击图例隐藏一段 → network 出现 `collapse=` 请求、后端重算后单图连通且 totals 守恒、隐藏到 2 段时提示「至少保留两个可见阶段」并禁用继续隐藏、点「已隐藏」徽章可恢复（`dashboard.flow-hide` 覆盖）。
 2. 维度与指标：一次只看一个维度（综合模型/上游模型/上游渠道），指标可选请求/词元/成本/花费。
@@ -173,7 +173,7 @@ node ops/checks/acceptance_browser.mjs --admin admin:admin12345 --user wangwu:ad
 4. `/logs`：费用列两行（计费/成本，毛利在报表聚合口径）；模型列两行（公开模型 / 请求模型 → 上游模型）；尝试列「N 次尝试」按钮打开路由链 popover（`attempt_no`/上游/状态码/耗时/错误），历史行显示「无链路记录」（ADR-028，`logs.attempts` 覆盖）。点「详情」核对请求/响应/用量/耗时/错误齐全。
 5. 权限：用 wangwu 登录，`/logs` 行内不得出现成本/毛利；用 lisi 登录，花费/日志范围限自己子树（`/settings/spend`；旧 `/revenue` 已删除）。
 
-### 5.4 账号、权限与设置（Story 22–31、46）
+### 5.4 账号、权限与设置（Story 22 至 31、46）
 
 1. `/admins`：内置角色不可删；可新建自定义角色并勾选权限；权限矩阵与实际菜单一致。
 2. `/users`：列表展示角色/父级/状态；代理用户（lisi）能新建下级，且新建用户的父级默认是自己。
@@ -181,7 +181,7 @@ node ops/checks/acceptance_browser.mjs --admin admin:admin12345 --user wangwu:ad
 4. 设置：用户设置 5 段（个人资料 / 主题 / 连接密钥 / 我的花费 / 通知偏好，`/settings/:section`）与运营设置 3 段（连接地址 / 系统参数+正文日志开关 / 运行信息，`/ops-settings/:section`，页内子导航）。主题切换与持久化在顶栏与 `/settings/theme` 均可验收（Story 23）。
 5. 会话：退出后直连任意 `/admin/*` 应 401；登录页错误密码文案来自后端 `GENERIC_LOGIN_ERROR`（`api/src/l05_service/auth.py:33`）。
 
-### 5.5 策略、护栏、MCP 与渲染（Story 34–38、48）
+### 5.5 策略、护栏、MCP 与渲染（Story 34 至 38、48）
 
 1. `/gateway-policies?tab=policies`：「编辑」「原始 JSON」可打开；保存后 `/config-revisions` 出现新版本并标记 rollout 状态。旧入口 `/policies` 重定向到该 Tab（不在侧栏）。
 2. `/gateway-policies?tab=guardrails`：「添加护栏」→ 规则可用正则/敏感信息/外部审核/自定义 webhook；不支持的类型必须显式报错或置灰，不允许静默丢弃。旧入口 `/guardrails` 重定向。
@@ -190,13 +190,13 @@ node ops/checks/acceptance_browser.mjs --admin admin:admin12345 --user wangwu:ad
 5. 优先级：显示 AG 原值并注明「数值小优先」；公开模型单页成员编排段展示 priority/weight/when（列表行内不再开旧「路由目标」弹窗）。
 6. 渲染：`cd api && python -m pytest -q` 覆盖 golden YAML/契约；所有渲染产物需 `--validate-only` 通过后才 apply（ADR-007/08 实现）。
 
-### 5.6 模型试验（Story 39–42）
+### 5.6 模型试验（Story 39 至 42）
 
 1. 参数：20 项 = 模型选择 + 19 个状态字段（`web/src/lib/playground-params.ts`）；分组、悬停说明、14 类校验需人工试错（负数 temperature、非法 JSON extraFields 等）。
 2. 会话：新建/重命名/复制/删除/重试最近一轮；导入会话 JSON / 导出全部会话；单条消息不导出；刷新后会话仍在（localStorage，上限 200）。
 3. 模型对话框：点击「选择模型」→ 右下角对话框、可搜索模型名/路由模式、显示思考等级；Esc 关闭。
 
-### 5.7 工程与交付（Story 47–50）
+### 5.7 工程与交付（Story 47 至 50）
 
 1. `cd web && npm run build && node scripts/check-bundle.mjs`：入口 chunk 与 `echarts` 分离；五期基线为首包 gzip **213.1 KB**、**75** 个 JS chunk、echarts 独立 148.2 KB（以 `check-bundle` PASS 为准；三期旧基线 147.73/47.04/151.94 已过时）。
 2. `bash ops/checks/verify_web.sh`：tsc/eslint/route-audit 全过；`node web/scripts/check-ui-foundation.mjs`（75/75）+ `check-semantic-dirty.mjs`（41/41）；`python ops/checks/smoke_api.py` 全 PASS。
@@ -218,7 +218,7 @@ node ops/checks/acceptance_browser.mjs --admin admin:admin12345 --user wangwu:ad
 
 ### 7.1 术语审计（`terminology_audit.mjs`，exit 0）
 
-- 最终结果：**PASS，error 0 / warn 0**；资产 10/10 通过（title 精确为「驭流 Slipstream · LLM API 网关」，favicon 指向存在的 SVG，三个 logo ≥ 100 字节，侧栏 36×36 品牌锁，登录页品牌齐全）。
+- 最终结果：**PASS，error 0 / warn 0**；资产 10/10 通过（title 精确为「驭流 Slipstream · 模型接口网关」，favicon 指向存在的 SVG，三个 logo ≥ 100 字节，侧栏 36×36 品牌锁，登录页品牌齐全）。
 - 修复记录：`playground.tsx` 的「tokens ·」改「词元 ·」；`latency-cards.tsx`「首个 token」改「首个词元」；`query-syntax-help.tsx` 三处 token 改「关键词/查询条件/具体位置」。
 - 旧版报告的 `latency-chart.tsx`、`log-detail-drawer.tsx`、`dashboard.tsx` 单数 token 已在前序 ticket 22/13/14 一并清理，最终扫描不再命中。
 

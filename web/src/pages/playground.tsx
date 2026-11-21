@@ -91,7 +91,7 @@ function estimateTokens(text: string): number {
 }
 
 const SAMPLE_PROMPTS = [
-  "用三句话解释什么是 LLM 网关",
+  "用三句话解释什么是模型接口网关",
   "把这段日志按错误码归类并给出排查顺序",
   "写一个最小可用的 SSE 解析器，并说明边界情况",
 ];

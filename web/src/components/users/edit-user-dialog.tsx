@@ -124,7 +124,7 @@ export function EditUserDialog({
         <DialogHeader>
           <DialogTitle>编辑用户</DialogTitle>
           <DialogDescription>
-            {user?.name ?? ""}（{user?.username ?? ""}）——登录名不可修改，改动立即生效。
+            {user?.name ?? ""}（{user?.username ?? ""}），登录名不可修改，改动立即生效。
           </DialogDescription>
         </DialogHeader>
 

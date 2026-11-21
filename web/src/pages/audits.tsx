@@ -63,11 +63,11 @@ function AuditDetailDrawer({ row, open, onOpenChange }: {
       <SheetContent side="right" size="lg" className="flex w-full flex-col gap-0 overflow-hidden">
         <SheetHeader className="border-b border-border px-4 py-3">
           <SheetTitle className="flex flex-wrap items-center gap-1.5 text-sm">
-            <span className="font-mono">{row?.action ?? "—"}</span>
-            <Badge tone="neutral">{row?.actor ?? "—"}</Badge>
+            <span className="font-mono">{row?.action ?? "-"}</span>
+            <Badge tone="neutral">{row?.actor ?? "-"}</Badge>
           </SheetTitle>
           <SheetDescription className="text-2xs">
-            对象 {row?.target || "—"} · {fmtTime(row?.created_at ?? null)}
+            对象 {row?.target || "-"} · {fmtTime(row?.created_at ?? null)}
           </SheetDescription>
         </SheetHeader>
         <div className="min-h-0 flex-1 overflow-auto px-4 py-3">
@@ -132,7 +132,7 @@ export function AuditLogsPage() {
       accessorKey: "target",
       header: "对象",
       cell: (c) => (
-        <span className="font-mono text-2xs text-body">{c.row.original.target || "—"}</span>
+        <span className="font-mono text-2xs text-body">{c.row.original.target || "-"}</span>
       ),
     },
     {
@@ -140,7 +140,7 @@ export function AuditLogsPage() {
       header: "详情摘要",
       cell: (c) => (
         <span className="block max-w-64 truncate text-2xs text-faint">
-          {c.row.original.detail || "—"}
+          {c.row.original.detail || "-"}
         </span>
       ),
     },

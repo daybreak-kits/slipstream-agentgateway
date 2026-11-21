@@ -99,8 +99,8 @@ function foldRows(rows: HeatmapRow[], groupKeyOf: (date: Date) => string): Aggre
     const sameDay = group.dates.length === 1;
     folded.push({
       key,
-      label: sameDay ? shortDate(first) : `${shortDate(first)}–${shortDate(last)}`,
-      coverage: sameDay ? isoDate(first) : `${isoDate(first)}–${isoDate(last)} · ${group.dates.length} 天`,
+      label: sameDay ? shortDate(first) : `${shortDate(first)} 至 ${shortDate(last)}`,
+      coverage: sameDay ? isoDate(first) : `${isoDate(first)} 至 ${isoDate(last)} · ${group.dates.length} 天`,
       values: group.values,
     });
   }

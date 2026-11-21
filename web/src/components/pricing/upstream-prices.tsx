@@ -248,7 +248,7 @@ export function UpstreamPricesSection() {
       sortable: true,
       sortValue: (model) => model.upstream_name ?? "",
       cell: (model) => (
-        <span className="text-body">{model.upstream_name ?? model.vendor_name ?? "—"}</span>
+        <span className="text-body">{model.upstream_name ?? model.vendor_name ?? "-"}</span>
       ),
     },
     {
@@ -385,7 +385,7 @@ export function UpstreamPricesSection() {
         const draft = drafts[model.id] ?? draftOf(model);
         const dirty = isDirty(model, draft);
         const saving = save.isPending && save.variables?.model.id === model.id;
-        if (!dirty) return <span className="text-2xs text-faint">—</span>;
+        if (!dirty) return <span className="text-2xs text-faint">-</span>;
         return (
           <div className="flex items-center justify-end gap-1">
             <Button size="dense" variant="ghost" onClick={() => resetDraft(model.id)} disabled={saving}>

@@ -5,7 +5,7 @@
 - 方法：静态检索设计 tells（渐变/发光/emoji/主色/动效/阴影/字体）+ 交互审计逐页截图目视 + `web/src/index.css` token 表核对。
 - 结论：**未发现典型 AI 味**（渐变文字、霓虹发光、emoji 标签、玻璃拟态、多主色混用、夸张 hover 缩放）；仅 2 处渐变属有意设计，已登记如下。
 
-> **五期（W5）状态**：五期能力已全部实现（路由链/冷却互斥/多密钥平权/公开模型单页等），本文件 §1–§17 为实现与规范记录；五期的实现落点、门禁证据与验收矩阵见 §17/§18。与实现冲突的旧描述已就地修正并标注（2026-11-21 ticket 17 收口）。
+> **五期（W5）状态**：五期能力已全部实现（路由链/冷却互斥/多密钥平权/公开模型单页等），本文件 §1 至 §17 为实现与规范记录；五期的实现落点、门禁证据与验收矩阵见 §17/§18。与实现冲突的旧描述已就地修正并标注（2026-11-21 ticket 17 收口）。
 
 ## 逐项核对
 
@@ -73,8 +73,8 @@ grep -rn "bg-gradient\|text-gradient\|drop-shadow\|blur-\|hover:scale\|animate-p
 
 ### 1. 卡片与布局（修「块边界差别大」）
 
-- 全站 4px 网格；卡片 padding 20–24，页面边缘 24–32，侧栏行高 32–36、行距 2–4。
-- 同层卡片**统一**一套边界 token：`--radius-12` + hairline 边框（文本色 6–10% 透明度）+ `--shadow-card`；页面不得自定边框粗细/颜色/圆角/阴影档位。
+- 全站 4px 网格；卡片 padding 20 至 24，页面边缘 24 至 32，侧栏行高 32 至 36、行距 2 至 4。
+- 同层卡片**统一**一套边界 token：`--radius-12` + hairline 边框（文本色 6 至 10% 透明度）+ `--shadow-card`；页面不得自定边框粗细/颜色/圆角/阴影档位。
 - 组内间距 < 组间间距；图标、标签、数字各自成列对齐；数字 `tabular-nums` 右对齐。
 - 每屏一个视觉重点（主图表或关键对象），chrome（导航/按钮/边框）保持安静：无渐变文字、无发光、无彩色阴影、无 emoji。
 
@@ -103,8 +103,8 @@ grep -rn "bg-gradient\|text-gradient\|drop-shadow\|blur-\|hover:scale\|animate-p
 | 计数 / 词元 / TPM / 尝试次数 | 千分位整数（`fmtInt`，如 1,234,567）；卡片、表格、tooltip 一律不缩写 |
 | 图表轴 | 只有坐标轴允许 K/M/B 紧凑格式，且只留整数（`fmtCount`，如 566K） |
 | RPM | 2 位小数（`fmtRpm`） |
-| 百分比 / 比率 | 1 位小数（`fmtPct` 收 0–1 比例，`fmtPctPoint` 收已是百分数的值）；缓存命中率口径见 GLOSSARY §5 |
-| 金额（表格 / 汇总 / KPI） | 2 位小数（`fmtMoney`）；未配置显示「—」，不渲染 0 |
+| 百分比 / 比率 | 1 位小数（`fmtPct` 收 0 至 1 比例，`fmtPctPoint` 收已是百分数的值）；缓存命中率口径见 GLOSSARY §5 |
+| 金额（表格 / 汇总 / KPI） | 2 位小数（`fmtMoney`）；未配置显示「-」，不渲染 0 |
 | 单请求金额 / 均值 | 4 位小数（`fmtMoneyAvg`），避免单次请求被舍成 ¥0.00 |
 | 单价（元 / 1M 词元） | 2 位小数；< 0.01 升 4 位（`fmtPriceAmount` / `fmtPricePerM` / `fmtUnitPriceMicro`） |
 | 延迟 | 秒（s）2 位小数 |
@@ -119,7 +119,7 @@ grep -rn "bg-gradient\|text-gradient\|drop-shadow\|blur-\|hover:scale\|animate-p
 
 ### 7. 术语门禁
 
-- `ops/checks/terminology_audit.mjs` 为唯一术语门禁（现行 8 条规则）：`收费`、厂商名 `qax|qianxin`、`Tokens`、单数 `Token`（warn）、裸「渠道」（`上游渠道` 复合词放行）、`调用模型|调用名|调用串|计划窗口|游乐场`、`封禁|对外模型|客户端密钥`、`令牌`；扫描范围是 `web/src` + `index.html` + `public`（**不含 docs/**，脚本输出会打印该口径，见 §18 与 recon §11）。允许「上游渠道」「关闭/启用」「快速上手」「代理用户」；UI 禁裸「渠道」、禁「封禁」。五期文档收口另用人工清单核对 docs 内旧术语（该脚本不扫 docs，见 recon §11）。
+- `ops/checks/terminology_audit.mjs` 为唯一术语门禁（W6 ticket 20 起现行 12 条规则）：`收费`、厂商名 `qax|qianxin`、`Tokens`、单数 `Token`（warn）、裸「渠道」（`上游渠道` 复合词放行）、`调用模型|调用名|调用串|计划窗口|游乐场`、`封禁|对外模型|客户端密钥`、`令牌`、旧英文产品名（`LLM API 网关/LLM API GATEWAY` 等，正名「模型接口网关」）、数据面版本语句（`AG 1.7`/`pinned AG`，能力文案走适配器 capability_note）、em dash（缺值「-」/区间「至」/正文改标点）、en dash 区间（统一「至」）；扫描范围是 `web/src` + `index.html` + `public`，并新增现行 docs 扫描（README + 现行规范/契约文档；DECISIONS 等 ADR 原文与历史归档不在清单内）。em/en dash 规则带 baseline 棘轮（`ops/checks/terminology_baseline.json`）：baseline 内残留只提示，新增违规 EXIT=1。允许「上游渠道」「关闭/启用」「快速上手」「代理用户」；UI 禁裸「渠道」、禁「封禁」。
 
 
 ## 四期·表格与分页规范（2026-11-19 用户定案）
@@ -155,13 +155,13 @@ grep -rn "bg-gradient\|text-gradient\|drop-shadow\|blur-\|hover:scale\|animate-p
 - 网格模板 = **两行 × 每行 6 卡**（`grid-cols-6` 起步，响应式降档 6→4→3→2）；卡片组成与填充见规划（待拍板项：12 卡清单）。
 
 ### 9. 表格高度
-- 表格区域**默认撑到当前页面最底部**（页面纵向 flex 布局，表体滚动区 `flex-1 min-h-0`），配**最小高度**（默认 `min-h-80`）兜底单页多表场景——多表时每表至少保住最小高度，页面才允许整页滚动。
+- 表格区域**默认撑到当前页面最底部**（页面纵向 flex 布局，表体滚动区 `flex-1 min-h-0`），配**最小高度**（默认 `min-h-80`）兜底单页多表场景：多表时每表至少保住最小高度，页面才允许整页滚动。
 
 ### 10. 列设置强制
 - 凡是表格必须有列设置（列显隐 + 持久化）；无列可隐的极简表（如密钥面板小表）例外需注明。
 
 ### 11. 延迟分位色（阈值色，独立于 §17 语义色五档）
-- 首字/耗时的分位色**不锁死绝对毫秒值**，按当前时间窗的分位数动态锚定：**≤P50 绿、P50–P95 黄（P75 为黄色锚点）、>P95 红**；分位数来自报表延迟端点（`all` 全样本块），随窗口刷新。实现见 `web/src/components/logs/latency-tone.ts`（日志耗时竖色条 + 标签），与 §17 的 success/warning/info/danger/neutral 五档语义色是两套机制：本节的绿/黄/红只表示延迟分位阈值，不得与语义色函数混用或互相覆盖。
+- 首字/耗时的分位色**不锁死绝对毫秒值**，按当前时间窗的分位数动态锚定：**≤P50 绿、P50 至 P95 黄（P75 为黄色锚点）、>P95 红**；分位数来自报表延迟端点（`all` 全样本块），随窗口刷新。实现见 `web/src/components/logs/latency-tone.ts`（日志耗时竖色条 + 标签），与 §17 的 success/warning/info/danger/neutral 五档语义色是两套机制：本节的绿/黄/红只表示延迟分位阈值，不得与语义色函数混用或互相覆盖。
 
 ### 12. 图标体系（lucide-react 单一来源）
 - 动作动词 → 图标映射表集中一处（`lib/icon` 或等价）：编辑=Pencil、删除=Trash2、关闭=Ban、启用=Play、测试连接=PlugZap、刷新=RefreshCw、复制=Copy、详情/查看=Eye、添加=Plus、冷却=Timer/Snowflake、周期=CalendarClock、批量=Layers、导出=Download、导入=Upload。
@@ -190,7 +190,7 @@ grep -rn "bg-gradient\|text-gradient\|drop-shadow\|blur-\|hover:scale\|animate-p
 
 ## 18. 五期（W5）实现清单（2026-11-21 收口）
 
-> 本节是五期能力的实现落点与可复验证据，供 ticket 18 浏览器验收与后续回归对照；历史巡检结论（§1–§17）继续有效，冲突处已就地修正。
+> 本节是五期能力的实现落点与可复验证据，供 ticket 18 浏览器验收与后续回归对照；历史巡检结论（§1 至 §17）继续有效，冲突处已就地修正。
 
 | 工单 | 能力 | 实现落点 | 门禁/验收证据 |
 | --- | --- | --- | --- |
@@ -201,7 +201,7 @@ grep -rn "bg-gradient\|text-gradient\|drop-shadow\|blur-\|hover:scale\|animate-p
 | 08 | 数字口径 | `lib/format.ts` 单一来源：`fmtInt` 千分位整数（计数/词元/TPM/尝试次数）、`fmtRpm` 两位小数、`fmtPct` 一位、`fmtMoney` 两位、`fmtMoneyAvg` 四位、单价 <0.01 升四位；图表轴才允许 `fmtCount` K/M/B | `check-ui-foundation.mjs`「数字格式」断言；本文件 §5 表 |
 | 09 | 语义色五档 / 脏标记 / toast | `lib/semantic-tone.ts`（五档 tone → 文字/浅底/描边）、`lib/icons.ts:ACTION_TONES`、`lib/dirty-fields.ts` + `lib/use-dirty-fields.ts` + `ui/dirty-field.tsx`、`lib/toast-policy.ts` + `lib/notification-store`；token 在 `index.css`（§17） | `web/scripts/check-semantic-dirty.mjs` 40 条（tone 五档/ACTION_TONES/脏标记原语/toast 3s 右上 80px/抽屉与设置页接线/冷却互斥） |
 | 10 | KPI 八卡八形 + 图标映射 | `components/dashboard/metric-cards.tsx`（8 卡：请求量/词元/缓存/费用/成本·毛利率/P50 延迟/RPM/TPM；每卡一个分类 tint 图形）、`lib/metric-icons.ts`（图标单一来源） | `check-ui-foundation.mjs`：八卡图标语义与分类色、不得再用 info 灰；本文件 §12/§14 |
-| 11 | 上游模型抽屉 100vh | `components/models/upstream-model-drawer.tsx`：右侧 100vh、四组内容（连接与模型/路由与模型/请求与响应/其他设置）、内部滚动、固定底栏、字段级脏标记；760–860px 视口自适应 | `check-semantic-dirty.mjs`「上游模型满高抽屉」；浏览器 760/860 两档 + 内部滚动/保存后关闭 |
+| 11 | 上游模型抽屉 100vh | `components/models/upstream-model-drawer.tsx`：右侧 100vh、四组内容（连接与模型/路由与模型/请求与响应/其他设置）、内部滚动、固定底栏、字段级脏标记；760 至 860px 视口自适应 | `check-semantic-dirty.mjs`「上游模型满高抽屉」；浏览器 760/860 两档 + 内部滚动/保存后关闭 |
 | 13 | 公开模型单页编辑器 | 路由 `/models/public/:id`（`web/src/routes.ts`）→ `components/models/public-model-page.tsx` + `public-model-editor.tsx` + `public-model-form.ts`：页头 + 基本信息 + 成员编排三段、底部唯一保存；单 `PATCH /admin/public-models/{id}` 一次提交整页（name/routing_mode/note/enabled/targets），双权限（`public_models:write` + 含 targets 时 `model_targets:write`）、脏标记、失败保留输入并回滚；列表「编辑」进单页，不再回列表弹窗 | `check-semantic-dirty.mjs`：单 PATCH 载荷/双权限/三段/唯一「保存」/失败保留/成员校验/接线（零 PUT targets）；浏览器 network 断言同 |
 | 14 | 成员 chip 编排 | `components/models/member-chip.ts`（成员名「上游渠道/模型」、按 priority 分层、同层保序、conditional 末位兜底）、`member-chip-flow.tsx`（分层 chip 流、候选按上游分组搜索）、`member-drafts.ts`、`member-editor.tsx` | `check-semantic-dirty.mjs`：member-chip / MemberChipFlow / MemberChipEditor / 成员脏标记与「成员 chip 流替换 MemberBoard」共 5 条；浏览器：分组搜索、conditional 末位、增删成员、脏标记 |
 

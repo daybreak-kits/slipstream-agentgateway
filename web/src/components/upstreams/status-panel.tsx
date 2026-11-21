@@ -122,17 +122,17 @@ export function UpstreamStatusPanel({
               <span className="text-2xs text-faint">{probeKindLabel(view.kind)}</span>
             </span>
           ) : (
-            <span className="text-faint">—</span>
+            <span className="text-faint">-</span>
           )}
         </StatusRow>
         <StatusRow label="耗时">
-          {view ? <span className="tnum">{view.latency_ms} ms</span> : <span className="text-faint">—</span>}
+          {view ? <span className="tnum">{view.latency_ms} ms</span> : <span className="text-faint">-</span>}
         </StatusRow>
         <StatusRow label="最近测试">
           {view?.tested_at_ms ? (
             <span className="tnum">{formatDateTime(view.tested_at_ms, timezone)}</span>
           ) : (
-            <span className="text-faint">—</span>
+            <span className="text-faint">-</span>
           )}
         </StatusRow>
         <StatusRow label="已识别协议">
@@ -146,7 +146,7 @@ export function UpstreamStatusPanel({
               )}
             </span>
           ) : (
-            <span className="text-faint">—</span>
+            <span className="text-faint">-</span>
           )}
         </StatusRow>
         <StatusRow label="鉴权方式">
@@ -176,7 +176,7 @@ export function UpstreamStatusPanel({
               })}
             </ul>
           ) : (
-            <span className="text-faint">—</span>
+            <span className="text-faint">-</span>
           )}
         </StatusRow>
         {hasSteps ? (

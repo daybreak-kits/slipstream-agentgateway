@@ -122,8 +122,8 @@ export function LedgerDrawer({ userId, userName, onClose }: LedgerDrawerProps) {
                       {fmtSignedMicro(entry.delta_micro)}
                     </TD>
                     <TD className="tnum whitespace-nowrap text-right">{fmtCny(entry.balance_after_micro)}</TD>
-                    <TD className="text-2xs text-body">{entry.note || "—"}</TD>
-                    <TD className="text-2xs text-faint">{entry.created_by || "—"}</TD>
+                    <TD className="text-2xs text-body">{entry.note || "-"}</TD>
+                    <TD className="text-2xs text-faint">{entry.created_by || "-"}</TD>
                   </TR>
                 ))}
               </tbody>

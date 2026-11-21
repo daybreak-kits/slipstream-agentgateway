@@ -104,7 +104,7 @@ function HealthBand() {
           <span className="text-faint">健康状态未知</span>
         ) : (
           <span className="tnum text-body">
-            {health.data?.adapter ?? "—"} · 端口 {health.data?.data_plane_port ?? "—"}
+            {health.data?.adapter ?? "-"} · 端口 {health.data?.data_plane_port ?? "-"}
           </span>
         )}
       </div>
@@ -113,7 +113,7 @@ function HealthBand() {
         {revisions.isPending ? (
           <Skeleton className="h-4 w-20" />
         ) : revisions.isError ? (
-          <span className="text-faint">—</span>
+          <span className="text-faint">-</span>
         ) : latest ? (
           <span className="flex items-center gap-1.5">
             <span className="tnum text-body">{revisionTitle(latest)}</span>
@@ -130,7 +130,7 @@ function HealthBand() {
         ) : health.data ? (
           <span className="tnum text-body">{formatIntervalDateTime(health.data.now_ms, timezone)}</span>
         ) : (
-          <span className="text-faint">—</span>
+          <span className="text-faint">-</span>
         )}
       </div>
     </div>
@@ -196,8 +196,8 @@ function ConnectionInfoCard({ canSettings }: { canSettings: boolean }) {
   });
   // 运营设置显式配置的公网地址；无权限或未配置都显示「—」
   const configuredUrl = canSettings
-    ? normalizeSettings(settings.data).find((row) => row.key === "gateway_base_url")?.value?.trim() || "—"
-    : "—";
+    ? normalizeSettings(settings.data).find((row) => row.key === "gateway_base_url")?.value?.trim() || "-"
+    : "-";
   const address = effectiveBaseUrl(connection.data);
 
   return (

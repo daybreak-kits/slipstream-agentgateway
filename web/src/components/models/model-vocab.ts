@@ -53,8 +53,8 @@ export function parametersOf(row: { parameters?: ModelParameters }): ModelParame
 /** 能力位摘要：输入类型 → 输出类型 · 能力（模型管理页与上游详情页同一口径）。 */
 export function parameterSummary(row: { parameters?: ModelParameters }): string {
   const p = parametersOf(row);
-  const input = p.input_types.length > 0 ? p.input_types.join("/") : "—";
-  const output = p.output_types.length > 0 ? p.output_types.join("/") : "—";
+  const input = p.input_types.length > 0 ? p.input_types.join("/") : "-";
+  const output = p.output_types.length > 0 ? p.output_types.join("/") : "-";
   const caps: string[] = [];
   if (p.tool_call) caps.push("工具");
   if (p.reasoning) caps.push("推理");

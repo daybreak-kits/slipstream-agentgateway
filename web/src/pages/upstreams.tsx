@@ -313,7 +313,7 @@ export function UpstreamsPage() {
       enableSorting: false,
       cell: ({ row }) => {
         const probe = row.original.last_probe;
-        if (!probe) return <span className="text-faint">—</span>;
+        if (!probe) return <span className="text-faint">-</span>;
         const probeStatus = probeStatusView(probe.status);
         return (
           <div>

@@ -1093,19 +1093,19 @@ export interface ParamHint {
  * 和 validateChatParams 的区间一起校对（改口径先改这里）。
  */
 export const PARAM_HINTS = {
-  temperature: { range: "0.0–2.0", usage: "越高输出越随机，越低越确定" },
-  topP: { range: "0.0–1.0（> 0）", usage: "与 temperature 二选一调整，越小候选越少" },
+  temperature: { range: "0.0 至 2.0", usage: "越高输出越随机，越低越确定" },
+  topP: { range: "0.0 至 1.0（> 0）", usage: "与 temperature 二选一调整，越小候选越少" },
   topK: { range: "≥ 0 的整数", usage: "只从概率最高的前 k 个候选里挑；上游未校验" },
-  frequencyPenalty: { range: "−2.0–2.0", usage: "按出现次数压低重复词，越高越不容易复读" },
-  presencePenalty: { range: "−2.0–2.0", usage: "按是否出现过压低，越高越愿意换话题" },
+  frequencyPenalty: { range: "−2.0 至 2.0", usage: "按出现次数压低重复词，越高越不容易复读" },
+  presencePenalty: { range: "−2.0 至 2.0", usage: "按是否出现过压低，越高越愿意换话题" },
   seed: { range: "整数", usage: "固定随机种子便于复现；上游未校验，可能被忽略" },
-  maxTokens: { range: "1–模型上限", usage: "本次回复最多生成的词元数" },
-  maxCompletionTokens: { range: "1–模型上限", usage: "与 max_tokens 二选一，新版接口用它替代" },
-  n: { range: "1–128", usage: "一次生成几份候选回复；多数上游只支持 1" },
+  maxTokens: { range: "1 至模型上限", usage: "本次回复最多生成的词元数" },
+  maxCompletionTokens: { range: "1 至模型上限", usage: "与 max_tokens 二选一，新版接口用它替代" },
+  n: { range: "1 至 128", usage: "一次生成几份候选回复；多数上游只支持 1" },
   stop: { range: "最多 4 条，逗号分隔", usage: "命中任一条就停止生成，停止词不进回复" },
   responseFormat: { range: "text / json_object", usage: "json_object 要求提示词里明确要求 JSON" },
   logprobs: { range: "开 / 关", usage: "返回每个生成词元的对数概率，用于排查" },
-  topLogprobs: { range: "0–20", usage: "返回前 k 个候选词的概率；需先打开 logprobs" },
+  topLogprobs: { range: "0 至 20", usage: "返回前 k 个候选词的概率；需先打开 logprobs" },
   user: { range: "≤ 256 字符", usage: "给上游的稳定用户标识，用于滥用追踪" },
   thinkingMode: {
     range: "default / none / low / medium / high / xhigh / max",
@@ -1194,7 +1194,7 @@ export function validateChatParams(
   const topLogprobs = parseOptionalNumber(input.topLogprobs);
 
   if (input.temperature?.trim() && (temperature === undefined || temperature < 0 || temperature > 2)) {
-    return { valid: false, message: "temperature 需在 0–2 之间。" };
+    return { valid: false, message: "temperature 需在 0 至 2 之间。" };
   }
   if (input.topP?.trim() && (topP === undefined || topP <= 0 || topP > 1)) {
     return { valid: false, message: "top_p 需大于 0 且不超过 1。" };
@@ -1206,19 +1206,19 @@ export function validateChatParams(
     input.frequencyPenalty?.trim() &&
     (frequencyPenalty === undefined || frequencyPenalty < -2 || frequencyPenalty > 2)
   ) {
-    return { valid: false, message: "frequency_penalty 需在 −2–2 之间。" };
+    return { valid: false, message: "frequency_penalty 需在 −2 至 2 之间。" };
   }
   if (
     input.presencePenalty?.trim() &&
     (presencePenalty === undefined || presencePenalty < -2 || presencePenalty > 2)
   ) {
-    return { valid: false, message: "presence_penalty 需在 −2–2 之间。" };
+    return { valid: false, message: "presence_penalty 需在 −2 至 2 之间。" };
   }
   if (input.seed?.trim() && !isIntegerInRange(seed, Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER)) {
     return { valid: false, message: "seed 需是整数。" };
   }
   if (input.maxTokens?.trim() && !isIntegerInRange(maxTokens, 1, limit)) {
-    return { valid: false, message: `max_tokens 需是 1–${limit} 的整数（上限取自所选模型）。` };
+    return { valid: false, message: `max_tokens 需是 1 至 ${limit} 的整数（上限取自所选模型）。` };
   }
   if (
     input.maxCompletionTokens?.trim() &&
@@ -1226,11 +1226,11 @@ export function validateChatParams(
   ) {
     return {
       valid: false,
-      message: `max_completion_tokens 需是 1–${limit} 的整数（上限取自所选模型）。`,
+      message: `max_completion_tokens 需是 1 至 ${limit} 的整数（上限取自所选模型）。`,
     };
   }
   if (input.n?.trim() && !isIntegerInRange(n, 1, 128)) {
-    return { valid: false, message: "n 需是 1–128 的整数。" };
+    return { valid: false, message: "n 需是 1 至 128 的整数。" };
   }
   // 票19：stop 单行逗号分隔（旧换行输入在解析层折算）；空条目上游会拒绝，
   // 发送前拦下并各给一句可操作的提示。
@@ -1245,7 +1245,7 @@ export function validateChatParams(
       return { valid: false, message: "top_logprobs 需要先打开 logprobs。" };
     }
     if (!isIntegerInRange(topLogprobs, 0, 20)) {
-      return { valid: false, message: "top_logprobs 需是 0–20 的整数。" };
+      return { valid: false, message: "top_logprobs 需是 0 至 20 的整数。" };
     }
   }
   if (input.user?.trim() && input.user.trim().length > 256) {

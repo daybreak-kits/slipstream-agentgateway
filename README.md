@@ -1,6 +1,6 @@
 # Slipstream 驭流
 
-LLM 网关的控制面与管理台：统一管理上游模型、公开模型、路由与重试、价目与额度、审计，把配置渲染/下发给 `agentgateway`（pinned 1.7.0，数据面）并同源托管管理台。
+模型接口网关的控制面与管理台：统一管理上游模型、公开模型、路由与重试、价目与额度、审计，把配置渲染/下发给 `agentgateway`（pinned 1.7.0，数据面）并同源托管管理台。
 
 > 数据面是 pinned 的 agentgateway 二进制，不可 fork（ADR-001）；本仓库只做控制面：主数据、价目、路由与健康策略、配置渲染与下发、用量与账本、审计。
 
@@ -232,7 +232,7 @@ node ops/checks/acceptance_browser.mjs --strict   # Playwright 全站验收
 
 ## P0 实验结论
 
-完整记录见 `docs/experiments/P0-RESULTS.md`（E1–E17，含原始证据与配置）。与产品行为直接相关的要点：
+完整记录见 `docs/experiments/P0-RESULTS.md`（E1 至 E17，含原始证据与配置）。与产品行为直接相关的要点：
 
 - 简化 llm 模式不接受请求内 retry（E13）→ 用顶层 `policies[]` 的 route 级 retry 实现（E14/E16）。
 - 完整形态下组间 failover 需要 **retry codes + health 表达式 + eviction** 三件套（E16/E17）；只配 codes 不会换组，4xx 尤甚。
@@ -245,11 +245,11 @@ node ops/checks/acceptance_browser.mjs --strict   # Playwright 全站验收
 | 文件 | 内容 |
 |---|---|
 | `docs/PLAN.md` | 总体设计、分层与里程碑 |
-| `docs/DECISIONS.md` | ADR-001 – ADR-028 决策记录（含 ADR-027 冷却互斥、ADR-028 追踪归适配层） |
+| `docs/DECISIONS.md` | ADR-001 至 ADR-028 决策记录（含 ADR-027 冷却互斥、ADR-028 追踪归适配层） |
 | `docs/GLOSSARY.md` | 术语表 |
 | `docs/api-contract.md` | 管理面 HTTP 契约 |
 | `docs/contracts/` | SPI / IR 与渲染 / 计费 / 改写编译器契约 |
-| `docs/experiments/P0-RESULTS.md` | E1–E20 实验结论与原始证据索引 |
+| `docs/experiments/P0-RESULTS.md` | E1 至 E20 实验结论与原始证据索引 |
 | `docs/ACCEPTANCE.md` | 验收清单 |
 | `docs/CHANGELOG-phase2.md` | 二期变更记录（历史） |
 | `docs/CHANGELOG-phase4.md` | 四期变更记录 + 五期（W5）变更记录 |

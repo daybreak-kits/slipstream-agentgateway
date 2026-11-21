@@ -93,7 +93,7 @@ export function validateLogQuery(query: string): string | null {
     if (token.startsWith("status:")) {
       const value = token.slice(7);
       if (!/^([1-5]\d\d|[1-5]xx)$/.test(value)) {
-        return "status: 只支持 3 位状态码（如 200）或 1xx–5xx";
+        return "status: 只支持 3 位状态码（如 200）或 1xx 至 5xx";
       }
       continue;
     }
@@ -113,7 +113,7 @@ export function validateLogQuery(query: string): string | null {
       const value = token.slice(6);
       const ratio = Number(value);
       if (!/^\d+(\.\d+)?$/.test(value) || ratio > 100) {
-        return "cache> 后需要 0–100 的百分比，例如 cache>30";
+        return "cache> 后需要 0 至 100 的百分比，例如 cache>30";
       }
       continue;
     }

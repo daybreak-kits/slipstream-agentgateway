@@ -72,7 +72,7 @@ export function ruleSummary(rule: AvailabilityRule): string {
     return rule.expires_at_ms ? "单次至 " + fmtDeadline(rule.expires_at_ms) : "单次";
   }
   const window = parseSchedule(rule.schedule_json)[0];
-  const span = window ? (window.start ?? "00:00") + "–" + (window.end ?? "23:59") : "";
+  const span = window ? (window.start ?? "00:00") + " 至 " + (window.end ?? "23:59") : "";
   let scopeText = RECURRENCE_LABELS[rule.recurrence];
   if (rule.recurrence === "weekly" && window?.days?.length) {
     scopeText += " " + window.days.map((d) => WEEKDAY_OPTIONS.find((o) => o.value === d)?.label ?? "?").join("/");
