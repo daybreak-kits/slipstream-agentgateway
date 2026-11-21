@@ -461,14 +461,19 @@
   background-size: 40px 40px;
 }
 
-/* W6 票12：登录页低对比浅色渐变。静态不动画（无 animation/keyframes），颜色全部走
- * 语义 token + color-mix 半透明混合（≤10% 强度），明暗主题自适应、不遮正文。 */
+/* W7 票13：登录页柔光渐变（可见但克制）。多层径向渐变 + 极淡纵向承托：
+ *   - 三层大面积柔光（靛蓝主色 / 信息蓝 / 登录域青），单层强度 ≤22%、低饱和；
+ *   - 静态不动画（无 animation/keyframes），颜色全部走语义 token，明暗主题各自适配；
+ *   - 只做背景，不改白色底与左右布局，也不压表单文字与按钮。
+ * 验收口径见 ops/checks/acceptance/w7_login_gradient.mjs（截图取样 + 计算样式，
+ * 不以类名存在为准）。 */
 @utility login-gradient {
   background-color: var(--bg);
   background-image:
-    radial-gradient(60rem 40rem at 85% -10%, color-mix(in oklab, var(--primary) 8%, transparent), transparent 70%),
-    radial-gradient(50rem 36rem at -10% 110%, color-mix(in oklab, var(--info) 8%, transparent), transparent 70%),
-    linear-gradient(180deg, color-mix(in oklab, var(--surface-2) 65%, transparent), var(--bg));
+    radial-gradient(52rem 38rem at 88% -14%, color-mix(in oklab, var(--primary) 22%, transparent), transparent 68%),
+    radial-gradient(44rem 32rem at 4% 108%, color-mix(in oklab, var(--info) 18%, transparent), transparent 70%),
+    radial-gradient(32rem 26rem at 80% 96%, color-mix(in oklab, var(--login-teal) 14%, transparent), transparent 72%),
+    linear-gradient(180deg, color-mix(in oklab, var(--surface-2) 45%, transparent), transparent 72%);
 }
 
 /* W6 票12：矮视口（667×375 横屏）压缩登录页——隐藏装饰行，提交按钮免滚可见

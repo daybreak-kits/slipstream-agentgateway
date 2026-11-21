@@ -11,7 +11,7 @@
 
 | 检查项 | 结果 | 证据 |
 |---|---|---|
-| 渐变文字 / 多色渐变装饰 | 无 | `web/src` 无 `bg-clip-text`、`text-gradient`；全仓仅 3 处 `linear-gradient`：`web/src/index.css:459-460` 用于 1px 网格背景线、`:471` 为登录页低对比浅色渐变（W6 ticket 12，功能性背景，非装饰） |
+| 渐变文字 / 多色渐变装饰 | 无 | `web/src` 无 `bg-clip-text`、`text-gradient`；全仓 3 处 `linear-gradient` + 3 处 `radial-gradient`：`web/src/index.css:459-460` 用于 1px 网格背景线、`:473-476` 为登录页多层柔光渐变（W7 ticket 13，功能性背景，非装饰；门禁见 §20） |
 | 发光 / 玻璃拟态 | 无 | 无 `drop-shadow`、`blur-*`、`backdrop-blur`、glow 类；阴影只有 2 个 token：`--shadow-card`、`--shadow-pop`（`web/src/index.css:34-35`） |
 | 单一主色 | 是（靛蓝） | `--primary: #4f46e5`（浅色）/ `#818cf8`（深色），`--primary-soft: #eef2ff`；success/warning/danger 只作状态色；图表 16 槽独立（`web/src/index.css:141-208`） |
 | emoji 标签 | 无 | `web/src` 无 emoji；图标统一 `lucide-react` |
@@ -20,7 +20,7 @@
 | 图表连线渐变 | 有意设计 | `web/src/components/dashboard/flow-chart.tsx` 的 sankey `lineStyle`（`color: "gradient"`, `opacity: 0.26`）：连线按源/目标色渐变，透明度已压低，不构成发光感；该文件同时承载分流图隐藏阶段的图例交互（§18 工单 01） |
 | toast 遮挡表单 | 已修 | 统一策略在 `web/src/lib/toast-policy.ts`（`TOAST_POSITION="top-right"`、`TOAST_OFFSET={top:80,right:16}`、3000ms、最多 3 条）；`components/ui/sonner.tsx` 的 Toaster 用 `position={TOAST_POSITION}` / 同一 offset，`web/src/main.tsx` 不覆盖。7abfb6b 的 `bottom-right` 方案已废弃（会压住表格底部与 sticky 操作列），本表旧描述已按实际修正 |
 | 控件可读名称 | 已修 | `pages/settings.tsx` 显示名/邮件通知/浏览器通知/周报摘要/个人简介补 `aria-label`；三个通知开关改由 `NOTIFY_PREFS` 列表统一渲染 |
-| 登录页配色 | W6 票12 重设计 | 低对比浅色渐变根容器（静态不动画）+ 三态主题（跟随全站主题状态）+ 登录框三档宽度 384/460/576 + 密码显隐 + 错误区固定预留；`web/src/index.css` 登录域 token 与矮视口压缩契约在位，`pages/login.tsx` 为唯一实现 |
+| 登录页配色 | W6 票12 重设计 / W7 票13 渐变增强 | 可见但克制的多层柔光渐变根容器（3 层 radial 色场 + 极淡纵向承托，静态不动画，单层强度 ≤22%）+ 三态主题（跟随全站主题状态）+ 登录框三档宽度 384/460/576 + 密码显隐 + 错误区固定预留；`web/src/index.css` 登录域 token 与矮视口压缩契约在位，`pages/login.tsx` 为唯一实现 |
 
 ## 复跑方式
 
@@ -230,3 +230,34 @@ node ops/checks/acceptance_browser.mjs --channel msedge --strict   # 单端口 3
 | 18/19 | 模型试验参数 | `reasoning_effort` 七档（default 不传）、`stop`（至多 4 条）/`top_k` 转发、max_output_tokens 后端兜底 | pytest `test_dataplane_contract.py` |
 | 20 | 术语/破折号 | 产品名统一、em/en dash 棘轮（`terminology_baseline.json`） | `terminology_audit.mjs` PASS |
 | 21 | 角色迁移 | key `admin`/`customer`/`reseller`，无 alias；`api/scripts/migrate_roles_w6.py` | pytest `test_role_migration.py` + `test_role_key_audit.py` |
+
+## 20. W7 登录渐变视觉门禁（2026-11-22，票 13）
+
+登录渐变从「低对比 / 有意设计」改为「可见但克制」（W7 spec User Stories 1 至 3、
+Conflict Review C8）。白底、左右布局、三态主题、密码显隐、错误预留位置一律不变，
+只增强背景渐变层：静态、低饱和、多层柔光。
+
+### 口径（验收以截图 + 计算样式为准，不以「类名存在」为准）
+
+| 维度 | 门禁 | 判定方式 |
+| --- | --- | --- |
+| 存在 | 计算样式 ≥3 层 `radial-gradient` 色场 + 底层承托（共 ≥4 层）；`animation-name: none` | 浏览器读根容器 `getComputedStyle(...).backgroundImage` |
+| 可见 | 背景实际像素各采样点最大 RGB 差 ≥14（0 至 255 标度）；浅色底强度不得只剩深色底的一半（≥50%） | 视口截图解码后按区域取平均 RGB |
+| 克制 | 最大 RGB 差 ≤48、单点色度 ≤70（低饱和、无突兀色块） | 同上 |
+| 层次 | 采样色至少 3 簇可分辨（两两差 ≥4）；三态下渐变层数与每层几何一致 | 同上 + 计算样式逐层比对 |
+| 静态 | 间隔 600ms 两次取样像素完全一致 | 同一页面重复取样 |
+| 可读 | 正文压在渐变上 ≥4.5:1、次级文字 ≥3:1、提交按钮文字 vs 按钮底色 ≥4.5:1（WCAG AA） | 隐藏文字后量测该处渐变实际底色再算对比度 |
+| 零位移 | 开/关渐变时登录框、输入、按钮、主题切换、错误槽、提示槽逐像素一致；375/768/1440 三档无横向溢出 | 元素矩形前后比对 |
+
+### 门禁落点
+
+- 浏览器验收：`ops/checks/acceptance/w7_login_gradient.mjs`（自起隔离站点 API 3902 + web 3903，12 条用例）
+- 静态门禁：`web/scripts/check-ui-foundation.mjs`「登录页：可见但克制的多层柔光渐变」（≥3 层 radial、单层强度 ≤22%、根容器带 `data-slot="login-root"`）
+- 响应式：`ops/checks/responsive_matrix.mjs`（375/768/1440 三档无横向溢出）
+
+### 本轮实测（票 13，1440×900）
+
+- 浅色主题：最大 RGB 差 28、可分辨色簇 4；深色主题：38、5 簇；跟随系统（系统深色）：38，都在「可见且克制」区间内。
+- 可读性：正文 浅 16.55:1 / 深 17.94:1；次级文字 3.52:1 / 5.41:1；提交按钮 6.29:1 / 6.43:1。
+- 对照：改动前浅色主题最大 RGB 差仅 11（用户所指的「几乎不可见」），低于 14 的可见下限；深色主题 28。
+

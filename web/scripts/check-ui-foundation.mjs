@@ -2146,18 +2146,31 @@ const loginTagOf = (source, slot) => {
   return source.slice(at, source.indexOf(">", at) + 1);
 };
 
-check("登录页：低对比浅色渐变背景——login-gradient 工具类就位且纯静态不动画", () => {
+check("登录页：可见但克制的多层柔光渐变——login-gradient 工具类就位、纯静态、单层强度受控", () => {
   const css = read("src/index.css");
   expect(css.includes("@utility login-gradient"), "index.css 必须定义 @utility login-gradient");
   const start = css.indexOf("@utility login-gradient");
   const block = css.slice(start, css.indexOf("}", start) + 1);
   expect(block.includes("gradient("), "login-gradient 必须是渐变背景（不是纯色）");
-  expect(block.includes("color-mix(in oklab"), "渐变必须用 color-mix 半透明混合（低对比，不遮正文）");
+  expect(block.includes("color-mix(in oklab"), "渐变必须用 color-mix 半透明混合（低饱和，不遮正文）");
   expect(block.includes("var(--"), "渐变色必须走语义 token，明暗主题自适应");
   expect(!/animation|animate|@keyframes/.test(block), "login-gradient 必须静态：不得含 animation/keyframes（票12：静态不动画）");
+  // W7 票13：多层柔光——至少三层 radial 色场，单层混合强度受上限约束（克制、低饱和）。
+  const layerSegments = block.split(/(?=(?:radial|linear|conic)-gradient\()/g).filter((part) => /gradient\(/.test(part));
+  const radialSegments = layerSegments.filter((part) => part.startsWith("radial-gradient("));
+  expect(radialSegments.length >= 3, "login-gradient 至少要 3 层 radial-gradient 柔光色场，实际 " + radialSegments.length);
+  for (const segment of radialSegments) {
+    const mixes = [...segment.matchAll(/color-mix\(in oklab, var\(--[\w-]+\) (\d+)%, transparent\)/g)].map((m) => Number(m[1]));
+    expect(mixes.length >= 1, "色场层必须用 color-mix 走语义 token 混色：" + segment.trim());
+    for (const percent of mixes) {
+      expect(percent <= 22, "单层色场强度 " + percent + "% 超过 22% 上限（低饱和、克制、不压正文）：" + segment.trim());
+    }
+  }
   const page = read("src/pages/login.tsx");
   expect(page.includes("login-gradient"), "登录页根容器必须使用 login-gradient");
   expect(!page.includes("animate-"), "登录页不得使用任何 animate-* 动效类（背景静态）");
+  // 浏览器验收按 data-slot 选根容器（不以类名存在为准）：截图取样与计算样式落到同一元素。
+  expect(page.includes('data-slot="login-root"'), "登录页根容器必须带 data-slot=login-root（浏览器验收按槽位取样）");
 });
 
 check("登录页：三态主题复用全站 useTheme——不另起 theme 存储，选项带 aria-pressed", async () => {
