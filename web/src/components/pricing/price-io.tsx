@@ -147,7 +147,7 @@ function ImportDialog({ onClose, queryClient }: { onClose: () => void; queryClie
   return (
     <>
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-2xl" onSubmit={() => { if (parsed) setImportConfirm(true); }} submitDisabled={!parsed || importMutation.isPending}>
         <DialogHeader>
           <DialogTitle>导入价目 JSON</DialogTitle>
         </DialogHeader>

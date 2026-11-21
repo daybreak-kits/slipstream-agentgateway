@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fmtMs } from "@/lib/format";
 import { ACTION_ICONS } from "@/lib/icons";
+import { useDialogDraftGuard } from "@/lib/use-dialog-draft-guard";
 import { OneTimeSecretDialog } from "@/components/users/one-time-secret-dialog";
 import { ENDPOINTS, api } from "@/lib/api";
 import { usePermissions } from "@/lib/permissions";
@@ -91,6 +92,17 @@ export function ClientKeysPage() {
 
   /** 签发目标：管理员/分销商取下拉选择；customer 固定为当前登录用户。 */
   const issueTargetId = canPickUser ? issueUserId : (me?.id ?? "");
+
+  // Enter 提交 + 草稿守卫（D11 共享原语）。
+  const issueSubmit = () => {
+    if (!issueOpen || issue.isPending || !issueTargetId) return;
+    issue.mutate({ userId: issueTargetId, name: issueName });
+  };
+  const issueGuard = useDialogDraftGuard({
+    dirty: issueName.trim() !== "" || issueUserId !== "",
+    onClose: () => setIssueOpen(false),
+    description: "新建密钥弹框里已填的名称与选择不会提交，关闭后将丢失。",
+  });
 
   const setStatus = useMutation({
     mutationFn: (vars: { keyId: string; status: "active" | "disabled" }) =>
@@ -234,8 +246,9 @@ export function ClientKeysPage() {
         closedLast={keyClosedLast}
       />
 
-      <Dialog open={issueOpen} onOpenChange={(next) => { if (!next) setIssueOpen(false); }}>
-        <DialogContent className="max-w-md">
+      {issueGuard.confirmNode}
+      <Dialog open={issueOpen} onOpenChange={(next) => { if (!next) issueGuard.requestClose(); }}>
+        <DialogContent className="max-w-md" onSubmit={issueSubmit} submitDisabled={issue.isPending}>
           <DialogHeader>
             <DialogTitle>新建连接密钥</DialogTitle>
             <DialogDescription>
@@ -284,7 +297,7 @@ export function ClientKeysPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIssueOpen(false)} disabled={issue.isPending}>
+            <Button variant="outline" onClick={issueGuard.requestClose} disabled={issue.isPending}>
               取消
             </Button>
             <Button

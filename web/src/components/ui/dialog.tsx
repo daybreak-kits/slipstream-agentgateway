@@ -5,6 +5,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { X } from "lucide-react"
 
 import { DialogOpenerProvider, useDialogOpener, useDialogOpenerRestore } from "@/lib/dialog-opener-focus"
+import { findFirstInput, isComposingEvent, isSelfActivatingTarget } from "@/lib/dialog-keyboard"
 import { cn } from "@/lib/utils"
 
 const Dialog = ({ open, ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) => {
@@ -44,17 +45,62 @@ const DialogContent = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
     /** Set false when the dialog renders its own close control. */
     showCloseButton?: boolean
+    /** Enter 触发的主操作（表单型弹框）；输入法组合中不触发。 */
+    onSubmit?: () => void
+    /** 主操作当前不可用（提交中/校验未过）：Enter 不再发起。 */
+    submitDisabled?: boolean
+    /** 打开后的落焦点：first-input=第一个输入框（默认），auto=第一个可聚焦元素。 */
+    initialFocus?: "first-input" | "auto"
   }
->(({ className, children, showCloseButton = true, onCloseAutoFocus, ...props }, ref) => {
+>(({ className, children, showCloseButton = true, onCloseAutoFocus, onOpenAutoFocus, onKeyDown, onSubmit, submitDisabled = false, initialFocus = "first-input", ...props }, ref) => {
   // A 类受控行为：受控打开（没有 DialogTrigger）时，关闭后由基元把焦点还给打开它的控件。
   const handleCloseAutoFocus = useDialogOpenerRestore(onCloseAutoFocus)
+  const contentRef = React.useRef<HTMLDivElement | null>(null)
+  // 输入法组合状态：组合中的 Enter 只用于选词，不能触发主操作。
+  const composingRef = React.useRef(false)
+
+  const setContentRef = React.useCallback((node: HTMLDivElement | null) => {
+    contentRef.current = node
+    if (typeof ref === "function") ref(node)
+    else if (ref) ref.current = node
+  }, [ref])
+
+  // 表单型弹框默认落在第一个输入框；没有输入框时沿用基元（第一个可聚焦元素）。
+  const handleOpenAutoFocus = React.useCallback((event: Event) => {
+    onOpenAutoFocus?.(event)
+    if (event.defaultPrevented) return
+    if (initialFocus !== "first-input") return
+    const target = findFirstInput(contentRef.current)
+    if (!target) return
+    event.preventDefault()
+    target.focus({ preventScroll: true })
+  }, [initialFocus, onOpenAutoFocus])
+
+  const handleKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    onKeyDown?.(event)
+    if (event.key !== "Enter" || !onSubmit) return
+    if (composingRef.current || isComposingEvent(event)) return
+    const target = event.target as HTMLElement | null
+    if (!target) return
+    // 多行输入里 Enter 只换行；按钮/链接自己被 Enter 激活，都不重复触发主操作。
+    if (target.closest("textarea")) return
+    if (isSelfActivatingTarget(target)) return
+    if (submitDisabled) return
+    event.preventDefault()
+    onSubmit()
+  }, [onKeyDown, onSubmit, submitDisabled])
+
   return (
   <DialogPortal>
     <DialogOverlay />
     <DialogPrimitive.Content
-      ref={ref}
+      ref={setContentRef}
       aria-modal="true"
       onCloseAutoFocus={handleCloseAutoFocus}
+      onOpenAutoFocus={handleOpenAutoFocus}
+      onKeyDown={handleKeyDown}
+      onCompositionStart={() => { composingRef.current = true }}
+      onCompositionEnd={() => { composingRef.current = false }}
       className={cn(
         // 移动端左右各留 16px；高度受视口约束并由内容区滚动，避免短视口/横屏裁掉提交按钮。
         "fixed left-[50%] top-[50%] z-[var(--z-modal)] grid max-h-[min(calc(100dvh-2rem),48rem)] w-[calc(100%-2rem)] max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto overscroll-contain border bg-surface p-6 shadow-pop duration-200 sm:w-full data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] rounded-card",

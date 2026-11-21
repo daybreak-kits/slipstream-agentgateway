@@ -5,7 +5,7 @@ import { toast } from "@/lib/notify";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useDialogDraftGuard } from "@/lib/use-dialog-draft-guard";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -508,8 +508,6 @@ function BatchPriceDialog({
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
   const [markup, setMarkup] = useState("");
-  // W4-G 弹窗草稿守卫：填了内容后 Esc/遮罩/取消不放行，先确认「放弃修改？」。
-  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const numericOf = (raw: string): number | null => {
     const text = raw.trim();
     if (text === "") return null;
@@ -524,12 +522,13 @@ function BatchPriceDialog({
     Number.isNaN(outNum) || (outNum !== null && outNum < 0) ||
     Number.isNaN(markupNum) || (markupNum !== null && (markupNum <= 0 || markupNum > 100));
   const nothingFilled = input.trim() === "" && output.trim() === "" && markup.trim() === "";
-  const dirty = !nothingFilled;
 
-  const requestClose = () => {
-    if (dirty) setConfirmDiscard(true);
-    else onClose();
-  };
+  // W4-G 弹窗草稿守卫（D11 统一实现）：填了内容后 Esc/遮罩/取消先确认「放弃修改？」。
+  const guard = useDialogDraftGuard({
+    dirty: !nothingFilled,
+    onClose,
+    description: "弹窗内已填的批量价目不会写入任何模型，关闭后将丢失。",
+  });
 
   const apply = useMutation({
     mutationFn: async () => {
@@ -564,8 +563,8 @@ function BatchPriceDialog({
 
   return (
     <>
-    <Dialog open onOpenChange={(open) => { if (!open) requestClose(); }}>
-      <DialogContent className="max-w-md">
+    <Dialog open onOpenChange={(open) => { if (!open) guard.requestClose(); }}>
+      <DialogContent className="max-w-md" onSubmit={() => apply.mutate()} submitDisabled={invalid || nothingFilled || apply.isPending}>
         <DialogHeader>
           <DialogTitle>批量改价 · {ids.length} 个上游模型</DialogTitle>
         </DialogHeader>
@@ -611,7 +610,7 @@ function BatchPriceDialog({
           <p className="text-2xs text-danger-text">成本必须是非负数，倍率需在 (0, 100]。</p>
         ) : null}
         <DialogFooter>
-          <Button variant="outline" onClick={requestClose}>取消</Button>
+          <Button variant="outline" onClick={guard.requestClose}>取消</Button>
           <Button
             onClick={() => apply.mutate()}
             disabled={invalid || nothingFilled || apply.isPending}
@@ -621,20 +620,7 @@ function BatchPriceDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-    {confirmDiscard ? (
-      <ConfirmDialog
-        open
-        onOpenChange={(open) => { if (!open) setConfirmDiscard(false); }}
-        title="放弃修改？"
-        description={"弹窗内已填的批量价目不会写入任何模型，关闭后将丢失。"}
-        confirmLabel="放弃修改"
-        destructive
-        onConfirm={() => {
-          setConfirmDiscard(false);
-          onClose();
-        }}
-      />
-    ) : null}
+    {guard.confirmNode}
     </>
   );
 }

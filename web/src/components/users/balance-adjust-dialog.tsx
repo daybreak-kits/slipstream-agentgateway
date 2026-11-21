@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { parseYuanToMicro } from "@/lib/format";
+import { useDialogDraftGuard } from "@/lib/use-dialog-draft-guard";
 
 interface BalanceAdjustDialogProps {
   userName: string;
@@ -56,6 +57,13 @@ export function BalanceAdjustDialog({
   const deltaMicro = parseSignedYuanToMicro(delta);
   const invalid = touched && deltaMicro === null;
 
+  // 填了金额/备注后 Esc/「取消」先确认放弃。
+  const guard = useDialogDraftGuard({
+    dirty: delta !== "" || note !== "",
+    onClose,
+    description: "调整余额弹框里已填的金额与备注不会提交，关闭后将丢失。",
+  });
+
   const submit = () => {
     setTouched(true);
     if (deltaMicro === null || deltaMicro === 0) return;
@@ -63,13 +71,14 @@ export function BalanceAdjustDialog({
   };
 
   return (
+    <>
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (!next) onClose();
+        if (!next) guard.requestClose();
       }}
     >
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md" onSubmit={submit} submitDisabled={pending}>
         <DialogHeader>
           <DialogTitle>调整余额 · {userName}</DialogTitle>
           <DialogDescription>输入带符号金额：正数入账、负数扣减；扣减可把余额变为负数。</DialogDescription>
@@ -107,7 +116,7 @@ export function BalanceAdjustDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={pending}>
+          <Button variant="outline" onClick={guard.requestClose} disabled={pending}>
             取消
           </Button>
           <Button
@@ -119,5 +128,7 @@ export function BalanceAdjustDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {guard.confirmNode}
+    </>
   );
 }

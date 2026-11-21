@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SELECT_NONE_VALUE } from "@/lib/select-sentinels";
+import { useDialogDraftGuard } from "@/lib/use-dialog-draft-guard";
+import { useDirtyFields } from "@/lib/use-dirty-fields";
 
 export interface CreateUserValues {
   name: string;
@@ -62,6 +64,21 @@ export function CreateUserDialog({
   }, [open, roles, role]);
 
   const nameInvalid = touched && name.trim().length === 0;
+  // 打开时的初始值就是基线：改了名称/登录帐户/角色/上级才算脏（Esc 与「取消」先确认放弃）。
+  const initialRole = roles[0]?.key ?? "customer";
+  const baseline = open ? { name: "", username: "", role: initialRole, parentId: SELECT_NONE_VALUE } : null;
+  const { isDirty } = useDirtyFields(baseline, {
+    name,
+    username,
+    role: role === "" ? initialRole : role,
+    parentId,
+  });
+  const guard = useDialogDraftGuard({
+    dirty: isDirty,
+    onClose,
+    description: "新建用户弹框里已填的内容不会提交，关闭后将丢失。",
+  });
+
   const submit = () => {
     setTouched(true);
     if (name.trim().length === 0) return;
@@ -74,13 +91,14 @@ export function CreateUserDialog({
   };
 
   return (
+    <>
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (!next) onClose();
+        if (!next) guard.requestClose();
       }}
     >
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md" onSubmit={submit} submitDisabled={pending}>
         <DialogHeader>
           <DialogTitle>新建用户</DialogTitle>
           <DialogDescription>
@@ -154,7 +172,7 @@ export function CreateUserDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={pending}>
+          <Button variant="outline" onClick={guard.requestClose} disabled={pending}>
             取消
           </Button>
           <Button onClick={submit} disabled={pending || name.trim().length === 0}>
@@ -163,5 +181,7 @@ export function CreateUserDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {guard.confirmNode}
+    </>
   );
 }

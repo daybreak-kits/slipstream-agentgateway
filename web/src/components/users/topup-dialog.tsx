@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { parseYuanToMicro } from "@/lib/format";
+import { useDialogDraftGuard } from "@/lib/use-dialog-draft-guard";
 
 const QUICK_AMOUNTS = ["100", "500", "1000", "5000"];
 
@@ -37,6 +38,13 @@ export function TopupDialog({ userName, open, pending, errorText, onClose, onSub
   const amountMicro = parseYuanToMicro(amount);
   const invalid = touched && amountMicro === null;
 
+  // 填了金额/备注后 Esc/「取消」先确认放弃。
+  const guard = useDialogDraftGuard({
+    dirty: amount !== "" || note !== "",
+    onClose,
+    description: "充值弹框里已填的金额与备注不会提交，关闭后将丢失。",
+  });
+
   const submit = () => {
     setTouched(true);
     if (amountMicro === null) return;
@@ -44,13 +52,14 @@ export function TopupDialog({ userName, open, pending, errorText, onClose, onSub
   };
 
   return (
+    <>
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (!next) onClose();
+        if (!next) guard.requestClose();
       }}
     >
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md" onSubmit={submit} submitDisabled={pending}>
         <DialogHeader>
           <DialogTitle>充值 · {userName}</DialogTitle>
           <DialogDescription>充值会写入账本并下发数据面，余额耗尽后请求返回 429。</DialogDescription>
@@ -102,7 +111,7 @@ export function TopupDialog({ userName, open, pending, errorText, onClose, onSub
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={pending}>
+          <Button variant="outline" onClick={guard.requestClose} disabled={pending}>
             取消
           </Button>
           <Button onClick={submit} disabled={pending || amountMicro === null}>
@@ -111,5 +120,7 @@ export function TopupDialog({ userName, open, pending, errorText, onClose, onSub
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {guard.confirmNode}
+    </>
   );
 }
