@@ -136,8 +136,8 @@ def test_attempt_endpoint_returns_attempts_and_resolves_upstream_name(
         "ups_test",
     ]
     assert [attempt["upstream_name"] for attempt in body["attempts"]] == [
-        "testv-01",
-        "testv-01",
+        "upstream-example",
+        "upstream-example",
     ]
     assert [attempt["status_code"] for attempt in body["attempts"]] == [500, 200]
     assert [attempt["outcome"] for attempt in body["attempts"]] == ["error", "ok"]

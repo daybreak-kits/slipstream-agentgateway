@@ -8,21 +8,13 @@ from conftest import seed_channel
 from l05_service import upstream_ops
 
 
-def _vendor(client, slug: str = "acme") -> str:
-    response = client.post(
-        "/admin/vendors", json={"name": f"Acme {slug}", "slug": slug}
-    )
-    assert response.status_code == 201, response.text
-    return response.json()["id"]
-
-
-def _upstream(client, vendor_id: str, *, key: str = "sk-initial") -> dict:
-    # No explicit name: it would now be honoured (ADR-023 #6) and clash within
-    # one test, so vendor-scoped upstreams get the generated {slug}-NN instead.
+def _upstream(client, *, key: str = "sk-initial") -> dict:
+    # ADR-030: no vendor dimension - the name derives from the base_url and
+    # dedupes with a numeric suffix, so several upstreams in one test stay
+    # distinct without any explicit name.
     response = client.post(
         "/admin/upstreams",
         json={
-            "vendor_id": vendor_id,
             "base_url": "https://api.example/v1",
             "api_style": "openai_chat",
             "api_key": key,
@@ -39,7 +31,7 @@ def _keys(client, upstream_id: str) -> dict:
 
 
 def test_new_upstream_has_one_masked_key(client):
-    upstream = _upstream(client, _vendor(client))
+    upstream = _upstream(client)
     keys = _keys(client, upstream["id"])
     assert keys["limit"] == 20
     assert len(keys["items"]) == 1
@@ -61,7 +53,7 @@ def test_new_upstream_has_one_masked_key(client):
 
 
 def test_key_add_patch_and_delete_stay_equal_peers(client):
-    upstream = _upstream(client, _vendor(client))
+    upstream = _upstream(client)
     upstream_id = upstream["id"]
 
     added = client.post(
@@ -107,7 +99,7 @@ def test_key_add_patch_and_delete_stay_equal_peers(client):
 
 
 def test_batch_delete_reports_per_key_and_keeps_the_last(client):
-    upstream_id = _upstream(client, _vendor(client))["id"]
+    upstream_id = _upstream(client)["id"]
     initial = _keys(client, upstream_id)["items"][0]["id"]
     ids = []
     for index in range(2):
@@ -161,7 +153,7 @@ def test_key_test_reports_and_persists_per_key(client, monkeypatch):
         return 200, ["glm-5.3"], 5
 
     monkeypatch.setattr(upstream_ops, "fetch_models", fake_fetch_models)
-    upstream_id = _upstream(client, _vendor(client), key="sk-bad-9999")["id"]
+    upstream_id = _upstream(client, key="sk-bad-9999")["id"]
     good = client.post(
         f"/admin/upstreams/{upstream_id}/keys",
         json={"label": "good", "api_key": "sk-good-0001"},
@@ -253,7 +245,7 @@ def test_pre_migration_inline_key_is_not_surfaced_as_a_synthetic_row(
 
 
 def test_key_cap_is_twenty_and_last_key_is_protected(client):
-    upstream_id = _upstream(client, _vendor(client))["id"]
+    upstream_id = _upstream(client)["id"]
     for index in range(19):
         response = client.post(
             f"/admin/upstreams/{upstream_id}/keys",
@@ -269,7 +261,7 @@ def test_key_cap_is_twenty_and_last_key_is_protected(client):
     assert overflow.status_code == 409
     assert "20" in overflow.json()["message"]
 
-    fresh_id = _upstream(client, _vendor(client, "solo"), key="sk-solo-1111")["id"]
+    fresh_id = _upstream(client, key="sk-solo-1111")["id"]
     only_key = _keys(client, fresh_id)["items"][0]
     blocked = client.delete(f"/admin/upstreams/{fresh_id}/keys/{only_key['id']}")
     assert blocked.status_code == 409
@@ -284,7 +276,7 @@ def test_connection_and_discovery_share_the_probe_record(client, monkeypatch):
         return 200, ["glm-5.3", "deepseek-v3"], 7
 
     monkeypatch.setattr(upstream_ops, "fetch_models", fake_fetch_models)
-    upstream_id = _upstream(client, _vendor(client), key="sk-probe-7777")["id"]
+    upstream_id = _upstream(client, key="sk-probe-7777")["id"]
 
     tested = client.post(f"/admin/upstreams/{upstream_id}/test-connection")
     assert tested.status_code == 200, tested.text
@@ -325,7 +317,7 @@ def test_failed_probe_is_reported_not_raised(client, monkeypatch):
         return 401, [], 12
 
     monkeypatch.setattr(upstream_ops, "fetch_models", fake_fetch_models)
-    upstream_id = _upstream(client, _vendor(client))["id"]
+    upstream_id = _upstream(client)["id"]
     response = client.post(f"/admin/upstreams/{upstream_id}/test-connection")
     assert response.status_code == 200
     assert response.json()["status"] == "error"
@@ -344,7 +336,7 @@ def test_delete_blocked_when_a_public_model_references_it(client, engine_and_ses
 
 
 def test_delete_removes_keys_and_models_for_an_unreferenced_upstream(client):
-    upstream_id = _upstream(client, _vendor(client))["id"]
+    upstream_id = _upstream(client)["id"]
     client.post(
         f"/admin/upstreams/{upstream_id}/import-models", json={"names": ["m1"]}
     )
@@ -356,9 +348,8 @@ def test_delete_removes_keys_and_models_for_an_unreferenced_upstream(client):
 
 
 def test_batch_enable_disable_delete_with_per_item_report(client, engine_and_sessionmaker):
-    vendor_id = _vendor(client, "batchv")
-    first = _upstream(client, vendor_id, key="sk-a-1111")["id"]
-    second = _upstream(client, vendor_id, key="sk-b-2222")["id"]
+    first = _upstream(client, key="sk-a-1111")["id"]
+    second = _upstream(client, key="sk-b-2222")["id"]
 
     disabled = client.patch(
         "/admin/upstreams/batch",
@@ -485,7 +476,6 @@ def test_create_with_auto_resolves_and_records_the_detection(client, monkeypatch
     response = client.post(
         "/admin/upstreams",
         json={
-            "vendor_id": _vendor(client, "autov"),
             "base_url": "https://api.example/v1",
             "api_style": "auto",
             "api_key": "sk-auto-1111",
@@ -521,11 +511,9 @@ def test_create_with_auto_fails_422_with_per_protocol_reasons(client, monkeypatc
     monkeypatch.setattr(
         upstream_ops, "detect_api_style", lambda **kw: _detect_result(None, steps)
     )
-    vendor_id = _vendor(client, "autofail")
     response = client.post(
         "/admin/upstreams",
         json={
-            "vendor_id": vendor_id,
             "base_url": "https://api.example/v1",
             "api_style": "auto",
             "api_key": "sk-auto-2222",
@@ -539,22 +527,21 @@ def test_create_with_auto_fails_422_with_per_protocol_reasons(client, monkeypatc
         "anthropic_messages",
         "gemini",
     ]
-    # nothing was created and the same vendor's counter did not move
+    # nothing was created: the retry derives its name from the base_url
     retry = client.post(
         "/admin/upstreams",
         json={
-            "vendor_id": vendor_id,
             "base_url": "https://api.example/v1",
             "api_style": "openai_chat",
             "api_key": "sk-plain-4444",
         },
     )
     assert retry.status_code == 201, retry.text
-    assert retry.json()["name"] == "autofail-01"
+    assert retry.json()["name"] == "api-example"
 
 
 def test_patch_with_auto_resolves_against_the_stored_key(client, monkeypatch):
-    upstream = _upstream(client, _vendor(client, "autoup"), key="sk-patch-3333")
+    upstream = _upstream(client, key="sk-patch-3333")
     seen: dict = {}
 
     def fake_detect(*, base_url, api_key, timeout_s=8.0):
@@ -574,7 +561,7 @@ def test_patch_with_auto_resolves_against_the_stored_key(client, monkeypatch):
 
 
 def test_discover_models_with_auto_returns_protocol_and_steps(client, monkeypatch):
-    upstream_id = _upstream(client, _vendor(client))["id"]
+    upstream_id = _upstream(client)["id"]
     steps = [
         {"order": 1, "protocol": "openai_chat", "method": "GET", "url": "u1",
          "http_status": 401, "latency_ms": 2, "ok": False, "detail": "HTTP 401"},
@@ -605,7 +592,7 @@ def test_discover_and_test_connection_keep_legacy_fields_for_a_fixed_style(
         return 200, ["glm-5.3"], 7
 
     monkeypatch.setattr(upstream_ops, "fetch_models", fake_fetch_models)
-    upstream_id = _upstream(client, _vendor(client, "legacyv"))["id"]
+    upstream_id = _upstream(client)["id"]
 
     tested = client.post(f"/admin/upstreams/{upstream_id}/test-connection")
     assert tested.status_code == 200, tested.text
@@ -641,7 +628,7 @@ def test_probe_request_can_override_the_style_for_one_call(client, monkeypatch):
         return 200, ["claude-x"], 4
 
     monkeypatch.setattr(upstream_ops, "fetch_models", fake_fetch_models)
-    upstream_id = _upstream(client, _vendor(client, "override"))["id"]
+    upstream_id = _upstream(client)["id"]
     response = client.post(
         f"/admin/upstreams/{upstream_id}/discover-models",
         json={"api_style": "anthropic_messages"},
@@ -660,7 +647,7 @@ def test_auto_probe_failure_is_reported_not_raised(client, monkeypatch):
     monkeypatch.setattr(
         upstream_ops, "detect_api_style", lambda **kw: _detect_result(None, steps)
     )
-    upstream_id = _upstream(client, _vendor(client, "autodown"))["id"]
+    upstream_id = _upstream(client)["id"]
     response = client.post(
         f"/admin/upstreams/{upstream_id}/test-connection", json={"api_style": "auto"}
     )
@@ -674,7 +661,7 @@ def test_auto_probe_failure_is_reported_not_raised(client, monkeypatch):
 
 
 def test_unknown_probe_style_is_rejected(client):
-    upstream_id = _upstream(client, _vendor(client, "badstyle"))["id"]
+    upstream_id = _upstream(client)["id"]
     response = client.post(
         f"/admin/upstreams/{upstream_id}/test-connection", json={"api_style": "nope"}
     )
@@ -683,7 +670,7 @@ def test_unknown_probe_style_is_rejected(client):
 
 
 # --------------------------------------------------------------- ADR-023 #6:
-# 厂商可选 + 名称由连接地址生成（工单 D）。vendor_id 缺省时名称不依赖厂商 slug。
+# 名称由连接地址生成（工单 D + ADR-030）。名称即上游标志，重名 422，可手改。
 
 
 def _bare_upstream(client, base_url: str, **extra) -> dict:
@@ -695,9 +682,8 @@ def _bare_upstream(client, base_url: str, **extra) -> dict:
     return response.json()
 
 
-def test_vendorless_upstream_generates_name_from_base_url(client):
+def test_upstream_generates_name_from_base_url(client):
     upstream = _bare_upstream(client, "https://www.abc.com:8080/v1")
-    assert upstream["vendor_id"] is None
     assert upstream["name"] == "www-abc-com-8080"
 
     # 默认端口去掉；非 [a-z0-9] 字符折叠为 -
@@ -709,7 +695,7 @@ def test_vendorless_upstream_generates_name_from_base_url(client):
     assert kept["name"] == "10-0-0-9-8000"
 
 
-def test_vendorless_names_dedupe_with_numeric_suffix(client):
+def test_generated_names_dedupe_with_numeric_suffix(client):
     first = _bare_upstream(client, "https://www.abc.com:8080/v1")
     second = _bare_upstream(client, "https://www.abc.com:8080/v1")
     assert (first["name"], second["name"]) == ("www-abc-com-8080", "www-abc-com-8080-2")
@@ -731,28 +717,6 @@ def test_explicit_name_wins_and_duplicates_are_422(client):
     )
     assert clash.status_code == 422
     assert "already exists" in clash.json()["message"]
-
-
-def test_explicit_vendor_keeps_the_slug_counter(client):
-    vendor_id = _vendor(client, "acme")
-    second = _bare_upstream(client, "https://acme.example/v1", vendor_id=vendor_id)
-    third = _bare_upstream(client, "https://acme.example/v1", vendor_id=vendor_id)
-    # 未带 name 时沿用 {slug}-NN 计数器；计数器只在这条路径递增
-    assert (second["name"], third["name"]) == ("acme-01", "acme-02")
-    assert second["vendor_id"] == vendor_id
-
-
-def test_unknown_vendor_id_is_still_404(client):
-    response = client.post(
-        "/admin/upstreams",
-        json={
-            "vendor_id": "vend_missing",
-            "base_url": "https://x.example/v1",
-            "api_style": "openai_chat",
-            "api_key": "sk-x",
-        },
-    )
-    assert response.status_code == 404
 
 
 def test_discover_models_route_is_registered_exactly_once(client):

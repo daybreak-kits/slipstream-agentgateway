@@ -20,7 +20,7 @@ from sqlalchemy.pool import StaticPool
 
 from l01_core.timeutil import now_ms
 from l04_repo.base import init_db
-from l04_repo.orm import FxSnapshotORM, UpstreamModelORM, UpstreamORM, VendorORM
+from l04_repo.orm import FxSnapshotORM, UpstreamModelORM, UpstreamORM
 from l05_service import models_dev
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "models_dev_api.json"
@@ -38,10 +38,9 @@ def session_factory():
     init_db(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False, future=True)
     with factory() as session:
-        session.add(VendorORM(id="v1", name="V", slug="v", created_at_ms=now_ms()))
         session.add(
             UpstreamORM(
-                id="u1", vendor_id="v1", name="up", base_url="https://x", created_at_ms=now_ms()
+                id="u1", name="up", base_url="https://x", created_at_ms=now_ms()
             )
         )
         session.add(

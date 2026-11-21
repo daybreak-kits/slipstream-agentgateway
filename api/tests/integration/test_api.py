@@ -21,8 +21,8 @@ def test_health(client):
 
 def test_rbac_customer_cannot_write(client, login_cookies):
     response = client.post(
-        "/admin/vendors",
-        json={"name": "V", "slug": "v"},
+        "/admin/upstreams",
+        json={"base_url": "https://v.example/v1", "api_style": "openai_chat", "api_key": "sk-v"},
         cookies=login_cookies("customer"),
     )
     assert response.status_code == 403
@@ -31,16 +31,16 @@ def test_rbac_customer_cannot_write(client, login_cookies):
 
 def test_rbac_unknown_role_rejected(anon_client):
     # Header spoofing is no longer an identity source: no cookie means 401.
-    response = anon_client.get("/admin/vendors", headers={"X-Admin-Role": "superboss"})
+    response = anon_client.get("/admin/upstreams", headers={"X-Admin-Role": "superboss"})
     assert response.status_code == 401
 
 
 def test_pagination_tiers(client, engine_and_sessionmaker):
     engine, factory = engine_and_sessionmaker
     seed_channel(engine, factory)
-    ok = client.get("/admin/vendors", params={"page_size": 200})
+    ok = client.get("/admin/upstreams", params={"page_size": 200})
     assert ok.status_code == 200
-    bad = client.get("/admin/vendors", params={"page_size": 30})
+    bad = client.get("/admin/upstreams", params={"page_size": 30})
     assert bad.status_code == 422
     assert bad.json()["code"] == "VALIDATION_ERROR"
 
@@ -133,17 +133,3 @@ def test_balance_topup_books_ledger_and_user(client, engine_and_sessionmaker):
     assert "topup" in {row["kind"] for row in ledger.json()}
     user = client.get(f"/admin/users/{ids['user_id']}")
     assert user.json()["balance_micro"] == 50_000_500
-
-
-def test_vendor_crud_flow(client):
-    created = client.post(
-        "/admin/vendors", json={"name": "Vendor One", "slug": "vendor-one"},
-    )
-    assert created.status_code == 201
-    vid = created.json()["id"]
-    patched = client.patch(
-        f"/admin/vendors/{vid}", json={"note": "hello"},
-    )
-    assert patched.json()["note"] == "hello"
-    deleted = client.delete(f"/admin/vendors/{vid}")
-    assert deleted.status_code == 204

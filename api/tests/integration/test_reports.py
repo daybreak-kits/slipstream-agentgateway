@@ -39,7 +39,6 @@ def _cost(session, *, rid: str, amount: int, currency: str, at_ms: int) -> None:
         CostEntryORM(
             id=rid,
             gateway_event_id="evt_" + rid,
-            vendor_id="vend_1",
             upstream_model_id="umdl_1",
             input_tokens=10,
             output_tokens=5,

@@ -26,7 +26,6 @@ from l04_repo.orm import (
     UpstreamModelORM,
     UpstreamORM,
     UserORM,
-    VendorORM,
 )
 from l05_service import auth
 from l05_service.client_keys import issue_client_key
@@ -359,19 +358,17 @@ def login_cookies(engine_and_sessionmaker):
 
 
 def seed_channel(engine, session_factory, *, transforms=None) -> dict:
-    """Seed vendor + upstream(+transforms) + model chain + one user/key; returns ids."""
+    """Seed upstream(+transforms) + model chain + one user/key; returns ids.
+
+    ADR-030: no vendor dimension - the upstream name derives from the base_url.
+    """
     from l01_core.timeutil import now_ms
 
     with session_factory() as session:
-        vendor = VendorORM(
-            id="vend_test", name="Test Vendor", slug="testv", created_at_ms=now_ms()
-        )
-        session.add(vendor)
         secret_box = SecretBox("test-secret")
         upstream = UpstreamORM(
             id="ups_test",
-            vendor_id=vendor.id,
-            name="testv-01",
+            name="upstream-example",
             base_url="https://upstream.example/v1",
             api_style="openai_chat",
             # ADR-026: the inline column is retired; the key row below is what
@@ -418,7 +415,6 @@ def seed_channel(engine, session_factory, *, transforms=None) -> dict:
         issued = issue_client_key(session, user_id=user.id, box=AesGcmBox("test-secret"))
         session.commit()
         return {
-            "vendor_id": vendor.id,
             "upstream_id": upstream.id,
             "upstream_model_id": model.id,
             "public_id": public.id,

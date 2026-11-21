@@ -672,12 +672,12 @@ def seeded(engine_and_sessionmaker, monkeypatch):
         session.add(UserORM(id="usr_b", name="Bob", created_at_ms=AT))
         session.add(
             UpstreamORM(
-                id="ups_a", vendor_id="v", name="青岚云", base_url="https://a", created_at_ms=AT
+                id="ups_a", name="青岚云", base_url="https://a", created_at_ms=AT
             )
         )
         session.add(
             UpstreamORM(
-                id="ups_b", vendor_id="v", name="星环", base_url="https://b", created_at_ms=AT
+                id="ups_b", name="星环", base_url="https://b", created_at_ms=AT
             )
         )
         session.add(

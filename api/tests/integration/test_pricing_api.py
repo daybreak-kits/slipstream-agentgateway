@@ -305,8 +305,7 @@ def test_unpriced_cache_costs_nothing_but_input_output_still_bill(
         session.add(
             UpstreamPriceORM(
                 id="upr_cache",
-                vendor_id=seed["vendor_id"],
-                upstream_model="glm-5.3",
+                upstream_model_id=seed["upstream_model_id"],
                 item="cache_read",
                 unit_price_micro=1_000_000,
                 currency="CNY",
