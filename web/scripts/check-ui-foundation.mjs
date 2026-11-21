@@ -771,7 +771,7 @@ check("模型管理：两张表都接入行色与关闭置尾（rowTone + closed
   );
 });
 
-check("模型管理：状态列按规则收敛——公开模型删只表达启停的状态列，上游模型保留（冷却/周期为额外状态）", () => {
+check("模型管理：两张表都删掉状态列——状态改由行底色 + 操作文案 + 名字旁状态图标表达（W7 ticket 10）", () => {
   const text = read("src/pages/models.tsx");
   const upstreamStart = text.indexOf("function UpstreamTab");
   const publicStart = text.indexOf("function PublicTab");
@@ -779,11 +779,59 @@ check("模型管理：状态列按规则收敛——公开模型删只表达启�
   const upstreamSlice = text.slice(upstreamStart, publicStart);
   const publicSlice = text.slice(publicStart);
   expect(
-    !publicSlice.includes('key: "status"'),
-    "公开模型不得保留只表达启停的状态列（user story 40 + ADR-025：公开模型只有启停）",
+    !upstreamSlice.includes('key: "status"'),
+    "上游模型表不得保留状态列（与操作列启停按钮重复；spec C11：用户已明确删除重复状态列）",
   );
-  expect(upstreamSlice.includes('key: "status"'), "上游模型状态列必须保留（冷却截止/周期规则/渠道联动关闭属额外状态）");
-  expect(upstreamSlice.includes("周期："), "上游状态列保留周期规则摘要");
+  expect(
+    !publicSlice.includes('key: "status"'),
+    "公开模型表不得保留状态列（与操作列启停按钮重复）",
+  );
+  // 状态信息不能跟着列一起消失：名字旁出图标，周期规则摘要搬进名字格。
+  expect(upstreamSlice.includes("StatusIcon"), "上游模型名旁必须挂状态图标（normal 不出图标）");
+  expect(publicSlice.includes("StatusIcon"), "公开模型名旁必须挂状态图标");
+  expect(upstreamSlice.includes("周期："), "周期规则摘要必须保留（随状态列删除搬到模型名下方）");
+});
+
+check("状态图标：normal 不出图标；closed/cooling/unknown 三态图标 + 悬浮文案（冷却时间 yyyy-mm-dd hh:mm:ss）", async () => {
+  const { StatusIcon } = await load("/src/components/ui/status-icon.tsx");
+  const normal = render(createElement(StatusIcon, { kind: "normal" }));
+  expect(!normal.includes("data-status-icon"), "normal 状态不得渲染状态图标");
+  expect(!normal.includes("<svg"), "normal 状态不得留下图标占位（正常模型不增加视觉噪音）");
+
+  const closed = render(createElement(StatusIcon, { kind: "closed" }));
+  expect(closed.includes('data-status-icon="closed"'), "关闭态必须渲染 closed 状态图标");
+  expect(closed.includes('aria-label="已关闭，人工启用后恢复"'), "关闭态悬浮文案必须是「已关闭，人工启用后恢复」");
+  expect(closed.includes("lucide-ban"), "关闭态图标必须是 Ban");
+  expect(closed.includes('data-hover-info="trigger"'), "状态图标必须挂统一悬浮详情触发元素");
+  expect(closed.includes('tabindex="0"'), "状态图标必须可聚焦（键盘用户要能读到状态）");
+
+  const cooling = render(createElement(StatusIcon, { kind: "cooling", cooldownUntilMs: 1795000000000 }));
+  expect(cooling.includes('data-status-icon="cooling"'), "冷却态必须渲染 cooling 状态图标");
+  expect(
+    /aria-label="冷却中，\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} 后解除"/.test(cooling),
+    "冷却态悬浮文案必须是「冷却中，yyyy-mm-dd hh:mm:ss 后解除」，实际：" + cooling,
+  );
+  expect(cooling.includes("lucide-snowflake"), "冷却态图标必须是 Snowflake");
+
+  const unknown = render(createElement(StatusIcon, { kind: "unknown" }));
+  expect(unknown.includes('data-status-icon="unknown"'), "未知态必须渲染 unknown 状态图标");
+  expect(unknown.includes('aria-label="状态未知"'), "未知态悬浮文案必须是「状态未知」");
+});
+
+check("模型状态投影：normal/cooling/closed 直出；控制台不认识的状态判 unknown（不装作正常）", async () => {
+  const { modelStatusKind } = await load("/src/components/models/availability.ts");
+  expect(modelStatusKind({ enabled: true, availability: { state: "normal" } }) === "normal", "normal 必须直出 normal");
+  expect(modelStatusKind({ enabled: false, availability: { state: "closed" } }) === "closed", "closed 必须直出 closed");
+  expect(
+    modelStatusKind({ enabled: true, availability: { state: "cooling", cooldown_until_ms: Date.now() + 60000 } }) === "cooling",
+    "cooling 必须直出 cooling",
+  );
+  expect(
+    modelStatusKind({ enabled: true, availability: { state: "degraded" } }) === "unknown",
+    "控制台不认识的状态必须判 unknown（不能装作正常）",
+  );
+  expect(modelStatusKind({ enabled: false }) === "closed", "没有投影时按行自身的启停兜底");
+  expect(modelStatusKind({}) === "unknown", "既没有投影也没有启停信息时判 unknown");
 });
 
 check("模型管理：操作列内容单行不换行——flex-wrap 会把末按钮甩到第二行左缘，贴边失效（768 实测 149px）", () => {
@@ -821,11 +869,22 @@ check("连接密钥：状态列只表达启停 → 删除重复状态列；关�
   expect(text.includes("rowTone={keyRowTone}"), "连接密钥必须传 rowTone={keyRowTone}（关闭行微灰）");
 });
 
-check("用户管理：关闭行置尾仅列表视图生效（树视图排除），状态列保留（已删除是额外终态）", () => {
+check("用户管理：状态列删除（与操作列启停重复）——状态由行底色 + 操作文案表达", () => {
   const text = read("src/components/users/users-panel.tsx");
-  expect(text.includes('accessorKey: "status"'), "用户状态列必须保留：deleted 是额外终态，不只是启停（user story 40 只删纯启停列）");
-  expect(text.includes('closedLast={view === "list" ? userClosedLast : undefined}'), "closedLast 必须只在不列表视图传入：树视图保持层级顺序不置尾（user story 42）");
+  expect(!text.includes('accessorKey: "status"'), "用户表不得保留状态列（与操作列启停按钮重复；spec C11）");
+  expect(!text.includes('status: "状态"'), "列设置菜单里不得再有「状态」项（列已删）");
+  expect(text.includes("closedLast={view === \"list\" ? userClosedLast : undefined}"), "closedLast 必须只在不列表视图传入：树视图保持层级顺序不置尾（user story 42）");
   expect(text.includes("rowTone={userRowTone}"), "用户表必须传 rowTone={userRowTone}（关闭/已删除行微灰）");
+  // 状态没跟着列一起丢：关闭/已删除由行底色与操作文案表达。
+  expect(text.includes("已删除"), "已删除用户仍要在操作列给出「已删除」文案");
+  expect(text.includes('disabledNow ? "启用" : "关闭"'), "操作列的启停文案必须随状态切换");
+});
+
+check("上游渠道：状态列已下线（与操作列启停重复），状态由行底色 + 操作文案 + 名称徽标表达", () => {
+  const text = read("src/pages/upstreams.tsx");
+  expect(!text.includes('accessorKey: "enabled"'), "上游渠道表不得有状态列");
+  expect(text.includes("rowTone={upstreamRowTone}"), "上游渠道表必须传 rowTone={upstreamRowTone}（关闭行微灰）");
+  expect(text.includes("partitionClosedLast("), "关闭上游仍要整页置尾");
 });
 
 check("上游渠道：server 分页模式页面层先分区再切片——关闭行排到最后一页，行色微灰", () => {

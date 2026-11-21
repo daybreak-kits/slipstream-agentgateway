@@ -5,7 +5,7 @@ import { ApiError, api, ENDPOINTS } from "@/lib/api";
 import type { TableRowTone } from "@/lib/table-columns";
 import { formatDateTime, useTimezone, type TimezoneMode } from "@/lib/time";
 import type {
-  AvailabilityRule, CooldownRecurrence, ModelAvailability, ModelBatchResult,
+  AvailabilityRule, CooldownRecurrence, ModelAvailability, ModelBatchResult, ModelStatusKind,
 } from "@/types";
 
 /** 冷却对话框的默认值：1 小时（预设首位）；到期后读取即自愈。 */
@@ -172,6 +172,29 @@ export function availabilityTone(row: { enabled: boolean; cooldown_until_ms?: nu
   // 「已关闭」用 warning 语义色（DESIGN-AUDIT 四期 §16 / W4-A1）：中性灰不表达「被人为关闭」的警示。
   if (row.availability?.state === "closed" || !row.enabled) return "warning";
   return "success";
+}
+
+/**
+ * 行状态 → 状态图标（W7 ticket 10 · spec User Story 34/35）：
+ * 模型状态由既有可用性投影（normal/cooling/closed）给出，前端只按状态渲染图标与详情，
+ * 不新增后端字段（spec「API 与契约-状态相关」）。
+ *
+ * 控制台不认识的状态（后端新增了第四种）判为 unknown——不装作正常，明说未知。
+ * 完全没有投影时才按行自身的启停与冷却截止兜底。
+ */
+export function modelStatusKind(row: {
+  enabled?: boolean;
+  cooldown_until_ms?: number;
+  availability?: ModelAvailability;
+}): ModelStatusKind {
+  const state = row.availability?.state;
+  if (state === "normal") return "normal";
+  if (state === "cooling") return "cooling";
+  if (state === "closed") return "closed";
+  if (state !== undefined) return "unknown";
+  if (row.enabled === undefined) return "unknown";
+  if (!row.enabled) return "closed";
+  return coolingUntil(row) > Date.now() ? "cooling" : "normal";
 }
 
 /**

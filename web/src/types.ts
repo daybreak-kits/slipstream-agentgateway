@@ -107,6 +107,9 @@ export interface ModelAvailability {
   cooldown_until_ms?: number;
 }
 
+/** 状态图标的渲染态（W7 ticket 10）：normal 不出图标；unknown = 控制台不认识的状态（不装作正常）。 */
+export type ModelStatusKind = "normal" | "cooling" | "closed" | "unknown";
+
 /** 旧系统 channel_models.parameters：0 表示未声明，输入/输出类型各至少 1 个。 */
 export interface ModelParameters {
   max_input_tokens: number;
