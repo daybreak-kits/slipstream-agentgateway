@@ -93,6 +93,11 @@ export function createIsolatedSite(options) {
           },
         );
         proxyReq.on("error", () => {
+          // 响应已经开始（或客户端已断开）时不能再写头，否则整个检查进程会被带崩。
+          if (res.headersSent) {
+            res.end();
+            return;
+          }
           res.writeHead(502, { "content-type": "application/json" });
           res.end(JSON.stringify({ error: { message: "isolated api unreachable" } }));
         });
