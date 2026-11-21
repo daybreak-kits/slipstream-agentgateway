@@ -26,6 +26,10 @@
  *   7. 375 用 CDP 模拟粗指针，断言按钮触控目标 ≥44px、表格行高 ≥40px；
  *   8. 静态断点审计：只允许 Tailwind 默认断点，禁止 --breakpoint-* 自定义 token
  *      与 min-[…]/max-[…] 裸断点；图表/表格响应式容器 token 必须在位。
+ *   9. （W6 ticket 12）登录页专项（未登录独立上下文）：375/667×375/768/1536 四档
+ *      三态主题切换与持久化、登录框三档宽度 384/460/576、密码显隐 aria-pressed、
+ *      登录失败错误区固定 h-10 按钮零位移 + 字段标红 + 详情进通知中心、
+ *      667×375 横屏提交按钮免滚可见可点、登录成功/失败流程回归。
  *
  * 运行：
  *   node ops/checks/responsive_matrix.mjs                 # 自动在 3777 起隔离站点
@@ -1261,6 +1265,217 @@ async function assertMemberBoard(page, width, fixtures) {
   return "行内字段随策略收敛、脏计数联动、chip 加入/移除往返、搜索固定" + (width >= 1024 ? "、大列表高度有界" : "");
 }
 
+/* W6 ticket 12：登录页专项——三态主题（复用全站 slipstream.theme 存储）、登录框三档
+ * 宽度（384/460/576）、密码显隐、错误零位移（错误区固定 h-10 + 字段 aria-invalid +
+ * 失败详情进通知中心）、667×375 横屏免滚可见提交按钮、成功/失败流程回归。
+ * 全部跑在未登录的独立上下文里，不污染主矩阵的已登录会话。 */
+async function openLoginContext(width, height) {
+  const context = await browser.newContext({
+    viewport: { width, height },
+    baseURL: baseUrl(),
+    locale: "zh-CN",
+  });
+  const loginPage = await context.newPage();
+  loginPage.setDefaultTimeout(PLAYWRIGHT_TIMEOUT);
+  await loginPage.goto(baseUrl() + "/login", { waitUntil: "domcontentloaded", timeout: 30_000 });
+  await loginPage.waitForTimeout(400);
+  return { context, loginPage };
+}
+
+async function assertLoginTheme(width, height) {
+  const { context, loginPage } = await openLoginContext(width, height);
+  try {
+    const switcher = loginPage.locator('[data-slot="login-theme"]');
+    assert(await visible(switcher), width + " 下登录页主题切换器不可见");
+    for (const name of ["浅色", "深色", "跟随系统"]) {
+      assert(await visible(loginPage.getByRole("button", { name, exact: true })), width + " 下主题选项不可见：" + name);
+    }
+    const stored = () => loginPage.evaluate(() => localStorage.getItem("slipstream.theme"));
+    const isDark = () => loginPage.evaluate(() => document.documentElement.classList.contains("dark"));
+    // 深色：显式选择立即生效并持久化（全站 slipstream.theme，不另起存储）。
+    await loginPage.getByRole("button", { name: "深色", exact: true }).click();
+    await loginPage.waitForTimeout(250);
+    assert(await isDark(), width + " 下选深色后 html 未切 .dark");
+    assert((await stored()) === "dark", width + " 下选深色后 slipstream.theme 未持久化为 dark");
+    // 刷新后仍是深色：持久化生效（index.html 反闪烁脚本同源，刷新无白闪回退）。
+    await loginPage.reload({ waitUntil: "domcontentloaded" });
+    await loginPage.waitForTimeout(400);
+    assert(await isDark(), width + " 下刷新后深色主题丢失（持久化失效）");
+    assert(await visible(switcher), width + " 下刷新后主题切换器不可见");
+    // 跟随系统：矩阵默认 prefers-color-scheme=light → 应回落浅色。
+    await loginPage.getByRole("button", { name: "跟随系统", exact: true }).click();
+    await loginPage.waitForTimeout(250);
+    assert(!(await isDark()), width + " 下跟随系统应回落浅色（矩阵 prefers-color-scheme=light）");
+    assert((await stored()) === "system", width + " 下跟随系统未持久化为 system");
+    // 浅色：显式选择。
+    await loginPage.getByRole("button", { name: "浅色", exact: true }).click();
+    await loginPage.waitForTimeout(250);
+    assert(!(await isDark()), width + " 下选浅色后 html 仍有 .dark");
+    assert((await stored()) === "light", width + " 下选浅色未持久化为 light");
+    await shot(loginPage, "login-theme-" + width);
+    return "深色生效+持久化、刷新保持、跟随系统回落浅色、浅色生效（slipstream.theme 全站同源）";
+  } finally {
+    await context.close().catch(() => {});
+  }
+}
+
+async function assertLoginWidths() {
+  const cases = [
+    { width: 640, height: 900, expect: 384, tier: "基础 384" },
+    { width: 768, height: 1024, expect: 460, tier: "md 460" },
+    { width: 1536, height: 864, expect: 576, tier: "2xl 576" },
+  ];
+  const measured = [];
+  for (const item of cases) {
+    const { context, loginPage } = await openLoginContext(item.width, item.height);
+    try {
+      const card = loginPage.locator('[data-slot="login-card"]');
+      assert(await visible(card), item.width + " 下登录卡片不可见");
+      const box = await boxOf(card);
+      const actual = Math.round(box.width);
+      measured.push(item.width + "→" + actual);
+      assert(
+        Math.abs(box.width - item.expect) <= 2,
+        item.width + " 下登录框宽度 " + actual + "px ≠ " + item.tier + "px（user story 32 三档 384/460/576）",
+      );
+      await shot(loginPage, "login-width-" + item.width);
+    } finally {
+      await context.close().catch(() => {});
+    }
+  }
+  return "三档实测 " + measured.join("、") + "（±2px）";
+}
+
+async function assertLoginPasswordToggle(width) {
+  const { context, loginPage } = await openLoginContext(width, 667);
+  try {
+    const password = loginPage.locator("#login-password");
+    const toggle = loginPage.locator('[data-slot="login-password-toggle"]');
+    assert(await visible(toggle), width + " 下密码显隐按钮不可见");
+    assert((await password.getAttribute("type")) === "password", "密码框默认必须隐藏");
+    assert((await toggle.getAttribute("aria-pressed")) === "false", "显隐按钮初始 aria-pressed 必须是 false");
+    await toggle.click();
+    await loginPage.waitForTimeout(150);
+    assert((await password.getAttribute("type")) === "text", "点击显隐按钮后密码必须可见（type=text）");
+    assert((await toggle.getAttribute("aria-pressed")) === "true", "显示态 aria-pressed 必须是 true");
+    assert((await toggle.getAttribute("aria-label")) === "隐藏密码", "显示态可访问名必须是「隐藏密码」");
+    await toggle.click();
+    await loginPage.waitForTimeout(150);
+    assert((await password.getAttribute("type")) === "password", "再次点击后密码必须重新隐藏");
+    assert((await toggle.getAttribute("aria-pressed")) === "false", "隐藏态 aria-pressed 必须回到 false");
+    await shot(loginPage, "login-password-toggle-" + width);
+    return "密码显示/隐藏往返可用，aria-pressed 与可访问名随状态切换";
+  } finally {
+    await context.close().catch(() => {});
+  }
+}
+
+/** 错误零位移（照票 14 手法）：提交前后逐像素量按钮/错误区矩形；同时断言字段标红、
+ * aria-invalid、详情进通知中心（slipstream.notifications.v1 是通知中心的唯一数据源）。 */
+async function assertLoginErrorZeroShift(width, height) {
+  const { context, loginPage } = await openLoginContext(width, height);
+  try {
+    const rectsOf = () =>
+      loginPage.evaluate(() => {
+        const rect = (node) => {
+          if (!node) return null;
+          const box = node.getBoundingClientRect();
+          return { x: box.x, y: box.y, w: box.width, h: box.height };
+        };
+        const area = document.querySelector('[data-slot="login-error"]');
+        const input = document.querySelector("#login-username");
+        return {
+          button: rect(document.querySelector('button[type="submit"]')),
+          area: rect(area),
+          areaHeight: area ? getComputedStyle(area).height : "",
+          borderColor: input ? getComputedStyle(input).borderColor : "",
+          ariaInvalid: input ? input.getAttribute("aria-invalid") : "",
+        };
+      });
+    await loginPage.fill("#login-username", ADMIN_CRED.user);
+    await loginPage.fill("#login-password", "matrix-wrong-password-" + Date.now().toString(36));
+    await loginPage.waitForTimeout(150);
+    const before = await rectsOf();
+    assert(before.ariaInvalid !== "true", "提交前输入框不应已标红（aria-invalid 提前置位）");
+    assert(Math.round(parseFloat(before.areaHeight)) === 40, "错误区固定高度应为 40px（h-10），实际 " + before.areaHeight);
+    await loginPage.click('button[type="submit"]');
+    await loginPage.locator('[data-slot="login-error"] p').first().waitFor({ state: "visible", timeout: 10_000 });
+    await loginPage.waitForTimeout(300);
+    const after = await rectsOf();
+    assert(after.ariaInvalid === "true", "登录失败后用户名输入框必须 aria-invalid=true（user story 49）");
+    const rgb = (after.borderColor.match(/\d+/g) ?? []).map(Number);
+    assert(
+      rgb.length >= 3 && rgb[0] > rgb[1] && rgb[0] > rgb[2] && after.borderColor !== before.borderColor,
+      "出错字段边框必须是红色系且相对正常态有变化（正常 " + before.borderColor + " → 失败 " + after.borderColor + "）",
+    );
+    const shift = (label, left, right) =>
+      JSON.stringify(left) === JSON.stringify(right) ? "" : label + " " + JSON.stringify(left) + " → " + JSON.stringify(right) + "；";
+    const shifts = shift("提交按钮", before.button, after.button) + shift("错误区", before.area, after.area);
+    assert(shifts === "", width + " 登录失败后布局位移（按钮必须零位移）：" + shifts.trim());
+    assertInViewport(
+      { x: after.button.x, y: after.button.y, width: after.button.w, height: after.button.h },
+      width,
+      height,
+      "错误出现后的提交按钮",
+    );
+    const notifications = await loginPage.evaluate(() => JSON.parse(localStorage.getItem("slipstream.notifications.v1") || "[]"));
+    const entry = notifications.find((item) => item.kind === "error" && item.title === "登录失败");
+    assert(entry, "登录失败必须写入通知中心历史（slipstream.notifications.v1 缺「登录失败」条目）");
+    const inlineError = (await loginPage.locator('[data-slot="login-error"] p').first().innerText()).trim();
+    assert(
+      typeof entry.description === "string" && entry.description.includes(inlineError),
+      "通知中心详情必须包含内联错误全文（内联：「" + inlineError + "」）",
+    );
+    await shot(loginPage, "login-error-zero-shift-" + width);
+    return "按钮/错误区逐像素零位移，错误区恒 40px，字段红色系边框+aria-invalid，详情进通知中心";
+  } finally {
+    await context.close().catch(() => {});
+  }
+}
+
+async function assertLoginLandscapeSubmit() {
+  const { context, loginPage } = await openLoginContext(667, 375);
+  try {
+    const submit = loginPage.locator('button[type="submit"]');
+    assert(await visible(submit), "667×375 横屏提交按钮不可见");
+    const box = await boxOf(submit);
+    assertInViewport(box, 667, 375, "横屏提交按钮");
+    await assertClickableAtCenter(loginPage, submit, "横屏提交按钮");
+    await shot(loginPage, "login-landscape-667x375");
+    return "提交按钮 y=" + Math.round(box.y) + "…" + Math.round(box.y + box.height) + " 免滚可见可点（user story 33）";
+  } finally {
+    await context.close().catch(() => {});
+  }
+}
+
+async function assertLoginFlowRegression() {
+  const { context, loginPage } = await openLoginContext(768, 1024);
+  try {
+    // 失败流程：内联错误可见（固定区文案），不推挤布局。
+    await loginPage.fill("#login-username", ADMIN_CRED.user);
+    await loginPage.fill("#login-password", "matrix-not-the-password");
+    await loginPage.click('button[type="submit"]');
+    const inline = loginPage.locator('[data-slot="login-error"] p').first();
+    await inline.waitFor({ state: "visible", timeout: 10_000 });
+    assert((await inline.innerText()).trim().length > 0, "登录失败必须显示内联错误文案");
+    // 成功流程：正确凭据后离开 /login 进入控制台。
+    await loginPage.fill("#login-username", ADMIN_CRED.user);
+    await loginPage.fill("#login-password", ADMIN_CRED.pass);
+    await loginPage.click('button[type="submit"]');
+    const deadline = Date.now() + 45_000;
+    while (Date.now() < deadline) {
+      if (!new URL(loginPage.url()).pathname.startsWith("/login")) break;
+      await loginPage.waitForTimeout(200);
+    }
+    const landed = new URL(loginPage.url()).pathname;
+    assert(!landed.startsWith("/login"), "登录成功后未离开 /login（超时）");
+    await shot(loginPage, "login-flow-success");
+    return "失败路径内联错误可见；成功路径进入控制台（" + landed + "）";
+  } finally {
+    await context.close().catch(() => {});
+  }
+}
+
 async function assertCoarsePointer(page) {
   // 复用已登录 cookies，在独立的移动+触摸上下文里测，避免影响主矩阵的桌面指针环境。
   const storageState = await page.context().storageState();
@@ -1384,6 +1599,18 @@ async function main() {
       }
     });
   }
+
+  // W6 ticket 12：登录页专项（未登录独立上下文，不污染主矩阵会话）。
+  await test("login.theme.375", "375 登录页三态主题切换与持久化", () => assertLoginTheme(375, 667));
+  await test("login.theme.667x375", "667×375 横屏登录页三态主题切换可见", () => assertLoginTheme(667, 375));
+  await test("login.theme.768", "768 登录页三态主题切换与持久化", () => assertLoginTheme(768, 1024));
+  await test("login.theme.1536", "1536 登录页三态主题切换与持久化", () => assertLoginTheme(1536, 864));
+  await test("login.widths", "登录框三档宽度 384/460/576（640/768/1536 实测）", () => assertLoginWidths());
+  await test("login.password-toggle", "375 登录页密码显隐切换与 aria-pressed", () => assertLoginPasswordToggle(375));
+  await test("login.error-zero-shift", "375 登录失败错误区固定、按钮零位移、字段标红、详情进通知中心", () =>
+    assertLoginErrorZeroShift(375, 667));
+  await test("login.landscape", "667×375 横屏提交按钮免滚可见可点", () => assertLoginLandscapeSubmit());
+  await test("login.flow.regression", "登录成功与失败流程回归", () => assertLoginFlowRegression());
 
   // 登录一次，后续只改视口；cookie 与 localStorage 在同一上下文内保持。
   const context = await browser.newContext({
