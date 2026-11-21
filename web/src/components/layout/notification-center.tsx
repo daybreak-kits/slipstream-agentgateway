@@ -23,20 +23,34 @@ const TIME_FORMAT = new Intl.DateTimeFormat("zh-CN", {
   month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
 });
 
-function NotificationRow({ item }: { item: NotificationItem }) {
+/** 行 hover 详情全文：标题在前、正文随后（票13：单行省略后完整信息靠 title 兜底）。 */
+function detailOf(item: NotificationItem): string {
+  return item.description ? item.title + "：" + item.description : item.title;
+}
+
+/** 导出供 check-ui-foundation SSR 渲染真实行 DOM（面板容器在 Radix Portal 内，SSR 不落 DOM）。 */
+export function NotificationRow({ item }: { item: NotificationItem }) {
   const meta = KIND_META[item.kind];
+  const at = new Date(item.at);
   return (
-    <li className="flex gap-2.5 border-b border-border px-3 py-2.5 last:border-b-0">
+    <li className="flex gap-2.5 border-b border-border px-3 py-2.5 last:border-b-0" title={detailOf(item)} data-slot="notification-row">
+      {/* 图标 16px 对标题行高 20px（text-2sm）：mt-0.5 = (20-16)/2，与标题垂直居中 */}
       <meta.icon className={cn("mt-0.5 h-4 w-4 shrink-0", meta.className)} strokeWidth={1.75} />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-2sm font-medium text-title" title={item.title}>{item.title}</p>
+        <div className="flex items-center justify-between gap-2" data-slot="notification-head">
+          <p className="truncate text-2sm font-medium text-title" title={item.title} data-slot="notification-title">
+            {item.title}
+          </p>
+          <time className="shrink-0 text-2xs text-faint" dateTime={at.toISOString()} data-slot="notification-time">
+            <span className="sr-only">{meta.label}，</span>
+            {TIME_FORMAT.format(at)}
+          </time>
+        </div>
         {item.description ? (
-          <p className="mt-0.5 line-clamp-2 text-2xs text-muted-foreground">{item.description}</p>
+          <p className="mt-0.5 truncate text-2xs text-muted-foreground" data-slot="notification-desc">
+            {item.description}
+          </p>
         ) : null}
-        <p className="mt-1 text-2xs text-faint">
-          <span className="sr-only">{meta.label}，</span>
-          {TIME_FORMAT.format(new Date(item.at))}
-        </p>
       </div>
     </li>
   );
@@ -67,7 +81,7 @@ export function NotificationCenter() {
           ) : null}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-[min(20rem,calc(100vw-2rem))] p-0">
+      <PopoverContent align="end" className="w-[min(20rem,calc(100vw-2rem))] p-0" data-slot="notification-panel">
         <div className="flex items-center justify-between border-b border-border px-3 py-2">
           <span className="text-2sm font-medium text-title">通知</span>
           {items.length > 0 ? (
