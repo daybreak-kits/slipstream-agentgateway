@@ -344,7 +344,8 @@ async function seedFixtures(page) {
     name: "响应式矩阵测试用户" + "·长名称用于撑开表格宽度".repeat(6) + suffix,
     username: "matrix_" + suffix,
     password: "Matrix12345!",
-    role: "user",
+    // W6 ticket 21 合并后 user/agent 角色键已退役，内置角色为 admin/customer/reseller。
+    role: "customer",
   };
   const created = await page.request.post(baseUrl() + "/admin/users", { data: user });
   if (!created.ok()) {
