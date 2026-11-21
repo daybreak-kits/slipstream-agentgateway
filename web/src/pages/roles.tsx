@@ -159,7 +159,7 @@ export function AdminsPage() {
       cell: (cell) => {
         const role = cell.row.original;
         return (
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex items-center gap-1.5">
             {role.builtin ? (
               // 内置角色只读入口：不要求 roles:write（查看权限摘要不是写操作）
               <Button

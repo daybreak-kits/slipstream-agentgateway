@@ -31,7 +31,7 @@ import { Table, TableWrap, TD, TH, THead, TR } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { api, ENDPOINTS } from "@/lib/api";
 import { ACTION_ICONS } from "@/lib/icons";
-import { FROZEN_COLUMN_CELL_CLASS, FROZEN_COLUMN_HEADER_CLASS } from "@/lib/table-columns";
+import { ACTION_CELL_WRAPPER_CLASS, FROZEN_COLUMN_CELL_CLASS, FROZEN_COLUMN_HEADER_CLASS } from "@/lib/table-columns";
 import { formatDateTime, useTimezone } from "@/lib/time";
 import { parseKeyLines, type PendingKey } from "./shared";
 import type { UpstreamKey, UpstreamKeyList } from "@/types";
@@ -251,8 +251,9 @@ function KeysTable({
             <TH>密钥</TH>
             <TH>测试结果</TH>
             <TH>创建时间</TH>
-            {/* 操作列 = 最后一列 + 尾部冻结（W5 D1）：裸表也复用 lib/table-columns 的冻结列类。 */}
-            <TH className={FROZEN_COLUMN_HEADER_CLASS}>操作</TH>
+            {/* 操作列 = 最后一列 + 尾部冻结（W5 D1）：裸表也复用 lib/table-columns 的冻结列类；
+                W6 ticket 11：表头与内容同右对齐（贴边规则与三套表格组件一致）。 */}
+            <TH className={FROZEN_COLUMN_HEADER_CLASS + " text-right"}>操作</TH>
           </tr>
         </THead>
         <tbody>
@@ -278,7 +279,11 @@ function KeysTable({
               <TD>
                 <span className="tnum text-2xs text-body">{row.createdText}</span>
               </TD>
-              <TD className={FROZEN_COLUMN_CELL_CLASS}>{actions(row)}</TD>
+              {/* W6 ticket 11：操作单元格内容统一由 KeysTable 套 justify-end 包装（user story 38），
+                  两个调用点不再各自手写对齐。 */}
+              <TD className={FROZEN_COLUMN_CELL_CLASS}>
+                <div className={ACTION_CELL_WRAPPER_CLASS}>{actions(row)}</div>
+              </TD>
             </TR>
           ))}
         </tbody>
@@ -515,7 +520,7 @@ export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
           onToggleAll={(checked) => setSelected(checked ? new Set(rows.map((row) => row.id)) : new Set())}
           selectable
           actions={(row) => (
-            <div className="flex flex-wrap gap-1">
+            <div className="flex gap-1">
               <Button
                 variant="outline"
                 size="dense"
@@ -692,7 +697,7 @@ export function PendingKeysPanel({
           onToggleAll={() => undefined}
           selectable={false}
           actions={(row) => (
-            <div className="flex flex-wrap gap-1">
+            <div className="flex gap-1">
               <Button
                 variant="ghost"
                 size="dense"

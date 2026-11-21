@@ -792,6 +792,153 @@ check("模型管理：操作列内容单行不换行——flex-wrap 会把末按
   expect(wraps === 0, "模型表操作列内容不得 flex-wrap（当前 " + wraps + " 处）：换行时末按钮回绕到下一行左缘，最后一个按钮不再贴右边缘");
 });
 
+// ---------- 4.6 表格规范推广全站（W6 ticket 11） ----------
+// 票 10 在模型管理两表上立了规矩（操作列右对齐贴边 + 单行、关闭行微灰置尾、冷却行微黄、
+// 三态排序图标）；本节把同一套规矩推广到其余全部数据表并钉住，防止逐页手写再次分裂。
+
+check("表格操作列单行：全站带行操作的表操作单元格内容不得 flex-wrap（末按钮回绕第二行左缘，贴边失效）", () => {
+  // 只匹配各文件操作列内容的确切类串；工具条/表单等非操作列的 flex-wrap 用别的类串，不受影响。
+  const OFFENDING = [
+    ["src/pages/client_keys.tsx", "flex\\s+flex-wrap\\s+items-center\\s+gap-1\\.5"],
+    ["src/pages/roles.tsx", "flex\\s+flex-wrap\\s+items-center\\s+gap-1\\.5"],
+    ["src/components/users/users-panel.tsx", "flex\\s+flex-wrap\\s+items-center\\s+gap-1\\.5"],
+    ["src/pages/upstreams.tsx", "flex\\s+flex-wrap\\s+gap-1\\b"],
+    ["src/components/upstreams/models-panel.tsx", "flex\\s+flex-wrap\\s+gap-1\\b"],
+    ["src/components/upstreams/keys-panel.tsx", "flex\\s+flex-wrap\\s+gap-1\\b"],
+  ];
+  const problems = [];
+  for (const [file, pattern] of OFFENDING) {
+    const count = (read(file).match(new RegExp(pattern, "g")) ?? []).length;
+    if (count > 0) problems.push(file + "：操作列内容 flex-wrap（" + count + " 处）");
+  }
+  expect(problems.length === 0, "操作列必须单行不换行：\n       " + problems.join("\n       "));
+});
+
+check("连接密钥：状态列只表达启停 → 删除重复状态列；关闭行微灰 + 默认置尾", () => {
+  const text = read("src/pages/client_keys.tsx");
+  expect(!text.includes('accessorKey: "status"'), "连接密钥状态列只表达启停（启用/关闭徽标与操作列启停按钮重复），必须删除（user story 40）");
+  expect(text.includes("closedLast={keyClosedLast}"), "连接密钥必须传 closedLast={keyClosedLast}（关闭密钥默认置尾）");
+  expect(text.includes("rowTone={keyRowTone}"), "连接密钥必须传 rowTone={keyRowTone}（关闭行微灰）");
+});
+
+check("用户管理：关闭行置尾仅列表视图生效（树视图排除），状态列保留（已删除是额外终态）", () => {
+  const text = read("src/components/users/users-panel.tsx");
+  expect(text.includes('accessorKey: "status"'), "用户状态列必须保留：deleted 是额外终态，不只是启停（user story 40 只删纯启停列）");
+  expect(text.includes('closedLast={view === "list" ? userClosedLast : undefined}'), "closedLast 必须只在不列表视图传入：树视图保持层级顺序不置尾（user story 42）");
+  expect(text.includes("rowTone={userRowTone}"), "用户表必须传 rowTone={userRowTone}（关闭/已删除行微灰）");
+});
+
+check("上游渠道：server 分页模式页面层先分区再切片——关闭行排到最后一页，行色微灰", () => {
+  const text = read("src/pages/upstreams.tsx");
+  expect(text.includes('from "@/lib/table-order"'), "上游渠道必须在页面层引入 partitionClosedLast（server 模式 DataTable 只见当前页）");
+  expect(text.includes("partitionClosedLast("), "pagedRows 必须先分区再 slice：关闭上游整页置尾，而不是只在当前页内置尾");
+  expect(text.includes("rowTone={upstreamRowTone}"), "上游渠道表必须传 rowTone={upstreamRowTone}（关闭行微灰）");
+});
+
+check("上游详情模型表：重复状态列删除，行色与置尾复用模型可用性语义", () => {
+  const text = read("src/components/upstreams/models-panel.tsx");
+  expect(!text.includes('accessorKey: "enabled"'), "上游详情模型表状态列只表达启停（enabled 徽标与操作列启停按钮重复），必须删除");
+  expect(text.includes("rowTone={modelRowTone}"), "上游详情模型表必须复用 modelRowTone（关闭微灰/冷却微黄，语义不另起一套）");
+  expect(text.includes("closedLast={modelRowRank}"), "上游详情模型表必须复用 modelRowRank（关闭置尾、冷却不置尾）");
+});
+
+check("日志页：SortHeader 换共享三态 SortIndicator（未排序 ArrowUpDown 常驻），两态 ArrowUp/ArrowDown 移除", () => {
+  const text = read("src/pages/logs.tsx");
+  expect(text.includes('SortIndicator'), "日志服务端排序列必须复用共享 SortIndicator（三态语义不另起一套）");
+  expect(!/import\s*\{[^}]*\bArrowUp\b[^}]*\}\s*from\s*"lucide-react"/.test(text), "日志页不得再从 lucide 引两态 ArrowUp（未排序也要有可排序指示）");
+  expect(!/const Arrow = /.test(text), "日志页不得保留 asc/desc 二选一的旧图标逻辑");
+  // SortIndicator 自带 aria-label（未排序/升序/降序）；外层按钮已有「按…排序」可访问名，
+  // 图标必须 aria-hidden，否则按钮可访问名变成「按词元排序 未排序」，exact 匹配的验收断言全断。
+  expect(/aria-hidden="true"[^>]*>\s*<SortIndicator/.test(text) || text.includes('<span aria-hidden="true"><SortIndicator'), "SortIndicator 必须包在 aria-hidden 内，保持「按…排序」按钮可访问名不变");
+});
+
+check("PriceTable：可排序列换共享三态 SortIndicator，两态 ArrowUp/ArrowDown 移除", () => {
+  const text = read("src/components/pricing/table.tsx");
+  expect(text.includes("SortIndicator"), "价目表可排序列必须复用共享 SortIndicator");
+  expect(!/import\s*\{[^}]*\bArrowUp\b[^}]*\}\s*from\s*"lucide-react"/.test(text), "PriceTable 不得再从 lucide 引两态 ArrowUp/ArrowDown 做排序指示");
+  expect(/<SortIndicator direction=\{sortKey === col\.key \? sortDir : false\} \/>/.test(text), "未排序态必须渲染 direction=false（常驻 ArrowUpDown），不能只在激活时出图标");
+});
+
+check("PriceTable：sticky 操作列单元格内容由表格统一 flex justify-end 包装（与 DataTable/ModelsTable 同一机制）", async () => {
+  const { PriceTable } = await load("/src/components/pricing/table.tsx");
+  const columns = [
+    { key: "name", label: "名称", cell: (row) => row.name },
+    { key: "actions", label: "操作", hideable: false, sticky: "right", cell: () => "编辑" },
+  ];
+  const html = render(
+    createElement(PriceTable, {
+      columns,
+      rows: [{ id: "a", name: "alpha" }],
+      totalCount: 1,
+      sectionKey: "t11",
+      searchText: "",
+      onSearchChange: () => {},
+      searchPlaceholder: "搜索",
+      emptyText: "暂无数据",
+      onClearFilters: () => {},
+      rowKey: (row) => row.id,
+    }),
+  );
+  const td = html.slice(html.lastIndexOf("<td", html.indexOf(">编辑<")), html.indexOf("</td>", html.indexOf(">编辑<")));
+  expect(td.includes("flex justify-end"), "PriceTable 操作列内容必须由表格统一 justify-end 包装，页面不再各自手写");
+});
+
+check("PriceTable：可排列表头常驻未排序 ArrowUpDown（SSR 渲染）", async () => {
+  const { PriceTable } = await load("/src/components/pricing/table.tsx");
+  const columns = [
+    { key: "name", label: "名称", cell: (row) => row.name },
+    { key: "price", label: "单价", sortable: true, sortValue: (row) => row.price, cell: (row) => String(row.price) },
+    { key: "note", label: "备注", cell: () => "—" },
+  ];
+  const html = render(
+    createElement(PriceTable, {
+      columns,
+      rows: [{ id: "a", name: "alpha", price: 2 }],
+      totalCount: 1,
+      sectionKey: "t11",
+      searchText: "",
+      onSearchChange: () => {},
+      searchPlaceholder: "搜索",
+      emptyText: "暂无数据",
+      onClearFilters: () => {},
+      rowKey: (row) => row.id,
+    }),
+  );
+  const priceTh = html.slice(html.lastIndexOf("<th", html.indexOf(">单价<")), html.indexOf("</th>", html.indexOf(">单价<")));
+  const noteTh = html.slice(html.lastIndexOf("<th", html.indexOf(">备注<")), html.indexOf("</th>", html.indexOf(">备注<")));
+  expect(priceTh.includes("lucide-arrow-up-down"), "可排序列未排序时必须常驻 ArrowUpDown 图标");
+  expect(!noteTh.includes("lucide"), "不可排序列不得渲染排序图标");
+});
+
+check("上游详情密钥裸表：操作列表头右对齐、单元格内容由 KeysTable 统一 justify-end 包装", () => {
+  const text = read("src/components/upstreams/keys-panel.tsx");
+  expect(text.includes('FROZEN_COLUMN_HEADER_CLASS + " text-right"'), "裸表操作列表头必须右对齐（与内容同侧）");
+  expect(text.includes("ACTION_CELL_WRAPPER_CLASS"), "KeysTable 必须用共享 ACTION_CELL_WRAPPER_CLASS 包装操作单元格内容，两个调用点不再各自手写");
+});
+
+check("日志页 SortHeader（SSR）：未排序 ArrowUpDown 常驻、升序 ArrowUpNarrowWide，按钮可访问名不被图标污染", async () => {
+  const { SortHeader } = await load("/src/pages/logs.tsx");
+  const unsorted = render(
+    createElement(SortHeader, {
+      label: "词元", field: "total_tokens",
+      sort: { field: "started_at", order: "desc" },
+      onSort: () => {},
+    }),
+  );
+  expect(unsorted.includes("lucide-arrow-up-down"), "未排序的排序列必须常驻 ArrowUpDown（此前只在激活时出图标）");
+  expect(/aria-label="按词元排序"/.test(unsorted), "按钮可访问名必须是「按词元排序」");
+  expect(unsorted.includes("aria-hidden=\"true\""), "SortIndicator 必须包在 aria-hidden 内：图标状态标签不得进入按钮可访问名");
+  const asc = render(
+    createElement(SortHeader, {
+      label: "词元", field: "total_tokens",
+      sort: { field: "total_tokens", order: "asc" },
+      onSort: () => {},
+    }),
+  );
+  expect(asc.includes("lucide-arrow-up-narrow-wide"), "升序必须渲染 ArrowUpNarrowWide（上窄下宽）");
+  expect(!asc.includes("lucide-arrow-up-down"), "激活态不得残留未排序图标");
+});
+
 // ---------- 7. 数字与格式化单一来源（ticket 08） ----------
 // 本仓前端没有测试运行器：数字口径的边界值在这里用 vite SSR 加载真实模块断言，
 // 「不得再出现本地 formatter」用源码扫描兜住，避免口径再次分裂。
