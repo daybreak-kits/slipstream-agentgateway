@@ -1,6 +1,6 @@
 /** 管理用户 / 用户（API 消费者）两页的本地类型：字段与后端 snake_case 一一对应，不做二次改名。 */
 
-/** 角色 key 由后端 admin_roles 决定：内置 admin/agent/user，可加自定义角色。 */
+/** 角色 key 由后端 admin_roles 决定：内置 admin/customer/reseller，可加自定义角色。 */
 export type AdminRole = string;
 
 /** GET /admin/admins 的返回项（后端无 created_at 字段）。 */

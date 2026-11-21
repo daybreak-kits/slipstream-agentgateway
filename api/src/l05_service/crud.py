@@ -601,7 +601,7 @@ def create_user(
     password_hash: str = "",
     balance_micro: int = 0,
     parent_user_id: str | None = None,
-    role: str = "user",
+    role: str = "customer",
     status: str = "active",
     actor: str = "",
 ) -> UserORM:

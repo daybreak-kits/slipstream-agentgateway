@@ -344,9 +344,10 @@ def ensure_bootstrap_admin(session: Session) -> bool:
     """
     from l05_service import user_tree
 
-    admin_roles = (rbac.BUILTIN_ROLE_ADMIN, *rbac.LEGACY_ALIASES_BY_KEY[rbac.BUILTIN_ROLE_ADMIN])
     existing = session.scalars(
-        select(UserORM).where(UserORM.role.in_(admin_roles), UserORM.password_hash != "")
+        select(UserORM).where(
+            UserORM.role == rbac.BUILTIN_ROLE_ADMIN, UserORM.password_hash != ""
+        )
     ).first()
     if existing is not None:
         return False

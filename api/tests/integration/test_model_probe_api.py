@@ -243,13 +243,13 @@ def test_unknown_upstream_is_404(client):
 
 
 def test_probe_requires_model_write_permission(client, login_cookies):
-    viewer = client.post(
+    customer = client.post(
         "/admin/upstreams/ups_whatever/models/probe",
         json={"model_ids": ["umdl_whatever"]},
-        cookies=login_cookies("viewer"),
+        cookies=login_cookies("customer"),
     )
-    assert viewer.status_code == 403, viewer.text
-    assert viewer.json()["code"] == "FORBIDDEN"
+    assert customer.status_code == 403, customer.text
+    assert customer.json()["code"] == "FORBIDDEN"
 
 
 def test_request_cannot_supply_a_base_url_or_style(

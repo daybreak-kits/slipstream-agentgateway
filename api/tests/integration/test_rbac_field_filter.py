@@ -103,7 +103,7 @@ def _custom_role_browser(
 
 def test_ordinary_user_overview_hides_cost_keeps_spend(client, engine_and_sessionmaker):
     _, factory = engine_and_sessionmaker
-    browser = _browser(factory, "user", "plain-overview")
+    browser = _browser(factory, "customer", "plain-overview")
     body = browser.get("/admin/reports/overview").json()
     assert "cost_micro" not in body
     assert "margin_micro" not in body
@@ -153,7 +153,7 @@ def test_role_without_billing_gets_no_money_keys(client, engine_and_sessionmaker
 def test_ordinary_user_sees_spend_fields(client, engine_and_sessionmaker):
     _, factory = engine_and_sessionmaker
     _seed_books(factory)
-    browser = _browser(factory, "user", "plain-spend", user_id="usr_filter")
+    browser = _browser(factory, "customer", "plain-spend", user_id="usr_filter")
     daily = browser.get("/admin/usage/daily").json()
     assert daily[0]["amount_micro"] == 1000
     ledger = browser.get("/admin/usage/ledger").json()
@@ -169,7 +169,7 @@ def test_ordinary_user_sees_spend_fields(client, engine_and_sessionmaker):
 
 def test_cost_endpoints_forbidden_without_billing_cost(client, engine_and_sessionmaker):
     _, factory = engine_and_sessionmaker
-    browser = _browser(factory, "user", "plain-forbidden")
+    browser = _browser(factory, "customer", "plain-forbidden")
     assert browser.get("/admin/cost/entries").status_code == 403
     assert browser.get("/admin/reports/margin").status_code == 403
     assert browser.get("/admin/charge/entries").status_code == 200

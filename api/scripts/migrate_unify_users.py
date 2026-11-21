@@ -41,13 +41,15 @@ from sqlalchemy import (
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT))
+
+from scripts.migrate_roles_w6 import canonical_role_key  # noqa: E402
 
 from l01_core.ids import new_id  # noqa: E402
 from l01_core.settings import get_settings  # noqa: E402
 from l01_core.timeutil import now_ms  # noqa: E402
 from l04_repo.base import init_db, make_engine, make_sessionmaker  # noqa: E402
 from l04_repo.orm import AdminSessionORM, UserORM  # noqa: E402
-from l05_service import rbac  # noqa: E402
 
 MERGE_SUFFIX = "-merged"
 
@@ -216,7 +218,7 @@ def run_unify_users(session, *, apply: bool) -> MergePlan:
                     username=admin.username,
                     password_hash=admin.password_hash,
                     balance_micro=0,
-                    role=rbac.normalize_role_key(admin.role),
+                    role=canonical_role_key(admin.role),
                     parent_user_id=root.id,
                     status=admin.status,
                     admin_user_id=admin.id,  # merge ledger only; retired column

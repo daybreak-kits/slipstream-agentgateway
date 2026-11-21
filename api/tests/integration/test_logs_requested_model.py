@@ -20,7 +20,7 @@ from l06_api.deps import SESSION_COOKIE
 
 
 def _browser(factory):
-    admin_id = make_admin(factory, username="logs-requested", role="owner")
+    admin_id = make_admin(factory, username="logs-requested", role="admin")
     client = _app_client(factory)
     client.cookies.set(SESSION_COOKIE, new_session_token(factory, admin_id))
     return client

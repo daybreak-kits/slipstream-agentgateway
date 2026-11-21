@@ -79,3 +79,12 @@
 - **ADR-027 冷却互斥**：单次与周期互斥（409，details 恒三键 `{blocking_rule_ids, cooldown_until_ms, window_end_ms}` 两形状）；note-only PATCH 放行；结构变更清窗口例外；关闭不参与互斥；公开模型冷却写操作 422；解除只删一次性托管规则（周期窗口只写 skip，规则保留）；写后立即 `Rollout.apply`（reason model-cooldown/model-release/model-enable/model-disable）。
 - 多密钥：渲染 provider 名 `{model}#k{seq}`、密钥文件名 `{id}#{seq}.key`；conditional 模式每目标只展开首把（E20 既定裁决）。
 - UI：上游详情四 Tab 第二 Tab 改名「路由与模型」（模型并入、健康并入「连接与模型」）；公开模型单页三段 + 分层成员 chip；分流图图例隐藏阶段；日志模型列两行 +「N 次尝试」；KPI 八卡；上游模型 100vh 抽屉；操作列 sticky 与头身对齐；语义色五档/脏标记/toast 统一。
+
+## W6 角色 key 迁移（ticket 21）
+
+### 破坏性变更（无兼容 alias）
+
+- 控制台内置角色 key `user` → `customer`、`agent` → `reseller`，显示名改为「客户」「分销商」；`admin`（管理用户）不变。
+- 旧 key 不再有任何 alias 或内置回退：新数据（内置定义、契约、前端常量）里不出现旧 key，API 分配一个没有对应 `admin_roles` 行的旧 key 返回 422。升级必须先在 `api/` 运行 `scripts/migrate_roles_w6.py`（默认 dry-run，确认后 `--apply`），由脚本重命名/合并数据库里的旧行；脚本幂等，已迁移库再跑为 no-op，失败会打印冲突的表/角色 key。
+- 迁移脚本同时折叠历史数据库名 `owner`→`admin`、`operator`→`reseller`、`viewer`→`customer`；只改 key 与显示名，逐用户权限与访问范围不变（HTTP seam 前后对比测试覆盖）。
+- 同步范围：权限注册与种子（`rbac.py` / `seed_demo.py`）、API 契约与 `web/src/generated/contract.ts`、前端角色常量/显示映射/mock、`docs/GLOSSARY.md` §7、`docs/api-contract.md`。

@@ -325,7 +325,7 @@ def test_old_put_targets_endpoint_is_gone(engine_and_sessionmaker, monkeypatch):
     from l06_api import spa
 
     monkeypatch.setattr(spa, "resolve_web_dist", lambda dist_dir=None: None)
-    admin_id = make_admin(factory, username="no-spa-owner", role="owner")
+    admin_id = make_admin(factory, username="no-spa-owner", role="admin")
     client = _app_client(factory)
     client.cookies.set(SESSION_COOKIE, new_session_token(factory, admin_id))
     ids = seed_channel(engine, factory)
