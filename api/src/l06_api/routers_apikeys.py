@@ -47,7 +47,9 @@ def _user_body(session: Session, row: UserORM, snapshot: dict | None = None) -> 
     return {
         "id": row.id,
         "name": row.name,
-        "username": row.username,
+        # Every user is a login account (W7): the name is always a string, the
+        # type column of the old console/API split is gone for good.
+        "username": row.username or "",
         "balance_micro": row.balance_micro,
         "role": row.role or rbac.BUILTIN_ROLE_CUSTOMER,
         "parent_user_id": row.parent_user_id,
