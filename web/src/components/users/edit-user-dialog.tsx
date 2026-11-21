@@ -34,7 +34,7 @@ interface EditUserDialogProps {
   onSubmit: (values: EditUserValues) => void;
 }
 
-/** 编辑用户：显示名/角色/上级/状态；登录名不可改（ADR-019），只读展示。 */
+/** 编辑用户：用户名称/角色/上级/状态；登录帐户不可改（ADR-019），只读展示。 */
 export function EditUserDialog({
   user,
   open,
@@ -124,16 +124,16 @@ export function EditUserDialog({
         <DialogHeader>
           <DialogTitle>编辑用户</DialogTitle>
           <DialogDescription>
-            {user?.name ?? ""}（{user?.username ?? ""}），登录名不可修改，改动立即生效。
+            {user?.name ?? ""}（{user?.username ?? ""}），登录帐户不可修改，改动立即生效。
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3">
           {errorText !== null && <Alert variant="destructive"><span>{errorText}</span></Alert>}
 
-          <DirtyField dirty={isDirtyField("name")} onReset={() => resetField("name")} resetLabel="恢复显示名">
+          <DirtyField dirty={isDirtyField("name")} onReset={() => resetField("name")} resetLabel="恢复用户名称">
             <div className="space-y-1.5">
-              <Label htmlFor="edit-user-name">显示名</Label>
+              <Label htmlFor="edit-user-name">用户名称</Label>
               <Input
                 id="edit-user-name"
                 value={name}

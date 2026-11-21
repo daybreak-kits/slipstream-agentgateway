@@ -12,7 +12,7 @@ import { SELECT_NONE_VALUE } from "@/lib/select-sentinels";
 
 export interface CreateUserValues {
   name: string;
-  /** 留空 = 后端按显示名派生（ADR-019：username 唯一且不可改，创建后无法再改） */
+  /** 留空 = 后端按用户名称派生（ADR-019：username 唯一且不可改，创建后无法再改） */
   username: string;
   role: string;
   parentUserId: string | null;
@@ -84,7 +84,7 @@ export function CreateUserDialog({
         <DialogHeader>
           <DialogTitle>新建用户</DialogTitle>
           <DialogDescription>
-            创建成功后会生成 12 位随机初始密码，仅弹窗展示一次；登录名创建后不可修改。
+            创建成功后会生成 12 位随机初始密码，仅弹窗展示一次；登录帐户创建后不可修改。
           </DialogDescription>
         </DialogHeader>
 
@@ -92,7 +92,7 @@ export function CreateUserDialog({
           {errorText !== null && <Alert variant="destructive"><span>{errorText}</span></Alert>}
 
           <div className="space-y-1.5">
-            <Label htmlFor="create-user-name">显示名</Label>
+            <Label htmlFor="create-user-name">用户名称</Label>
             <Input
               id="create-user-name"
               value={name}
@@ -102,21 +102,21 @@ export function CreateUserDialog({
               disabled={pending}
               autoComplete="off"
             />
-            {nameInvalid && <p className="text-2xs text-danger-text">请输入显示名</p>}
+            {nameInvalid && <p className="text-2xs text-danger-text">请输入用户名称</p>}
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="create-user-username">登录名（可选）</Label>
+            <Label htmlFor="create-user-username">登录帐户（可选）</Label>
             <Input
               id="create-user-username"
               value={username}
               onChange={(event) => setUsername(event.target.value)}
-              placeholder="留空则按显示名自动生成"
+              placeholder="留空则按用户名称自动生成"
               maxLength={128}
               disabled={pending}
               autoComplete="off"
             />
-            <p className="text-2xs text-faint">登录名唯一且不可修改（ADR-019）。</p>
+            <p className="text-2xs text-faint">登录帐户唯一且不可修改（ADR-019）。</p>
           </div>
 
           <div className="space-y-1.5">

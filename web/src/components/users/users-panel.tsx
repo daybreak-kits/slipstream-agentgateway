@@ -45,9 +45,9 @@ function userClosedLast(user: UserTreeNode): boolean {
 }
 
 const COLUMN_LABELS: Record<string, string> = {
-  user: "用户",
+  user: "用户名称",
+  username: "登录帐户",
   role: "角色",
-  type: "类型",
   balance_micro: "余额",
   keys: "密钥数",
   status: "状态",
@@ -82,11 +82,10 @@ type CreatedUser = UserTreeNode & { initial_password?: string };
 type ResetTarget = { id: string; name: string };
 
 /**
- * 用户管理单页（ADR-019 统一用户表；原「API 用户/控制台账号」双页签合并）：
+ * 用户管理单页（ADR-019 统一用户表 + W7：每个用户都是登录账号）：
  * 一张列表承载余额/密钥/层级与登录名/角色/密码两个镜头。
  * 操作显隐一律查权限键（DESIGN-AUDIT §13 RBAC 红线，键值逐一对应后端 require）：
- * 充值/调整余额/重置密码/编辑/启闭 = users:update，流水 = ledger:read，删除 = users:delete；
- * 「控制台」徽章仅标识有登录名的行，不参与任何显隐判断。
+ * 充值/调整余额/重置密码/编辑/启闭 = users:update，流水 = ledger:read，删除 = users:delete。
  */
 export function UsersPanel({
   nodes,
@@ -151,7 +150,7 @@ export function UsersPanel({
         status: "active",
       }),
     onSuccess: (user) => {
-      toast.success("用户已创建", { description: user.name + (user.username === "" ? "" : "（" + user.username + "）") });
+      toast.success("用户已创建", { description: user.name + "（" + user.username + "）" });
       setCreateOpen(false);
       onChanged();
       if (user.initial_password) {
@@ -188,7 +187,7 @@ export function UsersPanel({
       api.patch<UserTreeNode>("/admin/users/" + vars.id, { status: vars.status }),
     onSuccess: (user) => {
       toast.success(user.status === "active" ? "用户已启用" : "用户已关闭", {
-        description: user.name + (user.username === "" ? "" : "（" + user.username + "）"),
+        description: user.name + "（" + user.username + "）",
       });
       onChanged();
     },
@@ -205,7 +204,7 @@ export function UsersPanel({
         password: vars.password,
       }),
     onSuccess: (result, vars) => {
-      toast.success("密码已重置", { description: result.username === "" ? "已有会话已全部注销" : result.username + " 的已有会话已全部注销" });
+      toast.success("密码已重置", { description: result.username + " 的已有会话已全部注销" });
       setResetTarget(null);
       setOneTimeSecret({ title: "密码已重置", secret: vars.password });
     },
@@ -262,21 +261,21 @@ export function UsersPanel({
   const renderName = (user: UserTreeNode, level?: number) => (
     <div className="flex items-center gap-1.5" style={level === undefined ? undefined : { paddingLeft: level * 14 }}>
       {level !== undefined && level > 0 && <span className="text-2xs text-faint">└</span>}
-      <div className="min-w-0">
-        <div className="truncate font-medium text-title">{user.name}</div>
-        {user.username !== "" && (
-          <div className="truncate font-mono text-2xs text-faint">{user.username}</div>
-        )}
-      </div>
+      <div className="min-w-0 truncate font-medium text-title">{user.name}</div>
     </div>
   );
 
   const columns: ColumnDef<UserTreeNode, unknown>[] = [
     {
       id: "user",
-      header: "用户",
-      accessorFn: (row) => row.name + " " + row.username,
+      header: "用户名称",
+      accessorFn: (row) => row.name,
       cell: (cell) => renderName(cell.row.original, view === "tree" ? treeLevel.get(cell.row.original.id) : undefined),
+    },
+    {
+      accessorKey: "username",
+      header: "登录帐户",
+      cell: (cell) => <span className="font-mono text-2sm text-muted-foreground">{cell.row.original.username}</span>,
     },
     {
       accessorKey: "role",
@@ -284,16 +283,6 @@ export function UsersPanel({
       cell: (cell) => (
         <span className="text-2sm">{roleName.get(cell.row.original.role) ?? cell.row.original.role}</span>
       ),
-    },
-    {
-      id: "type",
-      header: "类型",
-      cell: (cell) =>
-        cell.row.original.username !== "" ? (
-          <Badge tone="neutral">控制台</Badge>
-        ) : (
-          <span className="text-2xs text-faint">-</span>
-        ),
     },
     {
       accessorKey: "balance_micro",
@@ -464,7 +453,7 @@ export function UsersPanel({
           data={data}
           loading={loading}
           pageSize={50}
-          filterPlaceholder="筛选显示名 / 登录名"
+          filterPlaceholder="筛选用户名称 / 登录帐户"
           emptyText="没有匹配的用户"
           storageKey="slipstream.cols.users"
           columnLabels={COLUMN_LABELS}
