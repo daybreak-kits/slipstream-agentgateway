@@ -114,7 +114,7 @@ USD = "USD"
 # (open-bigmodel-cn / api-nebula-example / 127-0-0-1-8000 / 127-0-0-1-8001).
 UPSTREAMS = [
     ("https://open.bigmodel.cn/api/paas/v4", "openai_chat",
-     ["sk-zai-demo-primary", "sk-zai-demo-backup", "sk-zai-demo-cheap"]),
+     ["sk-zai-demo-01", "sk-zai-demo-02", "sk-zai-demo-03"]),
     ("https://api.nebula.example/v1", "anthropic_messages",
      ["sk-nebula-demo-01"]),
     ("http://127.0.0.1:8000/v1", "openai_chat", ["sk-local-demo-01"]),
