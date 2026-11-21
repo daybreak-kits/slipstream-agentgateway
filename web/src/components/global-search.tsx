@@ -125,7 +125,7 @@ export function GlobalSearch() {
         label: row.name,
         detail: row.base_url,
         path: "/upstreams/" + row.id,
-        keywords: [row.name, row.base_url, row.api_style].join(" "),
+        keywords: [row.name, row.alias, row.base_url, row.api_style].filter(Boolean).join(" "),
       })),
     },
     {
