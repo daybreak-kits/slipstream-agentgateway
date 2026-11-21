@@ -1009,6 +1009,24 @@ check("缺失值口径：两处模型表共用同一个「未配置」写法", (
   }
 });
 
+// ---------- 12. 模型状态图标（W7 ticket 10）：语义色与单一文案来源 ----------
+check("状态图标：走语义色 token，不写死颜色（浅深主题自适应）", () => {
+  const src = read("src/components/ui/status-icon.tsx");
+  includesAll(src, ["toneText"], "状态图标必须走语义色映射（lib/semantic-tone）");
+  const magic = src.match(/#[0-9a-fA-F]{3,8}\b|rgba?\(/g);
+  expect(!magic, "状态图标不得出现魔法色值：" + (magic ?? []).join("、"));
+});
+
+check("状态文案口径：关闭/冷却/未知三态文案收在 statusDetailText 一处", async () => {
+  const { statusDetailText } = await load("/src/components/ui/status-icon.tsx");
+  expect(statusDetailText("closed") === "已关闭，人工启用后恢复", "关闭文案口径漂移");
+  expect(statusDetailText("unknown") === "状态未知", "未知文案口径漂移");
+  expect(statusDetailText("normal") === "", "normal 没有详情文案");
+  const cooling = statusDetailText("cooling", 1795000000000);
+  expect(/冷却中，\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} 后解除/.test(cooling), "冷却文案格式漂移：" + cooling);
+  expect(statusDetailText("cooling") === "冷却中", "没有解除时间时只写「冷却中」");
+});
+
 // ---------- run ----------
 server = await createServer({
   configFile: join(webRoot, "vite.config.ts"),
