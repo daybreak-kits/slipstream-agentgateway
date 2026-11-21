@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session
 
 from l01_core.crypto import SecretBox
 from l01_core.errors import AppError, ErrorCode
-from l01_core.settings import DEFAULT_AG_DB_FILENAME, get_settings
+from l01_core.settings import get_settings
 from l01_core.timeutil import now_ms
 from l02_domain.ir import (
     AccessLogSpec,
@@ -233,7 +233,7 @@ def build_render_plan(
     policies_block, guardrails_block, mcp_block, limits_block = stored_policy_blocks(
         session, adapter
     )
-    access_log = _access_log_spec(session, settings)
+    access_log = _access_log_spec(session)
     if access_log is not None:
         policies_block = replace(policies_block, access_log=access_log)
     ir = GatewayIR(
@@ -283,14 +283,15 @@ def model_alias(model_id: str, seq: int) -> str:
     return f"{model_id}#k{seq}"
 
 
-def _access_log_spec(session: Session, settings) -> AccessLogSpec:
-    """ADR-021: resolve the payload-logging switch; always renders a log DB source.
+def _access_log_spec(session: Session) -> AccessLogSpec:
+    """ADR-021: resolve the payload-logging switch; always render a log DB source.
 
     The data-plane log DB is a bootstrap dependency: usage ingestion, the
     request-log pages and retention all read it, so an unset switch must not
-    leave a fresh install without a data source. Defaults are safe (metadata =
-    no bodies); explicit ag_access_log_llm / ag_db_path win, and bodies are only
-    ever stored when the operator selects full.
+    leave a fresh install without a data source. The switch is a neutral system
+    fact (metadata = no bodies, full = bodies stored); WHERE the log DB lives
+    is adapter-owned (ADR-029 ticket 04), so database_url stays empty and the
+    adapter renders its own deployment default.
     """
     raw = get_setting(session, ACCESS_LOG_LLM_KEY)
     mode = "metadata"
@@ -301,8 +302,7 @@ def _access_log_spec(session: Session, settings) -> AccessLogSpec:
             value = raw
         if isinstance(value, str) and value.strip() in ACCESS_LOG_LLM_MODES:
             mode = value.strip()
-    database_url = settings.ag_db_path or DEFAULT_AG_DB_FILENAME
-    return AccessLogSpec(database_url=database_url, llm=mode)
+    return AccessLogSpec(database_url="", llm=mode)
 
 
 def apply_configuration(

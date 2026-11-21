@@ -105,7 +105,7 @@ def test_one_tick_runs_every_job_without_touching_balances(
         connection.commit()
     finally:
         connection.close()
-    asyncio.run(wiring.run_jobs_once(factory, Settings(ag_config_dir=str(ag_dir))))
+    asyncio.run(wiring.run_jobs_once(factory, Settings(data_plane_config_dir=str(ag_dir))))
 
     with factory() as session:
         assert session.get(UserORM, "usr_smoke").balance_micro == before

@@ -146,7 +146,7 @@ def _assert_migrated_plan_is_renderable(db_path: Path) -> None:
     factory = make_sessionmaker(engine)
     # Pass the real adapter so its capability matrix fills the IR: ticket 19 seeds
     # MCP targets/policies, and validation rejects them without a capability claim.
-    adapter = AgentgatewayAdapter(get_settings().ag_config_dir, ag_binary="")
+    adapter = AgentgatewayAdapter(get_settings().data_plane_config_dir, ag_binary="")
     try:
         with factory() as session:
             ir, key_files = build_render_plan(session, revision="rev_check", adapter=adapter)

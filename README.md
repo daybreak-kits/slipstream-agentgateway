@@ -167,13 +167,16 @@ slipstream-agentgateway/
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `SLIPSTREAM_DATABASE_URL` | `sqlite:///./.data_store/slipstream.db` | 控制面 SQLite；相对路径按 API 进程 cwd 解析 |
-| `SLIPSTREAM_AG_CONFIG_DIR` | `./.data_store/ag-config` | 渲染配置与 key 文件的落盘/白名单目录 |
-| `SLIPSTREAM_AG_LLM_PORT` | `3600` | 渲染进配置的数据面端口 |
+| `SLIPSTREAM_DATA_PLANE_CONFIG_DIR` | `./.data_store/ag-config` | 渲染配置与 key 文件的落盘/白名单目录（中性部署目录）；`SLIPSTREAM_AG_CONFIG_DIR` 仍是弃用别名、继续生效，两者同设时中性名优先（迁移而非拒绝） |
+| `SLIPSTREAM_AG_LLM_PORT` | `3600` | 数据面客户端端口（适配器命名空间；渲染进配置并出现在健康/连接信息） |
+| `SLIPSTREAM_AG_DB_PATH` | 未设 | 数据面日志 SQLite 路径覆盖；未设时用适配器默认（配置目录内 `ag-data.db`） |
 | `SLIPSTREAM_AG_BINARY` | 自动探测 | pinned AG `--validate-only` 闸门；设空字符串禁用闸门（会在 apply 记录） |
 | `SLIPSTREAM_SECRET_KEY` | `dev-only-change-me` | 落库加密主密钥，生产必须覆盖 |
 | `SLIPSTREAM_COOKIE_SECURE` | `false` | 生产 HTTPS 下设为 `1` |
 | `SLIPSTREAM_JOBS_ENABLED` | `true` | `0` 关闭进程内定时任务（测试/独立 worker） |
 | `SLIPSTREAM_ADMIN_USERNAME` / `SLIPSTREAM_ADMIN_PASSWORD` | `admin` / `admin` | 仅首次无管理员时用于 bootstrap（ADR-019），之后只认 DB |
+
+> ADR-029 命名空间策略（W6 票 04）：核心 settings 只保留中性运行配置；数据面专有旋钮（`SLIPSTREAM_AG_CONFIG_FILENAME`、`SLIPSTREAM_AG_LLM_PORT`、`SLIPSTREAM_AG_DB_PATH`、`SLIPSTREAM_AG_BINARY`）由适配器命名空间 `api/src/l03_adapters/agentgateway/deployment.py` 读取，变量名不变，行为不变。
 
 ## 验证
 

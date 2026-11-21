@@ -806,14 +806,16 @@ def test_access_log_full_renders_payload_capture():
     assert cfg["frontendPolicies"]["accessLog"]["database"]["llm"] == "full"
 
 
-def test_access_log_without_db_url_renders_nothing():
-    """缺省（未配置 AG 库路径）时不产出 logging 块。"""
+def test_access_log_empty_url_renders_the_deployment_default():
+    """ADR-029 ticket 04：库位置归适配器命名空间，空 URL = 适配器部署默认。"""
     from l02_domain.ir import AccessLogSpec
+    from l03_adapters.agentgateway.deployment import reset_deployment_cache
 
+    reset_deployment_cache()
     ir = _ir(policies=PoliciesSpec(access_log=AccessLogSpec(database_url="", llm="full")))
     cfg = render_config(ir, 3600)
-    assert "config" not in cfg
-    assert "frontendPolicies" not in cfg
+    assert cfg["config"]["logging"]["database"]["url"] == "ag-data.db"
+    assert cfg["frontendPolicies"]["accessLog"]["database"]["llm"] == "full"
 
 
 # ── ADR-028 适配器遥测：tracing 不是系统策略，只由适配器接收器是否运行决定 ──

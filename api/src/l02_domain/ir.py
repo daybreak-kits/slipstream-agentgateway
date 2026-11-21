@@ -353,9 +353,10 @@ class TransformsPolicySpec:
 class AccessLogSpec:
     """ADR-021 request/payload logging switch, resolved from app settings.
 
-    database_url comes from the same source as the AG SQLite path (settings
-    ag_db_path); llm is `metadata` (default, no prompt/completion bodies) or
-    `full`. None means "not configured" and nothing is rendered.
+    llm is `metadata` (default, no prompt/completion bodies) or `full`. None
+    means "not configured" and nothing is rendered. database_url is an
+    adapter-owned rendering hint (ADR-029 ticket 04): the system leaves it
+    empty and the adapter renders its own deployment default log DB location.
     """
 
     database_url: str = ""

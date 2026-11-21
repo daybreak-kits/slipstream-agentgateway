@@ -89,7 +89,7 @@ v1 主币种 CNY。
 | 下发 Apply | 原子写 + AG 1.7 `--validate-only` + 热加载 + 确认 + 失败回滚 |
 | 配置版本 ConfigRevision | 每次下发的留档：artifact、真实 sha256、操作人、状态、失败详情 |
 | Dry-run | 策略/护栏/MCP 保存前的完整校验：IR → validate → render；失败 422 且不落库，保存成功也不等于已下发 |
-| 密钥文件清理 KeyFilePrune | apply 成功后按**本次渲染的 `key_files` 白名单**清理 `<ag_config_dir>/keys` 下直接存放的陈旧 `*.key`；目录外、非 `.key`、子目录与符号链接永不触碰；删除失败只告警不阻断（best-effort），`dry_run` 可先看计划（ADR-026 补记，ticket 16） |
+| 密钥文件清理 KeyFilePrune | apply 成功后按**本次渲染的 `key_files` 白名单**清理数据面配置目录（`data_plane_config_dir`）`keys/` 下直接存放的陈旧 `*.key`；目录外、非 `.key`、子目录与符号链接永不触碰；删除失败只告警不阻断（best-effort），`dry_run` 可先看计划（ADR-026 补记，ticket 16） |
 
 ## 7. 角色、权限与账号
 

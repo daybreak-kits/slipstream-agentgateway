@@ -26,7 +26,7 @@ def test_relative_config_dir_is_resolved_absolute() -> None:
     previous = os.environ.get("SLIPSTREAM_AG_CONFIG_DIR")
     try:
         _with_env("./.data_store/ag-config")
-        config_dir = Path(get_settings().ag_config_dir)
+        config_dir = Path(get_settings().data_plane_config_dir)
         assert config_dir.is_absolute()
         assert config_dir.name == "ag-config"
     finally:
@@ -38,7 +38,7 @@ def test_absolute_config_dir_is_kept() -> None:
     try:
         absolute = str(Path.cwd() / ".tmp-ag-config-check")
         _with_env(absolute)
-        assert Path(get_settings().ag_config_dir) == Path(absolute)
+        assert Path(get_settings().data_plane_config_dir) == Path(absolute)
     finally:
         _restore(previous)
 

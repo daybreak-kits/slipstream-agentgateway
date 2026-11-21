@@ -26,6 +26,7 @@ from l03_adapters.registry import create
 from l03_adapters.spi import (
     AttemptSink,
     ClientContract,
+    ClientEndpoint,
     CredentialFile,
     DataPlaneAdapter,
     LogPayload,
@@ -95,6 +96,38 @@ def test_fake_driver_is_registered_but_not_a_ui_choice() -> None:
     # keeps seeing only the configured adapter id (settings/data plane), not a
     # picker populated from the registry.
     assert isinstance(adapter.describe().adapter_id, str)
+
+
+def test_client_contract_serves_connection_health_and_playground_facts() -> None:
+    """Ticket 04: connection/health/playground source every client fact from the contract.
+
+    The system layers never hardcode a data-plane port or endpoint path again:
+    they read the endpoint list, the relay URL, the purpose-keyed chat endpoint
+    and the legacy health wire fields straight off the adapter-owned contract.
+    """
+    contract = ClientContract(
+        default_port=3600,
+        scheme="http",
+        endpoints=(
+            ClientEndpoint("/v1/chat/completions", ("POST",), "chat.completions"),
+            ClientEndpoint("/v1/models", ("GET",), "models.list"),
+        ),
+    )
+    # Connection: the endpoint list and the fallback port are contract facts.
+    assert contract.endpoint_paths() == ("/v1/chat/completions", "/v1/models")
+    assert contract.default_port == 3600
+    # Playground: the relay endpoint is found by its neutral purpose key.
+    chat = contract.endpoint_for("chat.completions")
+    assert chat is not None
+    assert chat.path == "/v1/chat/completions"
+    assert contract.endpoint_for("no.such.purpose") is None
+    # The relay URL is contract-owned; no system-side address building.
+    assert contract.base_url() == "http://127.0.0.1:3600"
+    hinted = ClientContract(default_port=9999, base_url_hint="http://10.0.0.7:9999/")
+    assert hinted.base_url() == "http://10.0.0.7:9999"
+    # Health: the legacy data_plane_port wire field stays byte-stable while the
+    # value (and the key itself) move behind the adapter boundary.
+    assert contract.health_fields() == {"data_plane_port": 3600}
 
 
 def test_fake_driver_serves_every_business_port() -> None:
