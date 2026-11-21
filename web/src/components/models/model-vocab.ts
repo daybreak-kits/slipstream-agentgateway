@@ -29,6 +29,8 @@ export const DEFAULT_PARAMETERS: ModelParameters = {
   max_input_tokens: 0,
   max_output_tokens: 0,
   reasoning_level: "",
+  reasoning_levels: [],
+  default_reasoning_level: "",
   input_types: ["text"],
   output_types: ["text"],
   tool_call: false,

@@ -403,7 +403,11 @@ class PlaygroundRequest(BaseModel):
     temperature: float | None = Field(default=None, ge=0, le=2)
     top_p: float | None = Field(default=None, gt=0, le=1)
     max_tokens: int | None = Field(default=None, ge=1)
-    reasoning_effort: str | None = Field(default=None, pattern=r"^(low|medium|high)$")
+    # Full reasoning level set (ticket 18); "default" means 不传 and is dropped
+    # by the relay, every other level is forwarded verbatim.
+    reasoning_effort: str | None = Field(
+        default=None, pattern=r"^(default|none|low|medium|high|xhigh|max)$"
+    )
 
 
 class RuleCreate(BaseModel):
@@ -807,6 +811,9 @@ class MyModelParameters(BaseModel):
     max_input_tokens: int
     max_output_tokens: int
     reasoning_level: str
+    # Ticket 18: declared reasoning levels + default level (空 = 未声明).
+    reasoning_levels: list[str] = Field(default_factory=list)
+    default_reasoning_level: str = ""
     input_types: list[str]
     output_types: list[str]
     tool_call: bool

@@ -124,30 +124,59 @@ export interface ChatMessage {
   content: string;
 }
 
-export type ReasoningEffort = "none" | "low" | "medium" | "high" | "max";
+export type ReasoningEffort = "none" | "low" | "medium" | "high" | "xhigh" | "max";
 export type ResponseFormatType = "text" | "json_object";
-/** 思考控件：off 不指定；none..max 发 reasoning_effort；thinking 发 thinking.enabled；enable_thinking 发开关。 */
-export type ThinkingMode =
-  | "off"
-  | "none"
-  | "low"
-  | "medium"
-  | "high"
-  | "max"
-  | "thinking"
-  | "enable_thinking";
 
-/** 思考控件的中文标签；面板、对话框与摘要共用一处。 */
-export const THINKING_MODE_LABELS: Record<ThinkingMode, string> = {
-  off: "不指定",
+/**
+ * 思考档位全集（票18）：default 表示不发送 reasoning_effort，
+ * 其余档位控制面按值转发到数据面。选择器按模型声明收敛（见 reasoningLevelOptions）。
+ */
+export type ReasoningLevel = "default" | ReasoningEffort;
+
+/** 档位既定顺序；与后端 model_params.REASONING_LEVELS 同源。 */
+export const REASONING_LEVELS: ReasoningLevel[] = [
+  "default",
+  "none",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+];
+
+/** 思考控件的标签；面板、对话框与摘要共用一处。 */
+export const REASONING_LEVEL_LABELS: Record<ReasoningLevel, string> = {
+  default: "默认（不发送）",
   none: "none",
   low: "low",
   medium: "medium",
   high: "high",
+  xhigh: "xhigh",
   max: "max",
-  thinking: "thinking 开关",
-  enable_thinking: "enable_thinking 开关",
 };
+
+/** 模型声明的档位集合 → 选择器可选项：未声明回退全部，未知值过滤，空则回退。 */
+export function reasoningLevelOptions(declared?: string[] | null): ReasoningLevel[] {
+  if (!declared || declared.length === 0) return [...REASONING_LEVELS];
+  const known = declared.filter((value): value is ReasoningLevel =>
+    (REASONING_LEVELS as string[]).includes(value),
+  );
+  return known.length > 0 ? known : [...REASONING_LEVELS];
+}
+
+/** 模型声明的默认档 → 选择器初始值；未声明或非法回退 default（不发送）。 */
+export function normalizeDeclaredDefault(declared?: string | null): ReasoningLevel {
+  return declared && (REASONING_LEVELS as string[]).includes(declared)
+    ? (declared as ReasoningLevel)
+    : "default";
+}
+
+/** 仅 chat 类模型显示思考档位控件；无能力数据时按未声明处理（隐藏）。 */
+export function isChatModel(
+  modelInfo: { model_type: string } | null | undefined,
+): boolean {
+  return modelInfo?.model_type === "chat";
+}
 
 /** 思考内容的载体；顺序即归一化优先级。 */
 export type ThinkingCarrier =
@@ -188,7 +217,7 @@ export interface ThinkingExtraction {
 
 export interface ThinkingMarker {
   label: string;
-  source: "reasoning_effort" | "thinking" | "enable_thinking" | "think" | "inline_tag";
+  source: "reasoning_effort" | "think" | "inline_tag";
 }
 
 /**
@@ -212,10 +241,6 @@ export interface ChatParams {
   top_logprobs?: number;
   user?: string;
   reasoning_effort?: ReasoningEffort;
-  /** DeepSeek 的 thinking:{type:'enabled'|'disabled'}，优先级高于 reasoning_effort。 */
-  thinking?: { type: "enabled" | "disabled" };
-  /** Qwen / DashScope 的非标准开关。 */
-  enable_thinking?: boolean;
   /** 额外请求字段（JSON 透传框）；标准字段优先，保留键不会被覆盖。 */
   extraFields?: Record<string, unknown>;
 }
@@ -376,12 +401,6 @@ export function describeThinking(
   }
   if (params.reasoning_effort) {
     return { label: "reasoning_effort=" + params.reasoning_effort, source: "reasoning_effort" };
-  }
-  if (params.thinking?.type === "enabled") {
-    return { label: "thinking=on", source: "thinking" };
-  }
-  if (params.enable_thinking) {
-    return { label: "enable_thinking", source: "enable_thinking" };
   }
   if (reasoning.trim()) {
     return { label: "think", source: "think" };
@@ -573,7 +592,8 @@ async function toApiError(res: Response): Promise<ApiError> {
 /** 请求体里由本函数自己控制的键，JSON 额外字段不能覆盖。 */
 const RESERVED_BODY_KEYS = new Set(["model", "messages", "stream", "stream_options"]);
 
-/** 标准 ChatParams 字段；有值才写进请求体。 */
+/** 标准 ChatParams 字段；有值才写进请求体。reasoning_effort 的 default 档
+ * 在 chatParamsFromInput 就不产生值，控制面接受其余全部档位（票18）。 */
 const FORWARDED_CHAT_PARAMS = [
   "temperature",
   "top_p",
@@ -589,12 +609,8 @@ const FORWARDED_CHAT_PARAMS = [
   "logprobs",
   "top_logprobs",
   "user",
-  "thinking",
-  "enable_thinking",
+  "reasoning_effort",
 ] as const satisfies ReadonlyArray<keyof ChatParams>;
-
-/** 控制面 PlaygroundRequest 只声明了这三档 reasoning_effort。 */
-const CONTROL_PLANE_EFFORTS = new Set<ReasoningEffort>(["low", "medium", "high"]);
 
 /** delta.content 可能是字符串，也可能是 content parts 数组（Anthropic/Gemini 兼容层）。 */
 function deltaContent(value: unknown): string {
@@ -695,10 +711,6 @@ export async function sendChatStream(
   for (const key of FORWARDED_CHAT_PARAMS) {
     const value = params[key];
     if (value !== undefined) body[key] = value;
-  }
-  // 控制面只接受 low/medium/high；旧系统的 none/max 等档位不发送，避免 422。
-  if (params.reasoning_effort && CONTROL_PLANE_EFFORTS.has(params.reasoning_effort)) {
-    body.reasoning_effort = params.reasoning_effort;
   }
 
   let res: Response;
@@ -866,9 +878,7 @@ async function mockStreamChat(
   const started = performance.now();
   const params = options.params ?? {};
   const thinkEnabled =
-    params.thinking?.type === "enabled" ||
-    params.enable_thinking === true ||
-    (params.reasoning_effort !== undefined && params.reasoning_effort !== "none");
+    params.reasoning_effort !== undefined && params.reasoning_effort !== "none";
 
   const abortPromise = new Promise<never>((_, reject) => {
     if (options.signal?.aborted) {
@@ -1066,8 +1076,8 @@ export interface ChatParamInput {
   logprobs?: boolean;
   topLogprobs?: string;
   user?: string;
-  /** 思考控件：off 不指定；none..max 发 reasoning_effort；thinking / enable_thinking 发厂商开关。 */
-  thinkingMode?: ThinkingMode;
+  /** 思考控件：default 不发送 reasoning_effort，其余档位按值转发（票18）。 */
+  thinkingMode?: ReasoningLevel;
   /** 额外请求字段（JSON 对象）；厂商私有字段的兜底透传。 */
   extraFields?: string;
 }
@@ -1100,8 +1110,8 @@ export const PARAM_HINTS = {
   topLogprobs: { range: "0–20", usage: "返回前 k 个候选词的概率；需先打开 logprobs" },
   user: { range: "≤ 256 字符", usage: "给上游的稳定用户标识，用于滥用追踪" },
   thinkingMode: {
-    range: "不指定 / effort 五档 / thinking / enable_thinking",
-    usage: "原样发给上游；DeepSeek thinking 优先于 effort，都不发时默认开思考",
+    range: "default / none / low / medium / high / xhigh / max",
+    usage: "default 表示不发送该参数；其余档位控制面按值转发到上游",
   },
   extraFields: { range: "顶层 JSON 对象", usage: "厂商私有字段原样合并进请求体，后写覆盖先写" },
   systemPrompt: { range: "可选", usage: "作为 system 消息置顶，本会话每次请求都带" },
@@ -1231,11 +1241,8 @@ export function validateChatParams(
 /** 输入框里的字符串 → 上游认识的请求参数；留空的一律不发送。 */
 export function chatParamsFromInput(input: ChatParamInput): ChatParams {
   const stop = parseStopSequences(input.stop);
-  const mode = input.thinkingMode ?? "off";
-  const effort =
-    mode === "none" || mode === "low" || mode === "medium" || mode === "high" || mode === "max"
-      ? mode
-      : undefined;
+  const mode = input.thinkingMode ?? "default";
+  const effort = mode === "default" ? undefined : mode;
   return {
     temperature: parseOptionalNumber(input.temperature),
     top_p: parseOptionalNumber(input.topP),
@@ -1253,15 +1260,13 @@ export function chatParamsFromInput(input: ChatParamInput): ChatParams {
     top_logprobs: input.logprobs ? parseOptionalNumber(input.topLogprobs) : undefined,
     user: input.user?.trim() || undefined,
     reasoning_effort: effort,
-    thinking: mode === "thinking" ? { type: "enabled" } : undefined,
-    enable_thinking: mode === "enable_thinking" ? true : undefined,
     extraFields: parseExtraFields(input.extraFields).value,
   };
 }
 
 /** 输入区顶部的一句话摘要：只列这次真正会发送的字段。 */
 export function summarizeChatParams(input: ChatParamInput): string {
-  const thinkingMode = input.thinkingMode ?? "off";
+  const thinkingMode = input.thinkingMode ?? "default";
   const fields: Array<[string, string | undefined]> = [
     ["temperature", input.temperature],
     ["top_p", input.topP],
@@ -1270,11 +1275,7 @@ export function summarizeChatParams(input: ChatParamInput): string {
     ["stop", parseStopSequences(input.stop).length ? String(parseStopSequences(input.stop).length) + " 条" : undefined],
     [
       "思考",
-      thinkingMode === "off"
-        ? undefined
-        : thinkingMode === "thinking" || thinkingMode === "enable_thinking"
-          ? thinkingMode
-          : "reasoning_effort=" + thinkingMode,
+      thinkingMode === "default" ? undefined : "reasoning_effort=" + thinkingMode,
     ],
     [
       "额外字段",

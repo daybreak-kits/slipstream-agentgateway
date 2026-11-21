@@ -209,3 +209,65 @@ def test_playground_without_a_contract_chat_endpoint_is_a_stable_conflict(
     body = response.json()
     assert body["code"] == "CONFLICT"
     assert "对话端点" in body["message"]
+
+
+# --------------------------------------------- reasoning_effort full levels (t18)
+
+
+@pytest.mark.parametrize("level", ["none", "low", "medium", "high", "xhigh", "max"])
+def test_playground_reasoning_effort_level_is_forwarded_verbatim(
+    fake_dataplane, stub_upstream, level
+):
+    """Ticket 18: every declared level except default reaches the data plane."""
+    app, client = fake_dataplane
+    app.dependency_overrides[get_adapter] = lambda: FakeAdapter(
+        contract=_fake_contract(stub_upstream)
+    )
+    response = client.post(
+        "/admin/playground/stream",
+        json={
+            "model": "flagship",
+            "messages": [{"role": "user", "content": "hello"}],
+            "reasoning_effort": level,
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert len(_StubSSEHandler.received) == 1
+    assert _StubSSEHandler.received[0]["body"]["reasoning_effort"] == level
+
+
+def test_playground_reasoning_effort_default_never_lands_in_the_body(
+    fake_dataplane, stub_upstream
+):
+    """Ticket 18: "default" means 不传 — the relayed body has no such key."""
+    app, client = fake_dataplane
+    app.dependency_overrides[get_adapter] = lambda: FakeAdapter(
+        contract=_fake_contract(stub_upstream)
+    )
+    response = client.post(
+        "/admin/playground/stream",
+        json={
+            "model": "flagship",
+            "messages": [{"role": "user", "content": "hello"}],
+            "reasoning_effort": "default",
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert len(_StubSSEHandler.received) == 1
+    assert "reasoning_effort" not in _StubSSEHandler.received[0]["body"]
+
+
+def test_playground_reasoning_effort_unknown_level_is_a_validation_error(
+    fake_dataplane,
+):
+    """Anything outside the declared level set is a 422, not a silent drop."""
+    _app, client = fake_dataplane
+    response = client.post(
+        "/admin/playground/stream",
+        json={
+            "model": "flagship",
+            "messages": [{"role": "user", "content": "hello"}],
+            "reasoning_effort": "extremely-high",
+        },
+    )
+    assert response.status_code == 422
