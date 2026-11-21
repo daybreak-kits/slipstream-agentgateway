@@ -54,6 +54,7 @@ export function useDirtyGuard(dirty: boolean, description?: string): ReactNode {
       open
       onOpenChange={(open) => { if (!open) setLeaveHref(null); }}
       title="有未保存修改，确定离开吗？"
+      initialFocus="cancel"
       description={description ?? "离开页面将丢失未保存的修改。保存后再离开可保留配置。"}
       confirmLabel="离开"
       onConfirm={() => {

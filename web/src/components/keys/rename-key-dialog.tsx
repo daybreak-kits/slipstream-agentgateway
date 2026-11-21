@@ -5,6 +5,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { useDialogDraftGuard } from "@/lib/use-dialog-draft-guard";
 import { Label } from "@/components/ui/label";
 
 interface RenameKeyDialogProps {
@@ -25,6 +26,13 @@ export function RenameKeyDialog({ open, keyName, pending, onClose, onSubmit }: R
     if (isOpen) setName(keyName ?? "");
   }, [isOpen, keyName]);
 
+  // 改了名称后 Esc/「取消」先确认放弃。
+  const guard = useDialogDraftGuard({
+    dirty: name.trim() !== "" && name.trim() !== keyName,
+    onClose,
+    description: "重命名弹框里已改的名称不会保存，关闭后将丢失。",
+  });
+
   const submit = () => {
     const cleaned = name.trim();
     if (cleaned.length === 0 || cleaned === keyName) return;
@@ -32,13 +40,14 @@ export function RenameKeyDialog({ open, keyName, pending, onClose, onSubmit }: R
   };
 
   return (
+    <>
     <Dialog
       open={isOpen}
       onOpenChange={(next) => {
-        if (!next) onClose();
+        if (!next) guard.requestClose();
       }}
     >
-      <DialogContent className="max-w-sm">
+      <DialogContent className="max-w-sm" onSubmit={submit} submitDisabled={pending}>
         <DialogHeader>
           <DialogTitle>重命名密钥</DialogTitle>
           <DialogDescription>名称只用于控制台展示，可随时再改。</DialogDescription>
@@ -55,7 +64,7 @@ export function RenameKeyDialog({ open, keyName, pending, onClose, onSubmit }: R
           />
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={pending}>
+          <Button variant="outline" onClick={guard.requestClose} disabled={pending}>
             取消
           </Button>
           <Button onClick={submit} disabled={pending || name.trim().length === 0}>
@@ -64,5 +73,7 @@ export function RenameKeyDialog({ open, keyName, pending, onClose, onSubmit }: R
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {guard.confirmNode}
+    </>
   );
 }

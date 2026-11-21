@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 
 import {
   AlertDialog,
@@ -21,6 +21,11 @@ export interface ConfirmDialogProps {
   cancelLabel?: string;
   onConfirm: () => void | Promise<void>;
   destructive?: boolean;
+  /**
+   * 打开后的落焦点：cancel=取消，action=确认。
+   * 默认按 destructive 决定——危险确认落在「取消」，误按 Enter 不会直接执行删除。
+   */
+  initialFocus?: "cancel" | "action";
 }
 
 /**
@@ -36,10 +41,23 @@ export function ConfirmDialog({
   cancelLabel = "取消",
   onConfirm,
   destructive = false,
+  initialFocus,
 }: ConfirmDialogProps) {
+  // 一次确认只发一次：连按 Enter/点击不会重复提交。
+  const firedRef = useRef(false);
+  useEffect(() => {
+    if (open) firedRef.current = false;
+  }, [open]);
+
+  const handleConfirm = () => {
+    if (firedRef.current) return;
+    firedRef.current = true;
+    void onConfirm();
+  };
+
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent className="max-w-md">
+      <AlertDialogContent className="max-w-md" initialFocus={initialFocus ?? (destructive ? "cancel" : "action")}>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           {description ? <AlertDialogDescription>{description}</AlertDialogDescription> : null}
@@ -48,9 +66,7 @@ export function ConfirmDialog({
           <AlertDialogCancel>{cancelLabel}</AlertDialogCancel>
           <AlertDialogAction
             className={destructive ? buttonVariants({ variant: "danger" }) : undefined}
-            onClick={() => {
-              void onConfirm();
-            }}
+            onClick={handleConfirm}
           >
             {confirmLabel}
           </AlertDialogAction>

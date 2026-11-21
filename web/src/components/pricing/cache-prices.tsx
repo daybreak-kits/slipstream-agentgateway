@@ -4,7 +4,7 @@ import { toast } from "@/lib/notify";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useDialogDraftGuard } from "@/lib/use-dialog-draft-guard";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -292,9 +292,6 @@ function CachePriceDialog({
   const [selectedModelId, setSelectedModelId] = useState("");
   const [read, setRead] = useState("");
   const [write, setWrite] = useState("");
-  // W4-G 弹窗草稿守卫：填了内容/选了模型后 Esc、遮罩、取消不放行，先确认「放弃修改？」。
-  const [confirmDiscard, setConfirmDiscard] = useState(false);
-
   const selectedModel = models.find((model) => model.id === selectedModelId) ?? null;
   const targetModelId = mode === "edit" ? modelId : (selectedModel?.id ?? "");
 
@@ -307,11 +304,12 @@ function CachePriceDialog({
   const canSubmit =
     !invalid && !nothingFilled && (mode === "edit" || selectedModel);
 
-  const dirty = !nothingFilled || (mode === "create" && modelId !== "");
-  const requestClose = () => {
-    if (dirty) setConfirmDiscard(true);
-    else onClose();
-  };
+  // W4-G 弹窗草稿守卫（D11 统一实现）：有改动时 Esc/遮罩/取消先确认「放弃修改？」。
+  const guard = useDialogDraftGuard({
+    dirty: !nothingFilled || (mode === "create" && modelId !== ""),
+    onClose,
+    description: "弹窗内已填的缓存价不会写入，关闭后将丢失。",
+  });
 
   const save = useMutation({
     mutationFn: async () => {
@@ -355,8 +353,9 @@ function CachePriceDialog({
 
   return (
     <>
-    <Dialog open onOpenChange={(open) => { if (!open) requestClose(); }}>
-      <DialogContent className="max-w-md">
+    <Dialog open onOpenChange={(open) => { if (!open) guard.requestClose(); }}>
+      <DialogContent className="max-w-md" onSubmit={() => save.mutate()} submitDisabled={!canSubmit || save.isPending}>
+
         <DialogHeader>
           <DialogTitle>
             {mode === "edit" ? "编辑缓存价 · " + modelName : "新建缓存价"}
@@ -411,7 +410,7 @@ function CachePriceDialog({
           缓存价按版本追加：保存生成新版本并从当前时间生效，历史版本保留，不计入 JSON 导入导出（v1）。
         </p>
         <DialogFooter>
-          <Button variant="outline" onClick={requestClose}>取消</Button>
+          <Button variant="outline" onClick={guard.requestClose}>取消</Button>
           <Button
             onClick={() => save.mutate()}
             disabled={!canSubmit || save.isPending}
@@ -421,20 +420,7 @@ function CachePriceDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-    {confirmDiscard ? (
-      <ConfirmDialog
-        open
-        onOpenChange={(open) => { if (!open) setConfirmDiscard(false); }}
-        title="放弃修改？"
-        description="弹窗内已填的缓存价不会写入，关闭后将丢失。"
-        confirmLabel="放弃修改"
-        destructive
-        onConfirm={() => {
-          setConfirmDiscard(false);
-          onClose();
-        }}
-      />
-    ) : null}
+    {guard.confirmNode}
     </>
   );
 }

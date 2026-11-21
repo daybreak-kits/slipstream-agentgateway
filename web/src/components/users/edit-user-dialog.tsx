@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ACTION_ICONS } from "@/lib/icons";
 import { SELECT_NONE_VALUE } from "@/lib/select-sentinels";
+import { useDialogDraftGuard } from "@/lib/use-dialog-draft-guard";
 import { useDirtyFields } from "@/lib/use-dirty-fields";
 import type { UserTreeNode } from "@/types";
 
@@ -103,6 +104,13 @@ export function EditUserDialog({
 
   const isRoot = user !== null && rootIds.includes(user.id);
 
+  // 有未保存改动时，Esc/「取消」先确认放弃（D11 共享草稿守卫）。
+  const guard = useDialogDraftGuard({
+    dirty: isDirty,
+    onClose,
+    description: "编辑用户弹框里的修改不会保存，关闭后将丢失。",
+  });
+
   const submit = () => {
     if (user === null) return;
     onSubmit({
@@ -114,13 +122,14 @@ export function EditUserDialog({
   };
 
   return (
+    <>
     <Dialog
       open={isOpen}
       onOpenChange={(next) => {
-        if (!next) onClose();
+        if (!next) guard.requestClose();
       }}
     >
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md" onSubmit={submit} submitDisabled={pending}>
         <DialogHeader>
           <DialogTitle>编辑用户</DialogTitle>
           <DialogDescription>
@@ -219,7 +228,7 @@ export function EditUserDialog({
         </div>
 
         <DirtyFooter count={dirtyCount} onResetAll={resetAll} saving={pending}>
-          <Button variant="outline" onClick={onClose} disabled={pending}>
+          <Button variant="outline" onClick={guard.requestClose} disabled={pending}>
             取消
           </Button>
           <DirtySaveButton dirty={isDirty} pending={pending} onClick={submit}>
@@ -228,5 +237,7 @@ export function EditUserDialog({
         </DirtyFooter>
       </DialogContent>
     </Dialog>
+    {guard.confirmNode}
+    </>
   );
 }

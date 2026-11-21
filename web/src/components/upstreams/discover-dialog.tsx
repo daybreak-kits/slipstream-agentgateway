@@ -92,7 +92,7 @@ export function DiscoverModelsDialog({
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="max-w-xl" onSubmit={() => importModels.mutate()} submitDisabled={!ok || chosen.size === 0 || importModels.isPending}>
         <DialogHeader>
           <DialogTitle>获取上游模型</DialogTitle>
           <DialogDescription>
