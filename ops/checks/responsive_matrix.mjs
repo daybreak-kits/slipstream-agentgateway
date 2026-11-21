@@ -496,6 +496,73 @@ async function closeOverlay(page) {
   await page.waitForTimeout(180);
 }
 
+// W6 ticket 13：通知中心专项（375）。seed 一条超长标题/正文的通知：store 在应用
+// 启动时从 localStorage 读取（lib/notification-store 的 STORAGE_KEY），每次导航由
+// init script 重置，保证专项拿到确定性的行内容；原生 title tooltip 无法进截图，
+// 所以 hover 详情断言行 title 属性全文并执行一次真实 hover。
+async function assertNotificationCenterNarrow(page) {
+  await goto(page, "/users");
+  const bell = page.getByRole("button", { name: /^通知/ });
+  assert(await visible(bell), "375 下通知按钮不可见");
+  await bell.click();
+  const panel = page.locator('[data-slot="notification-panel"]');
+  await panel.waitFor({ state: "visible", timeout: 3000 });
+  // 等开箱 zoom-in（95%→100%）动画落位再量盒，过早量会得到 320×0.95=304 的动画中间帧。
+  await page.waitForFunction(
+    () => {
+      const el = document.querySelector('[data-slot="notification-panel"]');
+      return el !== null && el.getBoundingClientRect().width >= 318;
+    },
+    { timeout: 3000 },
+  ).catch(() => {});
+  const panelBox = await boxOf(panel);
+  // 票09 约束 w-[min(20rem,100vw-2rem)]：375 下取 20rem 上限 320px，双边缘都在视口内。
+  assert(panelBox.x >= 0 && panelBox.x + panelBox.width <= 375.5, "375 下通知面板超出视口：" + JSON.stringify(panelBox));
+  assert(panelBox.width >= 318 && panelBox.width <= 344, "375 下面板未占满可用宽度（min(20rem, 100vw-2rem)）：width=" + panelBox.width);
+  const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+  assert(scrollWidth <= 375, "面板打开后页面横向溢出：scrollWidth=" + scrollWidth);
+
+  const row = page.locator('[data-slot="notification-row"]').first();
+  const rowTitle = row.locator('[data-slot="notification-title"]');
+  const rowTime = row.locator('[data-slot="notification-time"]');
+  const rowDesc = row.locator('[data-slot="notification-desc"]');
+  if (!(await visible(rowTime))) {
+    const dump = await panel
+      .evaluate((node) => {
+        const li = node.querySelector('[data-slot="notification-row"]');
+        return JSON.stringify({
+          rows: node.querySelectorAll('[data-slot="notification-row"]').length,
+          times: node.querySelectorAll('[data-slot="notification-time"]').length,
+          firstRow: li ? li.outerHTML.slice(0, 800) : null,
+        });
+      })
+      .catch(() => String());
+    throw new MatrixError("通知行缺少 time 元素（诊断：" + dump + "）");
+  }
+  assert(await rowTime.getAttribute("datetime"), "time 元素缺 datetime 属性（机器可读时间）");
+  const titleBox = await boxOf(rowTitle);
+  const timeBox = await boxOf(rowTime);
+  const rowBox = await boxOf(row);
+  assert(Math.abs(timeBox.y - titleBox.y) <= 4, "时间与标题不在同一行：delta=" + (timeBox.y - titleBox.y).toFixed(1));
+  assert(timeBox.x >= titleBox.x + titleBox.width - 1, "时间未在标题行尾（与标题重叠）");
+  assert(timeBox.x + timeBox.width <= rowBox.x + rowBox.width + 0.5, "时间超出行右缘");
+  // 正文单行省略：一行高（text-2xs 行高 18）且长文案下 scrollWidth > clientWidth 证明 truncate 生效。
+  const descBox = await boxOf(rowDesc);
+  assert(descBox.height <= 20, "通知正文不是单行：height=" + descBox.height);
+  const descTruncated = await rowDesc.evaluate((node) => node.scrollWidth > node.clientWidth);
+  assert(descTruncated, "正文没有触发截断（文案不够长或未用 truncate）");
+  // hover 完整详情：行 title 属性包含标题与正文全文。
+  const detail = (await row.getAttribute("title")) ?? "";
+  assert(detail.includes("超长标题") && detail.includes("hover 可读完整详情"), "行 hover 详情缺失或不完整：" + detail);
+  await page.hover('[data-slot="notification-row"]');
+  await shot(page, "375-notification-hover");
+  // 可操作：清空后回到空态。
+  await page.getByRole("button", { name: "清空" }).click();
+  assert(await visible(page.getByText("暂无通知")), "清空后未回到空态");
+  await closeOverlay(page);
+  return "面板 " + Math.round(panelBox.width) + "px 双缘在视口内、时间行尾同高、正文单行截断、hover 详情完整、清空可点";
+}
+
 async function assertTopbarCluster(page, width) {
   // 主题：≥md 直接入口；<md 收进“更多操作 → 主题”子菜单。
   const theme = page.getByRole("button", { name: "切换主题" });
@@ -1775,6 +1842,21 @@ async function main() {
     baseURL: baseUrl(),
     locale: "zh-CN",
   });
+  // W6 ticket 13：给通知中心播种一条确定性通知（store 启动时读 localStorage）。
+  // 必须在 newPage 之前注册，init script 才作用于本上下文的每个导航。
+  await context.addInitScript(() => {
+    localStorage.setItem(
+      "slipstream.notifications.v1",
+      JSON.stringify([{
+        id: "matrix-notification-1",
+        kind: "warning",
+        title: "矩阵通知：上游渠道 glm-5.3 连接超时的超长标题用于验证标题单行省略与行尾时间不被挤压换行",
+        description: "矩阵通知正文：INTERNAL_ERROR 上游渠道连接超时，这段超长正文用于验证 375 视口下单行省略且 hover 可读完整详情，包含足够的字符让标题与正文都触发截断。",
+        at: Date.now(),
+        read: true,
+      }]),
+    );
+  });
   const page = await context.newPage();
   page.setDefaultTimeout(PLAYWRIGHT_TIMEOUT);
   const consoleErrors = [];
@@ -1819,6 +1901,8 @@ async function main() {
       if (width === 375) {
         await test("dialog.375x400", "375×400 短视口弹窗可滚、不裁提交区", () => assertShortViewportDialog(page));
         await test("touch.375", "375 粗指针触控目标 ≥44px、行高 ≥40px", () => assertCoarsePointer(page));
+        // W6 ticket 13：通知中心窄屏专项（占满可用宽度 + 时间行尾 + 单行省略 + hover 详情 + 清空可点）。
+        await test("notification.375", "375 通知中心窄屏可操作与紧凑行布局", () => assertNotificationCenterNarrow(page));
       }
       if (width === 375 || width === 768) {
         await test("drawer." + label, label + " 上游模型抽屉不超出视口且内容可滚", () => assertDrawer(page, width, height));
