@@ -11,8 +11,9 @@ import { Field } from "@/components/models/field";
 import { type MemberDraft, nextPriority, targetsPayload, validateMembers } from "@/components/models/member-drafts";
 import { MemberEditor } from "@/components/models/member-editor";
 import {
-  isImageType, MODEL_TYPES, parametersOf, parameterSummary, ROUTING_LABELS, similarity, TYPE_SOURCE_LABELS,
+  isImageType, MODEL_TYPES, ROUTING_LABELS, similarity, TYPE_SOURCE_LABELS,
 } from "@/components/models/model-vocab";
+import { ModelParamsCell } from "@/components/models/model-params-cell";
 import { PublicModelEditor } from "@/components/models/public-model-editor";
 import { UpstreamModelDrawer } from "@/components/models/upstream-model-drawer";
 import { PageHeader } from "@/components/layout/page-header";
@@ -301,7 +302,7 @@ function UpstreamTab() {
     staleTime: 60_000,
   });
 
-  // 价格单元格（W4-C）：进价 2 位小数（<0.01 升 4 位）；入出均未配置显示灰字「未设置」（同参数列「未声明」样式）。
+  // 价格单元格（W4-C）：进价 2 位小数（<0.01 升 4 位）；入出均未配置显示灰字「未设置」（同参数列「未配置」写法）。
   const priceCell = (row: UpstreamModel) => {
     const cache = cachePrices.get(row.name);
     const unpriced = (row.cost_input_per_1m ?? "").trim() === "" && (row.cost_output_per_1m ?? "").trim() === "";
@@ -379,17 +380,8 @@ function UpstreamTab() {
     {
       key: "params",
       label: "参数",
-      cell: (row) => {
-        const p = parametersOf(row);
-        return (
-          <div className="text-2xs text-body">
-            <div>{parameterSummary(row)}</div>
-            <div className="text-faint">
-              入上限 {p.max_input_tokens > 0 ? fmtInt(p.max_input_tokens) : "未声明"} / 出上限 {p.max_output_tokens > 0 ? fmtInt(p.max_output_tokens) : "未声明"}
-            </div>
-          </div>
-        );
-      },
+      // W7 t09：列里只留输入/输出上限；模态、能力、思考档位进悬浮详情。
+      cell: (row) => <ModelParamsCell row={row} />,
     },
     {
       key: "targets",

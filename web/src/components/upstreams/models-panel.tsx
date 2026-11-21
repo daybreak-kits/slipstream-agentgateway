@@ -5,7 +5,7 @@ import { toast } from "@/lib/notify";
 
 import { isCooling, modelRowRank, modelRowTone, useAvailabilityMutation } from "@/components/models/availability";
 import { UpstreamModelDrawer } from "@/components/models/upstream-model-drawer";
-import { parameterSummary } from "@/components/models/model-vocab";
+import { ModelParamsCell } from "@/components/models/model-params-cell";
 import { DataTable } from "@/components/data-table";
 import { ActionButton } from "@/components/ui/action-button";
 import { Badge } from "@/components/ui/badge";
@@ -93,8 +93,9 @@ export function UpstreamModelsPanel({
     },
     {
       id: "params",
-      header: "参数摘要",
-      cell: (c) => <span className="text-2xs text-body">{parameterSummary(c.row.original)}</span>,
+      header: "参数",
+      // W7 t09：与模型管理页同一口径——列里只留输入/输出上限，其余进悬浮详情。
+      cell: (c) => <ModelParamsCell row={c.row.original} />,
     },
     {
       id: "price",
