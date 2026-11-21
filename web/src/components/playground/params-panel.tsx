@@ -28,6 +28,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
+  DEFAULT_MAX_OUTPUT_TOKENS,
   isChatModel,
   maxOutputTokensFor,
   paramHintText,
@@ -201,7 +202,10 @@ export function ParamsPanel({
   modelInfo,
 }: ParamsPanelProps) {
   const patch = (next: Partial<PlaygroundParamsState>) => onChange({ ...value, ...next });
-  const limit = maxOutputTokensFor(null);
+  // 票19：上限取所选模型登记的 max_output_tokens；0 = 未声明，与无能力数据一样
+  // 回退安全默认，并在下方如实标注，不冒充登记值。
+  const limit = maxOutputTokensFor(modelInfo?.parameters.max_output_tokens);
+  const limitRegistered = (modelInfo?.parameters.max_output_tokens ?? 0) > 0;
   const validation = validateChatParams(value, { maxOutputTokens: limit });
   // 票18：思考档位控件只给 chat 类模型；档位选项按模型声明收敛，未声明回退全集。
   const showThinking = isChatModel(modelInfo);
@@ -440,14 +444,13 @@ export function ParamsPanel({
                 hintKey="stop"
                 className="col-span-2"
               >
-                <Textarea
+                <Input
                   id="playground-stop"
-                  rows={2}
-                  placeholder={"每行一条，最多 4 条"}
+                  placeholder="逗号分隔，最多 4 条"
                   value={value.stop}
                   disabled={disabled}
                   onChange={(event) => patch({ stop: event.target.value })}
-                  className="min-h-[28px] resize-y px-1.5 py-1 text-2xs"
+                  className={inputClass}
                 />
               </ParamField>
             </div>
@@ -547,10 +550,14 @@ export function ParamsPanel({
                 {validation.message ?? "参数不合法。"}
               </p>
             )}
+            {!limitRegistered ? (
+              <p className="text-2xs leading-relaxed text-faint">
+                当前模型未登记最大输出词元，输出上限按安全默认{" "}
+                {fmtInt(DEFAULT_MAX_OUTPUT_TOKENS)} 校验；可在控制面模型登记里声明。
+              </p>
+            ) : null}
             <p className="rounded-md bg-surface-2 px-2 py-1.5 text-2xs leading-relaxed text-faint">
-              控制面当前透传 temperature · top_p · max_tokens ·
-              reasoning_effort（档位按值转发，default 不发送）；其余字段按 OpenAI
-              形状发送，待数据面支持后生效。
+              控制面透传面板全部参数（reasoning_effort 按档位转发，default 不发送；额外字段不覆盖标准参数）。
             </p>
           </div>
         </CardContent>

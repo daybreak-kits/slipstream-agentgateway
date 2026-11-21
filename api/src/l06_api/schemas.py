@@ -11,10 +11,11 @@ invalid rules never reach storage.
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
+from l05_service.model_params import MAX_TOKEN_LIMIT
 from l05_service.rollout import RevisionStatus
 
 
@@ -395,19 +396,48 @@ class PlaygroundMessage(BaseModel):
     content: str
 
 
+class PlaygroundResponseFormat(BaseModel):
+    """response_format 只透传 type；text 是上游默认形状，面板不发它。"""
+
+    type: Literal["text", "json_object"]
+
+
 class PlaygroundRequest(BaseModel):
     model: str = Field(min_length=1)
     messages: list[PlaygroundMessage] = Field(min_length=1)
     # Sampling knobs forwarded verbatim to the data plane (t6 contract);
-    # None values never land in the relayed body.
+    # None values never land in the relayed body. Ticket 19: the full panel
+    # set is accepted here and forwarded by the relay whitelist, so no form
+    # field is a dead end any more.
     temperature: float | None = Field(default=None, ge=0, le=2)
     top_p: float | None = Field(default=None, gt=0, le=1)
-    max_tokens: int | None = Field(default=None, ge=1)
+    top_k: int | None = Field(default=None, ge=0)
+    frequency_penalty: float | None = Field(default=None, ge=-2, le=2)
+    presence_penalty: float | None = Field(default=None, ge=-2, le=2)
+    seed: int | None = None
+    # Sanity bounds reuse the model registry's own cap; the per-model
+    # registered max_output_tokens is enforced by the route (routers_ops).
+    max_tokens: int | None = Field(default=None, ge=1, le=MAX_TOKEN_LIMIT)
+    max_completion_tokens: int | None = Field(default=None, ge=1, le=MAX_TOKEN_LIMIT)
+    # Ticket 19: at most 4 non-empty stop sequences (the UI sends one array;
+    # the single-line input is comma separated and folded at parse time).
+    stop: list[Annotated[str, StringConstraints(min_length=1)]] | None = Field(
+        default=None, max_length=4
+    )
+    n: int | None = Field(default=None, ge=1, le=128)
+    response_format: PlaygroundResponseFormat | None = None
+    logprobs: bool | None = None
+    top_logprobs: int | None = Field(default=None, ge=0, le=20)
+    user: str | None = Field(default=None, min_length=1, max_length=256)
     # Full reasoning level set (ticket 18); "default" means 不传 and is dropped
     # by the relay, every other level is forwarded verbatim.
     reasoning_effort: str | None = Field(
         default=None, pattern=r"^(default|none|low|medium|high|xhigh|max)$"
     )
+    # Ticket 19: vendor passthrough box (面板「额外请求字段」). Merged into the
+    # relay body first, so a standard param always wins and the relay-owned
+    # keys (model/messages/stream/stream_options) can never be overridden.
+    extra_fields: dict[str, Any] | None = None
 
 
 class RuleCreate(BaseModel):

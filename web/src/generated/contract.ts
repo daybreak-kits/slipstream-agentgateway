@@ -238,8 +238,24 @@ export interface PlaygroundRequest {
   messages: PlaygroundMessage[];
   temperature?: number | null;
   top_p?: number | null;
+  top_k?: number | null;
+  frequency_penalty?: number | null;
+  presence_penalty?: number | null;
+  seed?: number | null;
   max_tokens?: number | null;
+  max_completion_tokens?: number | null;
+  stop?: string[] | null;
+  n?: number | null;
+  response_format?: PlaygroundResponseFormat | null;
+  logprobs?: boolean | null;
+  top_logprobs?: number | null;
+  user?: string | null;
   reasoning_effort?: string | null;
+  extra_fields?: Record<string, unknown> | null;
+}
+
+export interface PlaygroundResponseFormat {
+  type: "text" | "json_object";
 }
 
 export interface PolicyConfig {

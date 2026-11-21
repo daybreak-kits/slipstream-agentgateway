@@ -589,9 +589,6 @@ async function toApiError(res: Response): Promise<ApiError> {
   return new ApiError(res.status, code, message, requestId);
 }
 
-/** 请求体里由本函数自己控制的键，JSON 额外字段不能覆盖。 */
-const RESERVED_BODY_KEYS = new Set(["model", "messages", "stream", "stream_options"]);
-
 /** 标准 ChatParams 字段；有值才写进请求体。reasoning_effort 的 default 档
  * 在 chatParamsFromInput 就不产生值，控制面接受其余全部档位（票18）。 */
 const FORWARDED_CHAT_PARAMS = [
@@ -703,10 +700,11 @@ export async function sendChatStream(
     messages,
     stream: options.stream ?? true,
   };
-  // 额外字段先写，标准字段后写：保留键和同名标准字段不能被 JSON 框覆盖。
-  for (const [key, value] of Object.entries(params.extraFields ?? {})) {
-    if (RESERVED_BODY_KEYS.has(key)) continue;
-    body[key] = value;
+  // 票19：额外字段整包随 extra_fields 上行，由控制面合并进转发体——标准字段
+  // 优先、model/messages/stream/stream_options 保留键不开放覆盖（单一裁决点
+  // 在后端 relay）。控制面会把它拍平回顶层，上游看到的仍是 OpenAI 形状。
+  if (params.extraFields && Object.keys(params.extraFields).length > 0) {
+    body.extra_fields = params.extraFields;
   }
   for (const key of FORWARDED_CHAT_PARAMS) {
     const value = params[key];
@@ -1069,7 +1067,7 @@ export interface ChatParamInput {
   seed?: string;
   maxTokens?: string;
   maxCompletionTokens?: string;
-  /** stop 多值：每行一个，空行忽略。 */
+  /** stop 多值：单行逗号分隔；旧换行输入在解析时折算成同一语义（票19）。 */
   stop?: string;
   n?: string;
   responseFormat?: ResponseFormatType;
@@ -1103,8 +1101,8 @@ export const PARAM_HINTS = {
   seed: { range: "整数", usage: "固定随机种子便于复现；上游未校验，可能被忽略" },
   maxTokens: { range: "1–模型上限", usage: "本次回复最多生成的词元数" },
   maxCompletionTokens: { range: "1–模型上限", usage: "与 max_tokens 二选一，新版接口用它替代" },
-  stop: { range: "最多 4 条，每行一条", usage: "命中任一条就停止生成，停止词不进回复" },
   n: { range: "1–128", usage: "一次生成几份候选回复；多数上游只支持 1" },
+  stop: { range: "最多 4 条，逗号分隔", usage: "命中任一条就停止生成，停止词不进回复" },
   responseFormat: { range: "text / json_object", usage: "json_object 要求提示词里明确要求 JSON" },
   logprobs: { range: "开 / 关", usage: "返回每个生成词元的对数概率，用于排查" },
   topLogprobs: { range: "0–20", usage: "返回前 k 个候选词的概率；需先打开 logprobs" },
@@ -1113,7 +1111,7 @@ export const PARAM_HINTS = {
     range: "default / none / low / medium / high / xhigh / max",
     usage: "default 表示不发送该参数；其余档位控制面按值转发到上游",
   },
-  extraFields: { range: "顶层 JSON 对象", usage: "厂商私有字段原样合并进请求体，后写覆盖先写" },
+  extraFields: { range: "顶层 JSON 对象", usage: "厂商私有字段原样合并进请求体；与标准参数同名时以标准参数为准" },
   systemPrompt: { range: "可选", usage: "作为 system 消息置顶，本会话每次请求都带" },
   apiKey: { range: "留空用登录凭证", usage: "只留在浏览器内存，随请求发 Authorization" },
   streamMode: { range: "开 / 关", usage: "开=逐条收 SSE；关=等完整回复一次返回" },
@@ -1146,12 +1144,29 @@ export interface ChatParamValidationOptions {
   maxOutputTokens?: number | null;
 }
 
-/** stop 多值输入 → 真正发出去的数组；一行一条，保序去空行。 */
+/**
+ * stop 的分隔符（票19）：主用逗号；旧多行输入的换行在解析时折算成同一语义
+ * （一次性迁移，存量换行写法继续工作）。分号从来不是分隔符，保持为内容。
+ * 注意是单字符集、不带 +：连续逗号必须各自成段，空条目才检测得出来。
+ */
+const STOP_SEPARATORS = /[\n,]/;
+
+/** stop 多值输入 → 真正发出去的数组；逗号/换行拆分，trim，去空，保序。 */
 export function parseStopSequences(raw: string | undefined): string[] {
   return (raw ?? "")
-    .split(/\r?\n/)
+    .split(STOP_SEPARATORS)
     .map((item) => item.trim())
     .filter((item) => item.length > 0);
+}
+
+/**
+ * 空条目检测（票19 行内校验）：「a,,b」「a,」这类写法会产生空 stop 条目，
+ * 上游会拒绝，发送前拦下并提示。与 parseStopSequences 共用同一份分隔符定义。
+ */
+export function stopHasEmptyItems(raw: string | undefined): boolean {
+  const text = raw ?? "";
+  if (!text.trim()) return false;
+  return text.split(STOP_SEPARATORS).some((item) => item.trim().length === 0);
 }
 
 function isIntegerInRange(value: number | undefined, min: number, max: number): boolean {
@@ -1217,8 +1232,13 @@ export function validateChatParams(
   if (input.n?.trim() && !isIntegerInRange(n, 1, 128)) {
     return { valid: false, message: "n 需是 1–128 的整数。" };
   }
+  // 票19：stop 单行逗号分隔（旧换行输入在解析层折算）；空条目上游会拒绝，
+  // 发送前拦下并各给一句可操作的提示。
   if (parseStopSequences(input.stop).length > 4) {
-    return { valid: false, message: "stop 最多 4 条，每行一条。" };
+    return { valid: false, message: "stop 最多 4 条，逗号分隔。" };
+  }
+  if (stopHasEmptyItems(input.stop)) {
+    return { valid: false, message: "stop 含空条目，请去掉多余或连续的逗号。" };
   }
   if (input.topLogprobs?.trim()) {
     if (!input.logprobs) {
