@@ -1412,8 +1412,9 @@ async function assertMemberBoard(page, width, fixtures) {
   assert((await dirtyCount.count()) === 0, "恢复成员编排后计数徽章应消失");
   assert((await priorityInput.inputValue()) === "1", "恢复后 priority 应回基线值");
 
-  // 加入成员走 chip：点候选 chip → 左栏新增一行 + 计数联动；chip 从候选消失。
-  const candidateChip = page.locator('[data-slot="member-candidate-chip"]').first();
+  // 加入成员走 chip：点未选中的候选 chip → 左栏新增一行 + 计数联动；
+  // W7 票05 起候选原地灰显不消失，所以必须点 data-selected="false" 的 chip。
+  const candidateChip = page.locator('[data-slot="member-candidate-chip"][data-selected="false"]').first();
   assert(await visible(candidateChip), "候选区应有未加入成员的 chip");
   const joinedId = await candidateChip.getAttribute("data-upstream-model-id");
   const beforeRows = await rows.count();

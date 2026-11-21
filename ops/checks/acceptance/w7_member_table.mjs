@@ -343,6 +343,7 @@ async function readTable(page) {
       return {
         hasTable: Boolean(table),
         hasHead: Boolean(head),
+        hasDetail: Boolean(document.querySelector('[data-slot="member-row-detail"]')),
         heads,
         rows,
         tableWidth: tableRect ? tableRect.width : 0,
@@ -542,8 +543,17 @@ async function runChecks(session) {
     assert(table.hasDetail, "展开后必须出现展开区（member-row-detail）");
     const expandedFirst = table.rows.find((row) => row.upstreamModelId === firstId);
     const expandedSecond = table.rows.find((row) => row.upstreamModelId === secondId);
-    assert(expandedFirst.height > beforeFirst.height + 10, "展开后行高必须增大：" + beforeFirst.height + " → " + expandedFirst.height);
-    assert(expandedSecond.y > beforeSecond.y + 5, "后续行必须自然下移：" + beforeSecond.y + " → " + expandedSecond.y);
+    const detailBox = await page.locator(DETAIL).first().boundingBox();
+    assert(detailBox && detailBox.height > 10, "展开区必须有实际高度");
+    assert(
+      detailBox.y + detailBox.height - expandedFirst.y > beforeFirst.height + 10,
+      "展开后当前行块（行+展开区）必须增高",
+    );
+    assert(
+      Math.abs(expandedFirst.height - beforeFirst.height) <= 1,
+      "成员行自身高度不应变化（展开区独立成行，不推挤列）：" + beforeFirst.height + " → " + expandedFirst.height,
+    );
+    assert(expandedSecond.y > beforeSecond.y + 10, "后续行必须自然下移：" + beforeSecond.y + " → " + expandedSecond.y);
     assert(Math.abs(expandedSecond.x - beforeSecond.x) < 0.5, "后续行不得横向跳动：" + beforeSecond.x + " → " + expandedSecond.x);
     const removeAfter = await rowLocator(page, firstId).locator(REMOVE).boundingBox();
     assert(Math.abs(removeAfter.x - removeBox.x) < 0.5, "展开不得造成行内横向跳动：移除按钮 x " + removeBox.x + " → " + removeAfter.x);
@@ -693,7 +703,11 @@ async function runChecks(session) {
     await fillField(page, targets[0].upstream_model_id, "when", 'request.tier == "pro"');
     await fillField(page, targets[1].upstream_model_id, "when", 'request.tier == "std"');
     table = await readTable(page);
-    assert(table.rows.some((row) => row.upstreamModelId === targets[targets.length - 1].upstreamModelId && row.when === ""), "末位成员应保持表达式为空（兜底）");
+    const dump = table.rows.map((row) => row.label + "=p" + row.priority + "/when:" + JSON.stringify(row.when)).join(" | ");
+    assert(
+      table.rows.some((row) => row.upstreamModelId === targets[targets.length - 1].upstream_model_id && row.when === ""),
+      "末位成员应保持表达式为空（兜底）。行：" + dump,
+    );
 
     await savePage(page);
     const after = await session.apiGet("/admin/public-models");
