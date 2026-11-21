@@ -72,7 +72,8 @@ class Rollout:
         try:
             session = self._session
             adapter = self._adapter
-            ir, key_files = rendering.build_render_plan(session, revision=revision, adapter=adapter)
+            plan = rendering.build_render_plan(session, revision=revision, adapter=adapter)
+            ir, credentials = plan
             # S3: the driver's own validate() is part of the SPI contract, so the apply
             # flow must run it before rendering (a driver may reject IR that the generic
             # checker accepts). Nothing is written when it fails.
@@ -83,7 +84,11 @@ class Rollout:
                     "适配器校验未通过，拒绝下发",
                     details={"errors": list(validation.errors)},
                 )
-            rendering.write_key_files(key_files)
+            # Ticket 03: the adapter materializes its own credential files (write
+            # phase only) so the candidate config's key references resolve when the
+            # apply gate reads them; the whitelist cleanup runs after the apply
+            # actually succeeded, never on a failed one.
+            adapter.materialize_credentials(credentials, prune=False)
             artifact = adapter.render(ir)
             result = adapter.apply(artifact)
         except AppError as exc:
@@ -102,7 +107,7 @@ class Rollout:
             reason=reason,
         )
         if result.ok:
-            self._prune_stale_key_files(key_files)
+            self._prune_stale_credentials(credentials)
             return row
         if on_failure == "raise":
             raise AppError(
@@ -117,15 +122,17 @@ class Rollout:
             )
         return row
 
-    def _prune_stale_key_files(self, key_files: dict[str, str]) -> None:
-        """Ticket 16: drop managed key files the freshly applied config no longer uses.
+    def _prune_stale_credentials(self, credentials) -> None:
+        """Ticket 16/03: drop managed credential files the applied config no longer uses.
 
         Best effort by contract: a cleanup failure must never turn a successful
-        apply into a failed one. The plan (stale list) is logged before deleting
-        and failures are logged as warnings, so the operator can audit the dir.
+        apply into a failed one. The full materialize pass rewrites this render's
+        credentials byte-identically and prunes everything outside its whitelist;
+        the plan (stale list) is logged by the adapter and failures as warnings,
+        so the operator can audit the managed directory.
         """
         try:
-            audit = rendering.prune_key_files(key_files)
+            audit = self._adapter.materialize_credentials(credentials)
         except Exception:  # pragma: no cover - prune is best-effort
             logger.warning(
                 "key 文件清理失败，本次配置已生效但受管 keys/ 目录可能残留陈旧文件",

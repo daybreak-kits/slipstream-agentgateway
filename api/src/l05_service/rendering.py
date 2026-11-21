@@ -3,15 +3,17 @@
 Single-render source of truth (ADR-002): every rollout renders the complete
 desired state from the DB. ADR-026 多密钥平权: every ``upstream_keys`` row of an
 upstream expands into its own IR upstream (provider id ``{upstream_id}#{seq}``,
-key file ``keys/{upstream_id}#{seq}.key``) and its own copy of every upstream
+credential ref ``{upstream_id}#{seq}``) and its own copy of every upstream
 model (``{model_id}#k{seq}``); public-model targets expand the same way, so one
 logical target becomes one same-priority routing layer entry per key (E18:
 P2C 下的平权分流). E20 修正：该展开只对 failover/weighted 成立——AG 对
 conditional targets 按 first-match 求值（首条独占、无请求内切换），同 when 多条
 ``#kN`` 只会让 N-1 把密钥静默 0 流量，故 conditional 模式每个 target 只渲染
 第一把密钥的一条（并打 warning）；无 when 兜底也随之只渲染单条，与 AG
-硬校验「至多 1 条无 when 且必须末条」对齐。The IR references key files, never
-inline keys.
+硬校验「至多 1 条无 when 且必须末条」对齐。The IR references credential refs,
+never inline keys; where those files live on disk and how they are written is
+adapter-owned (the rollout hands the plaintext over only at the
+``materialize_credentials`` boundary, W6 ticket 03).
 Per-upstream transforms load from upstreams.transforms_json (task-164). ADR-010
 hardening: active ban/cooldown rules exclude targets at render time (E3: health
 is AG-process-local), the IR self-validates before any write (E8: AG accepts
@@ -22,9 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-from dataclasses import dataclass, replace
-from pathlib import Path
+from dataclasses import replace
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -46,7 +46,7 @@ from l02_domain.ir import (
 )
 from l02_domain.transforms_codec import transforms_from_json
 from l02_domain.validation import validate_gateway_ir
-from l03_adapters.spi import DataPlaneAdapter
+from l03_adapters.spi import CredentialFile, DataPlaneAdapter
 from l04_repo.orm import (
     ApiKeyORM,
     ConfigRevisionORM,
@@ -70,11 +70,14 @@ logger = logging.getLogger(__name__)
 
 def build_render_plan(
     session: Session, *, revision: str, adapter: DataPlaneAdapter | None = None
-) -> tuple[GatewayIR, dict[str, str]]:
-    """Compose the full IR plus plaintext key files; raises when nothing is renderable.
+) -> tuple[GatewayIR, tuple[CredentialFile, ...]]:
+    """Compose the full IR plus the adapter-bound credential intents.
 
     The driver is injected (S2: l05 never imports a concrete adapter); when given,
-    its capability declaration fills the IR guardrails block.
+    its capability declaration fills the IR guardrails block. The credentials are
+    neutral ``CredentialFile`` intents (ref + plaintext, no destination): the
+    adapter chooses where its key files live and writes them through its own
+    ``materialize_credentials`` port.
     """
     settings = get_settings()
     secret_box = SecretBox(settings.secret_key)
@@ -108,7 +111,7 @@ def build_render_plan(
     # ADR-026 密钥展开: one provider per key row. The seq is the 1-based ordinal
     # in (created_at_ms, id) order - the same stable order the console lists.
     upstream_specs: list[UpstreamSpec] = []
-    key_files: dict[str, str] = {}
+    credentials: list[CredentialFile] = []
     key_seqs_by_upstream: dict[str, list[int]] = {}
     for upstream in upstreams:
         key_rows = _upstream_key_rows(session, upstream.id)
@@ -121,15 +124,17 @@ def build_render_plan(
             )
         seqs: list[int] = []
         for seq, row in enumerate(key_rows, start=1):
-            key_file = _key_file_name(settings.data_plane_config_dir, upstream.id, seq)
-            key_files[key_file] = secret_box.decrypt(row.key_enc)
+            ref = provider_id(upstream.id, seq)
+            credentials.append(
+                CredentialFile(ref=ref, plaintext=secret_box.decrypt(row.key_enc))
+            )
             seqs.append(seq)
             upstream_specs.append(
                 UpstreamSpec(
-                    id=provider_id(upstream.id, seq),
+                    id=ref,
                     base_url=upstream.base_url,
                     api_style=upstream.api_style,
-                    key_file=key_file,
+                    key_file=ref,
                     transforms=transforms_from_json(upstream.transforms_json),
                     max_buffer_bytes=upstream.max_buffer_bytes,
                 )
@@ -254,7 +259,7 @@ def build_render_plan(
         )
     if not public_specs:
         raise AppError(ErrorCode.APPLY_FAILED, "nothing to render: no public models")
-    return ir, key_files
+    return ir, tuple(credentials)
 
 
 def _upstream_key_rows(session: Session, upstream_id: str) -> list[UpstreamKeyORM]:
@@ -278,10 +283,6 @@ def model_alias(model_id: str, seq: int) -> str:
     return f"{model_id}#k{seq}"
 
 
-def _key_file_name(config_dir: str, upstream_id: str, seq: int) -> str:
-    return os.path.join(config_dir, "keys", f"{upstream_id}#{seq}.key")
-
-
 def _access_log_spec(session: Session) -> AccessLogSpec:
     """ADR-021: resolve the payload-logging switch; always render a log DB source.
 
@@ -302,85 +303,6 @@ def _access_log_spec(session: Session) -> AccessLogSpec:
         if isinstance(value, str) and value.strip() in ACCESS_LOG_LLM_MODES:
             mode = value.strip()
     return AccessLogSpec(database_url="", llm=mode)
-
-
-def write_key_files(key_files: dict[str, str]) -> list[str]:
-    """Atomically write each key file (temp + replace); returns the written paths."""
-    written: list[str] = []
-    for path, plaintext in key_files.items():
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        tmp_path = path + ".tmp"
-        with open(tmp_path, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(plaintext)
-        os.replace(tmp_path, path)
-        written.append(path)
-    return written
-
-
-@dataclass(frozen=True, slots=True)
-class KeyFilePruneResult:
-    """Audit of one key-file prune pass (ticket 16: dry-run first, then delete)."""
-
-    dry_run: bool
-    stale: tuple[str, ...]
-    deleted: tuple[str, ...]
-    failed: tuple[str, ...]
-
-
-def _path_identity(path: str) -> str:
-    """Comparison key for the key-file whitelist (Windows is case-insensitive)."""
-    return os.path.normcase(os.path.abspath(path))
-
-
-def prune_key_files(
-    key_files: dict[str, str], *, dry_run: bool = False
-) -> KeyFilePruneResult:
-    """Delete stale managed key files so a new apply leaves no dead credentials.
-
-    Managed surface = regular ``*.key`` files directly inside
-    ``<data_plane_config_dir>/keys``. The whitelist is this render's ``key_files`` (the
-    files the new configuration references), so the previous revision's files
-    and pre-multikey ``{upstream_id}.key`` leftovers become stale. Everything
-    else is out of scope by construction: non-key files, subdirectories,
-    symlinks and anything outside the managed directory are never touched.
-    ``dry_run=True`` returns the auditable plan without deleting; per-file
-    failures are collected instead of raised (the rollout logs and continues).
-    """
-    settings = get_settings()
-    keys_dir = Path(settings.data_plane_config_dir) / "keys"
-    whitelist = {_path_identity(path) for path in key_files}
-    stale: list[str] = []
-    if keys_dir.is_dir():
-        # Sorted for a stable audit log; '#' in names is literal, never a glob.
-        for entry in sorted(keys_dir.iterdir(), key=lambda item: item.name):
-            if entry.is_symlink() or not entry.is_file() or not entry.name.endswith(".key"):
-                continue
-            path = str(entry)
-            if _path_identity(path) in whitelist:
-                continue
-            stale.append(path)
-    if stale:
-        logger.info(
-            "key 文件清理%s：%d 个陈旧文件不在本次下发白名单内：%s",
-            " dry-run（未删除）" if dry_run else "",
-            len(stale),
-            ", ".join(stale),
-        )
-    if dry_run:
-        return KeyFilePruneResult(dry_run=True, stale=tuple(stale), deleted=(), failed=())
-    deleted: list[str] = []
-    failed: list[str] = []
-    for path in stale:
-        try:
-            os.remove(path)
-        except OSError as exc:  # pragma: no cover - OS/permission edge
-            logger.warning("key 文件清理失败，文件保留：%s（%s）", path, exc)
-            failed.append(path)
-        else:
-            deleted.append(path)
-    return KeyFilePruneResult(
-        dry_run=False, stale=tuple(stale), deleted=tuple(deleted), failed=tuple(failed)
-    )
 
 
 def apply_configuration(

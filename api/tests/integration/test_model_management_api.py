@@ -732,11 +732,18 @@ def _last_reason(factory) -> str:
 
 
 def _window_on_another_day() -> str:
-    """A daily window on a weekday that is not today: inactive at test time."""
+    """A weekly window on a weekday that is not today: inactive at test time.
+
+    The evaluator applies the ``days`` filter only to weekly/monthly windows
+    (daily windows fire every day within their HH:MM range), so a daily
+    "other day" window goes active every day at 02:00-04:00 UTC and flakes the
+    "writes apply a revision" assertions. Weekly keeps the window genuinely
+    on another weekday at any wall clock.
+    """
     from datetime import UTC, datetime
 
-    today = datetime.now(tz=UTC).weekday() + 1
-    other = (today + 2) % 7 + 1
+    today = datetime.now(tz=UTC).isoweekday()
+    other = today % 7 + 1  # any day that is not today (weekly honors `days`)
     return json.dumps({"windows": [{"start": "02:00", "end": "04:00", "days": [other]}]})
 
 
@@ -843,7 +850,7 @@ def test_availability_rule_writes_apply_a_revision(client, engine_and_sessionmak
             "kind": "cooldown",
             "scope": "upstream_model",
             "scope_id": ids["upstream_model_id"],
-            "recurrence": "daily",
+            "recurrence": "weekly",
             "schedule_json": _window_on_another_day(),
         },
     )

@@ -266,9 +266,19 @@ class DataPlaneAdapter(Protocol):
         ...
 
     def materialize_credentials(
-        self, files: Sequence[CredentialFile], *, dry_run: bool = False
+        self,
+        files: Sequence[CredentialFile],
+        *,
+        dry_run: bool = False,
+        prune: bool = True,
     ) -> MaterializationResult:
-        """Write/prune adapter-managed credential files; system keeps metadata only."""
+        """Write/prune adapter-managed credential files; system keeps metadata only.
+
+        prune=True (default) also removes managed files outside this call's
+        whitelist; prune=False writes only, so a rollout can materialize the
+        credentials the candidate config references before its apply gate runs
+        and run the whitelist cleanup once the apply actually succeeded.
+        """
         ...
 
     def client_contract(self) -> ClientContract:

@@ -296,6 +296,22 @@ def _render_route_retry(ir: GatewayIR) -> list[dict]:
     ]
 
 
+def _key_file_reference(key_file: str) -> str:
+    """IR credential reference -> the provider ``apiKey.file`` entry.
+
+    The system hands over the neutral credential ref (``{upstream_id}#{seq}``,
+    the same string as ``CredentialFile.ref``); this adapter owns the on-disk
+    layout, so a bare ref resolves to the managed ``keys/<ref>.key`` reference.
+    AG reads provider key files relative to the config file, which is exactly
+    where ``credentials.materialize`` wrote the plaintext. An explicit
+    path-shaped reference (adapter-side IR construction, golden fixtures)
+    passes through verbatim.
+    """
+    if "/" in key_file or "\\" in key_file or key_file.endswith(".key"):
+        return key_file
+    return f"keys/{key_file}.key"
+
+
 def _render_provider(upstream) -> dict:
     provider_name = PROVIDER_BY_API_STYLE.get(upstream.api_style)
     if provider_name is None:
@@ -303,7 +319,10 @@ def _render_provider(upstream) -> dict:
     entry: dict = {
         "name": upstream.id,
         "provider": provider_name,
-        "params": {"baseUrl": upstream.base_url, "apiKey": {"file": upstream.key_file}},
+        "params": {
+            "baseUrl": upstream.base_url,
+            "apiKey": {"file": _key_file_reference(upstream.key_file)},
+        },
     }
     if upstream.extra_headers:
         entry["defaults"] = {

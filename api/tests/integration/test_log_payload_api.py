@@ -75,15 +75,25 @@ def test_missing_payload_row_is_404(client, ag_db):
     assert unknown.status_code == 404
 
 
-def test_missing_default_db_file_is_reported(client, monkeypatch, tmp_path):
-    """Unset SLIPSTREAM_AG_DB_PATH falls back to the AG config-dir default file."""
+def test_missing_data_plane_db_is_503_unavailable(client, monkeypatch, tmp_path):
+    """W6 ticket 07: no data plane at all is a dependency state, not a bug.
+
+    Unset SLIPSTREAM_AG_DB_PATH falls back to the AG config-dir default file;
+    when the data plane never ran, that file is missing and the read must
+    degrade to 503 with the stable DATA_PLANE_UNAVAILABLE code instead of the
+    old 500 SCHEMA_MISMATCH (recon 500s.md category C).
+    """
     monkeypatch.delenv("SLIPSTREAM_AG_DB_PATH", raising=False)
     monkeypatch.setenv("SLIPSTREAM_AG_CONFIG_DIR", str(tmp_path / "ag-config"))
     reset_settings_cache()
     try:
         response = client.get("/admin/logs/whatever/payload")
-        assert response.status_code == 500
-        assert "数据面请求日志不存在" in response.json()["message"]
+        assert response.status_code == 503
+        payload = response.json()
+        assert payload["code"] == "DATA_PLANE_UNAVAILABLE"
+        assert payload["message"]
+        assert payload["request_id"]
+        assert response.headers["x-request-id"] == payload["request_id"]
     finally:
         reset_settings_cache()
 

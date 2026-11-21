@@ -1,4 +1,5 @@
 import { toast } from "@/lib/notify";
+import { pushErrorNotificationOnce } from "@/lib/notification-store";
 
 import { mockRequest, useMock } from "./mock";
 
@@ -69,6 +70,38 @@ function redirectToLogin(): void {
   window.location.assign("/login?next=" + next);
 }
 
+/**
+ * 失败反馈（W6 票07）：查询（GET）失败不再逐查询弹 toast——同因（code+message）
+ * 只在通知中心记一条（去重见 notification-store），页面内联/空态照常渲染；
+ * 写操作（非 GET）保留右上角 toast：用户刚做了一个动作，需要即时反馈。
+ * request_id 进描述但不进去重键：后端每次请求都会生成新的 id。
+ */
+function reportFailure(err: ApiError, isQuery: boolean): void {
+  const description =
+    err.code +
+    "：" +
+    err.message +
+    (err.requestId ? "（request_id " + err.requestId + "）" : "");
+  if (!isQuery) {
+    toast.error("请求失败", { description });
+    return;
+  }
+  pushErrorNotificationOnce({
+    title: "查询失败",
+    description,
+    dedupeKey: err.code + "|" + err.message,
+  });
+}
+
+/** 网络/超时类失败与 HTTP 失败同策略：查询进通知中心去重，写操作弹 toast。 */
+function reportNetworkFailure(title: string, description: string, isQuery: boolean): void {
+  if (!isQuery) {
+    toast.error(title, { description });
+    return;
+  }
+  pushErrorNotificationOnce({ title, description, dedupeKey: "network|" + title });
+}
+
 /** 单请求可选项：signal 透传（react-query 换 key 自动取消旧请求）；timeoutMs=0 表示不设超时（流式用）。 */
 export interface ApiOpts {
   signal?: AbortSignal;
@@ -80,6 +113,8 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 async function request<T>(path: string, init?: RequestInit & ApiOpts): Promise<T> {
   if (useMock) return mockRequest<T>(path, init);
   const { timeoutMs = DEFAULT_TIMEOUT_MS, signal: external, ...rest } = init ?? {};
+  // W6 票07：GET 是查询——失败进通知中心去重，不逐查询弹 toast。
+  const isQuery = (rest.method ?? "GET").toUpperCase() === "GET";
   const controller = new AbortController();
   if (external) {
     if (external.aborted) controller.abort(external.reason);
@@ -101,10 +136,18 @@ async function request<T>(path: string, init?: RequestInit & ApiOpts): Promise<T
   } catch (e) {
     if (external?.aborted) throw e; // 外部取消（切区间/换页）：静默，由调用方处理
     if (e instanceof DOMException && e.name === "TimeoutError") {
-      toast.error("请求超时", { description: path + " 超过 " + Math.round(timeoutMs / 1000) + "s 未响应" });
+      reportNetworkFailure(
+        "请求超时",
+        path + " 超过 " + Math.round(timeoutMs / 1000) + "s 未响应",
+        isQuery,
+      );
       throw e;
     }
-    toast.error("无法连接控制面 API", { description: String(API_BASE) + "（" + String((e as Error).message) + "）" });
+    reportNetworkFailure(
+      "无法连接控制面 API",
+      String(API_BASE) + "（" + String((e as Error).message) + "）",
+      isQuery,
+    );
     throw e;
   } finally {
     if (timer) window.clearTimeout(timer);
@@ -116,7 +159,7 @@ async function request<T>(path: string, init?: RequestInit & ApiOpts): Promise<T
   }
   if (!res.ok) {
     const err = await parseError(res);
-    toast.error("请求失败", { description: err.code + "：" + err.message });
+    reportFailure(err, isQuery);
     throw err;
   }
   if (res.status === 204) return undefined as T;
