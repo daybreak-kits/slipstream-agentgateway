@@ -179,6 +179,7 @@ def _row_to_event(row: sqlite3.Row) -> UsageEvent:
         if "time_to_first_token_ms" in keys
         else 0,
         http_status=int(row["http_status"] or 0),
+        requested_model=_requested_model(raw),
         public_model=str(row["gen_ai_request_model"] or ""),
         upstream_model=str(row["gen_ai_response_model"] or ""),
         provider=str(row["gen_ai_provider_name"] or ""),
@@ -192,11 +193,77 @@ def _row_to_event(row: sqlite3.Row) -> UsageEvent:
         cache_write_tokens=int(row["cache_creation_input_tokens"] or 0)
         if "cache_creation_input_tokens" in keys
         else 0,
+        error=_error_text(raw),
+        has_payload=bool(raw.get("has_payload")),
         raw_json=json.dumps(raw, ensure_ascii=False, default=str),
-        # M5-a: request_logs.trace_id is filled by AG when tracing is enabled;
-        # it is the join key to trace_spans. Older fixture schemas may omit it.
-        trace_id=str(row["trace_id"] or "") if "trace_id" in keys else "",
+        # Wire flags decide the streaming verdict; without any explicit signal the
+        # verdict stays None and the system falls back to its own TTFT rule.
+        is_stream=_stream_verdict(raw),
+        # Wire column trace_id is the correlation key the attempts chain joins on.
+        correlation_key=str(row["trace_id"] or "") if "trace_id" in keys else "",
     )
+
+
+#: Mixed-form AG request logs carry the client-requested public model here; the
+#: full-form direct rows only record the final upstream model (E17-M2 evidence).
+_REQUESTED_MODEL_ATTR = "agw.ai.original_model"
+
+_STREAM_ATTR_KEYS = ("gen_ai.request.stream", "gen_ai.request.is_stream", "stream")
+
+
+def _attributes_of(raw: dict) -> dict:
+    """Parsed attributes_json (one JSON-text column inside the wire row).
+
+    Old/full-form rows may omit the column and malformed text is tolerated here:
+    both degrade to an empty mapping so no usage read can fail on surplus history.
+    """
+    attrs = raw.get("attributes_json")
+    if isinstance(attrs, str) and attrs.strip():
+        try:
+            attrs = json.loads(attrs)
+        except ValueError:
+            return {}
+    return attrs if isinstance(attrs, dict) else {}
+
+
+def _as_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value).strip().lower() in {"true", "1", "yes", "on", "stream"}
+
+
+def _requested_model(raw: dict) -> str:
+    """Client-requested public model, or "" when the row cannot answer.
+
+    Missing/malformed/old rows stay blank and are never backfilled from the
+    recorded models: requested_model is a wire fact, not a ledger default.
+    """
+    value = _attributes_of(raw).get(_REQUESTED_MODEL_ATTR)
+    return value if isinstance(value, str) else ""
+
+
+def _stream_verdict(raw: dict) -> bool | None:
+    """Streaming verdict from explicit wire flags only; None when undecidable.
+
+    The first present key wins (even when it says False); no explicit signal
+    anywhere means None so the system's TTFT fallback stays in charge.
+    """
+    for key in ("is_stream", "stream"):
+        if key in raw:
+            return _as_bool(raw[key])
+    attrs = _attributes_of(raw)
+    for key in _STREAM_ATTR_KEYS:
+        if key in attrs:
+            return _as_bool(attrs[key])
+    return None
+
+
+def _error_text(raw: dict) -> str:
+    """Error text exactly as the wire row records it; falsy values stay empty."""
+    value = raw.get("error")
+    return str(value) if value else ""
 
 
 def fetch_request_payload(conn: sqlite3.Connection, event_id: str) -> dict | None:

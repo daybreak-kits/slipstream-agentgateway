@@ -4,11 +4,15 @@ import { Outlet, useLocation } from "react-router-dom";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { RouteFallback } from "@/components/route-fallback";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { pollSystemStatus } from "@/lib/status-notice";
 import { Sidebar } from "./sidebar";
 import { Topbar } from "./topbar";
 import { NAV_LEAVES } from "./nav-items";
 
 const COLLAPSE_KEY = "slipstream.sidebar_collapsed";
+
+/** 每日状态提醒轮询间隔：后端一天才跑一次检查，页面侧 10 分钟跟一次足够。 */
+const STATUS_POLL_MS = 10 * 60 * 1000;
 
 export function AppShell() {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === "1");
@@ -24,6 +28,17 @@ export function AppShell() {
   useEffect(() => {
     setMobileNavOpen(false);
   }, [location.pathname]);
+
+  // W6 票08：进壳后拉一次每日状态检查结果，之后低频轮询；新提醒进通知中心
+  //（同一条只推一次，见 lib/status-notice），拉取失败静默（票07 去重上报兜底）。
+  useEffect(() => {
+    const tick = () => {
+      void pollSystemStatus().catch(() => {});
+    };
+    tick();
+    const timer = window.setInterval(tick, STATUS_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, []);
 
   // 前缀匹配：/upstreams/:id 等动态路由也能命中标题与分组（最长前缀优先）。
   // 二级导航项的面包屑上级用父项名（运营设置 / 连接地址），一级项用导航分组。

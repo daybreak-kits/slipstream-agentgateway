@@ -26,10 +26,6 @@ MCP_NOTE = (
     "无适配器时 MCP 视为未支持：targets 仅在适配器声明 mcp.targets 能力后渲染，"
     "且始终是顶层 mcp 段，绝不写进 llm"
 )
-MCP_SUPPORTED_NOTE = (
-    "AG 1.7 支持顶层 mcp.targets[] + mcp.policies（sse/stdio；http 被 pinned 1.7 拒绝）；"
-    "该形态已用 --validate-only 验证，targets 由 MCP 配置生成"
-)
 
 
 def policies_spec() -> PoliciesSpec:
@@ -63,7 +59,12 @@ def guardrails_spec(adapter: DataPlaneAdapter | None = None) -> GuardrailsSpec:
 
 
 def mcp_spec(adapter: DataPlaneAdapter | None = None) -> McpSpec:
-    """MCP support is capability-driven; never fabricate servers or targets."""
+    """MCP support is capability-driven; never fabricate servers or targets.
+
+    Whether MCP works is a neutral key lookup; what it means for this data
+    plane is adapter knowledge, so the note comes from ``capability_note``
+    (ADR-029): no data-plane version statement is hardcoded in the system.
+    """
     supported = False
     note = MCP_NOTE
     if adapter is not None:
@@ -71,7 +72,7 @@ def mcp_spec(adapter: DataPlaneAdapter | None = None) -> McpSpec:
         capability = capabilities.get("mcp.targets")
         if capability is not None and capability.supported:
             supported = True
-            note = MCP_SUPPORTED_NOTE
+            note = adapter.capability_note("mcp.targets") or MCP_NOTE
     return McpSpec(servers=(), supported=supported, note=note)
 
 

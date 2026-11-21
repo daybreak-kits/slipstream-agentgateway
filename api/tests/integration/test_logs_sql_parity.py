@@ -28,7 +28,6 @@ from l06_api.routers_ops import (
     _cache_ratio,
     _identity_of,
     _identity_tables,
-    _is_stream,
     _log_item,
     _parse_log_query,
     _raw_of,
@@ -89,58 +88,59 @@ def _seed(factory) -> None:
                     created_at_ms=_T,
                 )
             )
+        # is_stream None means "no explicit verdict": the endpoint falls back to
+        # ttft>0; a stored True/False always wins (adapter verdict, ticket 05).
         events = [
             # event_id, offset, duration, ttft, status, public, upstream, provider, key,
-            # input, output, total, cache_read, raw
+            # input, output, total, cache_read, requested, correlation, error,
+            # has_payload, is_stream, raw
             (
                 "evt_stream", -9000, 1400, 400, 200, "flagship", "glm-5.3", "testv",
-                "key_alice", 1000, 600, 1600, 250,
-                {"trace_id": "trace-stream", "has_payload": True, "cost": 0.002,
-                 "attributes_json": '{"gen_ai.request.stream": true}'},
+                "key_alice", 1000, 600, 1600, 250, "", "trace-stream", "", True, True,
+                {"cost": 0.002},
             ),
             (
                 "evt_error", -8000, 900, 0, 429, "flagship", "glm-5.3", "testv",
-                "key_bob", 200, 120, 320, 0,
-                {"error": "upstream rate limited", "has_payload": False},
+                "key_bob", 200, 120, 320, 0, "", "", "upstream rate limited",
+                False, False, None,
             ),
             (
                 "evt_embed", -7000, 50, 0, 200, "embed-small", "bge-m3", "testv",
-                "key_alice", 800, 0, 800, 0, {"seed": True},
+                "key_alice", 800, 0, 800, 0, "", "", "", False, None,
+                {"seed": True},
             ),
             (
                 "evt_slow", -6000, 5000, 1200, 200, "flagship", "qwen-max", "testv",
-                "key_dana", 3000, 2000, 5000, 1000,
-                {"attributes_json": '{"stream": false}', "error": ""},
+                "key_dana", 3000, 2000, 5000, 1000, "", "", "", False, False, None,
             ),
             (
                 "evt_500", -5000, 10, 0, 500, "flagship", "glm-5.3", "altv",
-                "key_bob", 10, 0, 10, 0, {"stream": True, "error": 0},
+                "key_bob", 10, 0, 10, 0, "", "", "", False, True, None,
             ),
-            # invalid JSON must fall back to ttft and be error-free
+            # no verdict and no ttft: falls back to non-streaming
             ("evt_badjson", -4000, 0, 0, 200, "flagship", "glm-5.3", "testv",
-             "key_dana", 0, 0, 0, 0, "not-json-at-all"),
-            # empty raw_json is invalid JSON too
+             "key_dana", 0, 0, 0, 0, "", "", "", False, None, "not-json-at-all"),
             ("evt_emptyraw", -3500, 0, 0, 204, "flagship", "glm-5.3", "testv",
-             "key_dana", 0, 0, 0, 0, ""),
+             "key_dana", 0, 0, 0, 0, "", "", "", False, None, ""),
             # no key row at all: identity is blank, the key token must not match
             ("evt_nokey", -3000, 30, 0, 200, "flagship", "glm-5.3", "testv",
-             None, 5, 5, 10, 0, {"error": True}),
-            # non-ASCII raw stored escaped (ensure_ascii default): LIKE prefilter
-            # cannot see the keyword, the fallback window must still catch it
+             None, 5, 5, 10, 0, "", "", "True", False, None, None),
+            # non-ASCII raw stored verbatim: LIKE prefilter cannot see the
+            # keyword, the fallback window must still catch it
             ("evt_unicode", -2500, 20, 0, 200, "flagship", "glm-5.3", "testv",
-             "key_alice", 7, 0, 7, 0, {"note": "中文关键词"}),
+             "key_alice", 7, 0, 7, 0, "", "", "", False, None, {"note": "中文关键词"}),
             # two events share started_at: non-started sorts must tie-break on id
             ("evt_tie_b", -1500, 70, 0, 200, "embed-small", "bge-m3", "testv",
-             "key_bob", 40, 10, 50, 0, {"error": 1}),
+             "key_bob", 40, 10, 50, 0, "", "", "1", False, None, None),
             ("evt_tie_a", -1500, 70, 0, 200, "embed-small", "bge-m3", "testv",
-             "key_dana", 40, 10, 50, 0, {"error": [1]}),
-            # nullable-ish raw with truthy string/number error shapes
+             "key_dana", 40, 10, 50, 0, "", "", "[1]", False, None, None),
             ("evt_mixed", -1000, 5, 0, 200, "Embed-Small", "bge-M3", "TESTV",
-             "key_alice", 1, 1, 2, 0, {"error": "boom", "stream": "false"}),
+             "key_alice", 1, 1, 2, 0, "embed-client", "", "boom", False, False, None),
         ]
         for (
             event_id, offset, duration, ttft, status, public, upstream, provider, key,
-            input_tokens, output_tokens, total_tokens, cache_read, raw,
+            input_tokens, output_tokens, total_tokens, cache_read, requested,
+            correlation, error, has_payload, is_stream, raw,
         ) in events:
             session.add(
                 GatewayUsageEventORM(
@@ -150,6 +150,7 @@ def _seed(factory) -> None:
                     duration_ms=duration,
                     time_to_first_token_ms=ttft,
                     http_status=status,
+                    requested_model=requested,
                     public_model=public,
                     upstream_model=upstream,
                     provider=provider,
@@ -159,6 +160,10 @@ def _seed(factory) -> None:
                     total_tokens=total_tokens,
                     cache_read_tokens=cache_read,
                     cache_write_tokens=0,
+                    error=error,
+                    has_payload=has_payload,
+                    is_stream=is_stream,
+                    correlation_key=correlation,
                     raw_json=(raw if isinstance(raw, str) else json.dumps(raw)),
                 )
             )
@@ -204,8 +209,15 @@ def _seed(factory) -> None:
         session.commit()
 
 
+def _normalized_stream(row) -> bool:
+    """Ticket 05 read rule: an adapter verdict wins, otherwise the TTFT fallback."""
+    if row.is_stream is not None:
+        return bool(row.is_stream)
+    return (row.time_to_first_token_ms or 0) > 0
+
+
 def _legacy_matches(row, parsed, *, identity, is_stream, cache_ratio, raw) -> bool:
-    """Verbatim copy of the v1 _matches_query removed from the router by this change."""
+    """The in-memory twin of the endpoint's filter, kept as the parity oracle."""
     user_id, user_name, api_key_label = identity
     model_text = f"{row.public_model or ''} {row.upstream_model or ''}".lower()
     upstream_text = f"{row.provider or ''} {row.upstream_model or ''}".lower()
@@ -240,6 +252,9 @@ def _legacy_matches(row, parsed, *, identity, is_stream, cache_ratio, raw) -> bo
             {
                 "id": row.event_id,
                 "models": [row.public_model, row.upstream_model, row.provider],
+                "requested_model": row.requested_model,
+                "correlation_key": row.correlation_key,
+                "error": row.error,
                 "identity": [user_name, api_key_label, row.api_key_id],
                 "raw": raw,
             },
@@ -277,10 +292,7 @@ def _legacy_search(
     identities = {
         row.event_id: _identity_of(row.api_key_id, keys_by_id, users_by_id) for row in rows
     }
-    streams = {
-        row.event_id: _is_stream(raws[row.event_id], row.time_to_first_token_ms or 0)
-        for row in rows
-    }
+    streams = {row.event_id: _normalized_stream(row) for row in rows}
     ratios = {row.event_id: _cache_ratio(row) for row in rows}
     rows = [
         row
@@ -299,7 +311,7 @@ def _legacy_search(
     if to_ms:
         rows = [r for r in rows if r.started_at_ms < to_ms]
     if has_error is not None:
-        rows = [r for r in rows if bool(raws[r.event_id].get("error")) == has_error]
+        rows = [r for r in rows if bool(r.error) == has_error]
     charge_by_event = {
         row.gateway_event_id: row for row in session.scalars(select(ChargeEntryORM)).all()
     }
@@ -347,7 +359,6 @@ def _legacy_search(
         items.append(
             _log_item(
                 row,
-                raws[row.event_id],
                 identity=identities[row.event_id],
                 upstream_model_id=umodel_id,
                 target_priority=target_priorities.get((public_id, umodel_id))

@@ -71,14 +71,11 @@ def _seed_logs(factory) -> None:
                 total_tokens=1600,
                 cache_read_tokens=250,
                 cache_write_tokens=0,
-                raw_json=json.dumps(
-                    {
-                        "trace_id": "trace-stream",
-                        "has_payload": True,
-                        "cost": 0.002,
-                        "attributes_json": '{"gen_ai.request.stream": true}',
-                    }
-                ),
+                error="",
+                has_payload=True,
+                is_stream=True,
+                correlation_key="trace-stream",
+                raw_json=json.dumps({"cost": 0.002}),
             )
         )
         session.add(
@@ -96,7 +93,10 @@ def _seed_logs(factory) -> None:
                 input_tokens=200,
                 output_tokens=120,
                 total_tokens=320,
-                raw_json=json.dumps({"error": "upstream rate limited", "has_payload": False}),
+                error="upstream rate limited",
+                has_payload=False,
+                is_stream=False,
+                raw_json="",
             )
         )
         session.add(
@@ -196,18 +196,22 @@ def test_log_list_carries_merged_columns(client, engine_and_sessionmaker):
     assert err["margin_micro"] is None
 
 
-def test_log_detail_matches_list_row_and_exposes_payload(client, engine_and_sessionmaker):
+def test_log_detail_matches_list_row_and_serves_neutral_facts(
+    client, engine_and_sessionmaker
+):
     _, factory = engine_and_sessionmaker
     _seed_logs(factory)
     row = _by_id(client.get("/admin/logs").json())["evt_stream"]
-    detail = client.get("/admin/logs/evt_stream?include_payload=true").json()
+    detail = client.get("/admin/logs/evt_stream").json()
 
     for key, value in row.items():
         assert detail.get(key) == value, key
     assert detail["provider"] == "testv"
     assert detail["api_key_id"] == "key_alice"
-    payload = json.loads(detail["raw_json"])
-    assert payload["trace_id"] == "trace-stream"
+    # The correlation key is served under its neutral name; the raw wire row is
+    # a diagnostic attachment in the table, never an API contract field.
+    assert detail["correlation_key"] == "trace-stream"
+    assert "raw_json" not in detail
 
 
 def test_log_query_tokens_filter_and_report_bad_syntax(client, engine_and_sessionmaker):
@@ -259,13 +263,11 @@ def test_log_detail_never_leaks_cost_without_billing_cost(client, engine_and_ses
     _seed_logs(factory)
     browser = _custom_role_browser(client, factory, ["logs:read"], "仅日志")
 
-    detail = browser.get("/admin/logs/evt_stream?include_payload=true").json()
+    detail = browser.get("/admin/logs/evt_stream").json()
     for key in ("cost_micro", "margin_micro", "charge_micro"):
         assert key not in detail, key
-    # The raw payload is scrubbed too, not only the envelope.
-    payload = json.loads(detail["raw_json"])
-    assert "cost" not in payload
-    assert payload["trace_id"] == "trace-stream"
+    # No raw wire row is served at all, so no money can hide inside one.
+    assert "raw_json" not in detail
 
     row = _by_id(browser.get("/admin/logs").json())["evt_stream"]
     for key in ("cost_micro", "margin_micro", "charge_micro"):
@@ -305,7 +307,7 @@ def test_log_paging_sorting_and_error_filter(client, engine_and_sessionmaker):
     ][0]["event_id"] == "evt_error"
 
     assert client.get("/admin/logs", params={"sort": "bogus"}).status_code == 422
-    detail = client.get("/admin/logs/evt_stream?include_payload=true").json()
+    detail = client.get("/admin/logs/evt_stream").json()
     assert client.get("/admin/logs/nope").status_code == 404
     assert detail["estimate"] is True
 

@@ -1,21 +1,20 @@
-"""Log requested_model (ticket 03): the public model the client actually asked for.
+"""Log requested_model (ticket 05): normalized by the adapter, never re-parsed.
 
-AG records the final upstream model in request_logs.gen_ai_request_model (our
-public_model column, ledger semantics untouched) and only the mixed-form
-attributes_json carries the client-facing name as agw.ai.original_model
-(docs/plans/w5-correctness-rework.md §7-3). The log API derives requested_model
-from the stored raw row; old/full-form rows and malformed JSON degrade to an
-empty string (rendered as "—"), never to a made-up public name.
+The AG wire row records the final upstream model in the ledger's public_model
+column and carries the client-facing name in wire attributes; the adapter
+decodes it into UsageEvent.requested_model at ingest time (ADR-029). The log
+API only reads the neutral column: old/legacy rows and rows without the fact
+degrade to an empty string (rendered as "—"), never to a made-up public name.
 """
 
 from __future__ import annotations
 
-import json
-
 from tests.conftest import _app_client, make_admin, new_session_token
 
 from l01_core.timeutil import now_ms
+from l02_domain.models import UsageEvent
 from l04_repo.orm import GatewayUsageEventORM
+from l05_service.usage_ingest import ingest_usage_events
 from l06_api.deps import SESSION_COOKIE
 
 
@@ -26,21 +25,18 @@ def _browser(factory):
     return client
 
 
-def _attr(value: object) -> dict:
-    """raw_json as AG stores it: attributes_json is one TEXT column holding JSON."""
-    return {"attributes_json": json.dumps(value) if not isinstance(value, str) else value}
+def _ingest(factory, events: list[UsageEvent]) -> None:
+    with factory() as session:
+        assert ingest_usage_events(session, events) == len(events)
+        session.commit()
 
 
-def _seed(factory, rows: list[tuple[str, object]]) -> None:
-    """Insert one gateway_usage_event per (event_id, raw_json) pair.
-
-    public_model/upstream_model are pinned to up-a on every row so a test that
-    expects the requested model to stay blank can also prove the API never
-    falls back to the ledger's recorded (upstream) model.
-    """
+def _seed_legacy(factory, event_ids: list[str]) -> None:
+    """Insert pre-neutrality rows directly: no requested_model fact, only the
+    recorded models — exactly what an old demo database looks like after init."""
     now = now_ms()
     with factory() as session:
-        for index, (event_id, raw) in enumerate(rows):
+        for index, event_id in enumerate(event_ids):
             session.add(
                 GatewayUsageEventORM(
                     event_id=event_id,
@@ -54,7 +50,6 @@ def _seed(factory, rows: list[tuple[str, object]]) -> None:
                     input_tokens=10,
                     output_tokens=5,
                     total_tokens=15,
-                    raw_json=raw if isinstance(raw, str) else json.dumps(raw),
                 )
             )
         session.commit()
@@ -64,22 +59,32 @@ def _by_id(body: dict) -> dict[str, dict]:
     return {item["event_id"]: item for item in body["items"]}
 
 
-def test_log_list_parses_original_model_from_attributes_json(engine_and_sessionmaker):
+def test_log_list_serves_the_adapter_normalized_requested_model(engine_and_sessionmaker):
     _, factory = engine_and_sessionmaker
-    _seed(
+    _ingest(
         factory,
         [
-            (
-                "evt_attr",
-                _attr({"agw.ai.original_model": "pub-a", "gen_ai.request.stream": True}),
+            UsageEvent(
+                event_id="evt_norm",
+                started_at_ms=now_ms() - 10_000,
+                completed_at_ms=now_ms() - 9_000,
+                duration_ms=1000,
+                http_status=200,
+                requested_model="pub-a",
+                public_model="up-a",
+                upstream_model="up-a",
+                provider="testv",
+                input_tokens=10,
+                output_tokens=5,
+                total_tokens=15,
             )
         ],
     )
-    row = _by_id(_browser(factory).get("/admin/logs").json())["evt_attr"]
+    row = _by_id(_browser(factory).get("/admin/logs").json())["evt_norm"]
 
     assert row["requested_model"] == "pub-a"
     # The ledger keeps recording the final upstream model in public_model: the
-    # new display field must not rewrite attribution.
+    # display field must not rewrite attribution.
     assert row["public_model"] == "up-a"
     assert row["upstream_model"] == "up-a"
 
@@ -88,30 +93,32 @@ def test_requested_model_degrades_to_blank_instead_of_faking_a_public_name(
     engine_and_sessionmaker,
 ):
     _, factory = engine_and_sessionmaker
-    _seed(
+    _seed_legacy(
         factory,
         [
-            # Old full-form direct row: no attributes_json column content at all.
-            ("evt_old", {"trace_id": "t-old"}),
-            # attributes_json exists but predates agw.ai.original_model.
-            ("evt_no_key", _attr({"gen_ai.request.stream": False})),
-            # Broken attributes_json text; must not raise or invent a name.
-            ("evt_bad_attr", _attr("{not valid json")),
-            # attributes_json that parses but is not an object.
-            ("evt_attr_array", _attr([1, 2])),
-            ("evt_null_attr", {"attributes_json": None}),
-            # Non-string attribute values are not model names.
-            ("evt_nonstring", _attr({"agw.ai.original_model": 7})),
-            ("evt_empty_model", _attr({"agw.ai.original_model": ""})),
-            # Broken raw_json and an empty raw_json row.
-            ("evt_bad_raw", "not-json-at-all"),
-            ("evt_empty_raw", ""),
+            # Pre-neutrality row: the adapter never normalized a requested model.
+            "evt_old",
+        ],
+    )
+    _ingest(
+        factory,
+        [
+            # Ingested fact without a requested model (adapter could not answer).
+            UsageEvent(
+                event_id="evt_no_fact",
+                started_at_ms=now_ms() - 5_000,
+                duration_ms=10,
+                http_status=200,
+                public_model="up-a",
+                upstream_model="up-a",
+                provider="testv",
+            )
         ],
     )
     body = _browser(factory).get("/admin/logs").json()
     rows = _by_id(body)
 
-    assert body["total"] == 9
+    assert body["total"] == 2
     for event_id, row in rows.items():
         assert row["requested_model"] == "", event_id
         # Never fall back to the ledger's recorded model.
@@ -120,7 +127,21 @@ def test_requested_model_degrades_to_blank_instead_of_faking_a_public_name(
 
 def test_log_detail_carries_requested_model_like_the_list(engine_and_sessionmaker):
     _, factory = engine_and_sessionmaker
-    _seed(factory, [("evt_attr", _attr({"agw.ai.original_model": "pub-a"}))])
+    _ingest(
+        factory,
+        [
+            UsageEvent(
+                event_id="evt_attr",
+                started_at_ms=now_ms() - 10_000,
+                duration_ms=1000,
+                http_status=200,
+                requested_model="pub-a",
+                public_model="up-a",
+                upstream_model="up-a",
+                provider="testv",
+            )
+        ],
+    )
     browser = _browser(factory)
     row = _by_id(browser.get("/admin/logs").json())["evt_attr"]
     detail = browser.get("/admin/logs/evt_attr").json()
@@ -130,26 +151,55 @@ def test_log_detail_carries_requested_model_like_the_list(engine_and_sessionmake
         assert detail.get(key) == value, key
 
 
-def test_requested_model_does_not_need_payload_logging(engine_and_sessionmaker):
+def test_streaming_and_payload_facts_come_from_the_normalized_columns(
+    engine_and_sessionmaker,
+):
     _, factory = engine_and_sessionmaker
-    _seed(
+    _ingest(
         factory,
         [
-            (
-                "evt_no_payload",
-                _attr({"agw.ai.original_model": "pub-a", "gen_ai.request.stream": False}),
+            UsageEvent(
+                event_id="evt_streamed",
+                started_at_ms=now_ms() - 10_000,
+                duration_ms=1000,
+                time_to_first_token_ms=400,
+                http_status=200,
+                requested_model="pub-a",
+                public_model="up-a",
+                upstream_model="up-a",
+                provider="testv",
+                is_stream=True,
+                has_payload=True,
             )
         ],
     )
-    with factory() as session:
-        session.get(GatewayUsageEventORM, "evt_no_payload").raw_json = json.dumps(
-            {
-                "attributes_json": json.dumps({"agw.ai.original_model": "pub-a"}),
-                "has_payload": False,
-            }
-        )
-        session.commit()
+    row = _by_id(_browser(factory).get("/admin/logs").json())["evt_streamed"]
 
-    row = _by_id(_browser(factory).get("/admin/logs").json())["evt_no_payload"]
-    assert row["has_payload"] is False
+    assert row["is_stream"] is True
+    assert row["has_payload"] is True
     assert row["requested_model"] == "pub-a"
+
+
+def test_stream_verdict_falls_back_to_ttft_when_the_adapter_gave_none(
+    engine_and_sessionmaker,
+):
+    """Rows without an explicit streaming verdict stay derivable from TTFT."""
+    _, factory = engine_and_sessionmaker
+    _ingest(
+        factory,
+        [
+            UsageEvent(
+                event_id="evt_ttft_only",
+                started_at_ms=now_ms() - 10_000,
+                duration_ms=1000,
+                time_to_first_token_ms=400,
+                http_status=200,
+                public_model="up-a",
+                upstream_model="up-a",
+                provider="testv",
+                is_stream=None,
+            )
+        ],
+    )
+    row = _by_id(_browser(factory).get("/admin/logs").json())["evt_ttft_only"]
+    assert row["is_stream"] is True
