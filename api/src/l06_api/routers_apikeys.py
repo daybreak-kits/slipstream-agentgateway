@@ -559,7 +559,12 @@ def rename_key(
     session: Session = Depends(session_of),
     principal: auth.Principal = Depends(require("apikeys:write")),
 ) -> dict:
-    """ADR-023: rename a key; console metadata only, no data-plane rollout."""
+    """ADR-023: rename a key; console metadata only, no data-plane rollout.
+
+    W7 B 方案：维护动作也要过 user scope——customer 拿到 apikeys:write 后
+    也不能按 key id 改别人分支的密钥；未知 id 仍 404。
+    """
+    _visible_key(session, principal, key_id)
     row = client_keys.rename_client_key(session, key_id, payload.name)
     _audit(
         session,
@@ -583,7 +588,11 @@ def delete_key(
     adapter: DataPlaneAdapter = Depends(get_adapter),
     principal: auth.Principal = Depends(require("apikeys:write")),
 ) -> None:
-    """ADR-023: delete a key outright; keeping an active key is never required."""
+    """ADR-023: delete a key outright; keeping an active key is never required.
+
+    W7 B 方案：删除同样按 user scope 鉴权（path 仍是 REST 风格，无 user 段）。
+    """
+    _visible_key(session, principal, key_id)
     client_keys.delete_client_key(session, key_id)
     _audit(session, actor=principal.username, action="delete_key", entity_id=key_id, detail="")
     session.commit()
@@ -602,6 +611,11 @@ def patch_key_status(
     adapter: DataPlaneAdapter = Depends(get_adapter),
     principal: auth.Principal = Depends(require("apikeys:write")),
 ) -> dict:
+    """ADR-023: enable/disable a key from the console row action.
+
+    W7 B 方案：行操作的启停也按 user scope 鉴权，customer 不能动别人分支的密钥。
+    """
+    _visible_key(session, principal, key_id)
     row = client_keys.set_key_status(session, key_id, payload.status)
     _audit(
         session,
@@ -626,6 +640,11 @@ def rotate_key(
     adapter: DataPlaneAdapter = Depends(get_adapter),
     principal: auth.Principal = Depends(require("apikeys:write")),
 ) -> dict:
+    """ADR-023: rotate renews key material once; the old hash stops validating.
+
+    W7 B 方案：重置同样按 user scope 鉴权（path 仍是 REST 风格，无 user 段）。
+    """
+    _visible_key(session, principal, key_id)
     issued = client_keys.rotate_client_key(session, key_id, _box())
     _audit(session, actor=principal.username, action="rotate_key", entity_id=key_id, detail="")
     session.commit()
