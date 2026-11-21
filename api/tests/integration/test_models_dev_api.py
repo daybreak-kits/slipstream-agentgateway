@@ -224,8 +224,8 @@ def test_my_models_excludes_disabled(client, seeded_ids):
 
 
 def test_my_models_login_only(client, seeded_ids, login_cookies, anon_client):
-    # Proxy (agent) and plain user sessions both read the same public catalog.
-    for role in ("agent", "user"):
+    # Reseller and customer sessions both read the same public catalog.
+    for role in ("reseller", "customer"):
         response = client.get("/admin/my/models", cookies=login_cookies(role))
         assert response.status_code == 200, response.text
         assert isinstance(response.json(), list)

@@ -3,7 +3,7 @@
 Users are one table now (ADR-019): creation takes/derives an immutable username
 and always yields a password, returned exactly once as initial_password. Key
 lists show the mask only (`sk-...abcd`); the plaintext copy exists purely for
-the audited reveal endpoint (owner/admin). A user holds up to 50 keys (ADR-023)
+the audited reveal endpoint (`apikeys:write` + user scope). A user holds up to 50 keys (ADR-023)
 with name / last_used_at_ms surfaced in list payloads.
 """
 
@@ -49,7 +49,7 @@ def _user_body(session: Session, row: UserORM, snapshot: dict | None = None) -> 
         "name": row.name,
         "username": row.username,
         "balance_micro": row.balance_micro,
-        "role": row.role or rbac.BUILTIN_ROLE_USER,
+        "role": row.role or rbac.BUILTIN_ROLE_CUSTOMER,
         "parent_user_id": row.parent_user_id,
         "status": row.status or "active",
         "depth": metrics["depth"],
@@ -123,7 +123,7 @@ def _box() -> AesGcmBox:
 
 
 def _visible_key(session: Session, principal, key_id: str) -> ApiKeyORM:
-    """Load one key inside the caller's user scope (ADR-008 owner/admin).
+    """Load one key inside the caller's user scope (ADR-008 admin/global scope).
 
     Keys hang off a user, so the subtree rule that guards users guards them too:
     an all-permission admin sees every key, a subtree role sees its branch, and
@@ -166,7 +166,7 @@ def create_user(
     chars, upper/lower/digit/symbol). The plaintext is returned exactly once,
     as initial_password on THIS creation response; it is never retrievable.
     """
-    role_key = roles.require_role(session, payload.role or rbac.BUILTIN_ROLE_USER)
+    role_key = roles.require_role(session, payload.role or rbac.BUILTIN_ROLE_CUSTOMER)
     role_key = user_tree.assert_can_grant_role(session, principal, role_key)
     if payload.parent_user_id:
         parent = user_tree.assert_parent_allowed(
@@ -175,7 +175,7 @@ def create_user(
     elif user_tree.has_global_scope(principal):
         parent = user_tree.ensure_root_user(session)
     else:
-        # 代理用户：第一次创建下级时自动在 D 下开户并绑定当前登录
+        # 分销商：第一次创建下级时自动在 D 下开户并绑定当前登录
         parent = user_tree.ensure_principal_node(session, principal)
     username = _resolve_username(session, payload.name.strip(), payload.username)
     initial_password = payload.password or auth.generate_password()
@@ -211,7 +211,7 @@ def list_users(
     page_size: int = 50,
     offset: int = 0,
 ) -> list[dict]:
-    """Scoped user list: admin sees all, 代理用户 its subtree, others only self."""
+    """Scoped user list: admin sees all, 分销商 its subtree, others only self."""
     limit, off = page_params(page_size, offset)
     rows = _scoped_users(session, principal)
     tree = user_tree.snapshot(session)
@@ -226,7 +226,7 @@ def user_tree_view(
     """Flat tree payload for the user panel (ticket 04).
 
     "nodes" is ordered by depth; "root_ids" lists the visible nodes whose parent
-    is outside the caller's scope, so a 代理用户's subtree renders as its own
+    is outside the caller's scope, so a 分销商's subtree renders as its own
     forest instead of a dangling edge to D.
     """
     rows = _scoped_users(session, principal)
@@ -646,7 +646,7 @@ def reveal_key(
     session: Session = Depends(session_of),
     principal: auth.Principal = Depends(require("apikeys:write")),
 ) -> dict:
-    """ADR-008 copy-key feature: audited plaintext reveal (owner/admin only).
+    """ADR-008 copy-key feature: audited plaintext reveal (requires `apikeys:write`).
 
     Visibility follows the caller's user scope (ADR-019): the built-in admin role
     sees every key, a subtree role only its own branch, everyone else is 403.

@@ -40,7 +40,7 @@ _SORT_KEYS = ("started_at", "duration_ms", "total_tokens", "cost_micro", "charge
 
 
 def _browser(factory):
-    admin_id = make_admin(factory, username="parity-owner", role="owner")
+    admin_id = make_admin(factory, username="parity-owner", role="admin")
     client = _app_client(factory)
     client.cookies.set(SESSION_COOKIE, new_session_token(factory, admin_id))
     return client

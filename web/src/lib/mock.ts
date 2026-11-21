@@ -43,8 +43,8 @@ const MOCK_ADMIN = {
   permissions: MOCK_ALL_PERMISSIONS,
   expires_at: "2026-11-18T00:00:00",
 };
-/** 普通用户镜像（l05_service/rbac.py _USER_PERMISSIONS）：只读 + 己方花费 + 模型试验。 */
-const MOCK_USER_PERMISSIONS = [
+/** 客户镜像（l05_service/rbac.py _CUSTOMER_PERMISSIONS）：只读 + 己方花费 + 模型试验。 */
+const MOCK_CUSTOMER_PERMISSIONS = [
   "vendors:read", "upstreams:read", "upstream_models:read", "public_models:read",
   "model_targets:read", "availability:read", "transforms:read", "config:read",
   "settings:read", "audits:read", "policies:read", "prices:read",
@@ -52,17 +52,17 @@ const MOCK_USER_PERMISSIONS = [
   "roles:read", "playground:use",
 ];
 /** 受限演示账号（W4-E 验收：无 users:update/users:delete/ledger:read/roles:write 的显隐对照）。 */
-const MOCK_USER = {
+const MOCK_CUSTOMER = {
   id: "adm_mock_user",
   username: "user01",
   name: "李四",
-  role: "user",
+  role: "customer",
   status: "active",
-  permissions: MOCK_USER_PERMISSIONS,
+  permissions: MOCK_CUSTOMER_PERMISSIONS,
   expires_at: "2026-11-18T00:00:00",
 };
 /** 当前 mock 会话身份：登录时按账号切换。 */
-let mockSession: typeof MOCK_ADMIN | typeof MOCK_USER = MOCK_ADMIN;
+let mockSession: typeof MOCK_ADMIN | typeof MOCK_CUSTOMER = MOCK_ADMIN;
 
 const vendors: Vendor[] = [
   { id: "vd_zai", name: "智谱 AI", slug: "zai", note: "智谱开放平台，旗舰 GLM 系列", upstream_seq: 3, created_at_ms: Date.parse("2026-11-01T09:00:00") },
@@ -884,9 +884,9 @@ const sampleTransforms: UpstreamTransforms = {
 
 /** 旧 /admin/admins mock（ADR-019 后由统一用户表取代）：仅保留读取桩，角色键与 admin_roles 对齐。 */
 const adminAccounts: AdminAccount[] = [
-  { id: "ad_01", username: "owner", role: "admin", enabled: true, created_at: "2026-10-01T08:00:00", last_login_at: "2026-11-17T02:00:00" },
+  { id: "ad_01", username: "legacy-admin", role: "admin", enabled: true, created_at: "2026-10-01T08:00:00", last_login_at: "2026-11-17T02:00:00" },
   { id: "ad_02", username: "ops-admin", role: "admin", enabled: true, created_at: "2026-10-12T08:00:00", last_login_at: "2026-11-16T23:30:00" },
-  { id: "ad_03", username: "audit-viewer", role: "user", enabled: false, created_at: "2026-11-01T08:00:00", last_login_at: null },
+  { id: "ad_03", username: "audit-viewer", role: "customer", enabled: false, created_at: "2026-11-01T08:00:00", last_login_at: null },
 ];
 
 /**
@@ -896,10 +896,10 @@ const adminAccounts: AdminAccount[] = [
  */
 const mockUsers: UserTreeNode[] = [
   { id: "eu_01", name: "内部平台", username: "internal", balance_micro: 1148659200, role: "admin", parent_user_id: null, status: "active", depth: 0, direct_children: 3, subtree_size: 5, created_at_ms: Date.parse("2026-11-01T10:00:00"), updated_at_ms: Date.parse("2026-11-17T01:22:00") },
-  { id: "eu_02", name: "数据分析组", username: "data-team", balance_micro: 480000000, role: "agent", parent_user_id: "eu_01", status: "active", depth: 1, direct_children: 1, subtree_size: 2, created_at_ms: Date.parse("2026-11-10T14:30:00"), updated_at_ms: Date.parse("2026-11-12T09:00:00") },
-  { id: "eu_03", name: "试用-临时", username: "trial", balance_micro: 0, role: "user", parent_user_id: "eu_02", status: "disabled", depth: 2, direct_children: 0, subtree_size: 1, created_at_ms: Date.parse("2026-10-20T09:00:00"), updated_at_ms: Date.parse("2026-11-14T18:00:00") },
-  { id: "eu_04", name: "分销代理", username: "", balance_micro: 230000000, role: "agent", parent_user_id: "eu_01", status: "active", depth: 1, direct_children: 0, subtree_size: 1, created_at_ms: Date.parse("2026-11-05T11:00:00"), updated_at_ms: Date.parse("2026-11-05T11:00:00") },
-  { id: "eu_05", name: "华东代理", username: "east-agent", balance_micro: 960000000, role: "user", parent_user_id: "eu_01", status: "active", depth: 1, direct_children: 0, subtree_size: 1, created_at_ms: Date.parse("2026-11-15T08:20:00"), updated_at_ms: Date.parse("2026-11-15T08:20:00") },
+  { id: "eu_02", name: "数据分析组", username: "data-team", balance_micro: 480000000, role: "reseller", parent_user_id: "eu_01", status: "active", depth: 1, direct_children: 1, subtree_size: 2, created_at_ms: Date.parse("2026-11-10T14:30:00"), updated_at_ms: Date.parse("2026-11-12T09:00:00") },
+  { id: "eu_03", name: "试用-临时", username: "trial", balance_micro: 0, role: "customer", parent_user_id: "eu_02", status: "disabled", depth: 2, direct_children: 0, subtree_size: 1, created_at_ms: Date.parse("2026-10-20T09:00:00"), updated_at_ms: Date.parse("2026-11-14T18:00:00") },
+  { id: "eu_04", name: "分销代理", username: "", balance_micro: 230000000, role: "reseller", parent_user_id: "eu_01", status: "active", depth: 1, direct_children: 0, subtree_size: 1, created_at_ms: Date.parse("2026-11-05T11:00:00"), updated_at_ms: Date.parse("2026-11-05T11:00:00") },
+  { id: "eu_05", name: "华东代理", username: "east-agent", balance_micro: 960000000, role: "customer", parent_user_id: "eu_01", status: "active", depth: 1, direct_children: 0, subtree_size: 1, created_at_ms: Date.parse("2026-11-15T08:20:00"), updated_at_ms: Date.parse("2026-11-15T08:20:00") },
 ];
 
 /** mock 用户序号：创建新用户时递增（id eu_NN）。 */
@@ -908,9 +908,9 @@ let mockUserSeq = mockUsers.length;
 // —— 角色管理（ADR-023 #4；契约 docs/api-contract.md：GET/POST/PATCH/DELETE /admin/roles） ——
 // 内存 admin_roles：与 lib/roles.ts 的 RoleDefinition 模型同形；member_count 按 mockUsers 实时计算，
 // 与后端 roles.member_count 同口径（删除有成员的角色会被拒）。
-const MOCK_AGENT_PERMISSIONS = [...MOCK_USER_PERMISSIONS, "users:create", "users:update", "billing:subtree"];
-/** 后端保留键：内置角色 + 历史别名（l05_service/rbac.py RESERVED_ROLE_KEYS）。 */
-const RESERVED_ROLE_KEYS = new Set(["admin", "user", "agent", "owner", "operator", "viewer"]);
+const MOCK_RESELLER_PERMISSIONS = [...MOCK_CUSTOMER_PERMISSIONS, "users:create", "users:update", "billing:subtree"];
+/** 后端保留键：内置角色（l05_service/rbac.py RESERVED_ROLE_KEYS）；旧名不再保留 alias。 */
+const RESERVED_ROLE_KEYS = new Set(["admin", "customer", "reseller"]);
 
 const adminRoles: RoleDefinition[] = [
   {
@@ -924,23 +924,23 @@ const adminRoles: RoleDefinition[] = [
     member_count: 0,
   },
   {
-    id: "rol_user",
-    key: "user",
-    name: "普通用户",
+    id: "rol_customer",
+    key: "customer",
+    name: "客户",
     description: "只读查看，可看自己的花费并试用模型",
     builtin: true,
     all_permissions: false,
-    permissions: [...MOCK_USER_PERMISSIONS],
+    permissions: [...MOCK_CUSTOMER_PERMISSIONS],
     member_count: 0,
   },
   {
-    id: "rol_agent",
-    key: "agent",
-    name: "代理用户",
-    description: "在普通用户基础上可创建下级并查看子树花费",
+    id: "rol_reseller",
+    key: "reseller",
+    name: "分销商",
+    description: "在客户基础上可创建下级并查看子树花费",
     builtin: true,
     all_permissions: false,
-    permissions: MOCK_AGENT_PERMISSIONS,
+    permissions: MOCK_RESELLER_PERMISSIONS,
     member_count: 0,
   },
   // 自定义角色示例：角色管理页用它演示「编辑/删除」入口（内置角色只有只读的「查看权限」）
@@ -951,7 +951,7 @@ const adminRoles: RoleDefinition[] = [
     description: "示例自定义角色：只读权限子集，可编辑或删除",
     builtin: false,
     all_permissions: false,
-    permissions: MOCK_USER_PERMISSIONS.slice(0, 12),
+    permissions: MOCK_CUSTOMER_PERMISSIONS.slice(0, 12),
     member_count: 0,
   },
 ];
@@ -1097,15 +1097,14 @@ const PREVIEW_BODY = JSON.stringify({
 export async function mockRequest<T>(path: string, init?: RequestInit): Promise<T> {
   await delay(220);
   const routePath = path.split("?")[0] ?? "";
-  // 登录（演示）：admin/user01 均为 admin12345（兼容旧 owner/admin123）签发 mock 会话
+  // 登录（演示）：admin/user01 均为 admin12345；旧 owner 账号不再兼容。
   if (init?.method === "POST" && path === "/admin/auth/login") {
     const body = JSON.parse(String(init.body ?? "{}")) as { username?: string; password?: string };
     const knownPassword = body.password === "admin12345" || body.password === "admin123";
     const knownUser =
-      (body.username === "admin" || body.username === "owner") ||
-      body.username === "user01";
+      body.username === "admin" || body.username === "user01";
     if (knownUser && knownPassword) {
-      mockSession = body.username === "user01" ? MOCK_USER : MOCK_ADMIN;
+      mockSession = body.username === "user01" ? MOCK_CUSTOMER : MOCK_ADMIN;
       mockLoggedIn = true;
       return { user: mockSession } as T;
     }
@@ -1177,7 +1176,7 @@ export async function mockRequest<T>(path: string, init?: RequestInit): Promise<
       name: body.name ?? "未命名用户",
       username: body.username ?? "",
       balance_micro: 0,
-      role: body.role ?? "user",
+      role: body.role ?? "customer",
       parent_user_id: parent?.id ?? null,
       status: body.status ?? "active",
       depth: (parent?.depth ?? -1) + 1,

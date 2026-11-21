@@ -163,7 +163,7 @@ def test_cli_merges_a_legacy_database(tmp_path: Path) -> None:
     by_name = {row[0]: row for row in rows}
     assert {row[0] for row in rows} == {"admin", "legacy-op"}
     assert all(row[1].startswith("scrypt$") for row in rows)
-    assert by_name["legacy-op"][2] == "agent"
+    assert by_name["legacy-op"][2] == "reseller"  # W6/21: unify writes the canonical key
 
     # Idempotency: a second pass finds both rows already folded.
     second = _run_script(db_path, env, "--apply", "--json")

@@ -64,7 +64,7 @@ export function EditUserDialog({
   useEffect(() => {
     if (!isOpen) return;
     if (role === "" || !roles.some((item) => item.key === role)) {
-      setRole(roles[0]?.key ?? "user");
+      setRole(roles[0]?.key ?? "customer");
     }
   }, [isOpen, roles, role]);
 

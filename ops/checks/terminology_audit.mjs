@@ -3,7 +3,7 @@
  * Slipstream 术语审计（ticket 20 浏览器验收前置）
  *
  * 目的：UI 文案按三期词表（docs/GLOSSARY.md，2026-11-19 用户裁定）管控：正名
- * 上游渠道/公开模型/连接密钥/启用/关闭/代理用户/词元/模型试验；已废旧词不得出现；
+ * 上游渠道/公开模型/连接密钥/启用/关闭/分销商/客户/词元/模型试验；已废旧词不得出现；
  * 页面 title 与 logo 资产必须符合品牌规范。代码标识符（channel、public_models、
  * api_keys 等）不在管控范围。
  *
@@ -221,6 +221,14 @@ const RULES = [
     suggestion: "上游语境统一写「上游渠道」，简称「上游」；单独「渠道」已禁（docs/GLOSSARY.md）",
   },
   {
+    // W6 ticket 21: old role display names are gone; keys are customer/reseller.
+    id: "retired-role-name",
+    severity: "error",
+    pattern: /代理用户|普通用户/g,
+    allow: () => true,
+    suggestion: "角色显示名已迁移：代理用户→分销商，普通用户→客户（docs/GLOSSARY.md §7）",
+  },
+  {
     // 已废且当前 UI 文案零存量的旧词（注释里的「调用串/定时封禁」不属于文案，扫描器会剥注释）。
     id: "retired-term",
     severity: "error",
@@ -431,7 +439,7 @@ if (asJson) {
   );
   console.log("");
   if (errors.length === 0) {
-    console.log("✓ 未发现禁用旧词（error 级：tokens/收费/qax/裸渠道/调用模型/调用名/调用串/计划窗口/游乐场/封禁/对外模型/客户端密钥/令牌）");
+    console.log("✓ 未发现禁用旧词（error 级：tokens/收费/qax/裸渠道/代理用户/普通用户/调用模型/调用名/调用串/计划窗口/游乐场/封禁/对外模型/客户端密钥/令牌）");
   } else {
     console.log("✗ 禁用旧词 " + errors.length + " 处（error，必须修）：");
     for (const v of errors) {

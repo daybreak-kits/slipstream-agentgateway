@@ -744,7 +744,7 @@ def test_field_level_money_absence_and_presence(client, engine_and_sessionmaker,
     assert "cost_micro" not in spend_body["totals"]
     assert "cost_micro" not in spend_body["members"][0]
 
-    user_browser = _browser(factory, "user", "plain-v2-money")
+    user_browser = _browser(factory, "customer", "plain-v2-money")
     assert (
         user_browser.get(
             "/admin/reports/timeseries?range=7d&dimension=combo&metric=cost"

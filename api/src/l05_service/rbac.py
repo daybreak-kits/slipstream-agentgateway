@@ -6,10 +6,11 @@ against it, "GET /admin/permissions" renders it, and the "require(...)"
 dependencies in l06_api reference these exact strings.
 
 Roles are rows, not code: "admin_roles" stores key/name/permission list and
-"admin_users.role" stores the key. The three built-in roles are seeded on
-startup and can never be deleted. Authorization checks always test a
-permission, never a role name, so a custom role behaves like a built-in one
-with the same grant set.
+"users.role" stores the key. The three built-in roles are seeded on startup and
+can never be deleted. Authorization checks always test a permission, never a
+role name, so a custom role behaves like a built-in one with the same grant set.
+W6 ticket 21 retired the old user/agent keys (and the owner/operator/viewer
+input aliases): migration is a database script, never an in-code alias.
 """
 
 from __future__ import annotations
@@ -72,7 +73,7 @@ PERMISSIONS: tuple[Permission, ...] = (
     Permission("prices:write", "维护价格表与汇率", "计费"),
     Permission("billing:cost", "查看成本与毛利", "计费", "无此权限时响应中直接不出现成本字段"),
     Permission("billing:spend", "查看己方花费", "计费", "充值/扣费/消费金额"),
-    Permission("billing:subtree", "查看下级花费", "计费", "代理用户查看自己子树的消费"),
+    Permission("billing:subtree", "查看下级花费", "计费", "分销商查看自己子树的消费"),
     Permission("ledger:read", "查看账本", "计费"),
     # 用量
     Permission("logs:read", "查看调用日志", "用量"),
@@ -113,25 +114,10 @@ class RoleDefinition:
 
 
 BUILTIN_ROLE_ADMIN = "admin"
-BUILTIN_ROLE_USER = "user"
-BUILTIN_ROLE_AGENT = "agent"
+BUILTIN_ROLE_CUSTOMER = "customer"
+BUILTIN_ROLE_RESELLER = "reseller"
 
-# Old role names kept by existing rows; every check normalizes them first.
-LEGACY_ROLE_ALIASES: dict[str, str] = {
-    "owner": BUILTIN_ROLE_ADMIN,
-    "admin": BUILTIN_ROLE_ADMIN,
-    "operator": BUILTIN_ROLE_AGENT,
-    "viewer": BUILTIN_ROLE_USER,
-}
-
-# Legacy names that still exist in admin_users rows, grouped by canonical key.
-LEGACY_ALIASES_BY_KEY: dict[str, tuple[str, ...]] = {
-    BUILTIN_ROLE_ADMIN: ("owner",),
-    BUILTIN_ROLE_AGENT: ("operator",),
-    BUILTIN_ROLE_USER: ("viewer",),
-}
-
-_USER_PERMISSIONS: frozenset[str] = frozenset(
+_CUSTOMER_PERMISSIONS: frozenset[str] = frozenset(
     {
         # 只读：主数据/流量治理/治理/价目/用量报表
         "vendors:read",
@@ -155,7 +141,7 @@ _USER_PERMISSIONS: frozenset[str] = frozenset(
     }
 )
 
-_AGENT_PERMISSIONS: frozenset[str] = _USER_PERMISSIONS | {
+_RESELLER_PERMISSIONS: frozenset[str] = _CUSTOMER_PERMISSIONS | {
     "users:read",
     "users:create",
     "users:update",
@@ -171,33 +157,27 @@ BUILTIN_ROLES: tuple[RoleDefinition, ...] = (
         all_permissions=True,
     ),
     RoleDefinition(
-        key=BUILTIN_ROLE_USER,
-        name="普通用户",
+        key=BUILTIN_ROLE_CUSTOMER,
+        name="客户",
         description="只读查看，可看自己的花费并试用模型",
-        permissions=_USER_PERMISSIONS,
+        permissions=_CUSTOMER_PERMISSIONS,
     ),
     RoleDefinition(
-        key=BUILTIN_ROLE_AGENT,
-        name="代理用户",
-        description="在普通用户基础上可创建下级并查看子树花费",
-        permissions=_AGENT_PERMISSIONS,
+        key=BUILTIN_ROLE_RESELLER,
+        name="分销商",
+        description="在客户基础上可创建下级并查看子树花费",
+        permissions=_RESELLER_PERMISSIONS,
     ),
 )
 
 BUILTIN_ROLE_KEYS: frozenset[str] = frozenset(role.key for role in BUILTIN_ROLES)
-RESERVED_ROLE_KEYS: frozenset[str] = frozenset(LEGACY_ROLE_ALIASES) | BUILTIN_ROLE_KEYS
-
-
-def normalize_role_key(role_key: str) -> str:
-    """Map a stored/legacy role name to its canonical key (unknown keys pass through)."""
-    return LEGACY_ROLE_ALIASES.get(role_key, role_key)
+RESERVED_ROLE_KEYS: frozenset[str] = BUILTIN_ROLE_KEYS
 
 
 def role_definition(role_key: str) -> RoleDefinition | None:
-    """Built-in definition for a role key (legacy names accepted)."""
-    key = normalize_role_key(role_key)
+    """Built-in definition for a canonical role key; unknown keys return None."""
     for definition in BUILTIN_ROLES:
-        if definition.key == key:
+        if definition.key == role_key:
             return definition
     return None
 

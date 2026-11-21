@@ -17,7 +17,7 @@ def _add(
     *,
     parent: str | None = None,
     username: str | None = None,
-    role: str = "user",
+    role: str = "customer",
 ) -> None:
     session.add(
         UserORM(
@@ -37,7 +37,7 @@ def _principal(admin_id: str, permissions: frozenset[str]) -> Principal:
         admin_id=admin_id,
         username=admin_id,
         name=admin_id,
-        role="agent",
+        role="reseller",
         session_id="ses_test",
         expires_at_ms=9_999_999_999_999,
         permissions=permissions,
@@ -87,7 +87,14 @@ def test_visible_ids_scoping(engine_and_sessionmaker):
     _, factory = engine_and_sessionmaker
     with factory() as session:
         root = user_tree.ensure_root_user(session)
-        _add(session, "usr_agent", "代理", parent=root.id, username="agent-login", role="agent")
+        _add(
+            session,
+            "usr_agent",
+            "分销商",
+            parent=root.id,
+            username="reseller-login",
+            role="reseller",
+        )
         _add(session, "usr_dep1", "下级", parent="usr_agent")
         _add(session, "usr_dep2", "孙级", parent="usr_dep1")
         _add(session, "usr_other", "别家", parent=root.id)

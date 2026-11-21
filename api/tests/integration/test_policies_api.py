@@ -146,11 +146,11 @@ def test_delete_policies_restores_defaults(client):
     assert body["updated_at_ms"] == 0
 
 
-def test_viewer_cannot_write_policies(client, login_cookies):
+def test_customer_cannot_write_policies(client, login_cookies):
     response = client.put(
         "/admin/policies",
         json=_policy_body(timeout={"request_timeout": "30s"}),
-        cookies=login_cookies("viewer"),
+        cookies=login_cookies("customer"),
     )
     assert response.status_code == 403
     assert response.json()["code"] == "FORBIDDEN"

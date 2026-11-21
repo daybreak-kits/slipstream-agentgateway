@@ -19,11 +19,11 @@ def test_health(client):
     assert response.json()["status"] == "ok"
 
 
-def test_rbac_viewer_cannot_write(client, login_cookies):
+def test_rbac_customer_cannot_write(client, login_cookies):
     response = client.post(
         "/admin/vendors",
         json={"name": "V", "slug": "v"},
-        cookies=login_cookies("viewer"),
+        cookies=login_cookies("customer"),
     )
     assert response.status_code == 403
     assert response.json()["code"] == "FORBIDDEN"

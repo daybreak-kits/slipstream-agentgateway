@@ -13,8 +13,8 @@
  *   - 日志模型列两行 +「N 次尝试」路由链 popover + 费用两行
  *   - 表格操作列 sticky 冻结、头身对齐、数字千分位；字段级脏标记与语义色
  *   - 模型试验 20 参数、会话复制/删除/重试、模型对话框
- *   - 普通用户看不到成本/管理员/用户管理入口；已删入口 /cost 404、/admins 跳转后无权限；后端 403；字段级权限缺失
- *   - 代理用户可进用户页、仍无成本
+ *   - 客户看不到成本/管理员/用户管理入口；已删入口 /cost 404、/admins 跳转后无权限；后端 403；字段级权限缺失
+ *   - 分销商可进用户页、仍无成本
  *
  * 运行前提：
  *   1) 控制面 3700：cd api && python scripts/seed_demo.py && PYTHONPATH=src python -m uvicorn l06_api.app:create_app --factory --port 3700
@@ -924,34 +924,34 @@ async function main() {
     return "无独立可用性入口";
   });
 
-  /* ---------- 普通用户 ---------- */
-  const user = await openSession(browser, { role: "user", ...SESSION_OPTIONS });
+  /* ---------- 客户 ---------- */
+  const user = await openSession(browser, { role: "customer", ...SESSION_OPTIONS });
   user.cred = USER_CRED;
   let userLoggedIn = false;
 
-  await test("user.nav-hidden", "普通用户看不到成本/管理员/用户管理入口", async () => {
+  await test("user.nav-hidden", "客户看不到成本/管理员/用户管理入口", async () => {
     const outcome = await user.login(USER_CRED);
-    if (!outcome.ok) throw new SkipError("普通用户 " + USER_CRED.user + " 登录失败：" + outcome.message + "（seed 提供 wangwu/admin12345，可用 --user 覆盖）");
+    if (!outcome.ok) throw new SkipError("客户 " + USER_CRED.user + " 登录失败：" + outcome.message + "（seed 提供 wangwu/admin12345，可用 --user 覆盖）");
     userLoggedIn = true;
     await user.settle();
     const links = await user.navLinks();
     const hrefs = links.map((l) => l.href);
     const forbidden = ["/bills", "/cost", "/revenue", "/admins", "/users", "/roles"].filter((href) => hrefs.includes(href));
-    assert(forbidden.length === 0, "普通用户侧栏出现受限/已删入口：" + forbidden.join("、"));
-    assert(hrefs.includes("/settings"), "普通用户侧栏缺少「用户设置」入口（billing:spend 应可见）");
-    assert(hrefs.length >= 6, "普通用户导航项过少（预期含看板/日志/模型试验/用户设置等）：" + hrefs.join("、"));
+    assert(forbidden.length === 0, "客户侧栏出现受限/已删入口：" + forbidden.join("、"));
+    assert(hrefs.includes("/settings"), "客户侧栏缺少「用户设置」入口（billing:spend 应可见）");
+    assert(hrefs.length >= 6, "客户导航项过少（预期含看板/日志/模型试验/用户设置等）：" + hrefs.join("、"));
     await user.shot("user-nav");
     return "可见导航：" + links.map((l) => l.label).join("/");
   });
 
-  await test("user.cost-forbidden", "普通用户看不到运营成本，/admins 被前端拦截", async () => {
+  await test("user.cost-forbidden", "客户看不到运营成本，/admins 被前端拦截", async () => {
     if (!userLoggedIn) {
       const outcome = await user.login(USER_CRED);
       userLoggedIn = outcome.ok;
     }
     await user.ensureAuthed();
-    assert(userLoggedIn, "普通用户未登录，跳过");
-    // /cost、/revenue 已随账单页删除（不是重定向）：普通用户直连应落到 404 页或被引导到用户设置，且不出现运营成本
+    assert(userLoggedIn, "客户未登录，跳过");
+    // /cost、/revenue 已随账单页删除（不是重定向）：客户直连应落到 404 页或被引导到用户设置，且不出现运营成本
     {
       const from = user.consoleErrors.length;
       await user.page.goto(BASE_URL + "/cost", { waitUntil: "domcontentloaded" });
@@ -960,7 +960,7 @@ async function main() {
       const text = await user.mainText();
       const missingPage = /页面不存在|404|找不到页面|Not Found/i.test(text);
       assert(path.startsWith("/settings") || missingPage, "/cost 既不是 404 也没引导到用户设置，实际 " + path);
-      assert(!text.includes("成本（运营）"), "普通用户在 /cost 落点看到了「成本（运营）」");
+      assert(!text.includes("成本（运营）"), "客户在 /cost 落点看到了「成本（运营）」");
       user.assertNoNewErrors(from, "/cost");
       await user.shot("user-cost-gone");
     }
@@ -976,37 +976,37 @@ async function main() {
     return "运营成本不可见 · /cost 已删（404/引导） · /admins 显示没有访问权限";
   });
 
-  await test("user.api-permissions", "普通用户后端无 billing:cost，成本接口 403", async () => {
+  await test("user.api-permissions", "客户后端无 billing:cost，成本接口 403", async () => {
     await user.ensureAuthed();
-    assert(userLoggedIn, "普通用户未登录，跳过");
+    assert(userLoggedIn, "客户未登录，跳过");
     const me = await user.apiGet("/admin/auth/me");
     assert(me.status === 200, "/admin/auth/me 返回 " + me.status);
     const permissions = (me.body && me.body.permissions) || [];
-    assert(!permissions.includes("billing:cost"), "普通用户 permissions 含 billing:cost：" + permissions.join(","));
-    assert(permissions.includes("billing:spend"), "普通用户缺少 billing:spend");
-    assert(!permissions.includes("users:read"), "普通用户 permissions 含 users:read");
+    assert(!permissions.includes("billing:cost"), "客户 permissions 含 billing:cost：" + permissions.join(","));
+    assert(permissions.includes("billing:spend"), "客户缺少 billing:spend");
+    assert(!permissions.includes("users:read"), "客户 permissions 含 users:read");
     const cost = await user.apiGet("/admin/cost/entries");
-    assert(cost.status === 403, "普通用户访问 /admin/cost/entries 返回 " + cost.status + "，应 403");
+    assert(cost.status === 403, "客户访问 /admin/cost/entries 返回 " + cost.status + "，应 403");
     const revenue = await user.apiGet("/admin/charge/entries");
-    assert(revenue.status === 200, "普通用户访问 /admin/charge/entries 返回 " + revenue.status + "，应 200");
+    assert(revenue.status === 200, "客户访问 /admin/charge/entries 返回 " + revenue.status + "，应 200");
     return "permissions " + permissions.length + " 项 · cost 403 · charge 200";
   });
 
-  const agent = await openSession(browser, { role: "agent", ...SESSION_OPTIONS });
+  const agent = await openSession(browser, { role: "reseller", ...SESSION_OPTIONS });
   agent.cred = AGENT_CRED;
-  await test("agent.permissions", "代理用户可管用户但看不到成本", async () => {
+  await test("agent.permissions", "分销商可管用户但看不到成本", async () => {
     const outcome = await agent.login(AGENT_CRED);
-    if (!outcome.ok) throw new SkipError("代理用户 " + AGENT_CRED.user + " 登录失败：" + outcome.message + "（seed 提供 lisi/admin12345，可用 --agent 覆盖）");
+    if (!outcome.ok) throw new SkipError("分销商 " + AGENT_CRED.user + " 登录失败：" + outcome.message + "（seed 提供 lisi/admin12345，可用 --agent 覆盖）");
     await agent.settle();
     const me = await agent.apiGet("/admin/auth/me");
     const permissions = (me.body && me.body.permissions) || [];
-    assert(permissions.includes("users:create"), "代理用户缺少 users:create");
-    assert(permissions.includes("billing:subtree"), "代理用户缺少 billing:subtree");
-    assert(!permissions.includes("billing:cost"), "代理用户不应有 billing:cost");
+    assert(permissions.includes("users:create"), "分销商缺少 users:create");
+    assert(permissions.includes("billing:subtree"), "分销商缺少 billing:subtree");
+    assert(!permissions.includes("billing:cost"), "分销商不应有 billing:cost");
     const links = await agent.navLinks();
     const hrefs = links.map((l) => l.href);
-    assert(hrefs.includes("/users"), "代理用户侧栏缺少「用户」入口");
-    assert(!hrefs.includes("/cost") && !hrefs.includes("/revenue"), "代理用户侧栏不应出现「成本（运营）」或旧营收入口");
+    assert(hrefs.includes("/users"), "分销商侧栏缺少「用户」入口");
+    assert(!hrefs.includes("/cost") && !hrefs.includes("/revenue"), "分销商侧栏不应出现「成本（运营）」或旧营收入口");
     await agent.shot("agent-nav");
     return "users:create + billing:subtree，无 billing:cost";
   });

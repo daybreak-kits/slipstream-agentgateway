@@ -78,8 +78,8 @@ def test_ledger_and_daily_show_every_row_to_an_admin(engine_and_sessionmaker, cl
 
 def test_ordinary_user_sees_only_its_own_rows(engine_and_sessionmaker):
     engine, factory = engine_and_sessionmaker
-    plain, plain_id = _client_for(factory, "user", "scope-plain")
-    other_id = make_admin(factory, username="scope-other", role="user")
+    plain, plain_id = _client_for(factory, "customer", "scope-plain")
+    other_id = make_admin(factory, username="scope-other", role="customer")
     _rows_for(factory, plain_id, tag="self", amount=100)
     _rows_for(factory, other_id, tag="other", amount=200)
 
@@ -120,11 +120,11 @@ def test_branch_role_sees_only_its_subtree(engine_and_sessionmaker, client):
     _rows_for(factory, child_id, tag="child", amount=100)
     _rows_for(factory, outsider_id, tag="outsider", amount=999)
 
-    # Downgrade the reader to the built-in subtree role (agent): the permissions
+    # Downgrade the reader to the built-in subtree role (reseller): the permissions
     # are read at session resolution, so a fresh session picks them up. The node's
     # position in the tree is what scopes it, not the role name.
     with factory() as session:
-        session.get(UserORM, reader_id).role = "agent"
+        session.get(UserORM, reader_id).role = "reseller"
         session.commit()
     branch_client = _app_client(factory)
     branch_client.cookies.set(SESSION_COOKIE, new_session_token(factory, reader_id))

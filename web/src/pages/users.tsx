@@ -17,8 +17,8 @@ const ROLES_KEY = ["admin-roles"] as const;
 /** roles:read 不可用（或列表为空）时的兜底：内置三角色仍是合法的 role 值。 */
 const BUILTIN_ROLE_OPTIONS = [
   { key: "admin", name: "管理用户" },
-  { key: "agent", name: "代理用户" },
-  { key: "user", name: "普通用户" },
+  { key: "customer", name: "客户" },
+  { key: "reseller", name: "分销商" },
 ];
 
 /**
@@ -38,7 +38,7 @@ export function UsersPage() {
   const canDelete = can("users:delete");
   const canReadLedger = can("ledger:read");
   const canReadKeys = can("apikeys:read");
-  // 与旧页一致的启发式：能删用户 ≈ 全局层级（代理用户只能看自己的子树）
+  // 与旧页一致的启发式：能删用户 ≈ 全局层级（分销商只能看自己的子树）
   const globalScope = canDelete;
 
   const tree = useQuery({
