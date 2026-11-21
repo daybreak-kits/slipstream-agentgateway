@@ -1,8 +1,8 @@
-# 交付说明（截至六期（W6），2026-11-21）
+# 交付说明（截至七期（W7），2026-11-22）
 
 本仓为 Slipstream：**agentgateway 当数据面黑盒 + 自建控制面/管理台**（B+ 架构，见 docs/PLAN.md 与 docs/DECISIONS.md）。
 
-状态：二期 ticket 01 至 22 **全部合入** `phase2/integration`；三期（W1 至 W7）、四期（多密钥平权/路由链/看板八卡等，M1 至 M4）与五期（W5 ticket 01 至 16）已合入本地 `w5/integration`；六期（W6 ticket 01 至 21）已合入本地 `w6/integration`（均未 push），六期门禁与验收基线见 §8。历史逐项变更见 `docs/CHANGELOG-phase2.md`、`docs/CHANGELOG-phase4.md`；五期变更见 §7 与 `docs/CHANGELOG-phase4.md`「五期（W5）变更记录」；六期变更见 §8。
+状态：二期 ticket 01 至 22 **全部合入** `phase2/integration`；三期（W1 至 W7）、四期（多密钥平权/路由链/看板八卡等，M1 至 M4）与五期（W5 ticket 01 至 16）已合入本地 `w5/integration`；六期（W6 ticket 01 至 21）已合入本地 `w6/integration`；七期（W7 ticket 01 至 14）已合入本地 `w7/integration`（均未 push），七期门禁与验收基线见 §9。历史逐项变更见 `docs/CHANGELOG-phase2.md`、`docs/CHANGELOG-phase4.md`；五期变更见 §7 与 `docs/CHANGELOG-phase4.md`「五期（W5）变更记录」；六期变更见 §8；七期变更见 §9（取代关系：W7 spec 收口了 W4/W5/W6 计划中与「厂商域、用户两 Tab、成员 chip 流、状态列、登录渐变低对比」相关的旧条目，历史计划文档保留原样）。
 
 > 阅读提示：§1 已按五期现状更新（OpenAPI/pytest/路由/包体等基线数字）；§3 是二期验收证据原样保留，五期复跑证据见 §7；§6 为三期历史交付段。
 
@@ -10,15 +10,15 @@
 
 | 层 | 位置 | 内容 | 验证 |
 |---|---|---|---|
-| 控制面 API | `api/`（l01~l07 分层） | OpenAPI 实测 **100 条路径 / 134 个操作**：上游（多密钥平权）、上游模型、公开模型（单事务整页保存）、模型目标、模型探测、连接密钥（后端 `/admin/api-keys`）、用户与层级/代理、管理员、角色（admin/customer/reseller）与权限矩阵、价目（成本+倍率）、账单（成本/营收/待补价/我的花费）、日志（含请求尝试链；正文经适配层端口）、审计、配置版本、策略/护栏/MCP、用户设置/运营设置、概览、看板（趋势/流向/热力/成员/延迟，分流支持隐藏阶段投影与 focus/q/top_n）、模型试验（reasoning_effort 七档、stop/top_k 转发）、每日状态检查 `/admin/system-status`、真实会话登录 | `pytest` **993 passed / 8 skipped**；`ruff check` 全过；`python ops/checks/smoke_api.py` **40/40 PASS**；`gen_ts --check` 最新 |
-| 认证与权限 | `api/src/l05_service/auth.py`、`rbac.py`、`l06_api/field_filter.py` | scrypt 密码、DB 会话、httpOnly cookie、5 次/分钟限流；三角色 + 自建角色、**41 个权限键**、字段级金额过滤（缺键非 null）；`X-Admin-Role` 不再信任 | `test_auth_api.py`、`test_rbac.py`、`test_rbac_field_filter.py` |
+| 控制面 API | `api/`（l01~l07 分层） | OpenAPI 实测 **98 条路径 / 130 个操作**（W7 删厂商域后较 W6 基线 100/134 各减 4，ADR-030）：上游（多密钥平权、唯一标志 name + 可选 alias）、上游模型、公开模型（单事务整页保存 + 成员表格）、模型目标、模型探测、连接密钥（后端 `/admin/api-keys`；customer self-only、admin/reseller 子树代签）、用户与层级/代理（单表全登录、无 type）、管理员、角色（admin/customer/reseller）与权限矩阵（39 键）、价目（成本+倍率；缓存价挂 `upstream_model_id`）、账单（成本/营收/待补价/我的花费，无 vendor 维度）、日志（含请求尝试链；正文经适配层端口）、审计、配置版本、策略/护栏/MCP、用户设置/运营设置、概览、看板（趋势/流向/热力/成员/延迟，分流支持隐藏阶段投影与 focus/q/top_n）、模型试验（reasoning_effort 七档、stop/top_k 转发）、每日状态检查 `/admin/system-status`、真实会话登录 | `pytest` **1026 passed / 8 skipped**；`ruff check` 全过；`python ops/checks/smoke_api.py` **40/40 PASS**；`gen_ts --check` 最新 |
+| 认证与权限 | `api/src/l05_service/auth.py`、`rbac.py`、`l06_api/field_filter.py` | scrypt 密码、DB 会话、httpOnly cookie、5 次/分钟限流；三角色 + 自建角色、**39 个权限键**（W7 `vendors:read/write` 退场）、字段级金额过滤（缺键非 null）；`X-Admin-Role` 不再信任 | `test_auth_api.py`、`test_rbac.py`、`test_rbac_field_filter.py`、`test_no_vendor_dimension.py` |
 | 数据面适配 | `api/src/l03_adapters/` | `DataPlaneAdapter` 八方法 SPI + `mock` + `agentgateway` 渲染/下发/回滚/用量拉取；IR 在 `l02_domain/ir.py`；AG 1.7 `--validate-only` 门禁；priority 旧→新语义迁移脚本 | 契约测试 + 渲染快照 + 真实二进制校验 + 迁移集成测试 |
-| 管理台 | `web/`（Vite+React+TS+Tailwind v4） | **27 条路由 = 17 个功能页 + 登录 + 404 + 8 个旧入口重定向页**，共 **19 个页面模块**。功能页：快速上手、数据看板（柱形/面积/分流三 Tab + 分流隐藏阶段 + 热力图 7D/30D/365D + 8 KPI 卡）、使用日志（模型列两行 +「N 次尝试」路由链 + 费用两行 + 详情抽屉）、上游管理 + 上游详情（四 Tab：连接与模型/路由与模型/请求与响应/其他设置；逐模型探测/拉取模型/逐把密钥测试）、模型管理（上游模型/公开模型两 Tab；公开模型「编辑」进整页 `/models/public/:id` 单事务保存 + 成员编排左 6 右 6 行内编辑，候选按上游分组 chip 搜索）、价目管理（成本+倍率可编辑、公开模型加权平均价只读）、模型试验（reasoning_effort 七档、stop/top_k 转发）、连接密钥、用户（树/代理）、角色管理（权限矩阵）、网关策略（流量策略/护栏/MCP 三 Tab）、审计、配置版本、用户设置、运营设置（连接地址/系统参数/运行信息）；全站自适应（移动侧栏 off-canvas、表格冻结操作列、弹窗/抽屉视口约束、登录框三档宽度） | `tsc --noEmit` exit 0；`eslint` 0 error；`vite build` 成功 |
+| 管理台 | `web/`（Vite+React+TS+Tailwind v4） | **27 条路由 = 17 个功能页 + 登录 + 404 + 8 个旧入口重定向页**，共 **19 个页面模块**。功能页：快速上手、数据看板（柱形/面积/分流三 Tab + 分流隐藏阶段 + 热力图 7D/30D/365D + 8 KPI 卡）、使用日志（模型列两行 + 尝试链分叉图标 popover + 费用两行 + 详情抽屉；筛选安静化：查询按钮默认白底、未应用变更黄边/变色）、上游管理 + 上游详情（四 Tab：连接与模型/路由与模型/请求与响应/其他设置；列改上游标志/别名；逐模型探测/拉取模型/逐把密钥测试）、模型管理（上游模型/公开模型两 Tab；公开模型「编辑」进整页 `/models/public/:id` 单事务保存 + 成员编排左 6 右 6 已选成员表格，候选原位灰态切换；模型名旁非正常状态图标；参数列只列输入/输出，完整参数进 HoverInfo）、价目管理（成本+倍率可编辑、缓存价按上游模型、公开模型加权平均价只读）、模型试验（reasoning_effort 七档、stop/top_k 转发）、连接密钥（customer self-only、代签入口、复制三级回退）、用户（单表全登录，列「用户名称/登录帐户」）、角色管理（权限矩阵）、网关策略（流量策略/护栏/MCP 三 Tab）、审计、配置版本、用户设置、运营设置（连接地址/系统参数/运行信息）；弹框键盘统一（Enter/Esc/焦点陷阱/IME 守卫）；脏字段浅黄底 +「已修改」无左线；全站自适应（移动侧栏 off-canvas、表格冻结操作列、弹窗/抽屉视口约束、登录框三档宽度 + 可见渐变柔光层） | `tsc --noEmit` exit 0；`eslint` 0 error；`vite build` 成功 |
 | 导航 IA | `web/src/components/layout/nav-items.ts`（清单唯一来源 `web/src/routes.ts` → `ops/checks/routes.json`） | 侧栏四组、**15 个一级导航项**（运营设置 3 个二级分区在页内子导航，不重复挂侧栏）：常规（快速上手/数据看板/使用日志）、配置（上游管理/模型管理/价目管理）、工具（模型试验）、系统（连接密钥/用户管理/角色管理/网关策略/审计/配置版本/用户设置/运营设置） | route-audit（27 路由 / 19 页面 / 15 导航）+ 浏览器验收 |
-| 前端包体 | `web/scripts/check-bundle.mjs` | 路由级 code-split；首包 gzip **216.1 KB**，共 **77 个 JS chunk**，echarts 惰性 chunk 148.2 KB | `check:bundle` PASS（maxFirstLoad 220 / minChunks 20 / maxChunk 400） |
-| 验收自动化 | `ops/checks/` | `w6_acceptance.mjs`（六期收官端到端：routes.json 全路由逐页四查 + 七条流程 + 强制 500，证据见 §8）、`acceptance_browser.mjs`（五期端到端，矩阵见 §7）、`responsive_matrix.mjs`（375/640/768/1024/1536 五档矩阵，W6 票09）、`interaction_audit.mjs`（全站逐控件交互审计）、`import_lint.py`（系统边界门禁，ADR-029）、`terminology_audit.mjs`（web 文案 + 现行 docs 术语门禁，含 em/en dash 棘轮）、`route-audit.mjs`、`smoke_api.py`；`docs/ACCEPTANCE.md` 为人工核对清单 | 六期矩阵 PASS 70 / FAIL 0、`w6_acceptance` PASS 36 / FAIL 0（证据见 §8） |
+| 前端包体 | `web/scripts/check-bundle.mjs` | 路由级 code-split；首包 gzip **216.9 KB**，共 **79 个 JS chunk**，echarts 惰性 chunk 148.2 KB | `check:bundle` PASS（maxFirstLoad 220 / minChunks 20 / maxChunk 400） |
+| 验收自动化 | `ops/checks/` | `w6_acceptance.mjs`（六期收官端到端：routes.json 全路由逐页四查 + 七条流程 + 强制 500，证据见 §8）、`acceptance/w7_*.mjs`（七期 10 个交互脚本，隔离端口，证据见 §9）、`acceptance_browser.mjs`（五期端到端，矩阵见 §7）、`responsive_matrix.mjs`（375/640/768/1024/1536 五档矩阵，W6 票09）、`interaction_audit.mjs`（全站逐控件交互审计）、`import_lint.py`（系统边界门禁，ADR-029）、`terminology_audit.mjs`（web 文案 + 现行 docs 术语门禁，含 em/en dash 棘轮）、`route-audit.mjs`、`smoke_api.py`；`docs/ACCEPTANCE.md` 为人工核对清单 | 七期矩阵 `responsive_matrix` PASS 70 / FAIL 0、`w6_acceptance` PASS 36 / FAIL 0、W7 十脚本 90 用例全 PASS（证据见 §9） |
 | 实验结论 | `docs/experiments/P0-RESULTS.md` | E1~E20：重试、热加载、健康、internal/404、failover 打平、sqlite 日志表、P2C 同层选路、transformations 头体改写、预算语义、keyHash、额度桶、retry 支持面、OTel 逐次尝试、多密钥展开/conditional 首条独占（E14 至 E20 详见 P0-RESULTS 与 CHANGELOG-phase4） | 隔离实例实测，全程未碰生产 AG |
-| 文档 | `docs/` | PLAN、CHANGELOG-phase2、CHANGELOG-phase4、GLOSSARY、FEATURE-PARITY、api-contract、DELIVERY、DECISIONS（ADR-001…029）、SYSTEM-BOUNDARY（系统边界契约，ADR-029 执行细则）、contracts/*、ACCEPTANCE、DESIGN-AUDIT、plans/w5-correctness-rework | - |
+| 文档 | `docs/` | PLAN、CHANGELOG-phase2、CHANGELOG-phase4、GLOSSARY、FEATURE-PARITY、api-contract、DELIVERY、DECISIONS（ADR-001…030）、SYSTEM-BOUNDARY（系统边界契约，ADR-029 执行细则）、contracts/*、ACCEPTANCE、DESIGN-AUDIT、plans/w5-correctness-rework、plans/w7-ui-refinement | - |
 
 ## 2. 怎么跑（Windows 单机）
 
@@ -42,8 +42,8 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 # 打开 http://localhost:3700
 ```
 
-- **演示数据规模**：3 厂商 / 4 上游（zai-01 一个上游 **3 把等权密钥**，nebula-01、local-01/02 各 1 把，共 **6 条上游密钥**）/ 16 上游模型（其中 **15 个带成本 + 1.2 倍率**，1 个故意未定价）/ 8 公开模型（6 failover + 2 weighted）/ 16 目标 / **6 用户**（根用户 D + 两层代理树）/ 5 把 `sk-` 连接密钥 / 252 条用量 / 245 条计费流水 / 2 条配置版本 / 64 条审计 / 13 条 app_settings / 2 条可用性规则（ban + cooldown，无排期窗口）；策略、护栏、MCP 各有一份样例配置。全程不使用 qax/qianxin 厂商名。
-- **登录**：真实会话（ticket 02）。默认演示账号 `admin / admin12345`（管理用户），另有 `lisi`（代理用户）、`wangwu`（普通用户），首次登录后请修改。除登录/健康检查外的 `/admin/*` 全部要求会话。
+- **演示数据规模**（W7 t14 实测，详见 api-contract §6）：无厂商域（ADR-030）；4 上游（`name` 由连接地址生成：open-bigmodel-cn 一个上游 **3 把等权密钥**，api-nebula-example 与 127-0-0-1:800x 两个各 1 把，共 **6 条上游密钥**；`alias` 字段在位、seed 默认留空）/ 16 上游模型（其中 **15 个带成本 + 1.2 倍率**，1 个故意未定价）/ 8 公开模型（6 failover + 2 weighted）/ 16 目标 / **6 用户（全部有登录凭证，ADR-019）** / 5 把 `sk-` 连接密钥 / 30 条缓存价（挂 `upstream_model_id`）/ 252 条用量 / 245 条计费流水 / 2 条配置版本 / 61 条审计 / 13 条 app_settings / 2 条可用性规则（ban + cooldown，无排期窗口）；策略、护栏、MCP 各有一份样例配置。
+- **登录**：真实会话（ticket 02）。默认演示账号 `admin / admin12345`（管理用户，共用同一演示密码的还有 root / lisi / wangwu / finance / loadtest：`lisi` 为分销商、`wangwu`/`finance`/`loadtest` 为客户），首次登录后请修改。除登录/健康检查外的 `/admin/*` 全部要求会话。
 - **端口**：管理台与控制面同为 **3700**（单端口：`web/dist` 由控制面同源托管，不再单独起前端端口）；仅本地 HMR 可选 `cd web && npm run dev`（5173，vite 代理 `/admin`、`/api` 到 3700）；数据面 **3600**；旧的 agentgateway（3691 / 19004-19006）**未做任何改动**。
 - **主机名**：管理台与 API 必须同主机名（都用 `localhost`）；混用 `localhost` 与 `127.0.0.1` 会因 SameSite=Lax 不带 cookie。
 
@@ -67,7 +67,7 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 2. **同层路由**由 AG 的 P2C 决定（健康 + 延迟 EWMA），控制面只配 failover 的 priority 分层与 weighted 权重；不支持“轮询/最小连接”的假实现（ADR-012/014）。
 3. **MCP 支持 sse/stdio**：顶层 `mcp.targets` 已实测通过 pinned AG 1.7 `--validate-only`；http 变体与 `url` 字段被二进制拒绝，后端 422、前端置灰。
 4. **`/admin/reports/trend` 是遗留日桶端点**（`metric + range` 7d/30d/90d，未知值回退 30d）；v2 看板与报表走 `/admin/reports/timeseries` 等端点，支持任意区间（today/24h/7d/30d/365d）与 `from_ms/to_ms` 自定义窗口、`bucket=auto` 小时/日桶；桑基 flow 与 overview 金额已跟随时间窗。
-5. **前端包体**：已做路由级 code-split，六期（W6）基线首包 gzip **216.1 KB**、**77** 个 JS chunk；最大 chunk 为 echarts（gzip 148.2 KB），后续可继续按页面细化拆包（playground/params-panel.tsx 常量外移）。二期当时的 193.8 KB/66 chunk 与五期的 213.1 KB/75 chunk 已过时。
+5. **前端包体**：已做路由级 code-split，七期（W7）基线首包 gzip **216.9 KB**、**79** 个 JS chunk；最大 chunk 为 echarts（gzip 148.2 KB），后续可继续按页面细化拆包（playground/params-panel.tsx 常量外移）。二期当时的 193.8 KB/66 chunk、五期的 213.1 KB/75 chunk 与六期的 216.1 KB/77 chunk 已过时。
 6. **上游密钥不回显**：`GET /admin/upstreams/{id}/keys` 只回 masked/key_suffix，明文只在创建/轮换时返回一次；上游列表用 `has_api_key` 与 `key_count`（只统计 `upstream_keys` 行，不读退役的 `api_key_enc`；旧库未迁移时为 0，前端提示运行 `migrate_multikey_v2`）。连接密钥（旧称客户端密钥，后端 `/admin/api-keys`）才有 `sk-…abcd` 掩码 + 审计化 reveal。
 7. **控制台会话是绝对过期（12h，无滑动续期）**；生产必须设 `SLIPSTREAM_COOKIE_SECURE=1` 并置于 TLS 之后，开发环境默认允许 http。
 8. **字段级权限是“缺键”不是 null**：无 `billing:cost` 时成本/毛利键消失，无 `billing:spend` 时花费/余额键消失；前端必须按键存在性判断，不能把 null 当无权限。
@@ -78,7 +78,7 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 ## 5. 范围外 / 后续
 
 1. **接真实数据面**：把 `agentgateway` 渲染产物下发到 3600 实例（`l03_adapters/agentgateway/apply.py` 原子替换 + 回滚），保持 3691 生产实例不动。
-2. **旧库迁移**：旧库 16 表按新模型（vendors/upstreams/upstream_keys/upstream_models/public_models/model_targets/api_keys/users）用脚本录入；priority 语义用 `migrate_priority_v2.py` 一次性翻转。
+2. **旧库迁移**：旧库按新模型（upstreams/upstream_keys/upstream_models/public_models/model_targets/api_keys/users）用脚本录入；priority 语义用 `migrate_priority_v2.py` 一次性翻转。（W7 后已无厂商表；旧 mock 库由 seed 重置，ADR-030 不写迁移脚本。）
 3. **趋势窗口化**：补 24h/小时桶与看板时间窗联动。
 4. **（可选）** 把控制面迁到 `\\wsl.localhost\Ubuntu-26.04\home\microsoft\slipstream` 运行，Windows 侧只留数据面。
 
@@ -249,3 +249,59 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 2. **响应式矩阵与 w6_acceptance 均要求隔离端口 + 临时 SQLite**：脚本显式拒绝 3700/3600；3777/3779 为脚本默认/常用隔离端口。
 3. **每日状态检查依赖 job 进程**：验收隔离站点置 `SLIPSTREAM_JOBS_ENABLED=0`，system-status 在该模式下返回空 checks（属预期；生产按 §6.3 组合根入口启动 job）。
 4. W6 未新增权限键（仍 41 个）；模型探测/公开模型 PATCH 权限复用 W5 口径。
+
+## 9. 七期（W7）交付段（2026-11-22 收口）
+
+七期主题：**UI 与领域收口**。W7 ticket 01 至 13 已全部合入本地 `w7/integration`（未 push）；本票（ticket 14）做文档/契约/ADR 收口与全量验收。ADR 范围扩到 **ADR-001…030**（新增 ADR-030「缓存价挂 upstream_model_id，厂商域整体退役」；修订注记落 ADR-002/019/023）。逐票 merge hash 取自 `w7/integration` 一线合并提交。
+
+### 9.1 W7 变更记录（14 票逐票一行：票号 → merge hash → 一句话变更）
+
+| 票 | merge hash | 变更 |
+|---|---|---|
+| 01 | 02c6c80 | 用户统一登录账户：seed 全员凭证（6 用户全部可登录）、创建落库 username/password_hash 强制非空、用户页删「类型」列 |
+| 02 | 29ccd65 | 缓存价 upstream_model_id 归属键路径（expand 预重构，新键读写先通；旧 vendor 键由票 03 删除） |
+| 03 | 1c040e1 | 移除厂商维度（contract）：vendors 表/路由/权限键退场、上游与成本流水去 vendor、缓存价只挂 upstream_model_id、新增 ADR-030 |
+| 04 | 6af42c3 | 上游标志/别名收口：列改「上游标志/上游别名」、重名 422 就地呈现、md+ 标志/别名与地址/协议两两同排、测试密钥默认项去重、页签按钮不贴线 |
+| 05 | c540c6f | 公开模型成员表格化：输入前置（优先级/权重/表达式中文标签）、chevron 展开更多配置、候选原位灰态 toggle、两栏列头对齐 |
+| 06 | b4a7fc7 | 日志筛选安静化与尝试链 popover：删「筛选已修改」提示与独立尝试列、查询按钮白底/未应用变 primary、模型旁分叉图标 |
+| 07 | 17bf34f | 连接密钥 B 方案：customer self-only、admin/reseller 子树代签、越界 403、剪贴板三级回退（Clipboard API → execCommand → 明确报错） |
+| 08 | f182f03 | HoverInfo 原语：hover/focus/触屏三路触发 + Portal 碰撞处理 + 可访问名称，指标卡示范接入 |
+| 09 | f3841be | 模型参数列只留输入/输出上限，完整参数进 HoverInfo |
+| 10 | 53a8076 | 删除重复状态列（用户/上游/密钥/模型）+ StatusIcon 三态图标（normal 零占位、冷却带 yyyy-mm-dd hh:mm:ss 解除时间） |
+| 11 | a6cb655 | 弹框键盘统一原语：Enter 主操作/IME 守卫、Esc 脏保护、焦点陷阱、危险默认取消、pending 防重复、焦点还原 + 隔离站点共享实现 |
+| 12 | 28d0f4f | 脏字段去左侧 2px 警示线、保留浅黄底与「已修改」图标/文字，标记不推挤布局；页头说明行解耦修 e5ecfa2 回归（矩阵恢复 70/0） |
+| 13 | 858a1fd | 登录渐变可见但克制：三层柔光 + 承托层、静态低饱和，截图取样视觉门禁（DESIGN-AUDIT §20） |
+| 14 | 本票 | 文档、契约与全量验收：GLOSSARY/DESIGN-AUDIT/DELIVERY/ACCEPTANCE/api-contract/ADR-019 对齐实现，Conflict Review C1 至 C11 关闭核对，全量门禁与 10 个 W7 验收脚本复跑 |
+
+### 9.2 W7 破坏性变更（无兼容别名）
+
+- **厂商域整体退役（ADR-030）**：`vendors` 表、`/admin/vendors` 路由、`vendors:read/write` 权限键、`upstreams.vendor_id`、`upstream_prices.vendor_id+upstream_model` 旧键、`cost_entries.vendor_id` 全部删除；旧地址 GET 落 SPA 兜底 404、其他方法 405。不写迁移脚本，旧 mock 库由 seed 重置。
+- **用户无「类型」**：用户列表/树不返回 `type`，页面无「API 用户/控制台账号两 Tab」；所有用户落库必有 username/password_hash。
+- **有操作表格无状态列**：用户/上游/连接密钥/模型管理删除重复状态列，状态由行底色与操作文案表达；模型仅非 normal 显示 StatusIcon。
+- **日志无独立尝试列**：`attempts_count > 0` 走模型旁分叉图标 + popover；数据契约（`GET /admin/logs/{event_id}/attempts`）不变。
+- **成员编排无 chip 流**：已选成员表格化，chip 只用于右栏候选。
+- **连接密钥角色化**：customer 无代签入口（self-only），admin/reseller 子树代签；权限键总数 41 → 39。
+
+### 9.3 W7 新字段 / 口径变化
+
+- `upstreams.alias`：可选展示名，不参与路由、不唯一；列表列「上游别名」、详情与标志同排（md+）。
+- `upstream_prices`：一行只挂 `upstream_model_id` + item（cache_read/cache_write）+ 时间区间 + 单价；缺归属键 422、指向不存在模型行 404；成本/账单/报表口径同价迁移（黄金字面量钉在 `test_seed_billing_golden.py`）。
+- 上游创建/更新：`name` 唯一（重名 422，就地呈现）；无 slug/code（ADR-023 决议维持）。
+- 权限键 39 个：主数据 8 / 流量治理 4 / 治理 7 / 计费 6 / 用量 3 / 账号 10 / 模型试验 1。
+- seed：61 条审计（实测；较 W6 口径的 64 条少 3）、用户显示名调整（内部平台/数据分析组/试用-临时/财务对账/压测环境）、30 条缓存价挂上游模型。
+
+### 9.4 W7 门禁基线（2026-11-22 票 14 实测，worktree t14）
+
+- 后端：`pytest` **1026 passed / 8 skipped / EXIT=0**；`ruff check . --no-cache` **All checks passed**；`gen_ts.py --check` EXIT=0（contract.ts 最新）；`import_lint.py` default=strict findings 0。
+- 前端：`tsc --noEmit` 0；`eslint src --max-warnings 0` 0；`vite build` 成功；`check-bundle` PASS（首包 gzip **216.9 KB** / **79** chunk / echarts 148.2 KB）；`check-ui-foundation` **139/139**；`check-semantic-dirty` **46/46**；`terminology_audit` RESULT PASS（**error 0 · warn 0 · 边界 0 · baseline 残留 0 · 资产 10/10**）。
+- OpenAPI：**98 路径 / 130 操作**；route-audit 口径不变（27 路由 / 19 页面 / 15 导航）。
+- 浏览器（全部隔离端口 + fresh seed 临时库，不碰 3700/3600）：`responsive_matrix.mjs` 五档 **PASS 70 / FAIL 0**；W7 十脚本 **90 用例全 PASS**（w7_hover_info 7、w7_model_params 10、w7_member_table 8、w7_upstream_identity 10、w7_status_columns 12、w7_dirty_field 9、w7_logs_filters_attempts 9、w7_key_copy 5、w7_login_gradient 12、w7_dialog_keyboard 8）；六期回归 `w6_acceptance.mjs` **PASS 36 / FAIL 0**。
+- 术语/文档门禁：现行 docs（api-contract/GLOSSARY/DESIGN-AUDIT/ACCEPTANCE/DELIVERY/contracts）扫描 0 新增违规。
+
+### 9.5 W7 已知边界（如实记录）
+
+1. **seed 的 `alias` 默认留空**：别名是可选能力（US 11），seed 只保证标志唯一；别名端到端由 `w7_upstream_identity`（详情编辑别名 → 落库 → 列表/详情一致）覆盖。
+2. **`pytest` 全量跑前需要 `web/dist` 存在**（先 `cd web && npm run build`）：`test_vendors_routes_are_gone` 断言 POST `/admin/vendors` 405，该状态码来自 SPA 兜底 catch-all 路由（spa.py：无 bundle 时 API-only 模式不挂 catch-all，POST 会变 404）。这是路由策略断言对构建产物的依赖，不是产品缺陷；全新 checkout 先构建再跑 pytest。
+3. **浏览器验收脚本全部要求隔离端口**：W7 十脚本各自默认 3885 至 3907（双端口），`w6_acceptance` 3779、`responsive_matrix` 3777；脚本显式拒绝 3700/3600，数据库/ag-config 落在各脚本证据目录，跑完即弃。
+4. **登录渐变以截图取样为准**（DESIGN-AUDIT §20）：浅色最大 RGB 差 28、深色 38，均在「可见且克制」区间；不以 CSS 类存在为准。
+5. 弹框键盘、脏字段零位移、HoverInfo 三路触发均以浏览器脚本断言为准（w7_dialog_keyboard / w7_dirty_field / w7_hover_info），静态门禁只做接线与源码契约补充。

@@ -261,3 +261,31 @@ Conflict Review C8）。白底、左右布局、三态主题、密码显隐、�
 - 可读性：正文 浅 16.55:1 / 深 17.94:1；次级文字 3.52:1 / 5.41:1；提交按钮 6.29:1 / 6.43:1。
 - 对照：改动前浅色主题最大 RGB 差仅 11（用户所指的「几乎不可见」），低于 14 的可见下限；深色主题 28。
 
+## 21. W7 UI 与领域收口（2026-11-22，票 14 核对）
+
+> W7 十三张实现票的交互/原语落点与本文件既有小节的衔接。§18 工单 14「成员 chip 编排」、§19 工单 14/15 的成员 chip 流描述是 W5/W6 当时的实现记录，**成员形态已被 W7 t05 表格化取代**（历史记录保留，现行口径以本节为准）。
+
+### 21.1 原语清单（components/ui 增量）
+
+- `ui/hover-info.tsx`（W7 t08）：统一悬浮详情原语。触发元素带 `data-hover-info="trigger"` 且 `tabindex="0"`；浮层 `data-slot="hover-info-panel"` Portal 到 body，hover 250ms / 键盘 focus / 触屏轻点三路触发，视口碰撞翻转收拢，显式 label 成为可访问名称；禁用与空内容是稳定态（不浮层、不新增焦点落点）。
+- `ui/status-icon.tsx`（W7 t10）：模型名旁三态状态图标。仅 closed/cooling/unknown 渲染（`data-status-icon="<kind>"`），normal 零占位；图标自带可聚焦触发元素，悬浮详情经 HoverInfo 给出关闭/冷却原因与冷却解除时间（yyyy-mm-dd hh:mm:ss）。上游模型表与公开模型表都接线（`check-ui-foundation` SSR 断言四态）。
+- `ui/dialog.tsx` / `ui/alert-dialog.tsx` / `ui/confirm-dialog.tsx`（W7 t11）：统一键盘行为。Enter 触发主操作（输入法组合中不触发；多行输入与按钮自身的 Enter 不重复触发），Escape 取消（脏内容有确认保护），Tab 焦点陷阱，危险确认默认焦点在「取消」，提交中防重复，关闭后焦点还原到触发按钮。全部创建/保存/确认/签发/重置密码弹框共用同一套原语。
+- `ui/dirty-field.tsx`（W7 t12 终态）：脏字段只有浅黄背景 + 「已修改」图标/文字 + 单项恢复；**左侧 2px 深色警示线已去除**（§17 的旧描述已就地标注）；标记用绝对定位固定槽，脏/净切换不推挤、不移动原有元素（w7_dirty_field 验收含零位移对比）。
+- `components/ui` 原语文件数 40 个 tsx（W7 净增 hover-info、status-icon 两件；§原语化整改记录的是 2026-11-18 当时的 42 件清单，progress/input-group/form 等零引用件后续已清理）。
+
+### 21.2 表格与页面形态（W7 收口口径）
+
+- 成员编排（W7 t05）：已选成员是表格（`data-slot="member-table"`，输入前置：优先级 → 权重/表达式 → 成员/上游 → 更多配置 → 移除），行内 chevron 展开更多配置；候选 chip 原位灰显 + ×，再点取消；两栏列头与候选搜索同一水平线对齐。门禁：`check-ui-foundation`「成员表格（W7 票05）」与 `check-semantic-dirty`「MemberChipFlow：已选成员表格化」（46 条内）。
+- 日志页（W7 t06）：独立「尝试」列删除；`attempts_count > 0` 时模型旁分叉图标 + popover（懒加载，与详情抽屉同一份数据）；查询按钮默认白底、筛选未应用时黄边 + 按钮变 primary；「筛选已修改」提示与输入框样式的「请求模型未记录」占位删除。门禁：`w7_logs_filters_attempts`（9 用例）。
+- 有操作表格去状态列（W7 t10）：用户/上游/连接密钥/模型管理的状态列删除，行底色与操作文案表达状态；模型仅非 normal 显示 StatusIcon。门禁：`w7_status_columns`（12 用例）。
+- 用户管理（W7 t01）：列名「用户名称/登录帐户」，无「类型」列、无「无登录帐户」行；所有 seed 用户可登录。
+- 上游渠道（W7 t04）：列改「上游标志/上游别名」，无厂商字段/筛选；详情页标志/别名、地址/协议 md+ 两两同排；测试密钥默认项去重、页签下按钮不贴边。
+- 连接密钥（W7 t07）：客户新建不出现用户选择（self-only），管理员/分销商保留代签入口；复制走 Clipboard API + textarea/execCommand 回退，失败明确报错。
+- 模型参数列（W7 t09）：只显示输入/输出上限；完整参数进 HoverInfo（含指标卡示范接线）。门禁：`w7_model_params`（10 用例）、`w7_hover_info`（7 用例）。
+- 登录渐变（W7 t13）：见 §20。
+
+### 21.3 W7 门禁基线（票 14 实测，2026-11-22）
+
+- 静态：`check-ui-foundation` **139/139**、`check-semantic-dirty` **46/46**、`terminology_audit` RESULT PASS（error 0 · warn 0 · 边界 0 · baseline 残留 0 · 资产 10/10）、`tsc`/`eslint`/`vite build` 全绿、`check-bundle` PASS（首包 gzip 216.9 KB / 79 chunk / echarts 148.2 KB）；后端 `pytest` 1026 passed / 8 skipped、`ruff --no-cache` 全过、`gen_ts --check` EXIT=0。
+- 浏览器（隔离端口 + fresh seed）：W7 十脚本 **90 用例全 PASS**（hover_info 7、model_params 10、member_table 8、upstream_identity 10、status_columns 12、dirty_field 9、logs_filters_attempts 9、key_copy 5、login_gradient 12、dialog_keyboard 8）；响应式矩阵五档 **70/0**；六期回归 `w6_acceptance` **36/0**（隔离 3779）。数字矩阵见 `docs/DELIVERY.md` §9.4、`docs/ACCEPTANCE.md` §0.2。
+
