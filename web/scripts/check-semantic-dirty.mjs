@@ -192,12 +192,14 @@ check("useDirtyFields：返回 dirtyFields/dirtyCount/isDirty/isDirtyField", asy
   expect(html.includes("&quot;name&quot;:false"), "未变化的 name 不应标脏，实际：" + html);
 });
 
-check("DirtyField：脏时 2px 警示条 + 浅底 + 已修改点 + 恢复该项；干净时不渲染标记", async () => {
+check("DirtyField：脏时浅底 + 已修改点 + 恢复该项、无左侧警示线（W7 A 方案）；干净时不渲染标记", async () => {
   const { DirtyField } = await load("/src/components/ui/dirty-field.tsx");
   const input = createElement("input", { defaultValue: "v", "aria-label": "字段" });
   const dirtyHtml = render(createElement(DirtyField, { dirty: true, onReset: () => {}, children: input }));
-  includesAll(dirtyHtml, ["w-0.5", "bg-warning", "bg-warning-soft", "已修改", "恢复该项"], "脏字段标记");
+  includesAll(dirtyHtml, ["bg-warning-soft", "已修改", "恢复该项", "dirty-marker"], "脏字段标记");
   expect(dirtyHtml.includes("<svg"), "恢复该项按钮必须带图标");
+  expect(!dirtyHtml.includes("dirty-bar"), "W7 ticket 12：脏字段不得再渲染左侧 2px 警示线（dirty-bar）");
+  expect(!dirtyHtml.includes("w-0.5"), "不得以任何竖条元素变相恢复左侧警示线");
   const cleanHtml = render(createElement(DirtyField, { dirty: false, onReset: () => {}, children: input }));
   expect(!cleanHtml.includes("已修改"), "干净字段不应出现「已修改」");
   expect(!cleanHtml.includes("bg-warning-soft"), "干净字段不应有警示浅底");

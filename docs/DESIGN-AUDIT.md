@@ -185,7 +185,7 @@ grep -rn "bg-gradient\|text-gradient\|drop-shadow\|blur-\|hover:scale\|animate-p
 ### 17. W5 语义色、脏标记与 toast 原语（ticket 09）
 - 语义色五档 = 成功绿 / 警示琥珀 / 信息蓝 / 危险红 / 中性灰；token 三件套 `--{tone}` / `--{tone}-text` / `--{tone}-soft`（index.css）。`lib/semantic-tone` 提供 tone → 文字/浅底/描边工具类映射，页面不得自拼裸色。
 - 动作语义色单一来源 `lib/icons.ACTION_TONES`：启用=success、关闭/冷却=warning、解除=success、测试=info、删除=danger、编辑=neutral；行内操作统一用 `ui/action-button`（图标 + 文字双编码，不只靠颜色）。
-- 脏标记原语：`lib/dirty-fields`（diffFields/sameArray/sameSet/sameJson）+ `lib/use-dirty-fields` + `ui/dirty-field`（DirtyField 字段 2px 警示条/浅底/「已修改」点/恢复该项；DirtyCountBadge 区块计数；DirtySummary/DirtyFooter 底部「未保存 N 项 + 恢复全部」；DirtySaveButton 脏=主按钮、干净=中性 disabled、保存中进度）。只标变更字段，保存成功由父级回填 baseline 清标记，失败保留标记与输入。
+- 脏标记原语：`lib/dirty-fields`（diffFields/sameArray/sameSet/sameJson）+ `lib/use-dirty-fields` + `ui/dirty-field`（DirtyField 字段浅底/「已修改」点/恢复该项（W7 收口：左侧 2px 警示线已去除）；DirtyCountBadge 区块计数；DirtySummary/DirtyFooter 底部「未保存 N 项 + 恢复全部」；DirtySaveButton 脏=主按钮、干净=中性 disabled、保存中进度）。只标变更字段，保存成功由父级回填 baseline 清标记，失败保留标记与输入。
 - toast 策略集中 `lib/toast-policy`：统一 3 秒、右上（offset top 80）避开顶栏/表格底部/sticky 操作列；持续反馈进通知中心（`lib/notification-store`）。
 
 ## 18. 五期（W5）实现清单（2026-11-21 收口）
