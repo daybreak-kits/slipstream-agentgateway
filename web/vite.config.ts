@@ -2,7 +2,24 @@ import { fileURLToPath, URL } from "node:url";
 
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
+
+import pkg from "./package.json" with { type: "json" };
+
+/**
+ * 构建注入版本标记（W6 票08）：把 package.json 版本写进 dist/index.html 的
+ * app-version meta，后端每日状态任务读取它做「前端构建版本 vs 后端版本」
+ * 对照。没有运行时版本协商——只在构建产物上留一个可读的事实。
+ */
+function appVersionMeta(): Plugin {
+  const tag = `<meta name="app-version" content="${pkg.version}">`;
+  return {
+    name: "inject-app-version-meta",
+    transformIndexHtml(html) {
+      return html.replace("</head>", `  ${tag}\n  </head>`);
+    },
+  };
+}
 
 /** 精确匹配 /node_modules/<pkg>/，避免子串误伤（如 react 与 react-dom 之外的同名前缀包）。 */
 function inPackage(id: string, ...names: string[]): boolean {
@@ -29,7 +46,7 @@ function manualChunks(rawId: string): string | undefined {
 }
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), appVersionMeta()],
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },

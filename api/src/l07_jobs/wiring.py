@@ -1,10 +1,11 @@
 """Job wiring for the in-process background runner (PLAN §6).
 
-Five periodic jobs run inside the control-plane process: incremental usage pull
+Six periodic jobs run inside the control-plane process: incremental usage pull
 (l05_service.usage_pull), cooldown expiry re-render (ADR-004), the ledger/balance
-reconcile (ADR-011), the daily request-log retention cleanup (ADR-021) and the
-daily models.dev snapshot sync + adopt (W4-H). The first
-three share one interval (`job_interval_seconds`); the two daily jobs run once a day.
+reconcile (ADR-011), the daily request-log retention cleanup (ADR-021), the
+daily models.dev snapshot sync + adopt (W4-H) and the daily status check +
+notice (W6 ticket 08). The first three share one interval
+(`job_interval_seconds`); the three daily jobs run once a day.
 
 The runner starts only when `jobs_enabled` is true, and the app factory exposes the
 created runner on `app.state.job_runner` (None when disabled) so tests can assert both
@@ -26,6 +27,7 @@ from l07_jobs.log_cleanup import LOG_CLEANUP_INTERVAL_S, make_cleanup_job
 from l07_jobs.models_dev_sync import MODELS_DEV_INTERVAL_S, make_models_dev_job
 from l07_jobs.reconcile import make_reconcile_job
 from l07_jobs.runner import JobRunner
+from l07_jobs.status_notice import STATUS_CHECK_INTERVAL_S, make_status_check_job
 from l07_jobs.usage_pull import make_pull_job
 
 LOGGER = logging.getLogger("slipstream.jobs")
@@ -48,6 +50,11 @@ def build_runner(session_factory: sessionmaker, settings: Settings | None = None
         "models_dev_sync",
         make_models_dev_job(session_factory, resolved),
         float(MODELS_DEV_INTERVAL_S),
+    )
+    runner.register(
+        "daily_status_check",
+        make_status_check_job(session_factory, resolved),
+        float(STATUS_CHECK_INTERVAL_S),
     )
     return runner
 

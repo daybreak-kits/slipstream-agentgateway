@@ -49,12 +49,58 @@ def test_app_registers_the_runner_when_jobs_enabled(engine_and_sessionmaker):
         "reconcile",
         "log_cleanup",
         "models_dev_sync",
+        "daily_status_check",
     }
-    # Three jobs share the configured interval; the two daily jobs run daily.
+    # Three jobs share the configured interval; the three daily jobs run daily.
     intervals = {name: interval for name, (_f, interval) in runner._jobs.items()}
     assert intervals.pop("log_cleanup") == 86_400.0
     assert intervals.pop("models_dev_sync") == 86_400.0
+    assert intervals.pop("daily_status_check") == 86_400.0
     assert set(intervals.values()) == {60.0}
+
+
+def test_status_check_job_failure_does_not_kill_the_runner(
+    engine_and_sessionmaker, monkeypatch, caplog
+):
+    """W6 ticket 08: a broken daily check is logged and the loop moves on."""
+    import asyncio
+    import logging
+
+    from l07_jobs import status_notice
+    from l07_jobs.runner import JobRunner
+
+    _, factory = engine_and_sessionmaker
+
+    def _explode(*args, **kwargs):
+        raise RuntimeError("status check exploded")
+
+    monkeypatch.setattr(status_notice, "run_status_check", _explode)
+    ran_after_failure = []
+
+    async def _healthy_job():
+        ran_after_failure.append(True)
+
+    runner = JobRunner()
+    runner.register("daily_status_check", status_notice.make_status_check_job(factory), 0.01)
+    runner.register("after_failure", _healthy_job, 0.01)
+
+    async def _scenario():
+        task = asyncio.create_task(runner.run_forever())
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            if ran_after_failure:
+                break
+        runner.stop()
+        await asyncio.wait_for(task, timeout=5)
+
+    with caplog.at_level(logging.ERROR, logger="slipstream.jobs"):
+        asyncio.run(_scenario())
+
+    assert ran_after_failure, "the loop keeps running later jobs after one fails"
+    assert any(
+        "daily_status_check" in record.getMessage() for record in caplog.records
+    ), "the failure leaves a visible log line"
+    assert runner._stop.is_set()
 
 
 def test_app_does_not_start_jobs_when_disabled(engine_and_sessionmaker):
