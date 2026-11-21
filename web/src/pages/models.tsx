@@ -4,7 +4,7 @@ import { toast } from "@/lib/notify";
 import { useMatch, useNavigate, useSearchParams } from "react-router-dom";
 
 import {
-  availabilityText, availabilityTone, isCooling, periodicByRow, ruleSummary,
+  availabilityText, availabilityTone, isCooling, modelRowRank, modelRowTone, periodicByRow, ruleSummary,
   useAvailabilityMutation, useAvailabilityRulesQuery, useBatchMutation,
 } from "@/components/models/availability";
 import { Field } from "@/components/models/field";
@@ -416,7 +416,7 @@ function UpstreamTab() {
       hideable: false,
       headerClassName: "min-w-64",
       cell: (row: UpstreamModel) => (
-        <div className="flex flex-wrap gap-1">
+        <div className="flex gap-1">
           <ActionButton action="edit" size="dense" onClick={() => setDrawer({ open: true, initial: row })}>
             编辑
           </ActionButton>
@@ -538,6 +538,9 @@ function UpstreamTab() {
         loading={q.isPending}
         error={q.isError ? (q.error as Error).message : null}
         onRetry={() => void q.refetch()}
+        // W6 ticket 10：关闭行微灰且默认置尾；冷却行微黄位置不变（modelRowTone/modelRowRank）。
+        rowTone={modelRowTone}
+        closedLast={modelRowRank}
         storageKey="slipstream.cols.models"
         tabKey="upstream"
         searchText={search}
@@ -889,11 +892,6 @@ function PublicTab() {
         );
       },
     },
-    {
-      key: "status",
-      label: "状态",
-      cell: (row) => <Badge tone={availabilityTone(row)}>{availabilityText(row)}</Badge>,
-    },
     ...(canWrite ? [{
       key: "actions",
       label: "操作",
@@ -902,7 +900,7 @@ function PublicTab() {
       hideable: false,
       headerClassName: "min-w-56",
       cell: (row: PublicModel) => (
-        <div className="flex flex-wrap gap-1">
+        <div className="flex gap-1">
           <Button
             variant="ghost"
             size="dense"
@@ -988,6 +986,9 @@ function PublicTab() {
         loading={q.isPending}
         error={q.isError ? (q.error as Error).message : null}
         onRetry={() => void q.refetch()}
+        // W6 ticket 10：公开模型只有启停（ADR-025），关闭行微灰且默认置尾。
+        rowTone={modelRowTone}
+        closedLast={modelRowRank}
         storageKey="slipstream.cols.models"
         tabKey="public"
         searchText={search}

@@ -21,14 +21,15 @@ What counts as a concrete data-plane reference ("leak"):
   ``ag_llm_port`` / ``data_plane_port`` or a concrete ``/v1/*`` endpoint literal;
 * a frontend source reference to the concrete adapter module path.
 
-Known baseline leaks (7, expected from W6 ticket 03 on; the W6 baseline
-2287de5 measured 8 and ticket 03 cleared the upstream transform import). This
-check reports them without blocking; tickets 02/04/06 migrate the remaining
-call sites and then turn ``--strict`` into a gate. Do not add new exceptions
-here: the list is documentation of the debt this baseline measured.
+Known baseline leaks (8, expected on the W6 baseline 2287de5). This ticket
+reports them without blocking; tickets 02/03/04/06 migrate the call sites and
+then turn ``--strict`` into a gate. Do not add new exceptions here: the list is
+documentation of the debt this baseline measured.
 
 1. api/src/l06_api/routers_log_payload.py:16  adapter-import
    System API imports the concrete usage reader to serve log payloads.
+2. api/src/l06_api/routers_upstreams.py:15   adapter-import
+   System API imports the concrete transform compiler for previews.
 3. api/src/l07_jobs/log_cleanup.py:28        adapter-import
    System job imports the concrete retention helper.
 4. api/src/l06_api/adapter_factory.py:24     adapter-name-dispatch
@@ -69,8 +70,7 @@ WEB_ADAPTER_PATH = re.compile(r"l03_adapters[\\/]+agentgateway")
 
 #: Baseline leak count. Kept in the output so the ticket-01 acceptance is
 #: visible; ticket 06 removes the final references and flips --strict on.
-#: Ticket 03 cleared the transform-compiler import (was finding #2, 8 -> 7).
-BASELINE_LEAK_COUNT = 7
+BASELINE_LEAK_COUNT = 8
 
 
 @dataclass(frozen=True, slots=True)

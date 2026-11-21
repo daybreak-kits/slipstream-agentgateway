@@ -223,3 +223,94 @@ def test_mock_driver_ports_are_inert_but_usable() -> None:
     assert adapter.capability_note("routing.priority_failover") == ""
     assert adapter.start_telemetry(None, lambda attempts: 0) is None
     adapter.stop_telemetry(None)
+
+
+#: Ticket 02: the payload/retention contract is one assertion set run on the
+#: fake driver and the real one (docs/SYSTEM-BOUNDARY.md section 8).
+LOG_CONTRACT_DRIVERS = ("fake", "agentgateway")
+
+#: Far inside the retention window, so the real driver's day-granular prune
+#: removes every seeded row the same way the fake clears its store.
+_EXPIRED_STARTED_AT = "2020-01-01T00:00:00+00:00"
+
+
+@pytest.fixture(params=LOG_CONTRACT_DRIVERS, ids=("fake", "agentgateway"))
+def log_contract(request, workdir):
+    """(adapter, seed) pairs: seed stores one payload through the driver's own
+    write seam, everything after that is shared port-level assertions."""
+    if request.param == "fake":
+        adapter = FakeAdapter()
+
+        def seed(event_id: str, prompt: str, completion: str) -> None:
+            adapter.seed_payload(
+                event_id,
+                request_prompt_json=prompt,
+                response_completion_json=completion,
+            )
+
+        return adapter, seed
+
+    db_path = workdir / "ag-data.db"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.executescript(
+            "CREATE TABLE request_logs (id TEXT PRIMARY KEY, started_at TEXT);"
+            "CREATE TABLE request_log_payloads (log_id TEXT PRIMARY KEY,"
+            " request_prompt_json TEXT, response_completion_json TEXT);"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    def ag_seed(event_id: str, prompt: str, completion: str) -> None:
+        connection = sqlite3.connect(db_path)
+        try:
+            connection.execute(
+                "INSERT INTO request_logs (id, started_at) VALUES (?, ?)",
+                (event_id, _EXPIRED_STARTED_AT),
+            )
+            connection.execute(
+                "INSERT INTO request_log_payloads VALUES (?, ?, ?)",
+                (event_id, prompt, completion),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+    return (
+        AgentgatewayAdapter(config_dir=str(workdir), ag_db_path=str(db_path), ag_binary=""),
+        ag_seed,
+    )
+
+
+def test_log_payload_and_retention_ports_share_one_contract(log_contract) -> None:
+    """The same port assertions hold for the fake and the real driver.
+
+    Read: unknown events are None, stored bodies round-trip as LogPayload with
+    the exact wire fields. Retention: a fresh store is a zero-count no-op, a
+    prune removes the stored bodies and reports per-table int counts.
+    """
+    adapter, seed = log_contract
+
+    assert adapter.prune_logs(30) == {"request_logs": 0, "request_log_payloads": 0}
+    assert adapter.read_log_payload("evt_missing") is None
+
+    seed("evt_p1", '{"prompt": "你好"}', '{"completion": true}')
+    seed("evt_expired", "{}", "")
+    assert adapter.read_log_payload("evt_p1") == LogPayload(
+        event_id="evt_p1",
+        request_prompt_json='{"prompt": "你好"}',
+        response_completion_json='{"completion": true}',
+    )
+    assert adapter.read_log_payload("evt_expired") == LogPayload(
+        event_id="evt_expired",
+        request_prompt_json="{}",
+        response_completion_json="",
+    )
+
+    counts = adapter.prune_logs(30)
+    assert counts["request_log_payloads"] == 2
+    assert isinstance(counts["request_logs"], int)
+    assert counts["request_logs"] >= 0
+    assert adapter.read_log_payload("evt_p1") is None
+    assert adapter.read_log_payload("evt_expired") is None

@@ -426,7 +426,10 @@ check("表格列元数据：DataTable 的 align/sticky 头身同用，冻结列�
   expect(/<th[^>]*class="[^"]*sticky right-0/.test(html), "表头冻结列必须有 sticky right-0");
   expect(/<td[^>]*class="[^"]*sticky right-0/.test(html), "表体冻结列必须有 sticky right-0");
   expect(/<th[^>]*class="[^"]*bg-surface-2/.test(html), "冻结列表头底色必须跟随表头行（bg-surface-2）");
-  expect(/<td[^>]*class="[^"]*bg-surface/.test(html), "冻结列单元格必须是不透明底色（bg-surface）");
+  expect(
+    /<td[^>]*class="[^"]*bg-\[var\(--row-bg,var\(--surface\)\)\]/.test(html),
+    "冻结列单元格必须是不透明底色（行背景变量 --row-bg，默认回落 --surface）",
+  );
   expect(html.includes("shadow-[inset_1px_0_0_var(--border)]"), "冻结列必须有左侧分割阴影");
   expect(/<th[^>]*class="[^"]*align-middle/.test(html), "表头必须垂直居中（align-middle）");
   expect(/<td[^>]*class="[^"]*align-middle/.test(html), "表体必须垂直居中（align-middle）");
@@ -457,7 +460,10 @@ check("表格列元数据：ModelsTable 的 align/sticky 头身同用，冻结�
   expect(/<td[^>]*class="[^"]*sticky right-0/.test(html), "表体冻结列必须有 sticky right-0");
   expect(/<th[^>]*class="[^"]*text-right/.test(html), "表头必须应用 align=right（头身同用）");
   expect(/<td[^>]*class="[^"]*text-right/.test(html), "表体必须应用 align=right（头身同用）");
-  expect(/<td[^>]*class="[^"]*bg-surface/.test(html), "冻结列单元格必须是不透明底色（bg-surface）");
+  expect(
+    /<td[^>]*class="[^"]*bg-\[var\(--row-bg,var\(--surface\)\)\]/.test(html),
+    "冻结列单元格必须是不透明底色（行背景变量 --row-bg，默认回落 --surface）",
+  );
   expect(/<th[^>]*class="[^"]*align-middle/.test(html), "表头必须垂直居中（align-middle）");
   expect(/<td[^>]*class="[^"]*align-middle/.test(html), "表体必须垂直居中（align-middle）");
   expect(/<td[^>]*class="[^"]*h-8/.test(html), "模型表紧凑行高必须与表头同档（h-8）");
@@ -550,6 +556,240 @@ check("表格行节奏：表头/正文同高且垂直居中，行悬浮色与冻
   const css = read("src/index.css");
   includesAll(css, ["--row-hover:", "--z-sticky-column:", "--z-sticky-head:"], "表格冻结列 token");
   expect((css.match(/--row-hover:/g) ?? []).length >= 2, "行悬浮色必须浅/深各一套");
+});
+
+// ---------- 4.5 表格规范（W6 ticket 10） ----------
+check("DataTable：无自定义 cell 时回退渲染 accessor 默认值（修配置版本操作人整列空白）", async () => {
+  const { DataTable } = await load("/src/components/data-table.tsx");
+  const columns = [
+    { accessorKey: "operator", header: "操作人" },
+    { accessorKey: "count", header: "计数" },
+  ];
+  const html = render(
+    createElement(DataTable, {
+      columns,
+      data: [{ operator: "admin", count: 3 }],
+      emptyText: "暂无数据",
+    }),
+  );
+  expect(/<td[^>]*>admin<\/td>/.test(html), "无自定义 cell 的列必须回退渲染 accessorKey 取到的字符串值");
+  expect(/<td[^>]*>3<\/td>/.test(html), "数字默认值也要渲染（0 等假值不得被丢掉）");
+});
+
+check("配置版本：版本列左对齐且表头与内容一致（不再整列右对齐）", () => {
+  const text = read("src/pages/config_revisions.tsx");
+  const column = text.slice(text.indexOf('accessorKey: "id"'), text.indexOf("operator", text.indexOf('accessorKey: "id"')));
+  expect(column.length > 0 && column.includes("版本"), "未找到版本列定义");
+  expect(!column.includes("text-right"), "版本列不得强制右对齐（user story 46：头身左对齐一致）");
+  expect(column.includes("tnum"), "版本列保留 tnum 等宽数字");
+});
+
+check("排序指示：共享三态组件——未排序 ArrowUpDown、升序 ArrowUpNarrowWide、降序 ArrowDownNarrowWide", async () => {
+  const { SortIndicator } = await load("/src/components/ui/sort-indicator.tsx");
+  const unsorted = render(createElement(SortIndicator, { direction: false }));
+  expect(unsorted.includes("lucide-arrow-up-down"), "未排序必须渲染 ArrowUpDown（上窄下宽之前的状态一眼可辨）");
+  const asc = render(createElement(SortIndicator, { direction: "asc" }));
+  expect(asc.includes("lucide-arrow-up-narrow-wide"), "升序必须渲染 ArrowUpNarrowWide（上窄下宽箭头）");
+  expect(!asc.includes("lucide-arrow-up-down"), "激活态不得残留未排序图标");
+  const desc = render(createElement(SortIndicator, { direction: "desc" }));
+  expect(desc.includes("lucide-arrow-down-narrow-wide"), "降序必须渲染 ArrowDownNarrowWide（下窄上宽箭头）");
+  expect(!desc.includes("lucide-arrow-up-narrow-wide"), "降序不得复用升序图标");
+});
+
+check("DataTable：可排序列常驻未排序图标（ArrowUpDown），禁排序列不显示，激活态带 aria-sort", async () => {
+  const { DataTable } = await load("/src/components/data-table.tsx");
+  const columns = [
+    { accessorKey: "name", header: "名称" },
+    { accessorKey: "id", header: "编号", enableSorting: false },
+  ];
+  const html = render(
+    createElement(DataTable, { columns, data: [{ name: "a", id: "1" }], emptyText: "暂无" }),
+  );
+  const count = html.split("lucide-arrow-up-down").length - 1;
+  expect(count === 1, "可排序列必须常驻 1 个未排序 ArrowUpDown 图标（当前 " + count + " 个）");
+  const idStart = html.lastIndexOf("<th", html.indexOf(">编号<"));
+  const idTh = html.slice(idStart, html.indexOf("</th>", html.indexOf(">编号<")));
+  expect(!idTh.includes("lucide"), "禁排序列不得渲染任何排序图标");
+  expect(!idTh.includes("cursor-pointer"), "禁排序列不得有排序点击态");
+  expect(read("src/components/data-table.tsx").includes("aria-sort"), "激活排序列的 th 必须设置 aria-sort");
+});
+
+check("表格操作列：sticky 列默认右对齐（头身同侧）、单元格内容 justify-end、末列收窄 padding 贴右边缘", async () => {
+  const { DataTable } = await load("/src/components/data-table.tsx");
+  const columns = [
+    { accessorKey: "name", header: "名称" },
+    { id: "actions", header: "操作", enableSorting: false, meta: { sticky: "right", hideable: false }, cell: () => "编辑" },
+  ];
+  const html = render(createElement(DataTable, { columns, data: [{ name: "a" }], emptyText: "暂无" }));
+  const thStart = html.lastIndexOf("<th", html.indexOf(">操作<"));
+  const th = html.slice(thStart, html.indexOf("</th>", html.indexOf(">操作<")));
+  const tdStart = html.lastIndexOf("<td", html.indexOf(">编辑<"));
+  const td = html.slice(tdStart, html.indexOf("</td>", html.indexOf(">编辑<")));
+  expect(th.includes("text-right"), "操作列表头必须右对齐（sticky 列默认 right，头身同侧）");
+  expect(th.includes("pr-2"), "末列表头必须收窄右 padding（贴边节奏）");
+  expect(td.includes("text-right"), "操作列单元格必须右对齐");
+  expect(td.includes("pr-2"), "末列单元格必须收窄右 padding（最后一个按钮贴近右边缘）");
+  expect(td.includes("flex justify-end"), "操作列单元格内容必须 flex justify-end 靠右");
+  expect(
+    td.includes("bg-[var(--row-bg,var(--surface))]"),
+    "冻结列单元格背景必须走行背景变量 --row-bg（行色时无白底断层），默认回落 --surface",
+  );
+});
+
+check("ModelsTable：操作列同样右对齐贴边（justify-end + pr-2 + 默认右对齐）", async () => {
+  const { ModelsTable } = await load("/src/components/models/table.tsx");
+  const columns = [
+    { key: "name", label: "名称", cell: () => "alpha" },
+    { key: "actions", label: "操作", hideable: false, sticky: "right", cell: () => "编辑" },
+  ];
+  const html = render(
+    createElement(ModelsTable, {
+      columns,
+      rows: [{ id: "a" }],
+      totalCount: 1,
+      storageKey: "slipstream.test",
+      tabKey: "t",
+      searchText: "",
+      onSearchChange: () => {},
+      searchPlaceholder: "搜索",
+      emptyText: "暂无数据",
+      onClearFilters: () => {},
+    }),
+  );
+  const th = html.slice(html.lastIndexOf("<th", html.indexOf(">操作<")), html.indexOf("</th>", html.indexOf(">操作<")));
+  const td = html.slice(html.lastIndexOf("<td", html.indexOf(">编辑<")), html.indexOf("</td>", html.indexOf(">编辑<")));
+  expect(th.includes("text-right"), "ModelsTable 操作列表头必须右对齐");
+  expect(th.includes("pr-2"), "ModelsTable 末列表头必须收窄右 padding");
+  expect(td.includes("text-right"), "ModelsTable 操作列单元格必须右对齐");
+  expect(td.includes("pr-2"), "ModelsTable 末列单元格必须收窄右 padding");
+  expect(td.includes("flex justify-end"), "ModelsTable 操作列内容必须 justify-end 靠右");
+  expect(
+    td.includes("bg-[var(--row-bg,var(--surface))]"),
+    "ModelsTable 冻结列单元格背景必须走行背景变量",
+  );
+});
+
+check("table-order：partitionClosedLast 稳定分区——关闭行置尾、启用行保持原序、不原地改入参", async () => {
+  const { partitionClosedLast } = await load("/src/lib/table-order.ts");
+  const rows = [
+    { id: "a", closed: false },
+    { id: "b", closed: true },
+    { id: "c", closed: false },
+    { id: "d", closed: true },
+  ];
+  const out = partitionClosedLast(rows, (row) => row.closed);
+  expect(out.map((row) => row.id).join("") === "acbd", "关闭行置尾且启用行保持原相对顺序（稳定分区）");
+  expect(rows.map((row) => row.id).join("") === "abcd", "不得原地修改入参（页面 rows 可能被复用）");
+  const untouched = partitionClosedLast([{ id: "x" }], () => false);
+  expect(untouched.length === 1 && untouched[0].id === "x", "无关闭行时位置不变（冷却行不置尾的前提）");
+});
+
+check("行色：ModelsTable 行级 rowTone——冷却微黄、关闭微灰，TR 同步 --row-bg 供冻结列着色", async () => {
+  const { ModelsTable } = await load("/src/components/models/table.tsx");
+  const columns = [{ key: "name", label: "名称", cell: (row) => row.name }];
+  const html = render(
+    createElement(ModelsTable, {
+      columns,
+      rows: [{ id: "w", name: "冷却行标记" }, { id: "n", name: "关闭行标记" }],
+      totalCount: 2,
+      storageKey: "slipstream.test",
+      tabKey: "t",
+      searchText: "",
+      onSearchChange: () => {},
+      searchPlaceholder: "搜索",
+      emptyText: "暂无数据",
+      onClearFilters: () => {},
+      rowTone: (row) => (row.id === "w" ? "warning" : "neutral"),
+    }),
+  );
+  expect(html.includes("bg-[var(--warning-soft)]"), "冷却行必须微黄底色（--warning-soft）");
+  expect(html.includes("bg-[var(--neutral-soft)]"), "关闭行必须微灰底色（--neutral-soft）");
+  expect(html.includes('--row-bg:var(--warning-soft)'), "冷却行 TR 必须设 --row-bg=warning-soft（冻结列同步着色）");
+  expect(html.includes('--row-bg:var(--neutral-soft)'), "关闭行 TR 必须设 --row-bg=neutral-soft（冻结列同步着色）");
+});
+
+check("置尾：ModelsTable 默认视图关闭行排在启用行之后（分页切片前分区）", async () => {
+  const { ModelsTable } = await load("/src/components/models/table.tsx");
+  const columns = [{ key: "name", label: "名称", cell: (row) => row.name }];
+  const html = render(
+    createElement(ModelsTable, {
+      columns,
+      rows: [
+        { id: "a", name: "甲启用" },
+        { id: "b", name: "乙关闭" },
+        { id: "c", name: "丙启用" },
+      ],
+      totalCount: 3,
+      storageKey: "slipstream.test",
+      tabKey: "t",
+      searchText: "",
+      onSearchChange: () => {},
+      searchPlaceholder: "搜索",
+      emptyText: "暂无数据",
+      onClearFilters: () => {},
+      closedLast: (row) => row.id === "b",
+    }),
+  );
+  const posA = html.indexOf("甲启用");
+  const posB = html.indexOf("乙关闭");
+  const posC = html.indexOf("丙启用");
+  expect(posA >= 0 && posB >= 0 && posC >= 0, "三行都必须渲染");
+  expect(posA < posC && posC < posB, "默认视图关闭行「乙」必须排在启用行「甲/丙」之后");
+});
+
+check("置尾：DataTable 客户端默认（未排序）视图支持 closedLast 置尾", async () => {
+  const { DataTable } = await load("/src/components/data-table.tsx");
+  const columns = [{ accessorKey: "name", header: "名称" }];
+  const html = render(
+    createElement(DataTable, {
+      columns,
+      data: [{ name: "甲启用" }, { name: "乙关闭" }, { name: "丙启用" }],
+      emptyText: "暂无",
+      closedLast: (row) => row.name === "乙关闭",
+    }),
+  );
+  const posA = html.indexOf("甲启用");
+  const posB = html.indexOf("乙关闭");
+  const posC = html.indexOf("丙启用");
+  expect(posA >= 0 && posB >= 0 && posC >= 0, "三行都必须渲染");
+  expect(posA < posC && posC < posB, "DataTable 默认视图关闭行必须置尾");
+});
+
+check("模型管理：两张表都接入行色与关闭置尾（rowTone + closedLast 走同一套模型可用性语义）", () => {
+  const text = read("src/pages/models.tsx");
+  const toneCalls = (text.match(/rowTone=\{modelRowTone\}/g) ?? []).length;
+  const lastCalls = (text.match(/closedLast=\{modelRowRank\}/g) ?? []).length;
+  expect(toneCalls >= 2, "上游模型与公开模型两张表都必须传 rowTone={modelRowTone}（当前 " + toneCalls + " 处）");
+  expect(lastCalls >= 2, "两张表都必须传 closedLast={modelRowRank}（当前 " + lastCalls + " 处）");
+  const vocab = read("src/components/models/availability.ts");
+  expect(vocab.includes("modelRowTone") && vocab.includes("modelRowRank"), "行色/置尾语义必须收敛在 availability 模块");
+  const toneFn = vocab.slice(vocab.indexOf("export function modelRowTone"), vocab.indexOf("export function modelRowRank"));
+  expect(toneFn.length > 0, "未找到 modelRowTone 函数");
+  expect(
+    toneFn.indexOf('state === "closed"') < toneFn.indexOf("isCooling(row)"),
+    "行色判定必须关闭优先于冷却（closed 行即使有残留冷却也是微灰）",
+  );
+});
+
+check("模型管理：状态列按规则收敛——公开模型删只表达启停的状态列，上游模型保留（冷却/周期为额外状态）", () => {
+  const text = read("src/pages/models.tsx");
+  const upstreamStart = text.indexOf("function UpstreamTab");
+  const publicStart = text.indexOf("function PublicTab");
+  expect(upstreamStart >= 0 && publicStart > upstreamStart, "未找到上游/公开两个 Tab 函数");
+  const upstreamSlice = text.slice(upstreamStart, publicStart);
+  const publicSlice = text.slice(publicStart);
+  expect(
+    !publicSlice.includes('key: "status"'),
+    "公开模型不得保留只表达启停的状态列（user story 40 + ADR-025：公开模型只有启停）",
+  );
+  expect(upstreamSlice.includes('key: "status"'), "上游模型状态列必须保留（冷却截止/周期规则/渠道联动关闭属额外状态）");
+  expect(upstreamSlice.includes("周期："), "上游状态列保留周期规则摘要");
+});
+
+check("模型管理：操作列内容单行不换行——flex-wrap 会把末按钮甩到第二行左缘，贴边失效（768 实测 149px）", () => {
+  const text = read("src/pages/models.tsx");
+  const wraps = (text.match(/flex flex-wrap gap-1/g) ?? []).length;
+  expect(wraps === 0, "模型表操作列内容不得 flex-wrap（当前 " + wraps + " 处）：换行时末按钮回绕到下一行左缘，最后一个按钮不再贴右边缘");
 });
 
 // ---------- 7. 数字与格式化单一来源（ticket 08） ----------

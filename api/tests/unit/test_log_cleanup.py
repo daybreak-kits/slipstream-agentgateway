@@ -10,7 +10,9 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime, timedelta
 
+from l01_core.settings import Settings
 from l03_adapters.agentgateway.usage import cleanup_expired_logs
+from l07_jobs.log_cleanup import cleanup_job
 
 #: Same request-log shape AG 1.7 creates (subset used by the cleanup predicates).
 _AG_SCHEMA = """
@@ -115,3 +117,33 @@ def test_missing_database_is_a_noop(tmp_path):
         "request_logs": 0,
         "request_log_payloads": 0,
     }
+
+
+def test_cleanup_job_default_path_prunes_through_the_adapter(
+    engine_and_sessionmaker, tmp_path
+):
+    """W6 t02: the production default (no injected adapter) prunes the same way.
+
+    The job resolves the configured adapter itself and prunes via the SPI port;
+    expired request-log rows and their payload rows go, rows inside the window
+    and the control-plane attempt/usage facts stay.
+    """
+    _, factory = engine_and_sessionmaker
+    ag_dir = tmp_path / "ag-config"
+    ag_dir.mkdir(parents=True, exist_ok=True)
+    db = _make_ag_db(
+        ag_dir / "ag-data.db",
+        [
+            ("evt_old", "2020-01-01T00:00:00+00:00"),
+            ("evt_new", datetime.now(UTC).isoformat()),
+        ],
+    )
+
+    counts = cleanup_job(factory, Settings(ag_config_dir=str(ag_dir)))
+
+    assert counts == {
+        "request_logs": 1,
+        "request_log_payloads": 1,
+        "request_attempts": 0,
+    }
+    assert _ids(db, "request_logs") == ["evt_new"]
