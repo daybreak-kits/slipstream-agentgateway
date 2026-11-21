@@ -59,10 +59,18 @@ _CURSOR_SEP = "|"
 
 
 def open_readonly(db_path: str) -> sqlite3.Connection:
-    """Open the AG SQLite file strictly read-only (URI mode); missing file is an error."""
+    """Open the AG SQLite file strictly read-only (URI mode).
+
+    A missing file means the data plane never ran (no store to read from) --
+    that is a dependency state, not a schema change, so it maps to the stable
+    DATA_PLANE_UNAVAILABLE code (W6 ticket 07: 503, never a plain 500). A real
+    schema drift is still SCHEMA_MISMATCH via assert_schema.
+    """
     if not os.path.exists(db_path):
         raise AppError(
-            ErrorCode.SCHEMA_MISMATCH, f"数据面请求日志不存在: {db_path}", details={"path": db_path}
+            ErrorCode.DATA_PLANE_UNAVAILABLE,
+            f"数据面请求日志不可用（数据面未启动或未产生日志库）: {db_path}",
+            details={"path": db_path},
         )
     uri = "file:" + db_path.replace("\\", "/") + "?mode=ro"
     conn = sqlite3.connect(uri, uri=True)

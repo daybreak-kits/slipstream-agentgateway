@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+from l01_core.errors import AppError, ErrorCode
 from l02_domain.ir import GatewayIR, TransformsSpec
 from l02_domain.validation import ValidationResult, validate_gateway_ir
 from l03_adapters.agentgateway import credentials
@@ -396,7 +397,11 @@ class AgentgatewayAdapter:
 
     def read_log_payload(self, event_id: str) -> LogPayload | None:
         if not self._ag_db_path:
-            return None
+            # No data plane configured at all: a dependency state, not "no such
+            # payload" -- reads answer 503 DATA_PLANE_UNAVAILABLE (W6 ticket 07).
+            # The usage port deliberately keeps its silent empty-page semantics:
+            # a background pull must not crash on an absent data plane.
+            raise AppError(ErrorCode.DATA_PLANE_UNAVAILABLE, "数据面未配置，日志正文不可读")
         conn = open_readonly(self._ag_db_path)
         try:
             payload = fetch_request_payload(conn, event_id)

@@ -1369,6 +1369,52 @@ check("分流图隐藏阶段：mock 不重算投影，隐藏到两段即禁用�
   );
 });
 
+// ---------- 六期：错误治理（W6 ticket 07）----------
+// 查询 4xx 不自动重试、查询错误不逐查询弹 toast、一次失败只产生一条通知。
+// retry 策略与通知去重都是纯函数，用 SSR 加载器跑真实实现断言行为；
+// 接线（main.tsx / api.ts）按本文件惯例用源码契约钉住。
+check("查询重试策略：4xx 不重试，5xx/网络错误最多重试 1 次", async () => {
+  const { queryRetry, QUERY_RETRY_MAX } = await load("/src/lib/query-retry.ts");
+  expect(queryRetry(0, { status: 404 }) === false, "4xx 第一次失败就必须放弃（重试必然再失败）");
+  expect(queryRetry(0, { status: 500 }) === true, "5xx 第一次失败允许重试一次");
+  expect(queryRetry(QUERY_RETRY_MAX, { status: 500 }) === false, "5xx 达到上限后停止重试");
+  expect(queryRetry(0, new Error("network down")) === true, "无状态码的网络类错误按 5xx 上限重试");
+});
+
+check("错误通知去重：同因失败窗口内只产生一条通知", async () => {
+  const store = await load("/src/lib/notification-store.ts");
+  store.clearNotifications();
+  const push = store.pushErrorNotificationOnce;
+  const key = "INTERNAL_ERROR|internal server error";
+  const first = push({ title: "查询失败", description: "INTERNAL_ERROR：x", dedupeKey: key }, 1_000);
+  const dup = push({ title: "查询失败", description: "INTERNAL_ERROR：y", dedupeKey: key }, 2_000);
+  const other = push({ title: "查询失败", description: "NOT_FOUND：z", dedupeKey: "NOT_FOUND|z" }, 2_100);
+  expect(first === true && dup === false, "窗口内同因失败必须去重（第二次不落新通知）");
+  expect(other === true, "不同原因的失败各记一条");
+  expect(store.getNotificationsSnapshot().length === 2, "一次失败只产生一条通知");
+  const afterWindow = push(
+    { title: "查询失败", description: "INTERNAL_ERROR：w", dedupeKey: key },
+    1_000 + store.ERROR_DEDUPE_WINDOW_MS + 1,
+  );
+  expect(afterWindow === true, "窗口外的新失败要再次提示");
+  store.clearNotifications();
+});
+
+check("错误治理接线：main.tsx retry 接策略函数，api.ts 查询失败进通知中心", () => {
+  const main = read("src/main.tsx");
+  expect(main.includes("queryRetry"), "main.tsx 必须把 queries.retry 接到 lib/query-retry 的策略函数");
+  const api = read("src/lib/api.ts");
+  includesAll(
+    api,
+    ["pushErrorNotificationOnce", "reportFailure(err, isQuery)"],
+    "api.ts：查询失败走通知中心去重",
+  );
+  // 查询错误不逐查询弹 toast：每个 toast.error 都必须直接落在非查询（写操作）分支里。
+  const toasts = (api.match(/toast\.error/g) ?? []).length;
+  const guarded = (api.match(/if \(!isQuery\) \{\s*toast\.error/g) ?? []).length;
+  expect(toasts > 0 && toasts === guarded, "api.ts 的每个 toast.error 都必须在 !isQuery（写操作）分支内");
+});
+
 // ---------- run ----------
 const failures = [];
 server = await createServer({
