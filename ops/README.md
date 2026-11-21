@@ -19,6 +19,7 @@ bash ops/checks/verify_web.sh                  # tsc + eslint + 路由审计
 node ops/checks/route-audit.mjs                # 路由与动态路由审计
 node ops/checks/acceptance_browser.mjs --channel msedge --strict   # 单端口 3700 全站验收
 node ops/checks/interaction_audit.mjs --channel msedge             # 逐页交互审计
+node ops/checks/acceptance/m4_retry_flow.mjs                       # mock 主/备固定响应 + AG 重试切备验收
 node ops/checks/terminology_audit.mjs          # 术语/品牌资产
 python ops/contract/gen_ts.py --check          # 校验 web/src/generated/contract.ts 未过期
 python ops/checks/smoke_api.py                 # API 冒烟（默认 http://localhost:3700）

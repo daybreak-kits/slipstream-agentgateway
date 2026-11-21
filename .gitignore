@@ -372,3 +372,10 @@ ops/experiments/ag-lab/.e17-tmp/
 ops/experiments/ag-lab/.e18-tmp/
 ops/experiments/ag-lab/.e19-tmp/
 ops/experiments/ag-lab/.e20-tmp/
+
+# === local-only test artefacts (2026-11-21) ===
+/note.txt
+/.playwright-mcp/
+/api/.scratch/
+/web/.scratch/
+/api/pytest-of-microsoft/

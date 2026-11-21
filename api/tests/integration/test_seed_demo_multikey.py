@@ -118,6 +118,14 @@ def test_seed_is_one_zai_channel_with_three_equal_keys(seeded_demo) -> None:
     assert "目标 16" in seeded.stdout
 
 
+def test_seeded_usage_rows_carry_requested_model(seeded_demo) -> None:
+    """E17 visual QA: requested_model is the client-facing model, not a blank."""
+    db_path, _env_value, _seeded = seeded_demo
+    rows = _query(db_path, "SELECT requested_model, public_model FROM gateway_usage_events")
+    assert rows
+    assert all(requested and requested == public for requested, public in rows)
+
+
 def test_seeded_ledger_attributes_every_event_to_its_own_channel(seeded_demo) -> None:
     db_path, _env_value, _seeded = seeded_demo
     events = _query(db_path, "SELECT event_id, provider FROM gateway_usage_events")

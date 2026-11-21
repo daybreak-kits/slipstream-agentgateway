@@ -369,6 +369,7 @@ async function run() {
   await sleep(400);
   check("ui.pairing-fixed-save-enabled", await saveBtn.isEnabled(), "配对后保存可用");
   await saveBtn.click();
+  await page.getByRole("button", { name: "确认保存并下发" }).click();
   const savedCfg = await pollPolicies((c) => c.retry !== null && c.health !== null);
   check("policies.saved", Boolean(savedCfg), savedCfg ? "retry/health 已保存" : "超时未保存");
   await shot("02-policies-saved");
@@ -416,6 +417,7 @@ async function run() {
   await page.getByRole("switch", { name: "启用请求内重试" }).click();
   await page.getByRole("switch", { name: "启用健康标记与驱逐" }).click();
   await page.getByRole("button", { name: "保存并下发" }).click();
+  await page.getByRole("button", { name: "确认保存并下发" }).click();
   const offCfg = await pollPolicies((c) => c.retry === null && c.health === null);
   check("policies.default-off", Boolean(offCfg), offCfg ? "retry/health 已关闭" : "超时未关闭");
   await shot("03-policies-default-off");

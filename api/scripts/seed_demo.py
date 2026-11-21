@@ -471,6 +471,9 @@ def seed(session, rng: random.Random) -> dict[str, object]:
                     duration_ms=duration,
                     time_to_first_token_ms=ttft,
                     http_status=status,
+                    # E17 visual QA: the model the client asked for must exist on
+                    # seeded rows, otherwise the log table falls back to a gap.
+                    requested_model=public_name,
                     public_model=public_name,
                     upstream_model=upstream_model,
                     # ADR-026: real AG rows carry the expanded provider name
