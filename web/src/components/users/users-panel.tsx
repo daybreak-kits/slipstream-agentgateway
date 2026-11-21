@@ -13,6 +13,7 @@ import { api } from "@/lib/api";
 import { fmtCny } from "@/lib/format";
 import { ACTION_ICONS } from "@/lib/icons";
 import { usePermissions } from "@/lib/permissions";
+import type { TableRowTone } from "@/lib/table-columns";
 import type { UserTreeNode } from "@/types";
 
 import { describeApiError } from "./api-error";
@@ -31,6 +32,17 @@ const STATUS_LABEL: Record<string, string> = {
   disabled: "关闭",
   deleted: "已删除",
 };
+
+/** W6 ticket 11（user story 43）：关闭/已删除用户行微灰（--neutral-soft）。
+ * 模块作用域：组件内每次渲染新建函数会让 DataTable 的数据 memo 失效（autoReset 循环）。 */
+function userRowTone(user: UserTreeNode): TableRowTone | undefined {
+  return user.status === "active" ? undefined : "neutral";
+}
+
+/** W6 ticket 11（user story 41）：关闭行默认置尾的分区谓词；树视图不传（保持层级顺序）。 */
+function userClosedLast(user: UserTreeNode): boolean {
+  return user.status !== "active";
+}
 
 const COLUMN_LABELS: Record<string, string> = {
   user: "用户",
@@ -328,30 +340,39 @@ export function UsersPanel({
         const isSelf = me?.id === user.id;
         const disabledNow = user.status === "disabled";
         return (
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex items-center gap-1.5">
             {canUpdate && (
               <Button variant="ghost" size="dense" onClick={() => setTopupUser(user)}>
                 <ACTION_ICONS.recharge className="h-3.5 w-3.5" /> 充值
               </Button>
             )}
+            {/* W6 ticket 11：操作列单行不换行（票 10 防回潮规则）后，7 个操作在基础档放不下
+                （实测冻结列宽 > 375 视口，贴边失效）。低频操作按断点收敛（user story 28 的
+                窄屏策略）：调整余额/流水/重置密码 sm 起显示，基础档保留充值/启停/编辑/删除。 */}
             {canUpdate && (
-              <Button variant="ghost" size="dense" onClick={() => setAdjustUser(user)}>
-                <ACTION_ICONS.adjustBalance className="h-3.5 w-3.5" /> 调整余额
-              </Button>
+              <span className="hidden items-center gap-1.5 sm:inline-flex">
+                <Button variant="ghost" size="dense" onClick={() => setAdjustUser(user)}>
+                  <ACTION_ICONS.adjustBalance className="h-3.5 w-3.5" /> 调整余额
+                </Button>
+              </span>
             )}
             {canReadLedger && (
-              <Button variant="ghost" size="dense" onClick={() => setLedgerUser(user)}>
-                <ACTION_ICONS.transactions className="h-3.5 w-3.5" /> 流水
-              </Button>
+              <span className="hidden items-center gap-1.5 sm:inline-flex">
+                <Button variant="ghost" size="dense" onClick={() => setLedgerUser(user)}>
+                  <ACTION_ICONS.transactions className="h-3.5 w-3.5" /> 流水
+                </Button>
+              </span>
             )}
             {canUpdate && (
-              <Button
-                variant="ghost"
-                size="dense"
-                onClick={() => setResetTarget({ id: user.id, name: user.name })}
-              >
-                <ACTION_ICONS.resetKey className="h-3.5 w-3.5" /> 重置密码
-              </Button>
+              <span className="hidden items-center gap-1.5 sm:inline-flex">
+                <Button
+                  variant="ghost"
+                  size="dense"
+                  onClick={() => setResetTarget({ id: user.id, name: user.name })}
+                >
+                  <ACTION_ICONS.resetKey className="h-3.5 w-3.5" /> 重置密码
+                </Button>
+              </span>
             )}
             {canUpdate && (
               // DESIGN-AUDIT §4：关闭/重新启用是可逆操作，直接执行不弹确认；
@@ -397,6 +418,9 @@ export function UsersPanel({
       },
     },
   ];
+
+  // W6 ticket 11（user story 41/43）：关闭/已删除用户行微灰；关闭行默认置尾。
+  // 置尾只在列表视图生效（树视图保持层级顺序，user story 42），closedLast 在下方按 view 条件传入。
 
   const data = useMemo<UserTreeNode[]>(
     () => (view === "tree" ? treeRows.map((row) => row.node) : listRows),
@@ -444,6 +468,8 @@ export function UsersPanel({
           emptyText="没有匹配的用户"
           storageKey="slipstream.cols.users"
           columnLabels={COLUMN_LABELS}
+          rowTone={userRowTone}
+          closedLast={view === "list" ? userClosedLast : undefined}
         />
       )}
 

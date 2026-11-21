@@ -1,8 +1,6 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
 import {
-  ArrowDown,
-  ArrowUp,
   FileText,
   ListFilter,
   RefreshCw,
@@ -30,6 +28,7 @@ import {
 } from "@/components/logs/latency-tone";
 import { LogDetailDrawer } from "@/components/logs/log-detail-drawer";
 import { rowErrorText } from "@/components/logs/error-summary";
+import { SortIndicator } from "@/components/ui/sort-indicator";
 import {
   NoChainRecord,
   RequestAttemptChainPopover,
@@ -428,8 +427,11 @@ export function LogsPage() {
   );
 }
 
-/** 表头排序按钮：升→降→取消（取消=回默认时间倒序），箭头指示当前方向。 */
-function SortHeader({
+/** 表头排序按钮：升→降→取消（取消=回默认时间倒序）。
+ * W6 ticket 11：三态指示复用共享 SortIndicator——未排序 ArrowUpDown 常驻（否则看不出列可排序）、
+ * 升序 ArrowUpNarrowWide、降序 ArrowDownNarrowWide；图标包 aria-hidden，
+ * 按钮可访问名保持「按…排序」不被图标状态标签污染（w6 验收按 exact 匹配点按）。 */
+export function SortHeader({
   label,
   field,
   sort,
@@ -441,7 +443,6 @@ function SortHeader({
   onSort: (field: LogSortField) => void;
 }) {
   const active = sort.field === field;
-  const Arrow = active && sort.order === "asc" ? ArrowUp : ArrowDown;
   return (
     <Button
       variant="ghost"
@@ -451,7 +452,7 @@ function SortHeader({
       aria-label={"按" + label + "排序"}
     >
       {label}
-      {active ? <Arrow className="h-3 w-3" aria-hidden="true" /> : null}
+      <span aria-hidden="true"><SortIndicator direction={active ? sort.order : false} /></span>
     </Button>
   );
 }

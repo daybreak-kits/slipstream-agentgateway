@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, ListFilter, Settings2 } from "lucide-react";
+import { ListFilter, Settings2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -10,8 +10,10 @@ import { Empty } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { PAGE_SIZE_OPTIONS, Pagination } from "@/components/ui/pagination";
 import { Skeleton } from "@/components/ui/skeleton";
+import { SortIndicator } from "@/components/ui/sort-indicator";
 import { Table, TableWrap, TD, TH, THead, TR } from "@/components/ui/table";
 import {
+  ACTION_CELL_WRAPPER_CLASS,
   tableColumnCellClass,
   tableColumnHeaderClass,
   type TableColumnLayoutMeta,
@@ -215,10 +217,10 @@ export function PriceTable<T>({
                 >
                   <span className="inline-flex items-center gap-1">
                     {col.header ?? col.label}
-                    {sortKey === col.key ? (
-                      sortDir === "asc"
-                        ? <ArrowUp className="h-3 w-3" />
-                        : <ArrowDown className="h-3 w-3" />
+                    {/* W6 ticket 11：三态指示复用共享 SortIndicator——未排序 ArrowUpDown 常驻（否则看不出列可排序），
+                        升序 ArrowUpNarrowWide、降序 ArrowDownNarrowWide，不再各自维护两态图标。 */}
+                    {col.sortable && col.sortValue ? (
+                      <SortIndicator direction={sortKey === col.key ? sortDir : false} />
                     ) : null}
                   </span>
                 </TH>
@@ -269,7 +271,13 @@ export function PriceTable<T>({
                 <TR key={rowKey(row) ?? index}>
                   {visibleColumns.map((col) => (
                     <TD key={col.key} className={cn("h-8 py-0.5", tableColumnCellClass(col))}>
-                      {col.cell(row)}
+                      {/* W6 ticket 11：操作列（sticky 尾列）内容统一 flex justify-end 贴右边缘，
+                          与 DataTable/ModelsTable 同一机制，页面不再各自手写对齐。 */}
+                      {col.sticky === "right" ? (
+                        <div className={ACTION_CELL_WRAPPER_CLASS}>{col.cell(row)}</div>
+                      ) : (
+                        col.cell(row)
+                      )}
                     </TD>
                   ))}
                 </TR>

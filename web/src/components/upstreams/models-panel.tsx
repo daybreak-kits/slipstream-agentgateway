@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
 import { toast } from "@/lib/notify";
 
-import { isCooling, useAvailabilityMutation } from "@/components/models/availability";
+import { isCooling, modelRowRank, modelRowTone, useAvailabilityMutation } from "@/components/models/availability";
 import { UpstreamModelDrawer } from "@/components/models/upstream-model-drawer";
 import { parameterSummary } from "@/components/models/model-vocab";
 import { DataTable } from "@/components/data-table";
@@ -119,13 +119,6 @@ export function UpstreamModelsPanel({
       },
     },
     {
-      accessorKey: "enabled",
-      header: "状态",
-      cell: (c) =>
-        // 「关闭」语义色 warning（DESIGN-AUDIT 四期 §16 / W4-A1）：中性灰不表达「被人为关闭」的警示。
-        c.row.original.enabled ? <Badge tone="success">启用</Badge> : <Badge tone="warning">关闭</Badge>,
-    },
-    {
       id: "actions",
       header: "操作",
       meta: { sticky: "right" },
@@ -133,7 +126,7 @@ export function UpstreamModelsPanel({
         const row = c.row.original;
         if (!canWrite) return null;
         return (
-          <div className="flex flex-wrap gap-1">
+          <div className="flex gap-1">
             <ActionButton
               action="testConnection"
               size="dense"
@@ -258,6 +251,10 @@ export function UpstreamModelsPanel({
         emptyText="还没有登记模型；先点「拉取模型」探测导入，或手动添加"
         filterPlaceholder="搜索模型名"
         storageKey="slipstream.cols.upstream-models"
+        // W6 ticket 11：与模型管理两表同一套行语义——关闭行微灰置尾、冷却行微黄不置尾；
+        // 状态列只表达启停已删除（启停按钮在操作列），冷却态经行色与「解除」按钮呈现。
+        rowTone={modelRowTone}
+        closedLast={modelRowRank}
       />
       {drawer.open ? (
         <UpstreamModelDrawer

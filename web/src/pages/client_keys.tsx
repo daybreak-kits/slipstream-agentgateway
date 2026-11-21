@@ -7,7 +7,6 @@ import { CopyKeyButton } from "@/components/keys/copy-key-button";
 import { RenameKeyDialog } from "@/components/keys/rename-key-dialog";
 import { DataTable } from "@/components/data-table";
 import { ActionButton } from "@/components/ui/action-button";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -18,10 +17,21 @@ import { ACTION_ICONS } from "@/lib/icons";
 import { OneTimeSecretDialog } from "@/components/users/one-time-secret-dialog";
 import { ENDPOINTS, api } from "@/lib/api";
 import { usePermissions } from "@/lib/permissions";
+import type { TableRowTone } from "@/lib/table-columns";
 import type { ApiKey } from "@/types";
 import { PageHeader } from "@/components/layout/page-header";
 
 const KEYS_QUERY_KEY = ["api-keys"] as const;
+
+/** W6 ticket 11（user story 41/43）：关闭密钥行微灰；状态列只表达启停已删除（与操作列启停按钮重复）。 */
+function keyRowTone(key: ApiKey): TableRowTone | undefined {
+  return key.status === "active" ? undefined : "neutral";
+}
+
+/** 关闭密钥默认置尾（lib/table-order 稳定分区）；显式列排序时 DataTable 自动尊重排序。 */
+function keyClosedLast(key: ApiKey): boolean {
+  return key.status !== "active";
+}
 
 /**
  * 连接密钥（ADR-023）：掩码常驻、明文只经审计化 reveal 取回；
@@ -154,15 +164,6 @@ export function ClientKeysPage() {
       },
     },
     {
-      accessorKey: "status",
-      header: "状态",
-      cell: (cell) => {
-        const active = cell.row.original.status === "active";
-        // 关闭是可逆启停（非终态），用 warning 提示「被人为关闭」而不是中性灰（DESIGN-AUDIT 四期 §16）。
-        return <Badge tone={active ? "success" : "warning"}>{active ? "启用" : "关闭"}</Badge>;
-      },
-    },
-    {
       accessorKey: "created_at_ms",
       header: "创建时间",
       meta: { className: "text-right tnum" },
@@ -177,7 +178,7 @@ export function ClientKeysPage() {
         const key = cell.row.original;
         const active = key.status === "active";
         return (
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex items-center gap-1.5">
             <ActionButton
               action={active ? "disable" : "enable"}
               size="dense"
@@ -223,6 +224,8 @@ export function ClientKeysPage() {
         emptyText="还没有连接密钥"
         filterPlaceholder="筛选名称 / 掩码"
         storageKey="slipstream.cols.client-keys"
+        rowTone={keyRowTone}
+        closedLast={keyClosedLast}
       />
 
       <Dialog open={issueOpen} onOpenChange={(next) => { if (!next) setIssueOpen(false); }}>

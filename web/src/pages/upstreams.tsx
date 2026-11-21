@@ -27,6 +27,8 @@ import { api, apiList, ENDPOINTS } from "@/lib/api";
 import { ACTION_ICONS } from "@/lib/icons";
 import { formatDateTime, useTimezone } from "@/lib/time";
 import { usePermissions } from "@/lib/permissions";
+import { partitionClosedLast } from "@/lib/table-order";
+import type { TableRowTone } from "@/lib/table-columns";
 import { API_STYLE_LABELS, probeStatusView, upstreamRoutingHref, type UpstreamRow } from "@/components/upstreams/shared";
 import type { UpstreamBatchResult, Vendor } from "@/types";
 import { PageHeader } from "@/components/layout/page-header";
@@ -38,6 +40,12 @@ const BATCH_LABEL: Record<BatchAction, string> = {
   disable: "批量关闭",
   delete: "批量删除",
 };
+
+/** W6 ticket 11（user story 43）：关闭上游行微灰。模块作用域：组件内新建函数会让
+ * DataTable 的数据 memo 失效（autoReset 循环）。 */
+function upstreamRowTone(row: UpstreamRow): TableRowTone | undefined {
+  return row.enabled ? undefined : "neutral";
+}
 
 const STATUS_OPTIONS = [
   { value: "all", label: "全部" },
@@ -132,8 +140,14 @@ export function UpstreamsPage() {
 
   const totalPages = Math.max(1, Math.ceil(rows.length / Math.max(1, pageSize)));
   const currentPage = Math.min(Math.max(1, page), totalPages);
+  // W6 ticket 11（user story 41）：server 分页模式 DataTable 只见当前页，关闭行置尾必须
+  // 在页面层先对全量筛选结果分区、再切片——关闭上游整体沉到最后一页，而不是只沉当前页尾部。
   const pagedRows = useMemo(
-    () => rows.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+    () =>
+      partitionClosedLast(rows, (row) => !row.enabled).slice(
+        (currentPage - 1) * pageSize,
+        currentPage * pageSize,
+      ),
     [rows, currentPage, pageSize],
   );
 
@@ -326,7 +340,7 @@ export function UpstreamsPage() {
         const item = row.original;
         // 阻止冒泡到行点击：按钮动作不触发整行进入编辑。
         return (
-          <div className="flex flex-wrap gap-1" onClick={(event) => event.stopPropagation()}>
+          <div className="flex gap-1" onClick={(event) => event.stopPropagation()}>
             <ActionButton
               action={item.enabled ? "disable" : "enable"}
               size="dense"
@@ -449,6 +463,7 @@ export function UpstreamsPage() {
         }
         onRowClick={openEditor}
         storageKey="slipstream.cols.upstreams"
+        rowTone={upstreamRowTone}
         paging={{
           mode: "server",
           offset: (currentPage - 1) * pageSize,
