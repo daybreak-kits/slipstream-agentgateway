@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -19,31 +17,14 @@ from l04_repo.orm import (
 )
 from l05_service import auth, user_tree
 from l05_service.usage_pull import pull_once
-from l06_api import field_filter
 from l06_api.adapter_factory import make_adapter
 from l06_api.deps import page_params, require, session_of
 
 router = APIRouter(tags=["usage"])
 
 
-def _sanitized_raw_json(raw: str | None, permissions: frozenset[str]) -> str | None:
-    """raw_json is a JSON string, so the central body filter cannot see inside.
-
-    Parse it here, reuse the same money-key scrubber, then re-serialize so a
-    logs:read caller never reads cost/charge values out of the raw payload.
-    """
-    if not raw:
-        return raw
-    try:
-        payload = json.loads(raw)
-    except (TypeError, ValueError):
-        return raw
-    if not isinstance(payload, (dict, list)):
-        return raw
-    return json.dumps(field_filter.sanitize(payload, permissions), ensure_ascii=False)
-
-
 def _event_body(row: GatewayUsageEventORM) -> dict:
+    """Neutral usage-event facts only (ADR-029): no raw wire row is served."""
     body = {
         "event_id": row.event_id,
         "started_at_ms": row.started_at_ms,
@@ -95,7 +76,6 @@ def event_detail(
     if row is None:
         raise AppError(ErrorCode.NOT_FOUND, f"usage event not found: {event_id}")
     body = _event_body(row)
-    body["raw_json"] = _sanitized_raw_json(row.raw_json, principal.permissions)
     cost = session.scalars(
         select(CostEntryORM).where(CostEntryORM.gateway_event_id == event_id)
     ).first()

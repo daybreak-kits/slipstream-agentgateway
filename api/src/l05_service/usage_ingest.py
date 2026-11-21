@@ -188,6 +188,7 @@ def _ingest_batch(
                 duration_ms=event.duration_ms,
                 time_to_first_token_ms=event.time_to_first_token_ms,
                 http_status=event.http_status,
+                requested_model=event.requested_model,
                 public_model=event.public_model,
                 upstream_model=event.upstream_model,
                 provider=event.provider,
@@ -197,8 +198,11 @@ def _ingest_batch(
                 total_tokens=event.total_tokens,
                 cache_read_tokens=event.cache_read_tokens,
                 cache_write_tokens=event.cache_write_tokens,
+                error=event.error,
+                has_payload=event.has_payload,
                 raw_json=event.raw_json,
-                trace_id=event.trace_id,
+                is_stream=event.is_stream,
+                correlation_key=event.correlation_key,
                 ingested_at_ms=now_ms(),
             )
         )

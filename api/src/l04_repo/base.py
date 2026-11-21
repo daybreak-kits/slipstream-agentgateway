@@ -51,10 +51,13 @@ def init_db(engine: Engine) -> None:
     The project has no alembic yet; this additive fallback keeps an existing
     demo DB usable (ticket 08 adds config_revisions.error_detail and
     config_revisions.validation_note). It never alters a column; ticket 16 also
-    drops columns the ORM retired after a database was created.
+    drops columns the ORM retired after a database was created. Ticket 05 moves
+    the usage join key from its wire-era column name into the neutral
+    correlation_key (values copied, legacy column kept until retirement).
     """
     Base.metadata.create_all(engine)
     _ensure_additive_columns(engine)
+    _backfill_usage_correlation_key(engine)
     _drop_retired_columns(engine)
     _ensure_username_index(engine)
     _ensure_model_markup_default(engine)
@@ -85,6 +88,30 @@ def _drop_retired_columns(engine: Engine) -> None:
             connection.execute(
                 text(f"ALTER TABLE {table_name} DROP COLUMN {column_name}")
             )
+
+
+def _backfill_usage_correlation_key(engine: Engine) -> None:
+    """Ticket 05: copy the wire-era usage join column into correlation_key.
+
+    Pure value move (no reinterpretation): old rows keep their chain, new code
+    reads only the neutral name. The legacy column stays in place until the
+    vocabulary gate retires it; a DB without the legacy column skips the pass.
+    """
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    if not inspector.has_table("gateway_usage_events"):
+        return
+    existing = {column["name"] for column in inspector.get_columns("gateway_usage_events")}
+    if "trace_id" not in existing or "correlation_key" not in existing:
+        return
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE gateway_usage_events SET correlation_key = trace_id "
+                "WHERE correlation_key = '' AND trace_id != ''"
+            )
+        )
 
 
 def _ensure_model_markup_default(engine: Engine) -> None:

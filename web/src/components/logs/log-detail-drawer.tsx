@@ -69,19 +69,13 @@ export function LogDetailDrawer({ open, row, timezone, onOpenChange }: LogDetail
     queryKey: ["log-detail", row?.event_id ?? ""],
     queryFn: ({ signal }) => {
       if (!row) throw new Error("缺少日志行");
-      return api.get<LogDetail>(
-        "/admin/logs/" + encodeURIComponent(row.event_id) + "?include_payload=true",
-        { signal },
-      );
+      return api.get<LogDetail>("/admin/logs/" + encodeURIComponent(row.event_id), { signal });
     },
     enabled: open && row !== null,
     staleTime: 30_000,
   });
 
   const detail = detailQuery.data;
-  const raw = useMemo(() => parseRawRecord(detail?.raw_json), [detail?.raw_json]);
-  // 整包 pretty-print 很贵：只在 raw 变化时算一次，别在每次抽屉渲染都 stringify。
-  const rawPretty = useMemo(() => (raw ? JSON.stringify(raw, null, 2) : null), [raw]);
   const { can } = usePermissions();
   const canCost = can("billing:cost");
   const canSpend = can("billing:spend");
@@ -105,7 +99,6 @@ export function LogDetailDrawer({ open, row, timezone, onOpenChange }: LogDetail
     ["上游模型", view.upstream_model || "—"],
     ["目标层级", view.target_priority === null ? "—" : "P" + view.target_priority],
     ["厂商", view.provider || "—"],
-    ["操作", rawValue(raw, "gen_ai_operation_name")],
     ["请求 ID", <span className="font-mono text-2xs">{view.event_id}</span>],
   ];
 
@@ -114,7 +107,6 @@ export function LogDetailDrawer({ open, row, timezone, onOpenChange }: LogDetail
     ["用户 ID", <span className="font-mono text-2xs">{view.user_id || "—"}</span>],
     ["密钥", <span className="font-mono text-2xs">{view.api_key_label || "—"}</span>],
     ["密钥 ID", <span className="font-mono text-2xs">{view.api_key_id || "—"}</span>],
-    ["用户组", rawValue(raw, "agentgateway_group")],
   ];
 
   const timingFields: Array<[string, ReactNode]> = [
@@ -137,12 +129,10 @@ export function LogDetailDrawer({ open, row, timezone, onOpenChange }: LogDetail
   ];
 
   const traceFields: Array<[string, ReactNode]> = [
-    ["操作", rawValue(raw, "gen_ai_operation_name")],
-    ["请求模型（原始）", rawValue(raw, "gen_ai_request_model")],
-    ["响应模型（原始）", rawValue(raw, "gen_ai_response_model")],
-    ["Trace", rawValue(raw, "trace_id")],
-    ["Span", rawValue(raw, "span_id")],
-    ["数据面用户", rawValue(raw, "agentgateway_user")],
+    [
+      "关联键",
+      <span className="font-mono text-2xs">{view.correlation_key || "—"}</span>,
+    ],
     ["含载荷", view.has_payload ? "是" : "否"],
   ];
 
@@ -285,18 +275,6 @@ export function LogDetailDrawer({ open, row, timezone, onOpenChange }: LogDetail
               </CollapsibleSection>
 
               <PayloadSection key={view.event_id} eventId={view.event_id} />
-
-              <CollapsibleSection title="原始载荷（raw JSON）">
-                {rawPretty ? (
-                  <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-md bg-surface-2 p-3 font-mono text-2xs text-body">
-                    {rawPretty}
-                  </pre>
-                ) : (
-                  <p className="text-2sm text-faint">
-                    该记录没有可解析的原始载荷（has_payload=false 或详情接口未返回 raw_json）。
-                  </p>
-                )}
-              </CollapsibleSection>
             </div>
           ) : (
             <p className="text-2sm text-faint">暂无详情字段。点击重试重新拉取。</p>
@@ -514,30 +492,4 @@ function FieldGrid({ items }: { items: Array<[string, ReactNode]> }) {
       ))}
     </dl>
   );
-}
-
-function parseRawRecord(raw: string | undefined): Record<string, unknown> | null {
-  if (!raw) return null;
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
-
-function rawValue(record: Record<string, unknown> | null, key: string): string {
-  if (!record) return "—";
-  const value = record[key];
-  if (value === null || value === undefined) return "—";
-  if (typeof value === "string") return value || "—";
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
 }

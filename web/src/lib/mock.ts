@@ -149,7 +149,7 @@ const clientKeys: ApiKey[] = [
  */
 interface MockLogRow {
   event_id: string;
-  trace_id: string;
+  correlation_key: string;
   started_at_ms: number;
   completed_at_ms: number;
   duration_ms: number;
@@ -212,29 +212,33 @@ const mockLogs: MockLogRow[] = Array.from({ length: 36 }, (_, i) => {
   const cache_total = input_tokens + cache_read_tokens + cache_write_tokens;
   const cost_micro = failed ? null : 4200 + i * 913;
   const charge_micro = failed ? null : 5200 + i * 1177;
-  // M5-b：成功行里挑一部分带 trace_id（两轮失败→成功 / 三轮），失败行与其余行留空，
-  // 用来验证「无 trace 不渲染路由链」分支。
+  // M5-b：成功行里挑一部分带关联键（两轮失败→成功 / 三轮），失败行与其余行留空，
+  // 用来验证「无关联键不渲染路由链」分支。
   // ticket 04：i===5 是失败但带尝试链的行——行级错误摘要由最后一次失败尝试补齐；
   // 其余失败行没有 attempts，验证「无链路记录」降级。
-  const trace_id = failed
+  const correlation_key = failed
     ? i === 5
-      ? "tr_m5b_failed"
+      ? "cor_m5b_failed"
       : ""
     : i % 4 === 0
-      ? "tr_m5b_retry"
+      ? "cor_m5b_retry"
       : i % 7 === 0
-        ? "tr_m5b_three"
+        ? "cor_m5b_three"
         : "";
   const attempts_count =
-    trace_id === "tr_m5b_three" || trace_id === "tr_m5b_failed" ? 3 : trace_id ? 2 : 0;
+    correlation_key === "cor_m5b_three" || correlation_key === "cor_m5b_failed"
+      ? 3
+      : correlation_key
+        ? 2
+        : 0;
   // ticket 04：带尝试链的失败行不再由 mock 拼 UI 摘要，只给 rowErrorText 所需的事实字段。
   const failedStatus = failed ? (i % 2 === 0 ? 500 : 502) : 200;
-  const chainFailure = trace_id === "tr_m5b_failed";
+  const chainFailure = correlation_key === "cor_m5b_failed";
   return {
     event_id: "mev_" + String(1000 + i),
-    trace_id,
+    correlation_key,
     attempts_count,
-    has_attempts: trace_id.length > 0,
+    has_attempts: correlation_key.length > 0,
     last_failure_status: chainFailure ? failedStatus : null,
     last_failure_error_type: chainFailure ? String(failedStatus) : "",
     last_failure_error_message: chainFailure ? (failedStatus === 502 ? "bad gateway" : "internal error") : "",
@@ -244,7 +248,7 @@ const mockLogs: MockLogRow[] = Array.from({ length: 36 }, (_, i) => {
     time_to_first_token_ms: is_stream ? 220 + ((i * 149) % 700) : 0,
     http_status: failedStatus,
     public_model: model,
-    // 混合形态 AG 日志才有请求模型；i%6===0 的行模拟历史/直连行，展示「—」降级。
+    // 历史行/缺失归一时没有请求模型；i%6===0 的行模拟旧行，展示「—」降级。
     requested_model: i % 6 === 0 ? "" : model,
     upstream_model: model,
     upstream_model_id: "um_0" + String((i % 3) + 1),
@@ -354,15 +358,15 @@ function queryMockLogs(params: URLSearchParams): { total: number; items: MockLog
 
 /**
 /**
- * ADR-028：日志详情路由链的两条演示尝试链（按 trace_id 索引，路由再补 event_id）。
- * tr_m5b_retry：第 1 轮 500 → 第 2 轮 200（跨 zai-01 → or-01）；
- * tr_m5b_three：第 1/2 轮 503/500 → 第 3 轮 200。
+ * ADR-028：日志详情路由链的两条演示尝试链（按关联键索引，路由再补 event_id）。
+ * cor_m5b_retry：第 1 轮 500 → 第 2 轮 200（跨 zai-01 → or-01）；
+ * cor_m5b_three：第 1/2 轮 503/500 → 第 3 轮 200。
  */
 const MOCK_TRACE_BASE_MS = Date.parse("2026-11-17T01:04:59");
 const mockAttempts: Record<string, LogAttemptsOut> = {
-  tr_m5b_retry: {
+  cor_m5b_retry: {
     event_id: "",
-    trace_id: "tr_m5b_retry",
+    correlation_key: "cor_m5b_retry",
     attempts: [
       {
         attempt: 1,
@@ -390,9 +394,9 @@ const mockAttempts: Record<string, LogAttemptsOut> = {
       },
     ],
   },
-  tr_m5b_three: {
+  cor_m5b_three: {
     event_id: "",
-    trace_id: "tr_m5b_three",
+    correlation_key: "cor_m5b_three",
     attempts: [
       {
         attempt: 1,
@@ -433,9 +437,9 @@ const mockAttempts: Record<string, LogAttemptsOut> = {
     ],
   },
   // ticket 04：失败但带尝试链的行——最后一轮 502 是行级错误摘要的来源。
-  tr_m5b_failed: {
+  cor_m5b_failed: {
     event_id: "",
-    trace_id: "tr_m5b_failed",
+    correlation_key: "cor_m5b_failed",
     attempts: [
       {
         attempt: 1,
@@ -1678,27 +1682,14 @@ export async function mockRequest<T>(path: string, init?: RequestInit): Promise<
     const eventId = routePath.split("/")[3] ?? "";
     const row = mockLogs.find((item) => item.event_id === eventId);
     if (!row) throw new Error("日志不存在：" + eventId);
-    const includePayload = new URLSearchParams(path.split("?")[1] ?? "").get("include_payload") === "true";
-    if (!includePayload) return structuredClone(row) as T;
-    const raw: Record<string, unknown> = {
-      gen_ai_operation_name: "chat",
-      gen_ai_request_model: row.upstream_model,
-      gen_ai_response_model: row.public_model,
-      agentgateway_user: row.user_name,
-      has_payload: row.has_payload,
-    };
-    if (row.trace_id) {
-      raw.trace_id = row.trace_id;
-      raw.span_id = row.trace_id === "tr_m5b_three" ? "sp_root_three" : "sp_root_retry";
-    }
-    return { ...structuredClone(row), raw_json: JSON.stringify(raw) } as T;
+    return structuredClone(row) as T;
   }
   if (init?.method === "GET" && /^\/admin\/logs\/[^/]+\/attempts$/.test(routePath)) {
     const eventId = decodeURIComponent(routePath.split("/")[3] ?? "");
     const row = mockLogs.find((item) => item.event_id === eventId);
     if (!row) throw new Error("日志不存在：" + eventId);
-    const detail = mockAttempts[row.trace_id];
-    if (!detail) return { event_id: eventId, trace_id: "", attempts: [] } as T;
+    const detail = mockAttempts[row.correlation_key];
+    if (!detail) return { event_id: eventId, correlation_key: "", attempts: [] } as T;
     return { ...structuredClone(detail), event_id: eventId } as T;
   }
 

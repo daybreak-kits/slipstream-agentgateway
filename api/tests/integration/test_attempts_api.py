@@ -91,7 +91,7 @@ def test_attempt_endpoint_returns_attempts_and_resolves_upstream_name(
                     duration_ms=20,
                     http_status=200,
                     public_model="flagship",
-                    trace_id=TRACE_ID,
+                    correlation_key=TRACE_ID,
                 )
             ],
         )
@@ -129,7 +129,7 @@ def test_attempt_endpoint_returns_attempts_and_resolves_upstream_name(
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["event_id"] == "evt_trace_join"
-    assert body["trace_id"] == TRACE_ID
+    assert body["correlation_key"] == TRACE_ID
     assert [attempt["attempt"] for attempt in body["attempts"]] == [1, 2]
     assert [attempt["upstream_ref"] for attempt in body["attempts"]] == [
         "ups_test",
@@ -168,7 +168,7 @@ def test_log_without_attempts_returns_an_empty_list(client, engine_and_sessionma
     assert response.status_code == 200, response.text
     assert response.json() == {
         "event_id": "evt_no_trace",
-        "trace_id": "",
+        "correlation_key": "",
         "attempts": [],
     }
 

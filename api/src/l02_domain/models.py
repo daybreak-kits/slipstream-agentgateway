@@ -157,10 +157,14 @@ class AvailabilityRule:
 
 @dataclass(frozen=True, slots=True)
 class UsageEvent:
-    """One data-plane request (E6 request_logs shape); append-only, idempotent by id.
+    """One normalized request fact (ADR-029); append-only, idempotent by id.
 
-    started_at + id form the incremental cursor; public_model is what the client
-    addressed, upstream_model is what actually served (gen_ai_response_model).
+    started_at + id form the incremental cursor; requested_model is the model
+    the client asked for, public_model/upstream_model are the ledger's recorded
+    routing facts. Everything wire-specific (attributes, column names, stream
+    flags) is decoded by the adapter before it hands this object over; the
+    system layer never re-parses data-plane attributes. raw_json rides along as
+    an already-collected diagnostic attachment only.
     """
 
     event_id: str
@@ -169,6 +173,7 @@ class UsageEvent:
     duration_ms: int = 0
     time_to_first_token_ms: int = 0
     http_status: int = 0
+    requested_model: str = ""
     public_model: str = ""
     upstream_model: str = ""
     provider: str = ""
@@ -178,9 +183,14 @@ class UsageEvent:
     total_tokens: int = 0
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
+    error: str = ""
+    has_payload: bool = False
     raw_json: str = ""
-    # M5-a: OTel trace id from request_logs (join key to the span tree).
-    trace_id: str = ""
+    # Adapter-verdicted streaming: True/False when a wire flag decided, None when
+    # no explicit signal exists (the system then falls back to its TTFT rule).
+    is_stream: bool | None = None
+    # Cross-log/attempt-chain join key, normalized by the adapter (ADR-028).
+    correlation_key: str = ""
 
 
 @dataclass(frozen=True, slots=True)

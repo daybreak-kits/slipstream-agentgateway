@@ -10,8 +10,6 @@ record_attempts 写入真实事实，不做内部实现模拟。
 
 from __future__ import annotations
 
-import json
-
 from sqlalchemy import event
 
 from l02_domain.models import RequestAttempt, UsageEvent
@@ -53,7 +51,7 @@ def _seed(factory, events: list[UsageEvent], attempts: list[RequestAttempt]) -> 
 
 
 def _event(
-    event_id: str, *, status: int, trace_id: str = "", raw: dict | None = None
+    event_id: str, *, status: int, correlation_key: str = "", error: str = ""
 ) -> UsageEvent:
     return UsageEvent(
         event_id=event_id,
@@ -63,8 +61,9 @@ def _event(
         public_model="flagship",
         upstream_model="glm-5.3",
         provider="testv",
-        trace_id=trace_id,
-        raw_json=json.dumps(raw or {"has_payload": False}),
+        correlation_key=correlation_key,
+        error=error,
+        has_payload=False,
     )
 
 
@@ -85,7 +84,7 @@ def test_row_exposes_last_failed_attempt_facts_without_a_server_side_summary(
     _, factory = engine_and_sessionmaker
     _seed(
         factory,
-        [_event("evt_retry_failed", status=502, trace_id="tr_failed")],
+        [_event("evt_retry_failed", status=502, correlation_key="tr_failed")],
         [
             _attempt("tr_failed", 1, status=500, outcome="error", error_type="500"),
             _attempt("tr_failed", 2, status=503, outcome="error", error_type="503"),
@@ -116,7 +115,7 @@ def test_failure_facts_keep_the_adapter_error_message_and_type(
     _, factory = engine_and_sessionmaker
     _seed(
         factory,
-        [_event("evt_quota", status=429, trace_id="tr_quota")],
+        [_event("evt_quota", status=429, correlation_key="tr_quota")],
         [
             _attempt(
                 "tr_quota",
@@ -143,7 +142,7 @@ def test_failure_facts_keep_error_type_when_message_is_missing(
     _, factory = engine_and_sessionmaker
     _seed(
         factory,
-        [_event("evt_timeout", status=504, trace_id="tr_timeout")],
+        [_event("evt_timeout", status=504, correlation_key="tr_timeout")],
         [_attempt("tr_timeout", 1, status=504, outcome="error", error_type="upstream_timeout")],
     )
 
@@ -171,10 +170,10 @@ def test_row_error_stays_empty_when_no_attempts_are_recorded(
     assert item["last_failure_error_message"] == ""
 
 
-def test_raw_log_error_is_not_replaced_by_the_attempt_summary(
+def test_ingested_error_text_is_not_replaced_by_the_attempt_summary(
     client, engine_and_sessionmaker
 ):
-    """原始日志已有错误文本时保留原文；失败事实字段仍照实返回。"""
+    """归一化错误文本照实返回；失败事实字段仍照实返回。"""
     _, factory = engine_and_sessionmaker
     _seed(
         factory,
@@ -182,8 +181,8 @@ def test_raw_log_error_is_not_replaced_by_the_attempt_summary(
             _event(
                 "evt_raw_error",
                 status=500,
-                trace_id="tr_raw",
-                raw={"error": "all upstreams failed", "has_payload": False},
+                correlation_key="tr_raw",
+                error="all upstreams failed",
             )
         ],
         [_attempt("tr_raw", 1, status=500, outcome="error", error_type="500")],
@@ -203,7 +202,7 @@ def test_successful_request_with_failed_attempts_keeps_error_empty(
     _, factory = engine_and_sessionmaker
     _seed(
         factory,
-        [_event("evt_retry_ok", status=200, trace_id="tr_retry_ok")],
+        [_event("evt_retry_ok", status=200, correlation_key="tr_retry_ok")],
         [
             _attempt("tr_retry_ok", 1, status=500, outcome="error", error_type="500"),
             _attempt("tr_retry_ok", 2, status=200, outcome="ok"),
@@ -222,8 +221,8 @@ def test_list_page_batches_attempt_counts_per_row(client, engine_and_sessionmake
     """一页多行按 correlation_key 各自取到自己的尝试数，不串行。"""
     _, factory = engine_and_sessionmaker
     events = [
-        _event("evt_one", status=200, trace_id="tr_one"),
-        _event("evt_two", status=502, trace_id="tr_two"),
+        _event("evt_one", status=200, correlation_key="tr_one"),
+        _event("evt_two", status=502, correlation_key="tr_two"),
         _event("evt_none", status=200),
     ]
     attempts = [
@@ -263,7 +262,7 @@ def test_a_log_page_queries_request_attempts_exactly_once(
     """一页日志只允许一次尝试聚合查询：行数增长不得变成 N+1。"""
     engine, factory = engine_and_sessionmaker
     events = [
-        _event("evt_page_" + str(idx), status=200, trace_id="tr_page_" + str(idx))
+        _event("evt_page_" + str(idx), status=200, correlation_key="tr_page_" + str(idx))
         for idx in range(20)
     ]
     attempts = [
