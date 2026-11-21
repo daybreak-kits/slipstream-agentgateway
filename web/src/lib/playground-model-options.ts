@@ -17,6 +17,9 @@ export interface ModelParameters {
   max_input_tokens: number;
   max_output_tokens: number;
   reasoning_level: string;
+  /** 票18：声明的思考档位集合与默认档；空/缺省 = 未声明。 */
+  reasoning_levels?: string[];
+  default_reasoning_level?: string;
   input_types: InputType[];
   output_types: OutputType[];
   tool_call?: boolean;
@@ -29,6 +32,8 @@ export const DEFAULT_MODEL_PARAMETERS: ModelParameters = {
   max_input_tokens: 0,
   max_output_tokens: 0,
   reasoning_level: "",
+  reasoning_levels: [],
+  default_reasoning_level: "",
   input_types: ["text"],
   output_types: ["text"],
 };

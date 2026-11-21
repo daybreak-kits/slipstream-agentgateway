@@ -23,6 +23,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { api, apiList, ENDPOINTS } from "@/lib/api";
 import { sameJson } from "@/lib/dirty-fields";
+import { REASONING_LEVELS, REASONING_LEVEL_LABELS } from "@/lib/playground";
 import { formatDateTime, useTimezone } from "@/lib/time";
 import { useDirtyFields } from "@/lib/use-dirty-fields";
 import { usePermissions } from "@/lib/permissions";
@@ -87,8 +88,46 @@ function ParameterFields({ value, onChange }: { value: ModelParameters; onChange
           <Input inputMode="numeric" value={String(value.max_output_tokens)} onChange={(e) => onChange({ ...value, max_output_tokens: toInt(e.target.value) })} />
         </Field>
       </div>
-      <Field label="推理档位" hint="如 low / medium / high，留空表示不声明">
-        <Input value={value.reasoning_level} onChange={(e) => onChange({ ...value, reasoning_level: e.target.value })} placeholder="留空 = 不声明" />
+      <Field label="思考档位" hint="留空 = 未声明，模型试验会回退全部档位">
+        <div className="flex flex-wrap gap-x-4 gap-y-1">
+          {REASONING_LEVELS.map((level) => (
+            <label key={level} className="flex items-center gap-1.5 text-2sm text-body">
+              <Checkbox
+                checked={value.reasoning_levels?.includes(level) === true}
+                onCheckedChange={() => {
+                  const declared = value.reasoning_levels ?? [];
+                  const next = declared.includes(level)
+                    ? declared.filter((item) => item !== level)
+                    : [...declared, level];
+                  const defaultLevel =
+                    level === value.default_reasoning_level || next.length === 0
+                      ? ""
+                      : value.default_reasoning_level ?? "";
+                  onChange({ ...value, reasoning_levels: next, default_reasoning_level: defaultLevel });
+                }}
+              />
+              {REASONING_LEVEL_LABELS[level]}
+            </label>
+          ))}
+        </div>
+      </Field>
+      <Field label="默认思考档" hint="必须是已声明的档位之一；未声明 = 不指定默认档">
+        <Select
+          value={value.default_reasoning_level ?? ""}
+          onValueChange={(next) => onChange({ ...value, default_reasoning_level: next })}
+        >
+          <SelectTrigger className="w-44">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">未声明</SelectItem>
+            {(value.reasoning_levels ?? []).map((level) => (
+              <SelectItem key={level} value={level}>
+                {REASONING_LEVEL_LABELS[level as keyof typeof REASONING_LEVEL_LABELS] ?? level}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </Field>
       <Field label="输入类型" hint="至少选择 1 个">
         <div className="flex flex-wrap gap-x-4 gap-y-1">

@@ -218,6 +218,8 @@ export interface MyModelParameters {
   max_input_tokens: number;
   max_output_tokens: number;
   reasoning_level: string;
+  reasoning_levels?: string[];
+  default_reasoning_level?: string;
   input_types: string[];
   output_types: string[];
   tool_call: boolean;

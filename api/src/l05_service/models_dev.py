@@ -558,6 +558,10 @@ def _merge_member_parameters(base: dict[str, Any], incoming: dict[str, Any]) -> 
             base[key] = True
     if base["reasoning_level"] == "" and incoming["reasoning_level"]:
         base["reasoning_level"] = incoming["reasoning_level"]
+    if base["reasoning_levels"] == [] and incoming["reasoning_levels"]:
+        base["reasoning_levels"] = list(incoming["reasoning_levels"])
+    if base["default_reasoning_level"] == "" and incoming["default_reasoning_level"]:
+        base["default_reasoning_level"] = incoming["default_reasoning_level"]
 
 
 def user_model_parameters(session: Session) -> list[dict[str, Any]]:

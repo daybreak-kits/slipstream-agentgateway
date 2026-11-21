@@ -122,6 +122,9 @@ export interface ModelParameters {
   max_input_tokens: number;
   max_output_tokens: number;
   reasoning_level: string;
+  /** 票18：声明的思考档位集合与默认档；空/缺省 = 未声明（选择器回退全部档位）。 */
+  reasoning_levels?: string[];
+  default_reasoning_level?: string;
   input_types: string[];
   output_types: string[];
   tool_call: boolean;
