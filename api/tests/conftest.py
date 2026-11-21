@@ -64,6 +64,7 @@ _TEST_TMP_PATTERNS = (
     ".tmp-ag-contract-*",
     ".tmp-status-*",
     ".tmp-ag-config-check",
+    ".tmp-pytest-*",
 )
 
 _LOCK_NAME = ".ag-dir.lock"
@@ -158,6 +159,42 @@ def _cleanup_repo_local_test_dirs():
     _sweep_repo_local_test_dirs()
     yield
     _sweep_repo_local_test_dirs()
+
+
+class _RepoLocalTmpFactory:
+    """Minimal stand-in for pytest's tmp_path_factory inside the repo.
+
+    The DSH Windows sandbox denies the platform temp area (and pytest's
+    mode-restricted subdirectories), while the repo is writable. The existing
+    suite already creates AG test dirs here; this keeps tmp_path-based tests
+    isolated and sandbox-friendly while still cleaning up after themselves.
+    """
+
+    def __init__(self) -> None:
+        self._root = TEST_TMP_ROOT / (".tmp-pytest-" + uuid4().hex[:8])
+        self._root.mkdir()
+
+    def mktemp(self, name: str, numbered: bool = True) -> Path:
+        del numbered  # pytest's numbering is not needed by this suite
+        path = self._root / name
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def getbasetemp(self) -> Path:
+        return self._root
+
+
+@pytest.fixture(scope="session")
+def tmp_path_factory():
+    factory = _RepoLocalTmpFactory()
+    yield factory
+    _rmtree_retry(str(factory._root))
+
+
+@pytest.fixture()
+def tmp_path(tmp_path_factory) -> Path:
+    path = tmp_path_factory.mktemp("case-" + uuid4().hex[:8])
+    yield path
 
 
 @pytest.fixture()
