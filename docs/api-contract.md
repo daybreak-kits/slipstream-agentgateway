@@ -466,8 +466,10 @@ failover 目标 `priority` 为正整数（升序优先，同值=同层）；weig
 | POST | /admin/api-keys/{key_id}/rotate | apikeys:write | 轮换，返回新明文一次 |
 | POST | /admin/api-keys/{key_id}/reveal | apikeys:write | 解密回显（审计留痕） |
 
-约束（ADR-019/023）：用户表已统一：username 唯一且不可改（缺省由 name 派生、冲突追加 `-2`），密码必填，
+约束（ADR-019/023 + W7）：用户表已统一：username 唯一且不可改（缺省由 name 派生、冲突追加 `-2`），密码必填，
 创建响应带 `initial_password`（12 位大小写+数字+符号随机，**仅此一次**，请求显式给 password 则用之）。
+**每个用户都是登录账号**：落库后 `username` 与 `password_hash` 必非空（seed 也写全），用户列表/树
+**不返回 `type` 字段**（W7 取消「类型/无登录帐户」表达，页面只显示「用户名称/登录帐户」）。
 连接密钥一用户最多 50 把（任意状态合计，第 51 把 409 CONFLICT）；库里只存 sha256:<hex> +
 AES-GCM 密文 + sk-...abcd 掩码。
 
@@ -717,8 +719,10 @@ nebula-01、local-01/02 各一把，共 6 条上游密钥；ADR-026 多密钥平
 8 公开模型（6 failover + 2 weighted）/ 16 目标 / 6 用户（根用户 D + 两层分销树，5 把 sk-+64 大写客户端密钥 + 充值流水）/
 15 个模型带进价（另 30 条 cache 价目）/ 7 天 252 条用量事件（cost 与 charge 各 3 条缺价 unpriced）/ 245 条计费流水 /
 2 条配置版本（operator 张三 superseed / 李四 active）/ 64 条审计 / 13 条 app_settings /
-2 条可用性规则（ban + cooldown，无排期窗口）/ **3 个管理员**：admin（张三，管理用户 `admin`）、lisi（李四，分销商 `reseller`）、
-wangwu（王五，客户 `customer`）。默认密码 admin12345，可用 `SLIPSTREAM_DEMO_ADMIN_PASSWORD` 覆盖，
+2 条可用性规则（ban + cooldown，无排期窗口）/ **6 个账号全部可登录**（W7：每个用户都有登录名与密码，
+没有「无登录帐户」的行）：root（根用户 D，管理用户 `admin`）、admin（张三，管理用户 `admin`）、
+lisi（李四，分销商 `reseller`）、wangwu（王五，客户 `customer`）、finance（财务对账，客户 `customer`）、
+loadtest（压测环境，客户 `customer`）。默认密码 admin12345，可用 `SLIPSTREAM_DEMO_ADMIN_PASSWORD` 覆盖，
 首次登录后修改。
 
 settings 六个可编辑键均已有值：base_currency=CNY、timezone=Asia/Shanghai、
