@@ -1952,7 +1952,75 @@ check("成员编排行内编辑：行内字段按策略收敛、候选按上游�
   includesAll(flow, ["CANDIDATE_CHIP_BUDGET", "展开全部"], "大列表预算截断");
 });
 
-// ---------- 十一、登录页视觉与自适应（W6 ticket 12）----------
+// ---------- 十一、通知中心紧凑布局与密钥弹窗二元按钮（W6 ticket 13）----------
+// 行结构与 hover 详情是真实渲染面：NotificationRow 与 BrandLockup 同惯例导出，
+// SSR 渲染真实 DOM 断言；面板容器走 Radix Portal（SSR 不落 DOM），宽度约束按
+// 源码契约钉住，窄屏行为由 responsive_matrix 的 notification.375 专项兜住。
+const t13Notification = (overrides) => ({
+  id: "matrix-1",
+  kind: "error",
+  title: "查询失败",
+  description: "INTERNAL_ERROR：矩阵模拟上游 5xx 的超长正文，用于验证单行省略与 hover 完整详情可达",
+  at: Date.UTC(2026, 10, 21, 9, 30, 0),
+  read: true,
+  ...overrides,
+});
+
+check("通知行：时间在标题行尾（time[datetime]）、图标与标题垂直居中、正文单行省略", async () => {
+  const { NotificationRow } = await load("/src/components/layout/notification-center.tsx");
+  const html = render(createElement(NotificationRow, { item: t13Notification() }));
+  expect(/<time[^>]+datetime="2026-11-21T/i.test(html), "时间必须是带 datetime 的 time 元素（机器可读）");
+  // 时间在标题行尾：DOM 顺序 title → time → 正文（li 的 title 属性也含全文，所以按元素锚点定序）。
+  const titleAt = html.indexOf('data-slot="notification-title"');
+  const timeAt = html.indexOf('data-slot="notification-time"');
+  const descAt = html.indexOf('data-slot="notification-desc"');
+  expect(titleAt >= 0 && timeAt > titleAt && descAt > timeAt, "时间必须在标题行内（title 元素之后、正文元素之前）");
+  const headTag = html.match(/<div[^>]*data-slot="notification-head"[^>]*>/)?.[0] ?? "";
+  expect(headTag.includes("flex items-center justify-between"), "标题行必须 flex items-center justify-between（时间行尾对齐）");
+  const timeTag = html.match(/<time[^>]*data-slot="notification-time"[^>]*>/)?.[0] ?? "";
+  expect(timeTag.includes("shrink-0"), "时间必须 shrink-0，不得被长标题挤压换行");
+  // 图标垂直居中：16px 图标对 20px 标题行高（text-2sm），mt-0.5 = (20-16)/2 恰好居中。
+  expect(/mt-0\.5 h-4 w-4/.test(html), "图标必须 mt-0.5 + h-4 w-4（对 20px 标题行高垂直居中）");
+  // 正文单行省略：truncate 且不得再有 line-clamp-2。
+  const descTag = html.match(/<p[^>]*data-slot="notification-desc"[^>]*>/)?.[0] ?? "";
+  expect(descTag.includes("truncate"), "正文必须单行 truncate");
+  expect(!html.includes("line-clamp"), "正文不得再 line-clamp-2（紧凑布局契约）");
+  // hover 完整详情：行 title 属性 = 标题 + 正文全文（原生 tooltip 的输入）。
+  expect(
+    /title="查询失败：INTERNAL_ERROR：矩阵模拟上游 5xx[^"]*"/.test(html),
+    "行必须带完整详情 title 属性（hover 可读全文）",
+  );
+});
+
+check("通知行：无正文时 hover 详情只有标题；面板窄屏宽度约束在位（票09 补断言）", async () => {
+  const { NotificationRow } = await load("/src/components/layout/notification-center.tsx");
+  const html = render(
+    createElement(NotificationRow, { item: t13Notification({ kind: "success", description: undefined }) }),
+  );
+  expect(/title="查询失败"/.test(html), "无正文时行 title 仍要有标题详情");
+  expect(!html.includes('data-slot="notification-desc"'), "无正文不得渲染空正文行");
+  const centerSrc = read("src/components/layout/notification-center.tsx");
+  expect(
+    centerSrc.includes("w-[min(20rem,calc(100vw-2rem))]"),
+    "面板必须保留票09 的 min(20rem, 100vw-2rem) 宽度约束（窄屏占满可用宽度）",
+  );
+});
+
+check("密钥弹窗：只有复制与关闭两个同尺寸按钮，复制反馈为已复制", () => {
+  const src = read("src/components/users/one-time-secret-dialog.tsx");
+  // Radix Dialog 走 Portal，SSR 不落 DOM（同 model-dialog 先例）：按源码契约钉住。
+  expect((src.match(/<Button/g) ?? []).length === 2, "弹窗 footer 只能有复制与关闭两个按钮");
+  expect(!src.includes("再次复制") && !src.includes("showRecopy"), "同义的「再次复制」必须移除（与「复制」同动作同入口）");
+  expect(!/\bsize=/.test(src), "复制与关闭必须同尺寸（默认 h-10，不得一个 sm 一个 default）");
+  expect(/<Button[^>]*>\s*复制\s*<\/Button>/.test(src), "缺少复制按钮（主操作，default 尺寸）");
+  expect(/<Button[^>]*>\s*关闭\s*<\/Button>/.test(src), "缺少关闭按钮（ghost 变体，default 尺寸）");
+  expect(src.includes('toast.success("已复制")'), "复制成功文案必须是「已复制」");
+  expect(!src.includes("useState"), "关闭即失效：弹窗不得在前端缓存明文");
+  const clientKeys = read("src/pages/client_keys.tsx");
+  expect(!clientKeys.includes("showRecopy"), "调用方不得再传 showRecopy");
+});
+
+// ---------- 十二、登录页视觉与自适应（W6 ticket 12）----------
 // 登录页是未登录用户看到的第一个界面：三态主题、渐变背景、密码显隐、错误零位移、
 // 三档宽度都钉在这里。SSR 渲染真实 LoginPage（useQuery 失败回落表单，正好是登录态），
 // 通知中心推送等无法 SSR 的契约用源码接线断言兜底。

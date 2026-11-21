@@ -332,7 +332,6 @@ export function ClientKeysPage() {
         title="新密钥已生成"
         description="此密钥仅显示一次，请立即复制保存；关闭后不再可见。"
         secret={rotatedSecret ?? ""}
-        showRecopy
         onClose={() => setRotatedSecret(null)}
       />
     </div>

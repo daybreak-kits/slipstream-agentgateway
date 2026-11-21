@@ -10,22 +10,20 @@ interface OneTimeSecretDialogProps {
   /** 一次性警示文案：如「此密码仅显示一次」/「关闭后不再展示，请立即复制保存」 */
   description: string;
   secret: string;
-  /** 重置密钥场景需要「再次复制」入口（仅本弹窗存活期有效）；密码类默认关 */
-  showRecopy?: boolean;
   onClose: () => void;
 }
 
 /**
  * 一次性明文展示（ADR-019/ADR-023）：创建用户的 initial_password、重置密码、
  * 重置密钥的新明文共用同一个弹窗形态——大号等宽字 + 复制 + 仅显示一次警示。
- * 关闭即失效，前端不缓存明文。
+ * 关闭即失效，前端不缓存明文；footer 只有复制与关闭两个同尺寸按钮（票13，
+ * 复制可重复点击，不设第二个复制入口）。
  */
 export function OneTimeSecretDialog({
   open,
   title,
   description,
   secret,
-  showRecopy = false,
   onClose,
 }: OneTimeSecretDialogProps) {
   const copy = () => {
@@ -48,11 +46,6 @@ export function OneTimeSecretDialog({
           {secret}
         </p>
         <DialogFooter>
-          {showRecopy && (
-            <Button variant="outline" size="sm" onClick={copy}>
-              再次复制
-            </Button>
-          )}
           <Button onClick={copy}>复制</Button>
           <Button variant="ghost" onClick={onClose}>
             关闭
