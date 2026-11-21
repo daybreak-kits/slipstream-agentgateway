@@ -142,7 +142,7 @@ export function RoleDrawer({
         if (!next) requestClose();
       }}
     >
-      <SheetContent className="flex flex-col gap-3 overflow-y-auto sm:max-w-xl">
+      <SheetContent size="xl" className="flex flex-col gap-3 overflow-y-auto">
         <SheetHeader className="pr-8">
           <SheetTitle>
             {isCreate ? "新建角色" : readOnly ? "内置角色权限摘要" : "编辑角色"}

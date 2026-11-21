@@ -3,7 +3,7 @@ import type { HTMLAttributes, TdHTMLAttributes, ThHTMLAttributes } from "react";
 import { cn } from "@/lib/utils";
 
 export function TableWrap({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("w-full overflow-x-auto", className)} {...rest} />;
+  return <div data-slot="table-wrap" className={cn("w-full overflow-x-auto", className)} {...rest} />;
 }
 
 export function Table({ className, ...rest }: HTMLAttributes<HTMLTableElement>) {

@@ -228,7 +228,7 @@ export function FlowChart({ data, hiddenStages, onToggleStage }: FlowChartProps)
       <div className="relative">
         <div
           ref={setElement}
-          className="h-[320px] w-full min-w-0"
+          className="chart-frame w-full min-w-0"
           role="img"
           aria-label="调用流向桑基图：用户到连接密钥、公开模型、上游模型、上游渠道"
         />

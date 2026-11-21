@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  KeyRound, LogOut, Monitor, Moon, PanelLeftClose, PanelLeftOpen, RefreshCw, Sun, UserRound,
+  KeyRound, LogOut, Menu, Monitor, Moon, MoreHorizontal, PanelLeftClose, PanelLeftOpen,
+  RefreshCw, Sun, UserRound,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "@/lib/notify";
@@ -12,7 +13,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
-  DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger,
+  DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub,
+  DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { API_BASE_LABEL, api, ENDPOINTS } from "@/lib/api";
@@ -40,9 +42,11 @@ interface TopbarProps {
   group: string;
   collapsed: boolean;
   onToggleCollapse: () => void;
+  /** <lg 打开 off-canvas 导航。 */
+  onOpenMobileNav: () => void;
 }
 
-export function Topbar({ title, group, collapsed, onToggleCollapse }: TopbarProps) {
+export function Topbar({ title, group, collapsed, onToggleCollapse, onOpenMobileNav }: TopbarProps) {
   const { theme, setTheme } = useTheme();
   const prefs = usePreferencesSync();
   const savePrefs = useSavePreferences();
@@ -92,10 +96,21 @@ export function Topbar({ title, group, collapsed, onToggleCollapse }: TopbarProp
   const displayName = me.data?.name || me.data?.username || "";
 
   return (
-    <header className="relative z-[var(--z-topbar)] flex h-16 shrink-0 items-center gap-3 border-b border-border bg-surface px-4 lg:px-6">
+    <header className="relative z-[var(--z-topbar)] flex h-14 shrink-0 items-center gap-2 border-b border-border bg-surface px-3 sm:h-16 sm:gap-3 sm:px-4 lg:px-6">
       <Button
         variant="ghost"
         size="icon"
+        className="lg:hidden"
+        title="打开导航"
+        aria-label="打开导航"
+        onClick={onOpenMobileNav}
+      >
+        <Menu className="size-4" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="hidden lg:inline-flex"
         title={collapsed ? "展开侧栏" : "收起侧栏"}
         aria-label={collapsed ? "展开侧栏" : "收起侧栏"}
         onClick={onToggleCollapse}
@@ -111,13 +126,13 @@ export function Topbar({ title, group, collapsed, onToggleCollapse }: TopbarProp
         ) : null}
         <span className="truncate font-medium text-title">{title}</span>
       </nav>
-      <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
-        {useMock ? <Badge tone="warning">Mock 演示</Badge> : null}
+      <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-1.5">
+        {useMock ? <Badge tone="warning" className="hidden md:inline-flex">Mock 演示</Badge> : null}
         <span className="hidden text-2xs text-faint xl:inline">
           {API_BASE_LABEL.replace("https://", "").replace("http://", "")}
         </span>
         {can("config:read") ? (
-          <span className="hidden items-center gap-1.5 text-2sm text-body md:flex">
+          <span className="hidden items-center gap-1.5 text-2sm text-body xl:flex">
           配置版本
           {latest.isPending ? (
             <Skeleton className="h-4 w-24" />
@@ -129,9 +144,19 @@ export function Topbar({ title, group, collapsed, onToggleCollapse }: TopbarProp
           </span>
         ) : null}
         <GlobalSearch />
-        <ThemeMenu theme={theme} onChange={onThemeChange} />
+        {/* ≥md 直接显示主题与刷新；<md 收进右侧「更多操作」，375 也保证可见可点。 */}
+        <div className="hidden md:block">
+          <ThemeMenu theme={theme} onChange={onThemeChange} />
+        </div>
         <NotificationCenter />
-        <Button variant="ghost" size="icon" title="刷新全部数据" aria-label="刷新全部数据" onClick={onRefresh}>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="hidden md:inline-flex"
+          title="刷新全部数据"
+          aria-label="刷新全部数据"
+          onClick={onRefresh}
+        >
           <RefreshCw className="size-4" />
         </Button>
         {me.data ? (
@@ -150,7 +175,7 @@ export function Topbar({ title, group, collapsed, onToggleCollapse }: TopbarProp
                 >
                   {(displayName || "?").charAt(0).toUpperCase()}
                 </span>
-                <span className="hidden max-w-32 truncate text-2sm text-title sm:inline">{displayName}</span>
+                <span className="hidden max-w-32 truncate text-2sm text-title lg:inline">{displayName}</span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-52">
@@ -175,8 +200,67 @@ export function Topbar({ title, group, collapsed, onToggleCollapse }: TopbarProp
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
+        <TopbarOverflowMenu theme={theme} onChange={onThemeChange} onRefresh={onRefresh} />
       </div>
     </header>
+  );
+}
+
+/**
+ * <md 的顶栏溢出菜单：主题与刷新在手机上仍有唯一入口。
+ * 桌面隐藏；菜单项保留键盘与读屏语义（RadioGroup 选主题、Item 触发刷新）。
+ */
+function TopbarOverflowMenu({
+  theme,
+  onChange,
+  onRefresh,
+}: {
+  theme: Theme;
+  onChange: (next: string) => void;
+  onRefresh: () => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="md:hidden"
+          title="更多操作"
+          aria-label="更多操作"
+        >
+          <MoreHorizontal className="size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuLabel>更多操作</DropdownMenuLabel>
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>
+            <Sun className="size-4" />
+            主题
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="w-40">
+            <DropdownMenuLabel>主题</DropdownMenuLabel>
+            <DropdownMenuRadioGroup value={theme} onValueChange={onChange}>
+              {THEME_OPTIONS.map((option) => (
+                <DropdownMenuRadioItem key={option.value} value={option.value}>
+                  <option.icon className="size-4" />
+                  {option.label}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        <DropdownMenuItem onClick={onRefresh}>
+          <RefreshCw className="size-4" />
+          刷新全部数据
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="max-w-44 truncate font-normal text-2xs text-faint">
+          {API_BASE_LABEL.replace("https://", "").replace("http://", "")}
+        </DropdownMenuLabel>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

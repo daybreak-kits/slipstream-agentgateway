@@ -48,7 +48,7 @@ export function MemberPanel({
     return <div className="text-2xs text-faint">所选区间没有成员数据</div>;
   }
   return (
-    <div className="flex h-[320px] min-w-0 flex-col">
+    <div className="chart-frame flex min-w-0 flex-col">
       <div className="flex items-center justify-between gap-2 pb-1">
         <span className="text-2xs font-medium text-muted-foreground">成员（{visible.length}）</span>
         {hidden.length > 0 && (
