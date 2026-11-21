@@ -17,6 +17,46 @@ UNAUTHENTICATED_MESSAGE = "未登录或会话已失效"
 ALLOWED_PAGE_SIZES = (25, 50, 100, 200)
 DEFAULT_PAGE_SIZE = 50
 
+# W6 ticket 16: the custom report window cap, defined once. ops/contract/gen_ts.py
+# exports it into web/src/generated/contract.ts and the UI picker derives its
+# calendar bounds from that export, so the selector and the backend cannot drift.
+MAX_CUSTOM_SPAN_MS = 366 * 86_400_000
+MAX_CUSTOM_SPAN_DAYS = MAX_CUSTOM_SPAN_MS // 86_400_000
+
+
+def raise_span_over_cap(from_ms: int, to_ms: int) -> None:
+    """422 when an explicit positive epoch-ms pair spans more than the shared cap."""
+    if to_ms - from_ms > MAX_CUSTOM_SPAN_MS:
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR,
+            f"from_ms/to_ms span must not exceed {MAX_CUSTOM_SPAN_DAYS} days",
+            details={
+                "from_ms": from_ms,
+                "to_ms": to_ms,
+                "max_span_ms": MAX_CUSTOM_SPAN_MS,
+                "max_span_days": MAX_CUSTOM_SPAN_DAYS,
+            },
+        )
+
+
+def validate_window_pair(from_ms: int, to_ms: int) -> None:
+    """Shared guard for overview/margin windows (W6 ticket 16).
+
+    These routes treat from_ms <= 0 / to_ms <= 0 as "since the beginning / up
+    to now" -- a documented default, not an explicit custom window. Only a
+    fully explicit positive pair is validated, and then with the same rules as
+    the latency/timeseries/heatmap/flow guard: ordered, and within the cap.
+    """
+    if from_ms <= 0 or to_ms <= 0:
+        return
+    if from_ms >= to_ms:
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR,
+            "from_ms must be less than to_ms",
+            details={"from_ms": from_ms, "to_ms": to_ms},
+        )
+    raise_span_over_cap(from_ms, to_ms)
+
 
 def current_principal(request: Request) -> auth.Principal:
     """Identity resolved by AdminSessionMiddleware; 401 when the gate let a request through."""

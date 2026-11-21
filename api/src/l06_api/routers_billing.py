@@ -21,7 +21,7 @@ from l04_repo.orm import (
     UpstreamPriceORM,
 )
 from l05_service import auth, prices, pricing, usage_ingest
-from l06_api.deps import page_params, require, session_of
+from l06_api.deps import page_params, require, session_of, validate_window_pair
 from l06_api.schemas import FxPut, RecomputeIn, UpstreamPriceCreate
 
 router = APIRouter(tags=["billing"])
@@ -162,7 +162,11 @@ def margin(
     Omitting the window reports all time: from_ms <= 0 means "since the
     beginning", to_ms <= 0 means "up to now". The response echoes the resolved
     from_ms/to_ms, so a UI can label the range it actually got.
+
+    W6 ticket 16: an explicit positive pair obeys the shared 366-day cap
+    (deps.validate_window_pair) like the other report routes.
     """
+    validate_window_pair(from_ms, to_ms)
     return prices.margin_report(session, from_ms, to_ms)
 
 

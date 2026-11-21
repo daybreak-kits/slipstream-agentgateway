@@ -36,7 +36,7 @@ from l01_core.errors import AppError, ErrorCode
 from l01_core.timeutil import now_ms
 from l05_service import aggregates, auth, rbac
 from l05_service.prices import margin_report
-from l06_api.deps import require, session_of
+from l06_api.deps import raise_span_over_cap, require, session_of, validate_window_pair
 from l06_api.schemas import FlowReportOut
 
 router = APIRouter(tags=["reports"])
@@ -59,7 +59,6 @@ def _range_window(range_key: str, to_ms: int, tz) -> tuple[int, int, str]:
     return aggregates.resolve_range(range_key, tz, at_ms=to_ms)
 
 
-_MAX_CUSTOM_SPAN_MS = 366 * 86_400_000
 _AUTO_HOUR_SPAN_MS = 48 * 3_600_000
 
 
@@ -94,12 +93,7 @@ def _window_override(from_ms: int | None, to_ms: int | None) -> tuple[int, int] 
             "from_ms must be less than to_ms",
             details={"from_ms": from_ms, "to_ms": to_ms},
         )
-    if to_ms - from_ms > _MAX_CUSTOM_SPAN_MS:
-        raise AppError(
-            ErrorCode.VALIDATION_ERROR,
-            "from_ms/to_ms span must not exceed 366 days",
-            details={"from_ms": from_ms, "to_ms": to_ms},
-        )
+    raise_span_over_cap(from_ms, to_ms)
     return from_ms, to_ms
 
 
@@ -167,7 +161,12 @@ def overview(
     so net input derives as input_tokens - cache_read_tokens - cache_write_tokens
     (GLOSSARY §5); cache_read_tokens/cache_write_tokens share the same window
     and filters as input_tokens/output_tokens.
+
+    W6 ticket 16: an explicit positive from_ms/to_ms pair obeys the same shared
+    366-day cap as the other report routes; the 0 = beginning/now defaults are
+    not a custom window and stay untouched.
     """
+    validate_window_pair(from_ms, to_ms)
     stats = aggregates.overview_stats(session, from_ms=from_ms, to_ms=to_ms)
     flat = aggregates.overview_flat_latency(session, from_ms=from_ms, to_ms=to_ms)
 

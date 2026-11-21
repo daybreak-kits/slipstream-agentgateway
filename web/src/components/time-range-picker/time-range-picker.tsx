@@ -8,11 +8,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { pushErrorNotificationOnce } from "@/lib/notification-store";
 import { cn } from "@/lib/utils";
 
 import {
   TIME_WINDOW_RANGES,
+  customWindowSpanError,
   dayStartMs,
+  earliestCustomDayMs,
   nextDayStartMs,
   startOfMonthMs,
   startOfWeekMs,
@@ -21,8 +24,6 @@ import {
   type TimeWindowRange,
 } from "./window";
 
-/** 日历可回看的天数：与后端自定义窗上限（366 天）对齐。 */
-const LOOKBACK_DAYS = 365;
 const DEFAULT_START_TIME = "00:00";
 const DEFAULT_END_TIME = "23:59";
 
@@ -79,12 +80,27 @@ export function TimeRangePicker({ value, onChange, className }: TimeRangePickerP
     }
   }, [open, value]);
 
-  /** 起止齐且结束晚于开始才上抛；否则保留上一次生效区间。 */
+  /** 跨度超界的统一反馈（W6 票 16）：只走通知中心（票 07 语义），不弹逐条 toast。 */
+  const notifySpanBlocked = (message: string) => {
+    pushErrorNotificationOnce({
+      title: "时间范围超出上限",
+      description: message,
+      dedupeKey: "time-window-span|" + message,
+    });
+  };
+
+  /** 起止齐且结束晚于开始、且不超 366 天上限才上抛；否则保留上一次生效区间，不发请求。 */
   const publish = (nextDays: DateRange | undefined, nextStart: string, nextEnd: string) => {
     if (!nextDays?.from || !nextDays.to || !nextStart || !nextEnd) return;
     const fromMs = toMs(nextDays.from, nextStart);
     const toMsValue = toMs(nextDays.to, nextEnd);
-    if (toMsValue > fromMs) onChange({ kind: "custom", fromMs, toMs: toMsValue });
+    if (toMsValue <= fromMs) return;
+    const spanError = customWindowSpanError(fromMs, toMsValue);
+    if (spanError) {
+      notifySpanBlocked(spanError);
+      return;
+    }
+    onChange({ kind: "custom", fromMs, toMs: toMsValue });
   };
 
   const chooseDays = (next: DateRange | undefined) => {
@@ -102,30 +118,46 @@ export function TimeRangePicker({ value, onChange, className }: TimeRangePickerP
   const pickNow = () => {
     if (!days?.from) return;
     const now = Date.now();
+    const next: TimeWindow = { kind: "custom", fromMs: dayStartMs(days.from), toMs: now };
+    if (next.toMs <= next.fromMs) return;
+    const spanError = customWindowSpanError(next.fromMs, next.toMs);
+    if (spanError) {
+      notifySpanBlocked(spanError);
+      return;
+    }
     setStartTime("00:00");
     setEndTime(msToTime(now));
-    onChange({ kind: "custom", fromMs: dayStartMs(days.from), toMs: now });
+    onChange(next);
   };
 
   /** 「零点」：开始日 00:00 → 结束日次日 00:00（未选结束日时按开始日）。 */
   const pickMidnight = () => {
     if (!days?.from) return;
     const endDay = days.to ?? days.from;
-    setStartTime("00:00");
-    setEndTime("00:00");
-    onChange({
+    const next: TimeWindow = {
       kind: "custom",
       fromMs: dayStartMs(days.from),
       toMs: nextDayStartMs(endDay),
-    });
+    };
+    if (next.toMs <= next.fromMs) return;
+    const spanError = customWindowSpanError(next.fromMs, next.toMs);
+    if (spanError) {
+      notifySpanBlocked(spanError);
+      return;
+    }
+    setStartTime("00:00");
+    setEndTime("00:00");
+    onChange(next);
   };
 
-  const draftInvalid = (() => {
-    if (!days?.from) return false;
-    if (!days.to) return false;
+  /** 草稿错误：结束不晚于开始，或跨度超过契约上限（W6 票 16）。只标红字段 + 行内文案。 */
+  const draftError = (() => {
+    if (!days?.from) return null;
+    if (!days.to) return null;
     const fromMs = toMs(days.from, startTime);
     const toMsValue = toMs(days.to, endTime);
-    return toMsValue <= fromMs;
+    if (toMsValue <= fromMs) return "结束时刻需晚于开始时刻。";
+    return customWindowSpanError(fromMs, toMsValue);
   })();
 
   // 自定义窗起点恰为本周一/本月 1 日 00:00 时，把对应预设按钮点亮（起点锚定，不看易漂移的终点）。
@@ -133,8 +165,8 @@ export function TimeRangePicker({ value, onChange, className }: TimeRangePickerP
   const monthActive = value.kind === "custom" && value.fromMs === startOfMonthMs();
 
   const today = new Date();
-  const earliest = new Date(today);
-  earliest.setDate(earliest.getDate() - LOOKBACK_DAYS);
+  // 日历硬边界（W6 票 16）：超界日期直接禁用，最早可选日由契约上限推导。
+  const earliest = new Date(earliestCustomDayMs());
 
   return (
     <div className={cn("min-w-0", className)}>
@@ -166,7 +198,7 @@ export function TimeRangePicker({ value, onChange, className }: TimeRangePickerP
               locale={zhCN}
               startMonth={earliest}
               endMonth={today}
-              disabled={{ after: today }}
+              disabled={{ before: earliest, after: today }}
               className="bg-transparent p-0"
             />
             <div className="flex flex-col gap-2 sm:w-56 sm:border-l sm:border-border sm:pl-3">
@@ -223,9 +255,10 @@ export function TimeRangePicker({ value, onChange, className }: TimeRangePickerP
                     <Input
                       type="time"
                       aria-label="开始时刻"
+                      aria-invalid={draftError !== null}
                       value={startTime}
                       onChange={(event) => chooseTime(event.target.value, endTime)}
-                      className="h-8 flex-1 px-2 text-xs"
+                      className={cn("h-8 flex-1 px-2 text-xs", draftError && "border-danger")}
                     />
                   </div>
                   <div className="flex items-center gap-2">
@@ -233,9 +266,10 @@ export function TimeRangePicker({ value, onChange, className }: TimeRangePickerP
                     <Input
                       type="time"
                       aria-label="结束时刻"
+                      aria-invalid={draftError !== null}
                       value={endTime}
                       onChange={(event) => chooseTime(startTime, event.target.value)}
-                      className="h-8 flex-1 px-2 text-xs"
+                      className={cn("h-8 flex-1 px-2 text-xs", draftError && "border-danger")}
                     />
                   </div>
                 </div>
@@ -259,9 +293,7 @@ export function TimeRangePicker({ value, onChange, className }: TimeRangePickerP
                     零点
                   </Button>
                 </div>
-                {draftInvalid && (
-                  <p className="mt-1.5 text-2xs text-danger-text">结束时刻需晚于开始时刻。</p>
-                )}
+                {draftError && <p className="mt-1.5 text-2xs text-danger-text">{draftError}</p>}
                 {!days?.from && (
                   <p className="mt-1.5 text-2xs text-faint">先在日历选择起止日，再用时刻或按钮收窄。</p>
                 )}

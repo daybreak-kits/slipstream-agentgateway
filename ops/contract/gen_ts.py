@@ -41,6 +41,17 @@ def _page_size_tiers() -> tuple[int, ...]:
     return tuple(ALLOWED_PAGE_SIZES)
 
 
+def _max_custom_span() -> tuple[int, int]:
+    """Custom report window cap (W6 ticket 16); exported into TS so the UI picker
+    and the backend share one source and cannot drift."""
+    src = REPO_ROOT / "api" / "src"
+    if str(src) not in sys.path:
+        sys.path.insert(0, str(src))
+    from l06_api.deps import MAX_CUSTOM_SPAN_DAYS, MAX_CUSTOM_SPAN_MS
+
+    return int(MAX_CUSTOM_SPAN_MS), int(MAX_CUSTOM_SPAN_DAYS)
+
+
 def _openapi_spec() -> dict[str, Any]:
     """Build the app with a throwaway in-memory DB; never touch the dev database."""
     src = REPO_ROOT / "api" / "src"
@@ -151,6 +162,9 @@ def render(spec: dict[str, Any] | None = None) -> str:
         f"export const PAGE_SIZE_TIERS = [{tiers}] as const;\n"
         "export type PageSizeTier = (typeof PAGE_SIZE_TIERS)[number];"
     )
+
+    max_span_ms, max_span_days = _max_custom_span()
+    blocks.append(f"export const MAX_CUSTOM_SPAN_MS = {max_span_ms};\nexport const MAX_CUSTOM_SPAN_DAYS = {max_span_days};")
 
     for name in sorted(schemas):
         schema = schemas[name]

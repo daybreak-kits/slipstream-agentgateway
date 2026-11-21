@@ -5,6 +5,9 @@
 export const PAGE_SIZE_TIERS = [25, 50, 100, 200] as const;
 export type PageSizeTier = (typeof PAGE_SIZE_TIERS)[number];
 
+export const MAX_CUSTOM_SPAN_MS = 31622400000;
+export const MAX_CUSTOM_SPAN_DAYS = 366;
+
 export interface AdoptModelsDevBatchResult {
   refreshed: boolean;
   snapshot?: Record<string, number>;
