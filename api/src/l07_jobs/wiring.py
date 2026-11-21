@@ -5,13 +5,17 @@ Six periodic jobs run inside the control-plane process: incremental usage pull
 reconcile (ADR-011), the daily request-log retention cleanup (ADR-021), the
 daily models.dev snapshot sync + adopt (W4-H) and the daily status check +
 notice (W6 ticket 08). The first three share one interval
-(`job_interval_seconds`); the three daily jobs run once a day.
+(``job_interval_seconds``); the three daily jobs keep their 24h registration
+interval and the runner anchors each of their passes to just after local
+midnight. Each daily job also self-gates on its app_settings last-run record,
+so a restart or a second replica never repeats a pass inside the same local
+day (W6 review P1-1: per-job next-due scheduling, not one shared fastest tick).
 
-The runner starts only when `jobs_enabled` is true, and the app factory exposes the
-created runner on `app.state.job_runner` (None when disabled) so tests can assert both
-states without racing a live background task. `SLIPSTREAM_JOBS_ENABLED=0` is the env
+The runner starts only when ``jobs_enabled`` is true, and the app factory exposes the
+created runner on ``app.state.job_runner`` (None when disabled) so tests can assert both
+states without racing a live background task. ``SLIPSTREAM_JOBS_ENABLED=0`` is the env
 switch for the disabled state; a deployment running these on a separate worker sets it
-and invokes `python -m l07_jobs.worker` instead.
+and invokes ``python -m l07_jobs.worker`` instead.
 """
 
 from __future__ import annotations
@@ -34,7 +38,7 @@ LOGGER = logging.getLogger("slipstream.jobs")
 
 
 def build_runner(session_factory: sessionmaker, settings: Settings | None = None) -> JobRunner:
-    """A runner with all periodic jobs registered (retention on a daily cadence)."""
+    """A runner with all periodic jobs registered (the three daily ones anchored)."""
     resolved = settings or get_settings()
     runner = JobRunner()
     interval = float(resolved.job_interval_seconds)
@@ -44,17 +48,22 @@ def build_runner(session_factory: sessionmaker, settings: Settings | None = None
     )
     runner.register("reconcile", make_reconcile_job(session_factory, resolved), interval)
     runner.register(
-        "log_cleanup", make_cleanup_job(session_factory, resolved), float(LOG_CLEANUP_INTERVAL_S)
+        "log_cleanup",
+        make_cleanup_job(session_factory, resolved),
+        float(LOG_CLEANUP_INTERVAL_S),
+        daily=True,
     )
     runner.register(
         "models_dev_sync",
         make_models_dev_job(session_factory, resolved),
         float(MODELS_DEV_INTERVAL_S),
+        daily=True,
     )
     runner.register(
         "daily_status_check",
         make_status_check_job(session_factory, resolved),
         float(STATUS_CHECK_INTERVAL_S),
+        daily=True,
     )
     return runner
 

@@ -11,12 +11,16 @@ facts or the ledger.
 
 Registering this as a job means the cleanup follows SLIPSTREAM_JOBS_ENABLED like
 the other in-process jobs; a deployment running jobs on a separate worker gets
-it through build_runner as well.
+it through build_runner as well. The runner anchors the pass to just after local
+midnight and the wrapper self-gates on the app_settings last-run date, so a
+restart or a second replica never repeats the pass inside the same local day
+(W6 review P1-1).
 """
 
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Awaitable, Callable
 
 from sqlalchemy.orm import sessionmaker
@@ -26,18 +30,25 @@ from l01_core.settings import (
     Settings,
     get_settings,
 )
+from l01_core.timeutil import local_today, now_ms
 from l03_adapters.spi import DataPlaneAdapter
-from l04_repo.repository import get_setting
+from l04_repo.repository import get_setting, put_setting
 from l05_service.attempts import cleanup_expired_attempts
 from l06_api.adapter_factory import make_adapter
+
+LOGGER = logging.getLogger("slipstream.jobs")
 
 #: Retention is a daily housekeeping task, not a per-minute one.
 LOG_CLEANUP_INTERVAL_S = 24 * 3600
 
 RETENTION_KEY = "log_retention_days"
 
+#: app_settings key recording the last-run local date (restart/multi-replica gate).
+LOG_CLEANUP_LAST_RUN_KEY = "log_cleanup_last_run"
+
 __all__ = [
     "LOG_CLEANUP_INTERVAL_S",
+    "LOG_CLEANUP_LAST_RUN_KEY",
     "RETENTION_KEY",
     "cleanup_job",
     "make_cleanup_job",
@@ -89,10 +100,24 @@ def cleanup_job(
 def make_cleanup_job(
     session_factory: sessionmaker, settings: Settings | None = None
 ) -> Callable[[], Awaitable[dict[str, int]]]:
-    """Coroutine factory registered with the JobRunner (daily cadence)."""
+    """Coroutine factory registered with the JobRunner (daily cadence).
+
+    The pass body is :func:`cleanup_job`; this wrapper records the last-run
+    local date under ``LOG_CLEANUP_LAST_RUN_KEY`` so a restart or a second
+    replica never repeats the retention pass inside the same local day.
+    """
     resolved = settings or get_settings()
 
     async def _job() -> dict[str, int]:
-        return cleanup_job(session_factory, resolved)
+        with session_factory() as session:
+            last_run_date = get_setting(session, LOG_CLEANUP_LAST_RUN_KEY)
+        if last_run_date == local_today():
+            LOGGER.info("log cleanup already ran today (%s); skipping", last_run_date)
+            return {}
+        counts = cleanup_job(session_factory, resolved)
+        with session_factory() as session:
+            put_setting(session, LOG_CLEANUP_LAST_RUN_KEY, local_today(), now_ms())
+            session.commit()
+        return counts
 
     return _job

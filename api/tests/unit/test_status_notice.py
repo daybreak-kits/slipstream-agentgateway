@@ -20,7 +20,7 @@ import json
 import tomllib
 from pathlib import Path
 
-from l04_repo.orm import ConfigRevisionORM
+from l04_repo.orm import AppSettingORM, ConfigRevisionORM
 from l05_service.status_notice import (
     CONTROL_PLANE_VERSION,
     STATUS_NOTICE_KEY,
@@ -146,6 +146,37 @@ def test_corrupt_persisted_state_is_treated_as_empty(engine_and_sessionmaker):
         notices = apply_check_result(session, {"config_hash": _mismatch()}, T0)
         session.commit()
     assert notices["config_hash"]["notified_at_ms"] == T0
+
+
+def test_unchanged_conclusion_skips_the_app_settings_writes(engine_and_sessionmaker):
+    """W6 review P1-1: a pass whose conclusion is unchanged writes no app_settings row."""
+    _, factory = engine_and_sessionmaker
+    with factory() as session:
+        apply_check_result(session, {"config_hash": _mismatch()}, T0)
+        session.commit()
+        first_notice = session.get(AppSettingORM, STATUS_NOTICE_KEY)
+        first_state = session.get(AppSettingORM, STATUS_STATE_KEY)
+
+    with factory() as session:
+        apply_check_result(session, {"config_hash": _mismatch()}, T0 + 3600_000)
+        session.commit()
+        second_notice = session.get(AppSettingORM, STATUS_NOTICE_KEY)
+        second_state = session.get(AppSettingORM, STATUS_STATE_KEY)
+
+    assert second_notice.value_json == first_notice.value_json
+    assert second_notice.updated_at_ms == first_notice.updated_at_ms, (
+        "同结论重跑不得重写 notice 行"
+    )
+    assert second_state.updated_at_ms == first_state.updated_at_ms, (
+        "同结论重跑不得重写 state 行"
+    )
+
+    with factory() as session:
+        apply_check_result(session, {"config_hash": _ok()}, T0 + 7200_000)
+        session.commit()
+        third_notice = session.get(AppSettingORM, STATUS_NOTICE_KEY)
+
+    assert third_notice.updated_at_ms == T0 + 7200_000, "结论变化（恢复）仍要落库"
 
 
 # ---------------------------------------------------------------------------

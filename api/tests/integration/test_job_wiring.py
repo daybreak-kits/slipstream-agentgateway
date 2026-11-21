@@ -1,19 +1,29 @@
-"""Job wiring: the app starts the four periodic jobs, or not when disabled.
+"""Job wiring: the app starts the six periodic jobs, or not when disabled.
 
 P0-3 regression: l07_jobs existed with factories but nothing ever registered them,
 so no background task ran in a real deployment. These tests pin both states of the
 switch (app flag and `jobs_enabled` setting) and smoke-run one tick of each job.
+W6 review P1-1: they also pin the execution rhythm -- each job follows its own
+interval (not the fastest registered one), daily jobs anchor to just after the
+next local midnight, and a daily job never re-runs inside the same local day.
 """
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
+import time
+from datetime import datetime
 
+import pytest
 from fastapi import FastAPI
 
 from l01_core.settings import Settings
+from l01_core.timeutil import now_ms
 from l04_repo.orm import LedgerEntryORM, UserORM
+from l04_repo.repository import get_setting, put_setting
 from l07_jobs import wiring
+from l07_jobs.runner import JobRunner, next_local_midnight
 from server import create_app
 
 #: Minimal data-plane request-log schema (same shape AG 1.7 creates).
@@ -156,3 +166,176 @@ def test_one_tick_runs_every_job_without_touching_balances(
     with factory() as session:
         assert session.get(UserORM, "usr_smoke").balance_micro == before
         assert session.query(LedgerEntryORM).count() == ledger_before
+
+
+# ---------------------------------------------------------------------------
+# Execution rhythm (W6 review P1-1): per-job next-due scheduling.
+
+
+def test_per_job_interval_keeps_a_slow_job_idle_across_fast_cycles():
+    """Each job advances by its own interval, not by the fastest registered one.
+
+    The old loop awaited every job each round and then slept min(interval)
+    seconds, so a job registered with 86400s re-ran every ``job_interval_seconds``
+    alongside the fast jobs. With per-job next-due scheduling the slow job runs
+    once (its startup pass) and stays idle while the fast one laps it.
+    """
+    ran = {"fast": 0, "slow": 0}
+
+    async def _fast():
+        ran["fast"] += 1
+
+    async def _slow():
+        ran["slow"] += 1
+
+    runner = JobRunner()
+    runner.register("fast", _fast, 0.03)
+    runner.register("slow_daily_cadence", _slow, 86_400.0)
+
+    async def _scenario():
+        task = asyncio.create_task(runner.run_forever())
+        await asyncio.sleep(0.4)
+        runner.stop()
+        await asyncio.wait_for(task, timeout=5)
+
+    asyncio.run(_scenario())
+
+    assert ran["fast"] >= 5, ran
+    assert ran["slow"] == 1, "86400s 任务在多轮快速周期里只能执行一次"
+
+
+def test_daily_job_first_run_anchors_to_next_local_midnight():
+    """A daily-anchored job does not run at startup; it waits for next midnight."""
+    ran = {"daily": 0, "fast": 0}
+
+    async def _daily():
+        ran["daily"] += 1
+
+    async def _fast():
+        ran["fast"] += 1
+
+    runner = JobRunner()
+    runner.register("daily_anchor", _daily, 86_400.0, daily=True)
+    runner.register("fast", _fast, 0.03)
+
+    async def _scenario():
+        task = asyncio.create_task(runner.run_forever())
+        await asyncio.sleep(0.35)
+        runner.stop()
+        await asyncio.wait_for(task, timeout=5)
+
+    asyncio.run(_scenario())
+
+    if next_local_midnight(time.time()) - time.time() < 1.0:
+        pytest.skip("test window overlaps the local-midnight anchor")
+    assert ran["daily"] == 0, "daily 任务首跑必须锚定到次日本地 0 点后"
+    assert ran["fast"] >= 5, ran
+
+
+def test_next_local_midnight_lands_on_the_next_local_midnight():
+    now = time.time()
+    anchor = next_local_midnight(now)
+    anchor_local = datetime.fromtimestamp(anchor).astimezone()
+    now_local = datetime.fromtimestamp(now).astimezone()
+    assert (anchor_local.hour, anchor_local.minute, anchor_local.second) == (0, 0, 0)
+    assert anchor_local.date() > now_local.date(), (
+        "strictly the following day, even when called exactly at midnight"
+    )
+    assert anchor > now
+
+
+# ---------------------------------------------------------------------------
+# Daily-job self gates (W6 review P1-1): a restart or second replica in the
+# same local day must not repeat a daily pass; state rides in app_settings.
+
+
+def test_status_check_job_runs_once_per_local_day(engine_and_sessionmaker, monkeypatch):
+    _, factory = engine_and_sessionmaker
+    from l07_jobs import status_notice as job_module
+
+    calls = {"n": 0}
+
+    def _counting_check(*args, **kwargs):
+        calls["n"] += 1
+        return {"checked_at_ms": 0, "checks": {}}
+
+    monkeypatch.setattr(job_module, "run_status_check", _counting_check)
+    job = job_module.make_status_check_job(factory)
+
+    asyncio.run(job())
+    asyncio.run(job())
+    assert calls["n"] == 1, "同日第二次触发必须跳过（app_settings 已记 last-run 日期）"
+    with factory() as session:
+        assert get_setting(session, job_module.STATUS_CHECK_LAST_RUN_KEY) == (
+            datetime.now().astimezone().date().isoformat()
+        )
+
+    with factory() as session:
+        put_setting(session, job_module.STATUS_CHECK_LAST_RUN_KEY, "2020-01-01", now_ms())
+        session.commit()
+    asyncio.run(job())
+    assert calls["n"] == 2, "记录的是昨天 -> 允许再跑一轮"
+
+
+def test_log_cleanup_job_runs_once_per_local_day(engine_and_sessionmaker, monkeypatch):
+    _, factory = engine_and_sessionmaker
+    from l07_jobs import log_cleanup as job_module
+
+    calls = {"n": 0}
+
+    def _counting_cleanup(*args, **kwargs):
+        calls["n"] += 1
+        return {"request_logs": 0, "request_log_payloads": 0, "request_attempts": 0}
+
+    monkeypatch.setattr(job_module, "cleanup_job", _counting_cleanup)
+    job = job_module.make_cleanup_job(factory)
+
+    asyncio.run(job())
+    asyncio.run(job())
+    assert calls["n"] == 1, "同日第二次触发必须跳过"
+    with factory() as session:
+        assert get_setting(session, job_module.LOG_CLEANUP_LAST_RUN_KEY) == (
+            datetime.now().astimezone().date().isoformat()
+        )
+
+    with factory() as session:
+        put_setting(session, job_module.LOG_CLEANUP_LAST_RUN_KEY, "2020-01-01", now_ms())
+        session.commit()
+    asyncio.run(job())
+    assert calls["n"] == 2
+
+
+def test_models_dev_job_freshness_gate_skips_a_recent_successful_pull(
+    engine_and_sessionmaker, monkeypatch
+):
+    """距上次成功拉取 <24h 的调度直接返回，不再打外部 API（P1-1 后果之一）。"""
+    from l05_service import models_dev
+    from l07_jobs import models_dev_sync as job_module
+
+    _, factory = engine_and_sessionmaker
+    fetches = {"n": 0}
+
+    def _fake_fetch(*args, **kwargs):
+        fetches["n"] += 1
+        return {}
+
+    monkeypatch.setattr(models_dev, "fetch_snapshot", _fake_fetch)
+
+    first = job_module.models_dev_sync_job(factory)
+    assert fetches["n"] == 1
+    assert first["refreshed"] is True
+
+    again = job_module.models_dev_sync_job(factory)
+    assert fetches["n"] == 1, "24h 内的成功拉取必须让下一轮直接跳过"
+    assert again["skipped"] is True
+
+    with factory() as session:
+        put_setting(
+            session,
+            job_module.MODELS_DEV_LAST_FETCH_KEY,
+            str(now_ms() - 25 * 3600 * 1000),
+            now_ms(),
+        )
+        session.commit()
+    job_module.models_dev_sync_job(factory)
+    assert fetches["n"] == 2, "超过 24h 的记录放行新一轮拉取"

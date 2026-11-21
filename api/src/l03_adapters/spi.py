@@ -271,13 +271,17 @@ class DataPlaneAdapter(Protocol):
         *,
         dry_run: bool = False,
         prune: bool = True,
+        prune_only: bool = False,
     ) -> MaterializationResult:
         """Write/prune adapter-managed credential files; system keeps metadata only.
 
-        prune=True (default) also removes managed files outside this call's
-        whitelist; prune=False writes only, so a rollout can materialize the
-        credentials the candidate config references before its apply gate runs
-        and run the whitelist cleanup once the apply actually succeeded.
+        Three pass shapes: the default writes the whitelist and prunes managed
+        files outside it; ``prune=False`` writes only, so a rollout can
+        materialize the credentials the candidate config references before its
+        apply gate runs; ``prune_only=True`` runs the whitelist cleanup WITHOUT
+        writing any file -- the bytes are already on disk from the write phase,
+        so the post-apply cleanup must not rewrite them (W6 review P2-1).
+        prune_only implies pruning.
         """
         ...
 

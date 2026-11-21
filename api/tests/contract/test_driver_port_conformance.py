@@ -156,6 +156,33 @@ def test_write_phase_keeps_managed_refs_until_the_cleanup_pass(driver):
     assert cleanup.deleted == (managed_id("ups_a#1"),)
 
 
+def test_prune_only_cleans_outside_the_whitelist_without_writing(driver):
+    """W6 review P2-1: the rollout cleanup phase prunes but never rewrites.
+
+    The write phase already materialized the whitelist bytes; the post-apply
+    pass must only delete what fell outside the whitelist -- no rewritten files,
+    and nothing from the call itself is smuggled into the managed store.
+    """
+    _contract, adapter, managed_id = driver
+    adapter.materialize_credentials([CredentialFile(ref="ups_a#1", plaintext="secret-a")])
+
+    result = adapter.materialize_credentials(
+        [CredentialFile(ref="ups_a#2", plaintext="REWRITTEN-BYTES")], prune_only=True
+    )
+
+    assert result.dry_run is False
+    assert result.written == (), "prune_only 只清理，绝不重写"
+    assert result.stale == (managed_id("ups_a#1"),)
+    assert result.deleted == (managed_id("ups_a#1"),)
+    # The pass must not have written ups_a#2 either: a dry-run audit over the
+    # original whitelist finds nothing outside it in the managed store -- had
+    # the cleanup smuggled the call's files in, ups_a#2 would show up stale.
+    audit = adapter.materialize_credentials(
+        [CredentialFile(ref="ups_a#1", plaintext="secret-a")], dry_run=True
+    )
+    assert audit.stale == (), "prune_only 不得把本次调用的文件写进受管存储"
+
+
 def test_preview_compiles_inside_the_driver_behind_the_port(driver):
     contract, adapter, _managed_id = driver
 

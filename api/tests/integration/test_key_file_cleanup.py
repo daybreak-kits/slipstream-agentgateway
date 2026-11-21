@@ -95,9 +95,9 @@ def test_prune_failure_is_logged_but_does_not_block_the_apply(
     real_materialize = type(adapter).materialize_credentials
     phases: list[bool] = []
 
-    def _explode_on_cleanup(files, *, dry_run=False, prune=True):
-        phases.append(prune)
-        if prune:  # the post-apply cleanup phase, not the pre-apply write
+    def _explode_on_cleanup(files, *, dry_run=False, prune=True, prune_only=False):
+        phases.append(prune_only)
+        if prune_only:  # the post-apply cleanup phase, not the pre-apply write
             raise OSError("disk busy")
         return real_materialize(adapter, files, dry_run=dry_run, prune=prune)
 
@@ -153,9 +153,11 @@ def test_rollout_materializes_before_apply_and_prunes_only_after_success(
             calls.append("validate")
             return super().validate(ir)
 
-        def materialize_credentials(self, files, *, dry_run=False, prune=True):
-            calls.append(f"materialize prune={prune}")
-            return real_materialize(inner, files, dry_run=dry_run, prune=prune)
+        def materialize_credentials(self, files, *, dry_run=False, prune=True, prune_only=False):
+            calls.append("materialize prune_only" if prune_only else "materialize write")
+            return real_materialize(
+                inner, files, dry_run=dry_run, prune=prune, prune_only=prune_only
+            )
 
         def render(self, ir):
             calls.append("render")
@@ -170,9 +172,9 @@ def test_rollout_materializes_before_apply_and_prunes_only_after_success(
     assert row.status == "active"
     assert calls == [
         "validate",
-        "materialize prune=False",
+        "materialize write",
         "render",
         "apply",
-        "materialize prune=True",
+        "materialize prune_only",
     ], calls
     assert (_keys_dir() / "ups_test#1.key").exists()

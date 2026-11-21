@@ -44,7 +44,7 @@ class _GateAdapter:
         return ValidationResult(ok=True)
 
     def materialize_credentials(
-        self, files, *, dry_run: bool = False, prune: bool = True
+        self, files, *, dry_run: bool = False, prune: bool = True, prune_only: bool = False
     ) -> MaterializationResult:
         self.materialized = tuple(files)
         return MaterializationResult(

@@ -7,11 +7,13 @@ what an operator actually sees: which problems are currently active, whether a
 notice was already pushed for one inside the last 24 hours, and the wire
 payload ``GET /admin/system-status`` returns to the notification center.
 
-Both the notices and the dedup state live in app_settings and are written back
-on every pass, so restarting the control plane does not reset the 24-hour
-window. A check that reports ``unknown`` (say, an unreachable data plane)
-neither clears an existing problem nor re-arms its window: only a positive
-``ok`` does, which is what lets a recovered problem notify again.
+Both the notices and the dedup state live in app_settings and are rewritten
+only when a pass actually changes the conclusion (same statuses, same problems,
+same notices -> no write, W6 review P1-1), so restarting the control plane does
+not reset the 24-hour window. A check that reports ``unknown`` (say, an
+unreachable data plane) neither clears an existing problem nor re-arms its
+window: only a positive ``ok`` does, which is what lets a recovered problem
+notify again.
 """
 
 from __future__ import annotations
@@ -79,6 +81,10 @@ def apply_check_result(
     Per problem: ``mismatch`` pushes a new notice when none was pushed in the
     last 24h (otherwise the original notice is kept -- dedup); ``ok`` recovers
     and clears it; ``unknown`` leaves the problem and its window untouched.
+
+    When the resulting conclusion matches what is already stored (same checks,
+    problems and notices), the two app_settings rows are left untouched instead
+    of being rewritten with only a newer timestamp (W6 review P1-1).
     """
     state = _load(session, STATUS_STATE_KEY)
     raw_problems = state.get("problems")
@@ -110,12 +116,18 @@ def apply_check_result(
         }
 
     payload = {"checked_at_ms": now, "checks": checks, "notices": notices}
-    put_setting(
-        session, STATUS_NOTICE_KEY, json.dumps(payload, ensure_ascii=False), now
+    unchanged = (
+        {"problems": problems} == state
+        and checks == store.get("checks")
+        and notices == store.get("notices")
     )
-    put_setting(
-        session, STATUS_STATE_KEY, json.dumps({"problems": problems}), now
-    )
+    if not unchanged:
+        put_setting(
+            session, STATUS_NOTICE_KEY, json.dumps(payload, ensure_ascii=False), now
+        )
+        put_setting(
+            session, STATUS_STATE_KEY, json.dumps({"problems": problems}), now
+        )
     return notices
 
 

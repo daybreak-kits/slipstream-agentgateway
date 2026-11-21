@@ -10,6 +10,15 @@ def now_ms() -> int:
     return int(datetime.now(UTC).timestamp() * 1000)
 
 
+def local_today() -> str:
+    """The process-local calendar date (ISO ``YYYY-MM-DD``) right now.
+
+    Daily housekeeping jobs record it in app_settings as their last-run date so
+    a restart or a second replica never repeats the same local day's pass.
+    """
+    return datetime.now().astimezone().date().isoformat()
+
+
 def ms_to_iso(ms: int) -> str:
     """Render epoch milliseconds as `YYYY-MM-DDTHH:MM:SS.mmmZ` (UTC)."""
     base = datetime.fromtimestamp(ms // 1000, tz=UTC).strftime("%Y-%m-%dT%H:%M:%S")

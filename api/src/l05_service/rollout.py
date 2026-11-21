@@ -126,13 +126,14 @@ class Rollout:
         """Ticket 16/03: drop managed credential files the applied config no longer uses.
 
         Best effort by contract: a cleanup failure must never turn a successful
-        apply into a failed one. The full materialize pass rewrites this render's
-        credentials byte-identically and prunes everything outside its whitelist;
+        apply into a failed one. The prune-only pass deletes managed files
+        outside this render's whitelist WITHOUT rewriting the whitelist files --
+        the write phase already materialized their exact bytes (W6 review P2-1);
         the plan (stale list) is logged by the adapter and failures as warnings,
         so the operator can audit the managed directory.
         """
         try:
-            audit = self._adapter.materialize_credentials(credentials)
+            audit = self._adapter.materialize_credentials(credentials, prune_only=True)
         except Exception:  # pragma: no cover - prune is best-effort
             logger.warning(
                 "key 文件清理失败，本次配置已生效但受管 keys/ 目录可能残留陈旧文件",
