@@ -80,6 +80,7 @@ from l04_repo.orm import (  # noqa: E402
     CostDailyORM,
     CostEntryORM,
     GatewayUsageEventORM,
+    RequestAttemptORM,
     UserDailyORM,
     UserORM,
 )
@@ -329,6 +330,11 @@ def seed(session, rng: random.Random) -> dict[str, object]:
         upstreams[upstream.name] = upstream  # names derive from the base_url
         key_counts[upstream.name] = len(api_keys)
 
+    # W7-D6 mock route chains need human-readable provider refs in the popover;
+    # real AG rows carry the expanded provider id, but the demo should read like
+    # the old console (upstream name + key sequence), not a UUID.
+    upstream_name_by_id = {upstream.id: name for name, upstream in upstreams.items()}
+
     upstream_models: dict[tuple[str, str], object] = {}
     index_to_upstream = {i: up for i, up in enumerate(upstreams.values())}
     for index, models in UPSTREAM_MODELS.items():
@@ -506,6 +512,81 @@ def seed(session, rng: random.Random) -> dict[str, object]:
                 )
             )
             event_count += 1
+    session.flush()
+
+    # W7-D6 demo data: two real-looking failover chains on the newest 200 rows so
+    # the default mock dataset shows the model-level fork icon and the route-chain
+    # popover without a hand-written SQLite fixture. Attempts are derived facts;
+    # they do not add usage events or change billing.
+    chain_events = session.scalars(
+        select(GatewayUsageEventORM)
+        .where(
+            GatewayUsageEventORM.http_status == 200,
+            # LOG-24H: chain rows must be already visible in the default window;
+            # the seeded day can contain future timestamps, which the console's
+            # 24h filter correctly excludes.
+            GatewayUsageEventORM.started_at_ms <= now - 60_000,
+        )
+        .order_by(GatewayUsageEventORM.started_at_ms.desc())
+        .limit(2)
+    ).all()
+    for chain_index, event in enumerate(chain_events):
+        event.correlation_key = f"seed_trace_{chain_index + 1}"
+        first_model = event.upstream_model
+        first_ref = event.provider or ""
+        provider_id = first_ref.split("#", 1)[0]
+        first_name = upstream_name_by_id.get(provider_id, provider_id)
+        first_key_seq = first_ref.split("#", 1)[1] if "#" in first_ref else "1"
+        other = next(
+            (upstream for upstream in upstreams.values() if upstream.id != provider_id),
+            next(iter(upstreams.values())),
+        )
+        other_name = upstream_name_by_id[other.id]
+        second_candidates = [
+            model_name
+            for (upstream_name, model_name) in upstream_models
+            if upstream_name == other_name and model_name != first_model
+        ]
+        second_model = second_candidates[0] if second_candidates else first_model
+        first_duration = 620 + chain_index * 40
+        second_duration = 900 + chain_index * 30
+        event.duration_ms = first_duration + second_duration
+        event.completed_at_ms = event.started_at_ms + event.duration_ms
+        # The request ultimately succeeded on the second upstream; keep usage /
+        # cost attribution on the provider that answered, while the attempts keep
+        # the failed first hop.
+        event.provider = other.id + "#1"
+        event.upstream_model = second_model
+        session.add_all([
+            RequestAttemptORM(
+                correlation_key=event.correlation_key,
+                attempt_no=1,
+                upstream_ref=f"{first_name}#{first_key_seq}",
+                model=first_model,
+                status_code=500,
+                error_type="upstream_error",
+                error_message="connection reset by peer while reading the response stream (seed route-chain fixture)",
+                started_at_ms=event.started_at_ms,
+                duration_ms=first_duration,
+                outcome="error",
+                adapter_id="agentgateway",
+                recorded_at_ms=now,
+            ),
+            RequestAttemptORM(
+                correlation_key=event.correlation_key,
+                attempt_no=2,
+                upstream_ref=f"{other_name}#1",
+                model=second_model,
+                status_code=200,
+                error_type="",
+                error_message="",
+                started_at_ms=event.started_at_ms + first_duration,
+                duration_ms=second_duration,
+                outcome="ok",
+                adapter_id="agentgateway",
+                recorded_at_ms=now,
+            ),
+        ])
     session.flush()
     saved_cost_refresh = usage_ingest.refresh_cost_daily
     saved_user_refresh = usage_ingest.refresh_user_daily

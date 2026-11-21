@@ -197,3 +197,41 @@ def _migrate(db_path: Path, env: dict[str, str], *extra: str) -> dict:
     )
     assert run.returncode == 0, run.stderr[-2000:]
     return json.loads(run.stdout)
+
+def test_seeded_logs_include_real_failover_route_chains(seeded_demo) -> None:
+    """W7-D6: the default mock DB must show the fork icon without a manual fixture."""
+    db_path, _env_value, _seeded = seeded_demo
+    attempts = _query(
+        db_path,
+        "SELECT correlation_key, attempt_no, upstream_ref, model, status_code,"
+        " outcome, duration_ms FROM request_attempts"
+        " ORDER BY correlation_key, attempt_no",
+    )
+    assert len(attempts) == 4
+    chains = {}
+    for key, attempt_no, upstream_ref, model, status_code, outcome, duration in attempts:
+        chains.setdefault(key, []).append(
+            (attempt_no, upstream_ref, model, status_code, outcome, duration)
+        )
+    assert sorted(chains) == ["seed_trace_1", "seed_trace_2"]
+    for chain in chains.values():
+        assert [row[0] for row in chain] == [1, 2]
+        first, second = chain
+        assert first[3] == 500 and first[4] == "error", first
+        assert second[3] == 200 and second[4] == "ok", second
+        assert first[2] != second[2], "the demo chain must switch model"
+        assert first[5] > 0 and second[5] > 0
+        assert "#" in first[1] and "#" in second[1], (first, second)
+        assert not first[1].startswith("ups"), "attempt refs must be readable upstream names"
+
+    events = _query(
+        db_path,
+        "SELECT event_id, correlation_key, provider, upstream_model FROM gateway_usage_events"
+        " WHERE correlation_key != '' ORDER BY correlation_key",
+    )
+    assert len(events) == 2
+    for event_id, key, provider, upstream_model in events:
+        chain = chains[key]
+        assert event_id.startswith("seed_evt_")
+        assert provider.split("#", 1)[0].startswith("ups")
+        assert upstream_model == chain[1][2]
