@@ -54,9 +54,11 @@ export interface ProbeResultView {
   probe_steps?: ProbeStep[];
 }
 
-/** 新建上游时的草稿（名称可随提交一起写，见 api-contract §3.2 / ADR-023 #6）。 */
+/** 新建上游时的草稿（名称/别名可随提交一起写，见 api-contract §3.2 / ADR-023 #6）。
+ *  name 是唯一「上游标志」（重名 422）；alias 是仅展示的「上游别名」，可为空。 */
 export interface UpstreamDraft {
   name: string;
+  alias: string;
   baseUrl: string;
   /** "auto" 或四个具体风格 */
   apiStyle: string;

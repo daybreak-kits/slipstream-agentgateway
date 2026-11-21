@@ -22,7 +22,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { TabBar } from "@/components/ui/tabs";
-import { api, ENDPOINTS } from "@/lib/api";
+import { ApiError, api, ENDPOINTS } from "@/lib/api";
 import { ACTION_ICONS } from "@/lib/icons";
 import { useDirtyGuard } from "@/lib/use-dirty-guard";
 import { formatDateTime, useTimezone } from "@/lib/time";
@@ -35,6 +35,7 @@ const NEW_UPSTREAM_ID = "new";
 function draftOf(row: UpstreamRow | null): UpstreamDraft {
   return {
     name: row?.name ?? "",
+    alias: row?.alias ?? "",
     baseUrl: row?.base_url ?? "",
     apiStyle: row?.api_style ?? "auto",
     enabled: row?.enabled ?? true,
@@ -44,6 +45,7 @@ function draftOf(row: UpstreamRow | null): UpstreamDraft {
 function draftEquals(a: UpstreamDraft, b: UpstreamDraft): boolean {
   return (
     a.name === b.name &&
+    a.alias === b.alias &&
     a.baseUrl === b.baseUrl &&
     a.apiStyle === b.apiStyle &&
     a.enabled === b.enabled
@@ -78,6 +80,8 @@ export function UpstreamDetailPage() {
 
   const [draft, setDraft] = useState<UpstreamDraft>(() => draftOf(null));
   const [baseline, setBaseline] = useState<UpstreamDraft | null>(isNew ? draftOf(null) : null);
+  // 重名 422 的就地呈现（ADR-023 #6）：挂在标志输入框旁（role=alert），改标志或保存成功即清除。
+  const [nameError, setNameError] = useState<string | null>(null);
   const [pendingKeys, setPendingKeys] = useState<PendingKey[]>([]);
   // W5 ticket 07：?tab=routing 由列表页「测试」快捷跳转带入；缺省/非法值回落「连接与模型」。
   const [searchParams, setSearchParams] = useSearchParams();
@@ -116,7 +120,10 @@ export function UpstreamDetailPage() {
   // ── 未保存离开拦截（W4-G 抽到 lib/use-dirty-guard）────────────────
   const leaveGuard = useDirtyGuard(dirty);
 
-  const onDraftChange = (patch: Partial<UpstreamDraft>) => setDraft((prev) => ({ ...prev, ...patch }));
+  const onDraftChange = (patch: Partial<UpstreamDraft>) => {
+    if (patch.name !== undefined) setNameError(null);
+    setDraft((prev) => ({ ...prev, ...patch }));
+  };
 
   // 切页签：改写草稿挂在 TransformsEditor 组件状态里，切走即丢（W4-G 起 dirty 时先确认）。
   // 同时把页签写回 URL（?tab=）：列表页「测试」快捷跳转与分享链接都定位到同一页签。
@@ -154,6 +161,7 @@ export function UpstreamDetailPage() {
       if (isNew) {
         const created = await api.post<UpstreamRow>(ENDPOINTS.upstreamCreate, {
           ...(draft.name.trim() !== "" ? { name: draft.name.trim() } : {}),
+          alias: draft.alias.trim(),
           base_url: draft.baseUrl.trim(),
           api_style: draft.apiStyle,
           api_key: pendingKeys[0]?.apiKey.trim() ?? "",
@@ -172,12 +180,14 @@ export function UpstreamDetailPage() {
         base_url: draft.baseUrl.trim(),
         api_style: draft.apiStyle,
         enabled: draft.enabled,
-        // ADR-023 #6 改名路径：名称已解锁，随配置一起提交（重名 422 由全局错误提示展示）。
+        // ADR-023 #6 改名路径：标志已解锁，随配置一起提交；重名 422 就地呈现在标志输入框旁。
         name: draft.name.trim(),
+        alias: draft.alias.trim(),
       });
       return { row, failedKeys: 0 };
     },
     onSuccess: ({ row, failedKeys }) => {
+      setNameError(null);
       if (isNew) {
         toast.success("上游渠道已创建", {
           description: failedKeys > 0
@@ -201,6 +211,11 @@ export function UpstreamDetailPage() {
       if (view) {
         setProbe(view);
         toast.error("保存失败：自动探测未识别协议", { description: "查看右侧探测步骤，或改选具体协议风格后重试。" });
+      }
+      // ADR-023 #6 重名 422：ensure_unique_name 的 details.name 在此 → 标志输入框旁 role=alert。
+      // （探测类 422 的 details 带 probe_steps 而无 name，不会误入这里。）
+      if (error instanceof ApiError && error.status === 422 && typeof error.details.name === "string") {
+        setNameError("上游标志「" + error.details.name + "」已存在，与其他上游重名；请换一个标志后重试。");
       }
     },
   });
@@ -305,6 +320,10 @@ export function UpstreamDetailPage() {
         <h1 className="text-lg font-semibold text-title">
           {isNew ? (draft.name.trim() || "新建上游渠道") : (upstream?.name ?? "")}
         </h1>
+        {/* 上游别名（展示名）跟随草稿实时展示；为空不占位（US 11/50）。 */}
+        {draft.alias.trim() !== "" ? (
+          <span className="text-2sm text-faint">{draft.alias.trim()}</span>
+        ) : null}
         {headerBadge}
         <div className="ml-auto flex flex-wrap items-center gap-3">
           {!isNew ? (
@@ -350,7 +369,9 @@ export function UpstreamDetailPage() {
         </div>
       </div>
 
-      <TabBar items={tabItems} value={activeTab} onValueChange={requestTab} ariaLabel="上游渠道编辑器页签" />
+      {/* W7 t04（US 13）：TabBar 根是 display:contents，父级 space-y 的 margin 落在它身上不渲染，
+          内容会贴着下划线——显式 mb-4 给页签分隔线与内容区（含「添加模型」等操作行）留出间距。 */}
+      <TabBar items={tabItems} value={activeTab} onValueChange={requestTab} ariaLabel="上游渠道编辑器页签" className="mb-4" />
 
       {activeTab === "connection" ? (
         <ConnectionTab
@@ -358,6 +379,7 @@ export function UpstreamDetailPage() {
           upstream={upstream}
           draft={draft}
           onDraftChange={onDraftChange}
+          nameError={nameError}
           pendingKeys={pendingKeys}
           onPendingKeysChange={setPendingKeys}
           probe={probe}
