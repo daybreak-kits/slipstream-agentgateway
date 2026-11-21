@@ -163,150 +163,175 @@ export function MemberChipFlow({
 
   return (
     <div className="space-y-3" data-slot="member-chip-flow">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-2xs text-faint">
-          共 {members.length} 个成员，{layers.length} 层；点击 chip 编辑 priority / weight / when。
-        </p>
-        <span className="text-2xs text-faint">{LAYER_NOTES[mode]}</span>
-      </div>
-
-      {layers.length === 0 ? (
-        <p className="rounded-md border border-dashed border-border p-3 text-2xs text-faint" data-slot="member-empty">
-          暂无成员；从下方候选区选择上游模型加入。
-        </p>
-      ) : null}
-
-      <div className="space-y-2">
-        {layers.map((layer) => (
-          <section
-            key={layer.priority}
-            data-slot="member-layer"
-            data-priority={layer.priority}
-            className="rounded-md border border-border bg-surface-2/40 p-2"
+      {/* W6 ticket 14 容器骨架：桌面左 6 右 6（左=已选成员层，右=候选），窄屏上下堆叠；
+       * 两栏各自 max-h min(60vh,560px) 内部滚动，列头固定在滚动区外。行内编辑字段与
+       * 候选分组 chip 归下一票；本票保持现有 chip 流与 Combobox 候选可用。 */}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-12" data-slot="member-board-grid">
+        <section data-slot="member-board-left" className="min-w-0 lg:col-span-6">
+          <div
+            data-slot="member-column-head"
+            data-column="left"
+            className="mb-1.5 flex flex-wrap items-center justify-between gap-x-2 gap-y-1"
           >
-            <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
-              <h4 className="text-2sm font-medium text-title">{layer.title}</h4>
-              <Badge tone="neutral" className="tnum">
-                priority {layer.priority}
-              </Badge>
-              <span className="text-2xs text-faint">{layer.chips.length} 个成员</span>
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {layer.chips.map((chip) => (
-                <div key={chip.index} data-slot="member-chip-group" className="inline-flex max-w-full items-stretch">
-                  {/* chip 本体就是「编辑该成员」按钮：点名字、顺序徽标、weight/when 都展开编辑器；移除是相邻的独立按钮（避免按钮嵌套）。 */}
-                  <Button
-                    variant="ghost"
-                    data-slot="member-chip"
-                    data-upstream-model-id={chip.member.upstream_model_id}
-                    data-fallback={chip.fallback ? "true" : "false"}
-                    className={cn(
-                      "inline-flex h-auto max-w-full min-w-0 items-center justify-start gap-1 overflow-hidden rounded-l-full rounded-r-none border border-r-0 px-2 py-1 text-left text-2sm font-normal",
-                      chip.fallback
-                        ? "border-info/50 bg-info-soft text-info-text hover:border-info hover:bg-info-soft"
-                        : "border-border bg-surface text-body hover:border-border-strong hover:bg-surface-2",
-                      editingIndex === chip.index && "ring-1 ring-primary",
-                    )}
-                    title={"编辑 " + chip.label}
-                    aria-label={"编辑成员 " + chip.label}
-                    onClick={() => setEditingIndex(chip.index === editingIndex ? null : chip.index)}
-                  >
-                    {mode === "conditional" ? (
-                      <span
-                        data-slot="chip-order"
-                        className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-surface-2 px-1 text-2xs text-faint tnum"
-                        title={"顺序 " + chip.order}
-                      >
-                        {chip.order}
-                      </span>
-                    ) : null}
-                    <span data-slot="member-chip-label" className="min-w-0 truncate font-mono">
-                      {chip.label}
-                    </span>
-                    {mode === "weighted" ? (
-                      <span data-slot="chip-weight" className="text-2xs text-faint">
-                        weight {chip.member.weight.trim() === "" ? "0" : chip.member.weight}
-                      </span>
-                    ) : null}
-                    {mode === "conditional" && chip.member.when.trim() !== "" ? (
-                      <span data-slot="chip-when" className="max-w-[14rem] truncate text-2xs text-faint" title={chip.member.when}>
-                        when {chip.member.when}
-                      </span>
-                    ) : null}
-                    {chip.fallback ? (
-                      <Badge tone="info" data-slot="chip-fallback">
-                        末位兜底
-                      </Badge>
-                    ) : null}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    data-slot="member-chip-remove"
-                    className={cn(
-                      "inline-flex h-auto items-center rounded-l-none rounded-r-full border border-l-0 px-1.5 py-1",
-                      chip.fallback
-                        ? "border-info/50 bg-info-soft/60 text-info-text hover:bg-danger-soft hover:text-danger-text"
-                        : "border-border bg-surface text-faint hover:bg-danger-soft hover:text-danger-text",
-                    )}
-                    title="移除成员"
-                    aria-label={"移除 " + chip.label}
-                    onClick={() => removeById(chip.member.upstream_model_id)}
-                  >
-                    <ACTION_ICONS.clear aria-hidden="true" className="h-3 w-3" />
-                  </Button>
-                </div>
+            <h4 className="text-2sm font-medium text-title">已选成员</h4>
+            <span className="text-2xs text-faint">
+              共 {members.length} 个成员，{layers.length} 层；{LAYER_NOTES[mode]}
+            </span>
+          </div>
+          <div data-slot="member-scroll" className="max-h-[min(60vh,560px)] overflow-y-auto pr-0.5">
+            {layers.length === 0 ? (
+              <p className="rounded-md border border-dashed border-border p-3 text-2xs text-faint" data-slot="member-empty">
+                暂无成员；从右侧候选区选择上游模型加入。
+              </p>
+            ) : null}
+            <p className="mb-2 text-2xs text-faint">点击 chip 编辑 priority / weight / when。</p>
+            <div className="space-y-2">
+              {layers.map((layer) => (
+                <section
+                  key={layer.priority}
+                  data-slot="member-layer"
+                  data-priority={layer.priority}
+                  className="rounded-md border border-border bg-surface-2/40 p-2"
+                >
+                  <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                    <h4 className="text-2sm font-medium text-title">{layer.title}</h4>
+                    <Badge tone="neutral" className="tnum">
+                      priority {layer.priority}
+                    </Badge>
+                    <span className="text-2xs text-faint">{layer.chips.length} 个成员</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {layer.chips.map((chip) => (
+                      <div key={chip.index} data-slot="member-chip-group" className="inline-flex max-w-full items-stretch">
+                        {/* chip 本体就是「编辑该成员」按钮：点名字、顺序徽标、weight/when 都展开编辑器；移除是相邻的独立按钮（避免按钮嵌套）。 */}
+                        <Button
+                          variant="ghost"
+                          data-slot="member-chip"
+                          data-upstream-model-id={chip.member.upstream_model_id}
+                          data-fallback={chip.fallback ? "true" : "false"}
+                          className={cn(
+                            "inline-flex h-auto max-w-full min-w-0 items-center justify-start gap-1 overflow-hidden rounded-l-full rounded-r-none border border-r-0 px-2 py-1 text-left text-2sm font-normal",
+                            chip.fallback
+                              ? "border-info/50 bg-info-soft text-info-text hover:border-info hover:bg-info-soft"
+                              : "border-border bg-surface text-body hover:border-border-strong hover:bg-surface-2",
+                            editingIndex === chip.index && "ring-1 ring-primary",
+                          )}
+                          title={"编辑 " + chip.label}
+                          aria-label={"编辑成员 " + chip.label}
+                          onClick={() => setEditingIndex(chip.index === editingIndex ? null : chip.index)}
+                        >
+                          {mode === "conditional" ? (
+                            <span
+                              data-slot="chip-order"
+                              className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-surface-2 px-1 text-2xs text-faint tnum"
+                              title={"顺序 " + chip.order}
+                            >
+                              {chip.order}
+                            </span>
+                          ) : null}
+                          <span data-slot="member-chip-label" className="min-w-0 truncate font-mono">
+                            {chip.label}
+                          </span>
+                          {mode === "weighted" ? (
+                            <span data-slot="chip-weight" className="text-2xs text-faint">
+                              weight {chip.member.weight.trim() === "" ? "0" : chip.member.weight}
+                            </span>
+                          ) : null}
+                          {mode === "conditional" && chip.member.when.trim() !== "" ? (
+                            <span data-slot="chip-when" className="max-w-[14rem] truncate text-2xs text-faint" title={chip.member.when}>
+                              when {chip.member.when}
+                            </span>
+                          ) : null}
+                          {chip.fallback ? (
+                            <Badge tone="info" data-slot="chip-fallback">
+                              末位兜底
+                            </Badge>
+                          ) : null}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          data-slot="member-chip-remove"
+                          className={cn(
+                            "inline-flex h-auto items-center rounded-l-none rounded-r-full border border-l-0 px-1.5 py-1",
+                            chip.fallback
+                              ? "border-info/50 bg-info-soft/60 text-info-text hover:bg-danger-soft hover:text-danger-text"
+                              : "border-border bg-surface text-faint hover:bg-danger-soft hover:text-danger-text",
+                          )}
+                          title="移除成员"
+                          aria-label={"移除 " + chip.label}
+                          onClick={() => removeById(chip.member.upstream_model_id)}
+                        >
+                          <ACTION_ICONS.clear aria-hidden="true" className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </section>
               ))}
             </div>
-          </section>
-        ))}
-      </div>
 
-      {editing !== null && editingIndex !== null ? (
-        <MemberChipEditor
-          member={editing}
-          label={labelOf(editing.upstream_model_id)}
-          mode={mode}
-          onChange={(patch) => updateByIndex(editingIndex, patch)}
-          onRemove={() => removeById(editing.upstream_model_id)}
-          onClose={() => setEditingIndex(null)}
-        />
-      ) : null}
+            {editing !== null && editingIndex !== null ? (
+              <div className="mt-2">
+                <MemberChipEditor
+                  member={editing}
+                  label={labelOf(editing.upstream_model_id)}
+                  mode={mode}
+                  onChange={(patch) => updateByIndex(editingIndex, patch)}
+                  onRemove={() => removeById(editing.upstream_model_id)}
+                  onClose={() => setEditingIndex(null)}
+                />
+              </div>
+            ) : null}
 
-      <div data-slot="member-candidates" className="space-y-2 rounded-md border border-border bg-surface p-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <h4 className="text-2sm font-medium text-title">候选成员</h4>
-          <Combobox
-            className="w-64"
-            ariaLabel="搜索上游渠道或模型"
-            placeholder="选择上游模型加入"
-            searchPlaceholder="搜索上游渠道或模型"
-            emptyText="没有匹配的上游模型"
-            value={pick}
-            options={candidateOptions}
-            onChange={setPick}
-          />
-          <Button
-            data-slot="member-candidate-add"
-            variant="outline"
-            size="sm"
-            disabled={pick === ""}
-            onClick={() => {
-              if (pick === "") return;
-              addModel(pick);
-              setPick("");
-            }}
+            {e20Hint !== null ? (
+              <p className="mt-2 text-2xs text-warning-text" data-slot="e20-hint">
+                {e20Hint}
+              </p>
+            ) : null}
+          </div>
+        </section>
+
+        <section data-slot="member-board-right" className="min-w-0 lg:col-span-6">
+          <div
+            data-slot="member-column-head"
+            data-column="right"
+            className="mb-1.5 flex flex-wrap items-center justify-between gap-x-2 gap-y-1"
           >
-            <ACTION_ICONS.add aria-hidden="true" className="h-3.5 w-3.5" /> 加入成员
-          </Button>
-          <span className="text-2xs text-faint">已加入 {members.length} 个成员；priority / weight / when 在 chip 上编辑。</span>
-        </div>
+            <h4 className="text-2sm font-medium text-title">候选成员</h4>
+            <span className="text-2xs text-faint">已加入 {members.length} 个成员</span>
+          </div>
+          <div data-slot="member-scroll" className="max-h-[min(60vh,560px)] overflow-y-auto pr-0.5">
+            <div data-slot="member-candidates" className="space-y-2 rounded-md border border-border bg-surface p-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <Combobox
+                  className="w-64 max-w-full"
+                  ariaLabel="搜索上游渠道或模型"
+                  placeholder="选择上游模型加入"
+                  searchPlaceholder="搜索上游渠道或模型"
+                  emptyText="没有匹配的上游模型"
+                  value={pick}
+                  options={candidateOptions}
+                  onChange={setPick}
+                />
+                <Button
+                  data-slot="member-candidate-add"
+                  variant="outline"
+                  size="sm"
+                  disabled={pick === ""}
+                  onClick={() => {
+                    if (pick === "") return;
+                    addModel(pick);
+                    setPick("");
+                  }}
+                >
+                  <ACTION_ICONS.add aria-hidden="true" className="h-3.5 w-3.5" /> 加入成员
+                </Button>
+              </div>
+              <p className="text-2xs text-faint">priority / weight / when 在左侧成员 chip 上编辑。</p>
+            </div>
+          </div>
+        </section>
       </div>
-
-      {e20Hint !== null ? (
-        <p className="text-2xs text-warning-text" data-slot="e20-hint">
-          {e20Hint}
-        </p>
-      ) : null}
     </div>
   );
 }
