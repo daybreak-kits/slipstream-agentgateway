@@ -104,3 +104,27 @@ def test_prune_is_a_noop_when_the_managed_directory_does_not_exist(tmp_path):
     )
 
     assert result.stale == () and result.deleted == () and result.written == ()
+
+
+def test_prune_only_keeps_whitelist_file_bytes_untouched(adapter):
+    """W6 review P2-1: the cleanup pass prunes without rewriting managed bytes.
+
+    The write phase already put the exact bytes on disk; the post-apply pass
+    must not open/rewrite the whitelist files (a stale mtime/content would race
+    the serving data plane) and must only delete outside files.
+    """
+    ag, keys = adapter
+    current = keys / "ups_a#1.key"
+    current.write_text("tampered-on-disk", encoding="utf-8")
+    stale = _write(keys / "ups_gone#1.key")
+
+    result = ag.materialize_credentials(
+        [CredentialFile(ref="ups_a#1", plaintext="secret")], prune_only=True
+    )
+
+    assert result.written == (), "prune_only 绝不重写"
+    assert result.stale == (str(stale),) and result.deleted == (str(stale),)
+    assert current.read_text(encoding="utf-8") == "tampered-on-disk", (
+        "白名单文件的字节保持原样（写阶段已落盘，不二次重写）"
+    )
+    assert not stale.exists()

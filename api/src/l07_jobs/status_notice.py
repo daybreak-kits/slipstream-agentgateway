@@ -1,9 +1,11 @@
 """Daily status check job (W6 ticket 08): config drift + build version drift.
 
-Once a day (the same cadence as log_cleanup / models_dev_sync) the job runs two
-checks and hands the raw results to the notice store (l05_service.status_notice),
-which decides whether an operator-visible reminder is pushed into the
-notification center via ``GET /admin/system-status``:
+Once a day -- the runner anchors the first pass to just after local midnight
+and the wrapper self-gates on the app_settings last-run date, so a restart or
+a second replica never repeats the pass inside the same local day (W6 review
+P1-1) -- the job runs two checks and hands the raw results to the notice store
+(l05_service.status_notice), which decides whether an operator-visible
+reminder is pushed into the notification center via ``GET /admin/system-status``:
 
 * the latest active config revision's artifact hash vs the data plane's running
   hash (the adapter ``status()`` port). A missing running hash or an unreachable
@@ -28,8 +30,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
 from l01_core.settings import Settings, get_settings
-from l01_core.timeutil import now_ms
+from l01_core.timeutil import local_today, now_ms
 from l04_repo.orm import ConfigRevisionORM
+from l04_repo.repository import get_setting, put_setting
 from l05_service.rollout import RevisionStatus
 from l05_service.status_notice import CONTROL_PLANE_VERSION, apply_check_result
 from l06_api.adapter_factory import make_adapter
@@ -39,6 +42,9 @@ LOGGER = logging.getLogger("slipstream.jobs")
 
 #: Daily housekeeping cadence, same as log_cleanup / models_dev_sync.
 STATUS_CHECK_INTERVAL_S = 24 * 3600
+
+#: app_settings key recording the last-run local date (restart/multi-replica gate).
+STATUS_CHECK_LAST_RUN_KEY = "daily_status_check_last_run"
 
 #: Neutral check ids reported in the notice payload.
 CHECK_CONFIG_HASH = "config_hash"
@@ -50,6 +56,7 @@ __all__ = [
     "CHECK_CONFIG_HASH",
     "CHECK_FRONTEND_VERSION",
     "STATUS_CHECK_INTERVAL_S",
+    "STATUS_CHECK_LAST_RUN_KEY",
     "frontend_build_version",
     "make_status_check_job",
     "run_status_check",
@@ -169,10 +176,24 @@ def run_status_check(
 def make_status_check_job(
     session_factory: sessionmaker, settings: Settings | None = None
 ) -> Callable[[], Awaitable[dict]]:
-    """Coroutine factory registered with the JobRunner (daily cadence)."""
+    """Coroutine factory registered with the JobRunner (daily cadence).
+
+    The pass body is :func:`run_status_check`; this wrapper records the last-run
+    local date under ``STATUS_CHECK_LAST_RUN_KEY`` so a restart or a second
+    replica never repeats the pass inside the same local day (W6 review P1-1).
+    """
     resolved = settings or get_settings()
 
     async def _job() -> dict:
-        return run_status_check(session_factory, resolved)
+        with session_factory() as session:
+            last_run_date = get_setting(session, STATUS_CHECK_LAST_RUN_KEY)
+        if last_run_date == local_today():
+            LOGGER.info("daily status check already ran today (%s); skipping", last_run_date)
+            return {"skipped": True}
+        result = run_status_check(session_factory, resolved)
+        with session_factory() as session:
+            put_setting(session, STATUS_CHECK_LAST_RUN_KEY, local_today(), now_ms())
+            session.commit()
+        return result
 
     return _job

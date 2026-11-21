@@ -32,7 +32,7 @@ class _ScriptedAdapter:
         return ValidationResult(ok=True)
 
     def materialize_credentials(
-        self, files, *, dry_run: bool = False, prune: bool = True
+        self, files, *, dry_run: bool = False, prune: bool = True, prune_only: bool = False
     ) -> MaterializationResult:
         return MaterializationResult(
             dry_run=dry_run,

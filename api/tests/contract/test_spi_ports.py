@@ -253,6 +253,9 @@ def test_mock_driver_ports_are_inert_but_usable() -> None:
     assert adapter.client_contract().endpoints == ()
     assert adapter.prune_logs(30) == {"request_logs": 0, "request_log_payloads": 0}
     assert adapter.materialize_credentials([]).written == ()
+    assert adapter.materialize_credentials(
+        [CredentialFile(ref="ups_a#1", plaintext="secret-a")], prune_only=True
+    ).written == ()
     assert adapter.capability_note("routing.priority_failover") == ""
     assert adapter.start_telemetry(None, lambda attempts: 0) is None
     adapter.stop_telemetry(None)

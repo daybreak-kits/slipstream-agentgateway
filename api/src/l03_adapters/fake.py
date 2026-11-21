@@ -259,18 +259,31 @@ class FakeAdapter:
         *,
         dry_run: bool = False,
         prune: bool = True,
+        prune_only: bool = False,
     ) -> MaterializationResult:
         requested = {file.ref: file.plaintext for file in files}
-        stale = tuple(sorted(set(self._credentials) - set(requested))) if prune else ()
+        stale = (
+            tuple(sorted(set(self._credentials) - set(requested)))
+            if (prune or prune_only)
+            else ()
+        )
         if dry_run:
             return MaterializationResult(dry_run=True, stale=stale)
-        if prune:
+        if prune_only:
+            # Cleanup-only pass: drop the stale refs, keep the whitelist entries'
+            # stored values untouched (their bytes are already materialized).
+            self._credentials = {
+                ref: plaintext
+                for ref, plaintext in self._credentials.items()
+                if ref in requested
+            }
+        elif prune:
             self._credentials = requested
         else:
             # Write phase only: keep the managed refs the cleanup pass will prune.
             self._credentials = {**self._credentials, **requested}
         return MaterializationResult(
-            written=tuple(file.ref for file in files),
+            written=() if prune_only else tuple(file.ref for file in files),
             stale=stale,
             deleted=stale,
         )

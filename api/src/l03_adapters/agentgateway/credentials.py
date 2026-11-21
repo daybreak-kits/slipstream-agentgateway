@@ -52,6 +52,7 @@ def materialize(
     *,
     dry_run: bool = False,
     prune: bool = True,
+    prune_only: bool = False,
 ) -> MaterializationResult:
     """Write credential files, then prune managed *.key files outside the whitelist.
 
@@ -60,8 +61,10 @@ def materialize(
     directory, never touches non-.key files or symlinks, and per-file failures
     are reported instead of raised so an apply can log and continue.
     ``prune=False`` writes only and leaves the whitelist cleanup for the
-    follow-up full pass (the rollout materializes before its apply gate and
-    prunes after the apply succeeded).
+    follow-up pass (the rollout materializes before its apply gate);
+    ``prune_only=True`` runs that cleanup pass WITHOUT rewriting the whitelist
+    files -- their bytes are already on disk from the write phase (W6 review
+    P2-1).
     """
     targets: list[tuple[str, str]] = []
     for file in files:
@@ -70,32 +73,33 @@ def materialize(
             targets.append((path, file.plaintext))
     whitelist = {_identity(path) for path, _ in targets}
     managed = _managed_dir(config_dir)
-    stale = _stale_files(managed, whitelist) if prune else []
+    stale = _stale_files(managed, whitelist) if (prune or prune_only) else []
     if dry_run:
         return MaterializationResult(dry_run=True, stale=tuple(stale))
 
     written: list[str] = []
     failed: list[str] = []
-    for path, plaintext in targets:
-        try:
-            directory = os.path.dirname(path)
-            if directory:
-                os.makedirs(directory, exist_ok=True)
-            fd, tmp_path = tempfile.mkstemp(dir=directory or ".", suffix=".tmp")
+    if not prune_only:  # cleanup-only pass: the whitelist bytes stay untouched
+        for path, plaintext in targets:
             try:
-                with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-                    handle.write(plaintext)
-                os.replace(tmp_path, path)
-            except BaseException:
+                directory = os.path.dirname(path)
+                if directory:
+                    os.makedirs(directory, exist_ok=True)
+                fd, tmp_path = tempfile.mkstemp(dir=directory or ".", suffix=".tmp")
                 try:
-                    os.remove(tmp_path)
-                except OSError:
-                    pass
-                raise
-        except OSError:
-            failed.append(path)
-        else:
-            written.append(path)
+                    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+                        handle.write(plaintext)
+                    os.replace(tmp_path, path)
+                except BaseException:
+                    try:
+                        os.remove(tmp_path)
+                    except OSError:
+                        pass
+                    raise
+            except OSError:
+                failed.append(path)
+            else:
+                written.append(path)
 
     deleted: list[str] = []
     for path in stale:

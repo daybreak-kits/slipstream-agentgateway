@@ -134,8 +134,9 @@ class MockAdapter:
         *,
         dry_run: bool = False,
         prune: bool = True,
+        prune_only: bool = False,
     ) -> MaterializationResult:
-        written = tuple(file.ref for file in files)
+        written = () if prune_only else tuple(file.ref for file in files)
         return MaterializationResult(dry_run=dry_run, written=written if not dry_run else ())
 
     def client_contract(self) -> ClientContract:

@@ -431,8 +431,11 @@ class AgentgatewayAdapter:
         *,
         dry_run: bool = False,
         prune: bool = True,
+        prune_only: bool = False,
     ) -> MaterializationResult:
-        return credentials.materialize(self._config_dir, files, dry_run=dry_run, prune=prune)
+        return credentials.materialize(
+            self._config_dir, files, dry_run=dry_run, prune=prune, prune_only=prune_only
+        )
 
     def client_contract(self) -> ClientContract:
         return ClientContract(
