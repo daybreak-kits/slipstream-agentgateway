@@ -1480,7 +1480,7 @@ check("成员编排：展示名统一「上游渠道/模型」，术语不单用
   const flow = read("src/components/models/member-chip-flow.tsx");
   includesAll(
     flow,
-    ["第 ", "搜索上游渠道或模型", 'data-slot="member-layer"', 'data-slot="member-chip"', 'data-slot="member-candidate-add"', "@/components/ui/combobox", "@/components/ui/button", "末位兜底"],
+    ["第 ", "搜索上游渠道或模型", 'data-slot="member-layer"', 'data-slot="member-row"', 'data-slot="member-candidate-chip"', "@/components/ui/button", "末位兜底"],
     "成员 chip 流结构",
   );
   for (const file of [
@@ -1732,6 +1732,33 @@ check("成员编排容器：桌面左6右6栅格、两栏 min(60vh,560px) 内部
     ],
     "成员编排两栏容器",
   );
+});
+
+// ---------- 十、公开模型成员编排行内编辑与分组候选（W6 ticket 15）----------
+check("成员编排行内编辑：行内字段按策略收敛、候选按上游分组 chip、搜索固定滚动区外", () => {
+  const flow = read("src/components/models/member-chip-flow.tsx");
+  // 行内编辑：priority 常驻；weight 仅 weighted、when 仅 conditional——其余模式的字段
+  // 完全不渲染（不是 disabled 摆着误导），票15 的核心契约。
+  includesAll(
+    flow,
+    ['data-slot="member-row"', 'aria-label="priority"', 'aria-label="weight"', 'aria-label="when"', 'data-slot="member-row-remove"'],
+    "行内编辑行",
+  );
+  expect(!flow.includes("@/components/ui/combobox"), "候选区不得再用 Combobox 单控件（票15 换按上游分组 chip）");
+  expect(!flow.includes("MemberChipEditor"), "行内编辑直接落在成员行上，不得保留点击展开式编辑器");
+  // 候选：按上游渠道分组渲染（candidateGroups + filterCandidateGroups 复用），chip 点击即加入。
+  includesAll(
+    flow,
+    ["candidateGroups(", "filterCandidateGroups(", 'data-slot="member-candidate-group"', 'data-slot="member-candidate-chip"', "加入成员"],
+    "候选分组 chip",
+  );
+  // 搜索框固定在滚动区外：右栏里搜索框必须出现在 member-scroll 之前（列头槽位）。
+  const right = flow.slice(flow.indexOf('data-slot="member-board-right"'));
+  const searchAt = right.indexOf('aria-label="搜索上游渠道或模型"');
+  const scrollAt = right.indexOf('data-slot="member-scroll"');
+  expect(searchAt >= 0 && scrollAt > searchAt, "候选搜索框必须渲染在 member-scroll 之前（固定在滚动区外）");
+  // 大列表：候选超预算截断渲染并提供「展开全部」，避免上千模型把页面拉到无限长。
+  includesAll(flow, ["CANDIDATE_CHIP_BUDGET", "展开全部"], "大列表预算截断");
 });
 
 // ---------- run ----------
