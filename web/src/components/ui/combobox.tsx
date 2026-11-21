@@ -104,7 +104,7 @@ export function Combobox({
             aria-label={ariaLabel ?? placeholder}
             className={cn(
               "flex h-9 w-full items-center gap-2 rounded-md border border-border bg-surface px-3 text-left text-sm text-title transition-colors hover:bg-surface-2 focus-visible:border-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-bg",
-              highlighted && "filter-dirty border-primary/70 bg-primary/15/40",
+              highlighted && "filter-dirty border-warning",
             )}
           >
                 <span

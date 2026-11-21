@@ -34,6 +34,8 @@ export interface TimeRangePickerProps {
   value: TimeWindow;
   onChange: (next: TimeWindow) => void;
   className?: string;
+  /** 草稿窗口与已生效窗口不同：触发按钮加黄边（W7 日志筛选 dirty 视觉）。 */
+  highlighted?: boolean;
 }
 
 function pad2(value: number): string {
@@ -58,7 +60,7 @@ function msToTime(ms: number): string {
  * 预设 近24小时/近7天/近30天/今天 走 range 枚举，本周/本月/自定义落成 {kind:"custom",fromMs,toMs}；
  * 弹层内日历选起止日 + HH:mm，两个小按钮：「此刻」= 开始日 00:00 → 当前时刻，「零点」= 开始日 00:00 → 结束日次日 00:00。
  */
-export function TimeRangePicker({ value, onChange, className }: TimeRangePickerProps) {
+export function TimeRangePicker({ value, onChange, className, highlighted = false }: TimeRangePickerProps) {
   const [open, setOpen] = useState(false);
   const [days, setDays] = useState<DateRange | undefined>(undefined);
   const [startTime, setStartTime] = useState(DEFAULT_START_TIME);
@@ -177,7 +179,10 @@ export function TimeRangePicker({ value, onChange, className }: TimeRangePickerP
             size="md"
             aria-haspopup="dialog"
             aria-label={`时间区间：${timeWindowLabel(value)}`}
-            className="max-w-full gap-2 px-3"
+            className={cn(
+              "max-w-full gap-2 px-3",
+              highlighted && "filter-dirty border-warning",
+            )}
           >
             <CalendarDays className="h-3.5 w-3.5 shrink-0 text-faint" strokeWidth={1.75} aria-hidden="true" />
             <span className="min-w-0 truncate tabular-nums">{timeWindowLabel(value)}</span>
