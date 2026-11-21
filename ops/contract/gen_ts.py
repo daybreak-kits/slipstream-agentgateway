@@ -95,6 +95,11 @@ def _ts_type(spec: dict[str, Any]) -> str:
     if kind == "array":
         item = _ts_type(spec.get("items", {}))
         return f"({item})[]" if " | " in item or " & " in item else f"{item}[]"
+    if kind == "object" and isinstance(spec.get("additionalProperties"), dict):
+        # Pydantic dict[str, Model] serializes as additionalProperties $ref
+        # (W6 t17: flow node_meta) — map it instead of degrading to unknown.
+        value = _ts_type(spec["additionalProperties"])
+        return f"Record<string, {value}>"
     if kind == "object":
         properties = spec.get("properties")
         if not properties:

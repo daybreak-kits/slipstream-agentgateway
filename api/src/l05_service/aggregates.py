@@ -1047,6 +1047,109 @@ def _heatmap_row(mode: str, day_key: int, row_index: dict) -> int | None:
 # ---------------------------------------------------------------------- flow
 
 
+def _flow_adjacency(
+    links: dict[tuple[str, str], dict[str, int]],
+) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    out: dict[str, list[str]] = {}
+    inn: dict[str, list[str]] = {}
+    for source, target in links:
+        out.setdefault(source, []).append(target)
+        inn.setdefault(target, []).append(source)
+    return out, inn
+
+
+def _flow_closure(links: dict[tuple[str, str], dict[str, int]], seeds: set[str]) -> set[str]:
+    """祖先 + 后代闭包（种子为空时闭包为空）。
+
+    两个方向各自单向扩展：祖先只沿入边向上走、后代只沿出边向下走，
+    不会从祖先继续探它的其他下游（否则闭包退化为整个连通分量）。
+    """
+    if not seeds:
+        return set()
+    out, inn = _flow_adjacency(links)
+    closure = set(seeds)
+    frontier = list(seeds)
+    while frontier:
+        node_id = frontier.pop()
+        for neighbour in inn.get(node_id, ()):
+            if neighbour not in closure:
+                closure.add(neighbour)
+                frontier.append(neighbour)
+    frontier = list(seeds)
+    while frontier:
+        node_id = frontier.pop()
+        for neighbour in out.get(node_id, ()):
+            if neighbour not in closure:
+                closure.add(neighbour)
+                frontier.append(neighbour)
+    return closure
+
+
+def _flow_keep_subgraph(
+    links: dict[tuple[str, str], dict[str, int]],
+    node_meta: dict[str, dict],
+    keep: set[str],
+) -> tuple[dict[tuple[str, str], dict[str, int]], dict[str, dict]]:
+    """只保留闭包内节点与其之间的聚合边；边值维持窗口聚合口径，不改写。"""
+    kept_links = {
+        pair: slot for pair, slot in links.items() if pair[0] in keep and pair[1] in keep
+    }
+    kept_meta = {node_id: meta for node_id, meta in node_meta.items() if node_id in keep}
+    return kept_links, kept_meta
+
+
+def _flow_fold_tail(
+    links: dict[tuple[str, str], dict[str, int]],
+    node_meta: dict[str, dict],
+    node_values: dict[str, int],
+    top_n: int,
+    visible_stages: Sequence[str],
+) -> tuple[dict[tuple[str, str], dict[str, int]], dict[str, dict]]:
+    """top_n 折尾：每阶段按 (value desc, label asc, id asc) 保留前 n 个节点，
+    其余折叠成 other:<stage> 聚合节点。折叠只重挂边的端点，每条路径贡献的
+    边数不变，因此链路请求/词元与首末边的金额锚定全部守恒。"""
+    by_stage: dict[str, list[str]] = {}
+    for node_id, meta in node_meta.items():
+        by_stage.setdefault(meta["stage"], []).append(node_id)
+    remap: dict[str, str] = {}
+    absorbed: dict[str, int] = {}
+    for stage in visible_stages:
+        stage_nodes = by_stage.get(stage, [])
+        if len(stage_nodes) <= top_n:
+            continue
+        ranked = sorted(
+            stage_nodes,
+            key=lambda node_id: (
+                -node_values.get(node_id, 0),
+                node_meta[node_id]["label"],
+                node_id,
+            ),
+        )
+        dropped = ranked[top_n:]
+        other_id = _OTHER_PREFIX + stage
+        remap.update((node_id, other_id) for node_id in dropped)
+        absorbed[other_id] = sum(node_values.get(node_id, 0) for node_id in dropped)
+    if not absorbed:
+        return links, node_meta
+    folded: dict[tuple[str, str], dict[str, int]] = {}
+    for (source, target), slot in links.items():
+        pair = (remap.get(source, source), remap.get(target, target))
+        merged = folded.setdefault(
+            pair, {"requests": 0, "tokens": 0, "cost_micro": 0, "charge_micro": 0}
+        )
+        for field in ("requests", "tokens", "cost_micro", "charge_micro"):
+            merged[field] += slot[field]
+    kept_meta = {node_id: meta for node_id, meta in node_meta.items() if node_id not in remap}
+    for other_id, value in absorbed.items():
+        kept_meta[other_id] = {
+            "id": other_id,
+            "label": "其他",
+            "stage": other_id[len(_OTHER_PREFIX) :],
+        }
+        node_values[other_id] = value
+    return folded, kept_meta
+
+
 def build_flow(
     session: Session,
     *,
@@ -1054,6 +1157,9 @@ def build_flow(
     to_ms: int,
     metric: str = "requests",
     collapse: Sequence[str] | None = None,
+    focus: str = "",
+    q: str = "",
+    top_n: int = 0,
 ) -> dict:
     """Five-stage Sankey: 用户 -> 连接密钥 -> 公开模型 -> 上游模型 -> 上游.
 
@@ -1070,6 +1176,23 @@ def build_flow(
     conserved, charge anchors on the first visible edge, cost on the last, and
     totals fold the full path once. With no collapse the payload is the legacy
     five-stage output unchanged.
+
+    W6 ticket 17 adds three optional narrowing params for production-scale
+    graphs (tens of thousands of keys); every default/blank value is a no-op
+    and keeps the wire output byte-identical (pinned by the collapse golden):
+
+    * q: case-insensitive substring over node labels; the subgraph keeps every
+      match plus its ancestor+descendant closure on the aggregated graph.
+    * focus: a node id; same closure for that single node (an unknown id yields
+      an empty subgraph; stages/totals stay window-wide either way).
+    * top_n: per visible stage keep the top-n nodes by metric value and fold
+      the tail into one synthetic ``other:<stage>`` node; folding only rehomes
+      edge endpoints so per-path edge counts and money anchors are conserved.
+
+    Order: collapse projection -> q -> focus -> top_n, so a search chain is
+    never clipped by top_n. Edge values keep their aggregated window calibre
+    inside the subgraph (identical to what the frontend highlight shows on the
+    same data); totals always equal the full window.
     """
     canonical = canonical_metric(metric)
     if canonical not in ("requests", "tokens"):
@@ -1170,6 +1293,28 @@ def build_flow(
         step = requests if canonical == "requests" else tokens
         for visible_id in visible_nodes:
             node_values[visible_id] = node_values.get(visible_id, 0) + step
+
+    # W6 t17 可选收窄（q → focus → top_n）；三个参数全空时是 no-op，默认输出不变。
+    needle = (q or "").strip().casefold()
+    if needle:
+        seeds = {
+            node_id
+            for node_id, meta in node_meta.items()
+            if needle in str(meta["label"]).casefold()
+        }
+        links, node_meta = _flow_keep_subgraph(links, node_meta, _flow_closure(links, seeds))
+    focus_id = (focus or "").strip()
+    if focus_id:
+        seeds = {focus_id} if focus_id in node_meta else set()
+        links, node_meta = _flow_keep_subgraph(links, node_meta, _flow_closure(links, seeds))
+    if top_n > 0:
+        links, node_meta = _flow_fold_tail(
+            links,
+            node_meta,
+            node_values,
+            top_n,
+            [_FLOW_STAGES[index][0] for index in visible],
+        )
 
     link_rows = []
     for (source, target), slot in links.items():

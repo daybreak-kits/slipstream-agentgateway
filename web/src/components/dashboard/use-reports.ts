@@ -122,22 +122,40 @@ export interface FlowParams {
   metric: "requests" | "tokens";
   /** 被隐藏的阶段 id；后端按完整五元组路径投影后返回可见子图。 */
   collapse?: string[];
+  /** focus 节点 id：只保留该节点前后整条链（W6 票 17，后端聚合过滤）。 */
+  focus?: string;
+  /** q 标签子串：大量节点时由后端过滤，前端不再硬算。 */
+  q?: string;
+  /** top_n：每段保留前 n 个节点、尾段折为 other:<stage>（0=关）。 */
+  topN?: number;
   enabled?: boolean;
 }
 
 /** 分流：五段桑基（用户 → 密钥 → 公开模型 → 上游模型 → 上游渠道）。 */
-export function useReportsFlow({ window, metric, collapse = [], enabled = true }: FlowParams) {
+export function useReportsFlow({
+  window,
+  metric,
+  collapse = [],
+  focus = "",
+  q = "",
+  topN = 0,
+  enabled = true,
+}: FlowParams) {
   // 隐藏集合是集合语义：排序后再进查询键/参数，同一组隐藏阶段命中同一份缓存。
   const hidden = [...collapse].sort().join(",");
+  const narrowedKey = `${hidden}|${focus.trim()}|${q.trim()}|${topN}`;
   return useQuery({
-    queryKey: ["reports", "flow", ...timeWindowKey(window), metric, hidden],
+    queryKey: ["reports", "flow", ...timeWindowKey(window), metric, narrowedKey],
     enabled,
     placeholderData: keepPreviousData,
     queryFn: async ({ signal }): Promise<FlowReport> => {
-      if (useMock) return mockFlow(metric, collapse);
+      if (useMock) return mockFlow(metric, collapse, { focus, q, topN });
       const params = windowParams(window);
       params.set("metric", metric);
       if (hidden) params.set("collapse", hidden);
+      if (focus.trim()) params.set("focus", focus.trim());
+      if (q.trim()) params.set("q", q.trim());
+      if (topN > 0) params.set("top_n", String(topN));
       return api.get<FlowReport>(REPORT_PATHS.flow + "?" + params.toString(), { signal });
     },
   });
