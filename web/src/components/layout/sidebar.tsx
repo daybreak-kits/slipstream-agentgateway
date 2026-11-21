@@ -30,7 +30,17 @@ export function BrandLockup({ collapsed }: { collapsed: boolean }) {
   );
 }
 
-export function Sidebar({ collapsed }: { collapsed: boolean }) {
+export function Sidebar({
+  collapsed,
+  className,
+  onNavigate,
+}: {
+  collapsed: boolean;
+  /** 移动抽屉里用 w-full 填满抽屉，桌面仍由 w-sidebar/w-18 控制。 */
+  className?: string;
+  /** 移动抽屉点击导航后关闭；桌面无副作用。 */
+  onNavigate?: () => void;
+}) {
   const { can } = usePermissions();
   const location = useLocation();
   const visibleSections = NAV_SECTIONS.map((section) => ({
@@ -40,9 +50,11 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
 
   return (
     <aside
+      data-testid="app-sidebar"
       className={cn(
-        "flex h-full shrink-0 flex-col border-r border-border bg-surface transition-[width] duration-200",
+        "flex h-full min-w-0 shrink-0 flex-col border-r border-border bg-surface transition-[width] duration-200",
         collapsed ? "w-18" : "w-sidebar",
+        className,
       )}
     >
       <BrandLockup collapsed={collapsed} />
@@ -73,6 +85,7 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
                       to={target}
                       end={target === "/"}
                       title={item.label}
+                      onClick={onNavigate}
                       className={({ isActive }) =>
                         cn(
                           "relative flex items-center rounded-control py-2 text-2sm transition-colors",
@@ -119,6 +132,7 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
                             <NavLink
                               to={child.path}
                               title={child.label}
+                              onClick={onNavigate}
                               className={({ isActive }) =>
                                 cn(
                                   "block truncate rounded-control px-2 py-1 text-2xs transition-colors",

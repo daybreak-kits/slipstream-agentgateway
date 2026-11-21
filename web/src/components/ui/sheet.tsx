@@ -40,21 +40,36 @@ const SheetOverlay = React.forwardRef<
 ))
 SheetOverlay.displayName = SheetPrimitive.Overlay.displayName
 
+/**
+ * 抽屉宽度统一走 --drawer-w token（W6 ticket 09）：
+ * - <sm：全宽；
+ * - ≥sm：min(档位宽度, 100vw - 2rem)，任何档位都不允许固定 px 超出视口；
+ * - 高度用 h-dvh，避免 iOS 地址栏/键盘把 footer 顶出屏幕。
+ */
 const sheetVariants = cva(
   "fixed z-[var(--z-modal)] gap-4 bg-surface p-6 shadow-pop transition ease-in-out data-[state=closed]:duration-300 data-[state=open]:duration-500 data-[state=open]:animate-in data-[state=closed]:animate-out",
   {
     variants: {
       side: {
-        top: "inset-x-0 top-0 border-b data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top",
+        top: "inset-x-0 top-0 max-h-dvh border-b data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top",
         bottom:
-          "inset-x-0 bottom-0 border-t data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
-        left: "inset-y-0 left-0 h-full w-3/4 border-r data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left sm:max-w-sm",
+          "inset-x-0 bottom-0 max-h-dvh border-t data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
+        left:
+          "inset-y-0 left-0 h-dvh w-full border-r data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left sm:w-[min(var(--drawer-w,24rem),calc(100vw-2rem))]",
         right:
-          "inset-y-0 right-0 h-full w-3/4 border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:max-w-sm",
+          "inset-y-0 right-0 h-dvh w-full border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:w-[min(var(--drawer-w,24rem),calc(100vw-2rem))]",
+      },
+      size: {
+        sm: "[--drawer-w:20rem]",
+        md: "[--drawer-w:24rem]",
+        lg: "[--drawer-w:32rem]",
+        xl: "[--drawer-w:48rem]",
+        full: "[--drawer-w:100vw]",
       },
     },
     defaultVariants: {
       side: "right",
+      size: "md",
     },
   }
 )
@@ -69,7 +84,7 @@ interface SheetContentProps
 const SheetContent = React.forwardRef<
   React.ElementRef<typeof SheetPrimitive.Content>,
   SheetContentProps
->(({ side = "right", className, children, showCloseButton = true, onCloseAutoFocus, ...props }, ref) => {
+>(({ side = "right", size = "md", className, children, showCloseButton = true, onCloseAutoFocus, ...props }, ref) => {
   // A 类受控行为：受控打开（没有 DialogTrigger）时，关闭后由基元把焦点还给打开它的控件。
   const handleCloseAutoFocus = useDialogOpenerRestore(onCloseAutoFocus)
   return (
@@ -78,7 +93,7 @@ const SheetContent = React.forwardRef<
     <SheetPrimitive.Content
       ref={ref}
       onCloseAutoFocus={handleCloseAutoFocus}
-      className={cn(sheetVariants({ side }), className)}
+      className={cn(sheetVariants({ side, size }), className)}
       {...props}
     >
       {showCloseButton && (
@@ -114,7 +129,7 @@ const SheetFooter = ({
 }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
     className={cn(
-      "flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2",
+      "flex flex-col-reverse gap-2 sm:flex-row sm:justify-end",
       className
     )}
     {...props}
