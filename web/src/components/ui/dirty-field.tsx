@@ -18,8 +18,10 @@ export interface DirtyFieldProps extends Omit<HTMLAttributes<HTMLDivElement>, "c
 }
 
 /**
- * 字段级脏标记（spec §7）：左侧 2px 警示条 + 浅琥珀底 + 行内「● 已修改」点 + 恢复该项。
- * 只标已修改字段——整表高亮是噪音；保存成功后由父级回填 baseline 自然清除。
+ * 字段级脏标记（W6 ticket 14 重做）：变脏只换背景色，标记槽绝对定位挂在字段
+ * 右上角——不加左 padding、不在文档流里插下方行，任何字段变脏都不改变自身与
+ * 后续元素的位置/尺寸（布局零位移）。只标已修改字段——整表高亮是噪音；保存
+ * 成功后由父级回填 baseline 自然清除。
  */
 export function DirtyField({
   dirty,
@@ -35,7 +37,7 @@ export function DirtyField({
       data-dirty={dirty ? "true" : "false"}
       className={cn(
         "relative rounded-control transition-colors",
-        dirty && "bg-warning-soft/60 pl-2.5",
+        dirty && "bg-warning-soft/60",
         className,
       )}
       {...rest}
@@ -44,14 +46,14 @@ export function DirtyField({
         <span
           aria-hidden="true"
           data-slot="dirty-bar"
-          className="absolute inset-y-0 left-0 w-0.5 rounded-full bg-warning"
+          className="pointer-events-none absolute inset-y-0 left-0 w-0.5 rounded-full bg-warning"
         />
       ) : null}
       {children}
       {dirty ? (
         <div
           data-slot="dirty-marker"
-          className="mt-0.5 flex items-center gap-1 text-2xs text-warning-text"
+          className="absolute right-1 top-0 z-[var(--z-sticky-column)] flex h-5 -translate-y-1/2 items-center gap-0.5 rounded-badge border border-warning/50 bg-surface px-1 text-2xs text-warning-text shadow-xs"
         >
           <span aria-hidden="true">●</span>
           <span>已修改</span>
@@ -59,7 +61,7 @@ export function DirtyField({
             <Button
               variant="ghost"
               size="dense"
-              className="h-5 gap-0.5 px-1 text-2xs text-warning-text hover:bg-warning-soft hover:text-warning-text"
+              className="h-4 gap-0.5 px-0.5 text-2xs text-warning-text hover:bg-warning-soft hover:text-warning-text"
               onClick={onReset}
               title={resetLabel}
               aria-label={resetLabel}

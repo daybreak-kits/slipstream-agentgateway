@@ -701,10 +701,13 @@ check("PublicModelPageView：单页三段 + 页头 h1/状态/脏标记 + 唯一�
   expect(saveButtons.length === 1, "整页只能有一个保存按钮，实际 " + saveButtons.length);
   expect(!html.includes("保存整页"), "旧「保存整页」文案必须移除");
   expect(!html.includes("保存成员"), "旧成员保存按钮必须移除");
-  const summaryStart = html.indexOf('data-slot="public-model-summary"');
-  const footerStart = html.indexOf('data-slot="dirty-footer"');
-  expect(summaryStart >= 0 && footerStart > summaryStart, "只读摘要必须有独立容器且位于底部动作条之前");
-  const summaryHtml = html.slice(summaryStart, footerStart);
+  // ticket 14：保存/状态/未保存数量固定页头（sticky），不再有底部动作条。
+  const headStart = html.indexOf('data-slot="page-head"');
+  const headerSave = html.indexOf('data-slot="header-save"');
+  expect(headStart >= 0 && headerSave > headStart, "保存/状态/未保存数量必须固定在 sticky 页头（data-slot=header-save）");
+  const summaryStart = html.indexOf('data-slot="readonly-summary"');
+  const summaryHtml = html.slice(summaryStart);
+  expect(summaryStart > headerSave, "只读摘要折叠容器必须在页头之后（不占主编辑区）");
   expect(!/<input|<textarea|<select/i.test(summaryHtml), "只读摘要内不得有可编辑控件");
   includesAll(summaryHtml, ["priority", "冷却", "上游模型"], "只读摘要必须说明渲染语义与冷却归属");
 });
@@ -800,7 +803,10 @@ check("接线：公开模型编辑器单页（无 Tab、单 PATCH、双权限、
   includesAll(text, ["api.patch", "patchPayloadOf"], "保存必须走单 PATCH 且携带 targets");
   const page = read("src/components/models/public-model-page.tsx");
   expect(!page.includes("Tabs"), "单页视图不得使用 Tabs");
-  expect(page.includes("DirtySaveButton") && page.includes("DirtyFooter"), "单页视图必须用统一脏表单动作条");
+  expect(
+    page.includes("DirtySaveButton") && page.includes("DirtySummary") && !page.includes("DirtyFooter"),
+    "保存/状态/未保存数量必须固定页头（ticket 14 后公开模型页不再用底部 DirtyFooter）",
+  );
 });
 
 // ---------- 9. 公开模型成员编排 chip 流（W5 ticket 14） ----------

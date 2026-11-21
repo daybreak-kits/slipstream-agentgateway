@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ChevronDown } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { SectionCard } from "@/components/governance/panel";
@@ -18,7 +18,7 @@ import {
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { DirtyCountBadge, DirtyField, DirtyFooter, DirtySaveButton } from "@/components/ui/dirty-field";
+import { DirtyCountBadge, DirtyField, DirtySaveButton, DirtySummary } from "@/components/ui/dirty-field";
 import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { formatDateTime, useTimezone } from "@/lib/time";
@@ -26,13 +26,13 @@ import type { DirtyFieldsState } from "@/lib/use-dirty-fields";
 import type { PublicModel, RoutingMode, UpstreamModel } from "@/types";
 
 /**
- * 公开模型单页编辑器的展示层（ticket 13）：一页三段（基本信息 / 成员编排 /
- * 只读摘要），页头 h1 + 状态 + 脏标记，底部只有一个「保存」。
+ * 公开模型单页编辑器的展示层（ticket 13 落地，W6 ticket 14 紧凑化重排）：
+ * 保存、状态、未保存数量固定在 sticky 页头（不必滚到底）；基本信息三列
+ * （名称/备注/启用）、策略三张横向卡片；只读摘要折叠（details）不占主编辑区；
+ * 成员编排是左 6 右 6 的两栏容器（内部滚动，见 MemberChipFlow）。
  *
  * 容器（public-model-editor.tsx）负责取数、草稿与单 PATCH 提交；这里只接收
- * props 渲染用户能看到的 DOM，SSR 门禁（check-semantic-dirty.mjs 第 9 段）直接
- * 断言这份 DOM，不进入组件内部状态。成员编排是 ticket 14 的分层 chip 流：
- * 成员名统一「上游渠道/模型」，点击 chip 编辑 priority/weight/when。
+ * props 渲染用户能看到的 DOM，SSR 门禁直接断言这份 DOM，不进入组件内部状态。
  */
 export interface PublicModelPageViewProps {
   model: PublicModel;
@@ -111,17 +111,37 @@ export function PublicModelPageView({
         <ArrowLeft className="h-3.5 w-3.5" /> 返回模型管理
       </Link>
 
-      <PageHeader
-        title={form.name.trim() || model.name}
-        description="公开模型 · 一次保存提交基本信息、策略、启用与成员；服务端单事务，失败整页回滚。"
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge tone="primary">{routing.label}</Badge>
-            <Badge tone={statusTone}>{statusText}</Badge>
-            <DirtyCountBadge count={dirty.dirtyCount} />
-          </div>
-        }
-      />
+      {/* sticky 页头：保存/状态/未保存数量固定在这里，长页不必滚到底（main 是滚动容器）。 */}
+      <header
+        data-slot="page-head"
+        className="sticky top-0 z-[var(--z-sticky)] -mx-4 border-b border-border bg-surface px-4 pb-3 pt-2 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8"
+      >
+        <PageHeader
+          title={form.name.trim() || model.name}
+          description="公开模型 · 一次保存提交基本信息、策略、启用与成员；服务端单事务，失败整页回滚。"
+          actions={
+            <div className="flex flex-wrap items-center gap-2" data-slot="header-save">
+              <Badge tone="primary">{routing.label}</Badge>
+              <Badge tone={statusTone}>{statusText}</Badge>
+              <DirtyCountBadge count={dirty.dirtyCount} />
+              <DirtySummary count={dirty.dirtyCount} onResetAll={onResetAll} saving={saving} />
+              {blockedReasons.length > 0 ? (
+                <span className="text-2xs text-danger-text" data-slot="save-blocked" title={blockedReasons.join("；")}>
+                  {blockedReasons.join("；")}
+                </span>
+              ) : null}
+              <DirtySaveButton
+                dirty={dirty.isDirty}
+                pending={saving}
+                disabled={controlsDisabled || formErrors.length > 0}
+                onClick={onSave}
+              >
+                保存
+              </DirtySaveButton>
+            </div>
+          }
+        />
+      </header>
 
       {readOnly ? (
         <Alert variant="warning" data-slot="permission-alert">
@@ -146,67 +166,79 @@ export function PublicModelPageView({
         </Alert>
       ) : null}
 
-      <SectionCard title="基本信息" description="名称、策略、备注与启用；与成员一起在同一个事务里提交。">
-        <fieldset disabled={controlsDisabled} className="m-0 min-w-0 space-y-3 border-0 p-0">
-          <DirtyField dirty={dirty.isDirtyField("name")} onReset={() => onResetField("name")} resetLabel="恢复名称">
-            <Field label="名称" hint="用户请求时使用的模型名">
-              <Input
-                value={form.name}
-                onChange={(event) => onFormChange({ name: event.target.value })}
-                placeholder="如 glm-5.3"
-              />
-            </Field>
-          </DirtyField>
+      <SectionCard title="基本信息" description="名称、备注与启用三列并排；与策略、成员一起在同一个事务里提交。">
+        <fieldset disabled={controlsDisabled} className="m-0 min-w-0 border-0 p-0">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3" data-slot="basic-fields-grid">
+            <div data-slot="field-name" className="min-w-0">
+              <DirtyField dirty={dirty.isDirtyField("name")} onReset={() => onResetField("name")} resetLabel="恢复名称">
+                <Field label="名称" hint="用户请求时使用的模型名">
+                  <Input
+                    value={form.name}
+                    onChange={(event) => onFormChange({ name: event.target.value })}
+                    placeholder="如 glm-5.3"
+                  />
+                </Field>
+              </DirtyField>
+            </div>
+            <div data-slot="field-note" className="min-w-0">
+              <DirtyField dirty={dirty.isDirtyField("note")} onReset={() => onResetField("note")} resetLabel="恢复备注">
+                <Field label="备注">
+                  <Input
+                    value={form.note}
+                    onChange={(event) => onFormChange({ note: event.target.value })}
+                    placeholder="选填"
+                  />
+                </Field>
+              </DirtyField>
+            </div>
+            <div data-slot="field-enabled" className="min-w-0">
+              <DirtyField
+                dirty={dirty.isDirtyField("enabled")}
+                onReset={() => onResetField("enabled")}
+                resetLabel="恢复启用状态"
+              >
+                <Field label="启用" hint="公开模型只有启用/关闭；可用性措施（冷却）挂在上游模型，不在此页（ADR-025）。">
+                  <div className="flex h-8 items-center">
+                    <Checkbox
+                      checked={form.enabled}
+                      aria-label="启用"
+                      onCheckedChange={(checked) => onFormChange({ enabled: checked === true })}
+                    />
+                  </div>
+                </Field>
+              </DirtyField>
+            </div>
+          </div>
+        </fieldset>
+      </SectionCard>
 
+      <SectionCard title="策略" description="三种路由模式横向对比；与基本信息、成员一起在同一个事务里提交。">
+        <fieldset disabled={controlsDisabled} className="m-0 min-w-0 border-0 p-0">
           <DirtyField
             dirty={dirty.isDirtyField("routing_mode")}
             onReset={() => onResetField("routing_mode")}
             resetLabel="恢复策略"
           >
-            <Field label="策略" hint={routing.desc}>
-              <RadioGroup
-                value={form.routing_mode}
-                onValueChange={(value) => onFormChange({ routing_mode: value as RoutingMode })}
-                className="gap-2"
-              >
-                {(Object.keys(ROUTING_LABELS) as RoutingMode[]).map((mode) => (
-                  <label key={mode} className="flex items-start gap-2 rounded-md border border-border p-2 text-2sm">
-                    <RadioGroupItem value={mode} className="mt-0.5" />
-                    <span>
-                      <span className="font-medium text-body">{ROUTING_LABELS[mode].label}</span>
-                      <span className="block text-2xs text-faint">{ROUTING_LABELS[mode].desc}</span>
-                    </span>
-                  </label>
-                ))}
-              </RadioGroup>
-            </Field>
-          </DirtyField>
-
-          <DirtyField dirty={dirty.isDirtyField("note")} onReset={() => onResetField("note")} resetLabel="恢复备注">
-            <Field label="备注">
-              <Input
-                value={form.note}
-                onChange={(event) => onFormChange({ note: event.target.value })}
-                placeholder="选填"
-              />
-            </Field>
-          </DirtyField>
-
-          <DirtyField
-            dirty={dirty.isDirtyField("enabled")}
-            onReset={() => onResetField("enabled")}
-            resetLabel="恢复启用状态"
-          >
-            <label className="flex items-center gap-2 text-2sm text-body">
-              <Checkbox
-                checked={form.enabled}
-                onCheckedChange={(checked) => onFormChange({ enabled: checked === true })}
-              />
-              启用
-            </label>
-            <p className="text-2xs text-faint">
-              公开模型只有启用/关闭；可用性措施（冷却）挂在上游模型，不在此页（ADR-025）。
-            </p>
+            <RadioGroup
+              value={form.routing_mode}
+              onValueChange={(value) => onFormChange({ routing_mode: value as RoutingMode })}
+              className="grid grid-cols-1 gap-2 md:grid-cols-3"
+              data-slot="strategy-cards"
+            >
+              {(Object.keys(ROUTING_LABELS) as RoutingMode[]).map((modeKey) => (
+                <label
+                  key={modeKey}
+                  data-slot="strategy-card"
+                  className="flex items-start gap-2 rounded-md border border-border p-2.5 text-2sm"
+                >
+                  <RadioGroupItem value={modeKey} className="mt-0.5" />
+                  <span className="min-w-0">
+                    <span className="block font-medium text-body">{ROUTING_LABELS[modeKey].label}</span>
+                    <span className="block text-2xs text-faint">{ROUTING_LABELS[modeKey].desc}</span>
+                  </span>
+                </label>
+              ))}
+            </RadioGroup>
           </DirtyField>
         </fieldset>
       </SectionCard>
@@ -246,8 +278,19 @@ export function PublicModelPageView({
         </DirtyField>
       </SectionCard>
 
-      <SectionCard title="只读摘要" description="按当前草稿计算的渲染语义；保存后生效。">
-        <div className="min-w-0" data-slot="public-model-summary">
+      {/* 只读摘要折叠（details）：收起时不占主编辑区，展开才出现按草稿计算的渲染语义。 */}
+      <details className="rounded-card border border-border bg-surface" data-slot="readonly-summary">
+        <summary className="flex cursor-pointer select-none list-none items-center justify-between gap-2 px-4 py-2.5 [&::-webkit-details-marker]:hidden">
+          <span>
+            <span className="text-sm font-semibold text-title">只读摘要</span>
+            <span className="ml-2 text-2xs font-normal text-faint">按当前草稿计算的渲染语义；保存后生效。</span>
+          </span>
+          <ChevronDown
+            aria-hidden="true"
+            className="h-4 w-4 shrink-0 text-faint transition-transform [[open]>&]:rotate-180"
+          />
+        </summary>
+        <div className="min-w-0 border-t border-border px-4 py-2" data-slot="public-model-summary">
           <SummaryRow label="模型 ID">
             <span className="break-all font-mono text-2xs">{model.id}</span>
           </SummaryRow>
@@ -272,23 +315,7 @@ export function PublicModelPageView({
           </SummaryRow>
           <SummaryRow label="创建时间">{formatDateTime(model.created_at_ms, mode)}</SummaryRow>
         </div>
-      </SectionCard>
-
-      <DirtyFooter count={dirty.dirtyCount} onResetAll={onResetAll} saving={saving}>
-        {blockedReasons.length > 0 ? (
-          <span className="text-2xs text-danger-text" data-slot="save-blocked">
-            {blockedReasons.join("；")}
-          </span>
-        ) : null}
-        <DirtySaveButton
-          dirty={dirty.isDirty}
-          pending={saving}
-          disabled={controlsDisabled || formErrors.length > 0}
-          onClick={onSave}
-        >
-          保存
-        </DirtySaveButton>
-      </DirtyFooter>
+      </details>
     </div>
   );
 }
