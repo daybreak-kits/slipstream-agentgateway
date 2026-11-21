@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
-"""System-boundary import lint (W6 ticket 01 baseline).
+"""System-boundary import lint (W6 ticket 01 baseline; ticket 06 made it the gate).
 
 Run from the repository root:
 
-    python ops/checks/import_lint.py            # report only, always EXIT=0
-    python ops/checks/import_lint.py --strict   # findings are failures, EXIT=1
+    python ops/checks/import_lint.py            # the gate: findings are failures
+    python ops/checks/import_lint.py --strict   # accepted alias of the default
+
+Since ticket 06 the default mode IS strict: any finding exits 1. The W6 baseline
+(2287de5) measured 8 known leaks; tickets 02/03/04/05 migrated the system layers
+and ticket 06 cleared the frontend copy, so a clean boundary exits 0. Do not
+re-add exceptions silently: new allowances must be registered in the explicit
+whitelists below with a reason and reflected in docs/SYSTEM-BOUNDARY.md §5.
 
 Scope: the system layers ``api/src/l02_domain``, ``l04_repo``, ``l05_service``,
 ``l06_api`` and ``l07_jobs`` plus ``web/src`` (including
@@ -19,32 +25,10 @@ What counts as a concrete data-plane reference ("leak"):
 * an adapter-name branch in a system composition module (``== "agentgateway"``);
 * hardcoded data-plane client-contract facts in system code:
   ``ag_llm_port`` / ``data_plane_port`` or a concrete ``/v1/*`` endpoint literal;
-* a frontend source reference to the concrete adapter module path.
-
-Known baseline leaks (8, expected on the W6 baseline 2287de5). This ticket
-reports them without blocking; tickets 02/03/04/06 migrate the call sites and
-then turn ``--strict`` into a gate. Do not add new exceptions here: the list is
-documentation of the debt this baseline measured.
-
-1. api/src/l06_api/routers_log_payload.py:16  adapter-import
-   System API imports the concrete usage reader to serve log payloads.
-2. api/src/l06_api/routers_upstreams.py:15   adapter-import
-   System API imports the concrete transform compiler for previews.
-3. api/src/l07_jobs/log_cleanup.py:28        adapter-import
-   System job imports the concrete retention helper.
-4. api/src/l06_api/adapter_factory.py:24     adapter-name-dispatch
-   Composition factory branches on the concrete adapter name and its knobs.
-5. api/src/l06_api/routers_health.py:21      client-contract-hardcode
-   System health exposes the data-plane port instead of a client contract.
-6. api/src/l06_api/routers_meta.py:150       client-contract-hardcode
-   System connection info hardcodes the data-plane endpoint list.
-7. api/src/l06_api/routers_ops.py:986        client-contract-hardcode
-   Playground hardcodes the data-plane base URL/port.
-8. web/src/lib/mock.ts:606                   adapter-module-reference
-   The frontend mock copies the concrete adapter's capability matrix.
-
-Usage with the future closeout gate (ticket 06):
-    python ops/checks/import_lint.py --strict
+* a frontend source reference to the concrete adapter module path;
+* a ``raw_json`` reference in a system file outside the registered whitelist
+  below (ticket 05/06: the attachment may ride along as storage and be searched
+  internally, but no new system reader may appear).
 """
 
 from __future__ import annotations
@@ -68,9 +52,18 @@ ENDPOINT_LITERALS = frozenset(
 )
 WEB_ADAPTER_PATH = re.compile(r"l03_adapters[\\/]+agentgateway")
 
-#: Baseline leak count. Kept in the output so the ticket-01 acceptance is
-#: visible; ticket 06 removes the final references and flips --strict on.
-BASELINE_LEAK_COUNT = 8
+#: Explicit raw_json whitelist (SYSTEM-BOUNDARY.md §5). Values are per-file
+#: reasons; any other system-layer ``raw_json`` reference is a gate failure.
+#: The four entries are the sanctioned paths:
+#: * the attachment fact itself rides along (§2 system fact whitelist);
+#: * routers_ops keeps the keyword-search haystack (ticket 05 Lead note) where
+#:   raw_json is only scanned internally and never served or interpreted.
+RAW_JSON_ALLOWLIST: dict[str, str] = {
+    "api/src/l02_domain/models.py": "UsageEvent diagnostic-attachment field (§2 fact)",
+    "api/src/l04_repo/orm.py": "diagnostic-attachment column definition (§2 fact)",
+    "api/src/l05_service/usage_ingest.py": "ingest passthrough stores the attachment (§2 fact)",
+    "api/src/l06_api/routers_ops.py": "keyword-search haystack, never served (ticket 05 Lead note)",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,7 +99,11 @@ def _web_files() -> list[Path]:
 
 
 def _relative(path: Path) -> str:
-    return path.relative_to(REPO_ROOT).as_posix()
+    """Repo-relative posix path; files outside the repo keep their own path."""
+    try:
+        return path.relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return path.as_posix()
 
 
 def _import_findings(path: Path, tree: ast.AST) -> list[Finding]:
@@ -180,6 +177,38 @@ def _client_contract_findings(path: Path, tree: ast.AST) -> list[Finding]:
     ]
 
 
+def _raw_json_findings(path: Path, tree: ast.AST) -> list[Finding]:
+    """Flag raw_json readers that are not on the registered whitelist.
+
+    Matches attribute access (``row.raw_json``), bare names and string keys
+    (``{"raw_json": ...}``) — serving the attachment under any spelling is the
+    same contract breach (SYSTEM-BOUNDARY §2: the API never returns it).
+    """
+    relative = _relative(path)
+    if relative in RAW_JSON_ALLOWLIST:
+        return []
+    lines: list[int] = []
+    for node in ast.walk(tree):
+        hit = (
+            (isinstance(node, ast.Attribute) and node.attr == "raw_json")
+            or (isinstance(node, ast.Name) and node.id == "raw_json")
+            or (isinstance(node, ast.Constant) and node.value == "raw_json")
+        )
+        if hit:
+            lines.append(node.lineno)
+    if not lines:
+        return []
+    return [
+        Finding(
+            relative,
+            min(lines),
+            "raw-json-read",
+            "references raw_json outside the registered whitelist "
+            "(docs/SYSTEM-BOUNDARY.md §5)",
+        )
+    ]
+
+
 def _scan_python(path: Path) -> list[Finding]:
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -190,9 +219,10 @@ def _scan_python(path: Path) -> list[Finding]:
         *_import_findings(path, tree),
         *_adapter_name_findings(path, tree),
         *_client_contract_findings(path, tree),
+        *_raw_json_findings(path, tree),
     ]
     # One finding per file/rule: the first offending line is enough to locate
-    # the leak, and it keeps the baseline stable across small edits.
+    # the leak, and it keeps the report stable across small edits.
     grouped: dict[tuple[str, str], Finding] = {}
     for finding in candidates:
         key = (finding.path, finding.rule)
@@ -231,30 +261,26 @@ def scan() -> list[Finding]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Report concrete data-plane references in system-layer sources."
+        description="Enforce the system boundary: no concrete data-plane references."
     )
     parser.add_argument(
         "--strict",
         action="store_true",
-        help="exit 1 when any finding remains (the future ticket-06 gate)",
+        help="accepted alias: the default mode has been strict since ticket 06",
     )
     args = parser.parse_args(argv)
 
     findings = scan()
-    print("import-lint: system boundary baseline")
+    print("import-lint: system boundary gate")
     for finding in findings:
         print(finding.render())
-    print(f"findings: {len(findings)} (baseline: {BASELINE_LEAK_COUNT})")
+    print(f"findings: {len(findings)}")
 
-    if args.strict:
-        if findings:
-            print("strict mode: findings are failures (EXIT=1)")
-            return 1
-        print("strict mode: clean (EXIT=0)")
-        return 0
-
-    print("baseline mode: findings are reported, not blocking (EXIT=0)")
-    print("run with --strict to enforce the boundary")
+    if findings:
+        print("boundary violated: concrete data-plane references must be migrated "
+              "(whitelists live in RAW_JSON_ALLOWLIST with a documented reason)")
+        return 1
+    print("boundary clean (EXIT=0)")
     return 0
 
 

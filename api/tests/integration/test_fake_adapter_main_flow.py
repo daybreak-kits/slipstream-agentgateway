@@ -14,7 +14,7 @@ from tests.conftest import make_admin, new_session_token, seed_channel
 
 from l01_core.settings import reset_settings_cache
 from l03_adapters.fake import FakeAdapter
-from l06_api.deps import SESSION_COOKIE
+from l06_api.deps import SESSION_COOKIE, get_adapter
 from l07_jobs.log_cleanup import cleanup_job
 from server import create_app
 
@@ -109,3 +109,77 @@ def test_fake_adapter_runs_render_apply_and_cleanup(fake_flow) -> None:
     # runs in the same job (its own retention tests live in test_attempt_retention).
     assert cleanup_adapter.pruned_retention_days == [30]
     assert counts["request_log_payloads"] == 1
+
+
+def test_fake_adapter_serves_the_whole_main_flow_in_one_session(fake_flow) -> None:
+    """Ticket 06 closeout: the full acceptance chain on one driver instance.
+
+    The three focused tests above keep their narrow seams; this one chains
+    启动 → connection → health → usage → 日志列表/详情 → payload → 渲染 → 下发 →
+    清理 against a single FakeAdapter (the get_adapter seam) so state links are
+    observable end to end: the payload the adapter stores is the payload the
+    reader serves, the apply the rollout performs is the status the console
+    reads, and the prune the job runs empties the same store.
+    """
+    client, engine, factory = fake_flow
+    adapter = FakeAdapter()
+    client.app.dependency_overrides[get_adapter] = lambda: adapter
+
+    # 启动 + health + connection（一切请求都先经过已启动的 app 与注册表事实）。
+    health = client.get("/admin/health")
+    assert health.status_code == 200, health.text
+    assert health.json()["adapter"] == "fake"
+    connection = client.get("/admin/connection")
+    assert connection.status_code == 200, connection.text
+    assert connection.json()["endpoints"]
+
+    # usage：注册表路径拉取（未覆写的依赖走 make_adapter），归一事件入库。
+    pulled = client.post("/admin/usage/pull")
+    assert pulled.status_code == 200, pulled.text
+    assert pulled.json()["added"] == 3
+
+    # 日志列表与详情：中性事实出现在系统 API。
+    logs = client.get("/admin/logs")
+    assert logs.status_code == 200, logs.text
+    assert logs.json()["total"] == 3
+    detail = client.get("/admin/logs/evt_fake_0001")
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["requested_model"] == "fake-chat"
+
+    # payload：适配器存的正文就是读取端口的答案；未存正文的事件 404。
+    adapter.seed_payload("evt_fake_0001", request_prompt_json='{"q": "hi"}')
+    payload = client.get("/admin/logs/evt_fake_0001/payload")
+    assert payload.status_code == 200, payload.text
+    assert payload.json()["request_prompt_json"] == '{"q": "hi"}'
+    missing = client.get("/admin/logs/evt_fake_0002/payload")
+    assert missing.status_code == 404
+
+    # 渲染预览：编译发生在适配器端口内，系统层拿到的是 fake 的答案。
+    seed_channel(engine, factory)
+    preview = client.post(
+        "/admin/upstreams/ups_test/transforms/preview",
+        json={"request_headers": [{"op": "update", "name": "x-trace", "value": "slip"}]},
+    )
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["after"] == {"fake": True, "rules": 0}
+
+    # 下发：rollout → validate → materialize → render → apply 落在同一实例，
+    # status 回答的就是这次 apply 的产物。
+    applied = client.post("/admin/config/apply", json={"reason": "fake-closeout-chain"})
+    assert applied.status_code == 200, applied.text
+    revision = applied.json()
+    assert revision["status"] == "active"
+    status = client.get("/admin/config/status")
+    assert status.status_code == 200, status.text
+    status_body = status.json()
+    assert status_body["config_hash"] == revision["artifact_hash"]
+    assert status_body["active_revision"]["id"] == revision["id"]
+
+    # 清理：retention job 经 prune_logs 端口清空同一个正文存储，应用状态不受影响。
+    adapter.seed_payload("evt_fake_retention", request_prompt_json="{}")
+    counts = cleanup_job(factory, adapter=adapter)
+    assert adapter.pruned_retention_days == [30]
+    assert counts["request_log_payloads"] == 2  # seeded detail + retention row
+    pruned = client.get("/admin/logs/evt_fake_0001/payload")
+    assert pruned.status_code == 404
+    assert client.get("/admin/config/status").json()["listening"] is True

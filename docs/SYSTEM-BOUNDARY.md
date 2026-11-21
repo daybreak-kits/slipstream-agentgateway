@@ -3,7 +3,7 @@
 - 状态：现行（W6 ticket 01，基线 2287de5）
 - 原则裁定：[ADR-029](DECISIONS.md#adr-029-系统与数据面边界系统层只依赖标准接口与领域事实)
 - 适用范围：`api/src/l01_core`…`l07_jobs`、`web/src`、`docs/api-contract.md` 与 `web/src/generated/contract.ts`
-- 执行检查：`python ops/checks/import_lint.py`（基线报告）、`--strict`（ticket 06 起强制）
+- 执行检查：`python ops/checks/import_lint.py`（强制门禁：任何泄漏 EXIT=1；`--strict` 为等价别名，W6 ticket 06 起默认即 strict）
 
 本文把 ADR-029 的原则写成系统层可执行的规则。**系统层只依赖标准接口与领域事实**；具体数据面实现只允许出现在 `l03_adapters` 与适配器工厂。本文与 ADR-029 互相引用：ADR-029 负责裁定「为什么」，本文负责回答「哪里算系统层、什么能出现、怎么检查、换数据面时核对什么」。
 
@@ -29,7 +29,7 @@
 补充约定：
 
 - `adapter_id` 是审计元数据，可以出现在配置版本与健康事实中；它不得进入用户可见的产品文案，也不得成为 UI 分支依据。
-- `correlation_key` 是跨请求日志与尝试链的领域连接键（ticket 05 已落地中性列；迁移前 wire 命名的旧列由 `init_db` 回填后保留，待词表门禁退役）。
+- `correlation_key` 是跨请求日志与尝试链的领域连接键（ticket 05 落地中性列并回填值；wire 命名的旧列 `gateway_usage_events.trace_id` 已由 ticket 06 按 `l04_repo/base.py::_RETIRED_COLUMNS` 惯例在启动时退役，旧库升级零数据丢失）。
 - `raw_json` 只能在适配器已归一化的前提下作为诊断附件存在（票05 后仅用于关键词检索附件）；系统层不得在其中解析 `agw.*`、`gen_ai_*`、`agentgateway_*` 等实现字段，API 不再返回它。
 - 配置版本 artifact 可以携带适配器辅助文件描述，但系统层不解释其磁盘格式。
 
@@ -101,27 +101,27 @@ settings.ag_llm_port
 ["/v1/chat/completions", "/v1/models", "/v1/embeddings"]
 ```
 
-### 5.3 执行基线
+### 5.3 执行基线（W6 ticket 06 收口后）
 
 `ops/checks/import_lint.py` 扫描：
 
 - `api/src/l02_domain`、`l04_repo`、`l05_service`、`l06_api`、`l07_jobs` 的 Python import/引用；
 - `web/src`（含 `web/src/generated/contract.ts`）中的具体适配器模块引用。
 
-默认模式列出当前泄漏并以 EXIT=0 结束，不阻断；`--strict` 在有任何泄漏时 EXIT=1。W6 基线（2287de5）的 8 条已知泄漏：
+**默认模式即强制**：任何泄漏 EXIT=1（`--strict` 为等价别名）。W6 基线（2287de5）曾记录 8 条泄漏，由 tickets 02/03/04 清零系统侧七条，ticket 06 清零最后一条（`web/src/lib/mock.ts` 的适配器能力矩阵复制——mock 改为消费票05 中性词表键的自有声明）；现状基线为 **0 条**，`python ops/checks/import_lint.py` 在干净边界上 EXIT=0。
 
-| # | 位置 | 类型 | 迁移票据 |
-|---|---|---|---|
-| 1 | `api/src/l06_api/routers_log_payload.py:16` | 具体 usage reader import | 02 |
-| 2 | `api/src/l06_api/routers_upstreams.py:15` | 具体 transform compiler import | 03 |
-| 3 | `api/src/l07_jobs/log_cleanup.py:28` | 具体 retention helper import | 02 |
-| 4 | `api/src/l06_api/adapter_factory.py:24` | 适配器名字分支/形状化 kwargs | 04 |
-| 5 | `api/src/l06_api/routers_health.py:21` | 健康响应暴露数据面端口 | 04 |
-| 6 | `api/src/l06_api/routers_meta.py:150` | connection 硬编码端点清单 | 04 |
-| 7 | `api/src/l06_api/routers_ops.py:986` | playground 硬编码数据面地址/端口 | 04 |
-| 8 | `web/src/lib/mock.ts:606` | 前端复制适配器能力矩阵 | 06 |
+历史例外以显式白名单登记（脚本内 `RAW_JSON_ALLOWLIST`，逐条带理由；新增白名单条目必须同步本节）：
 
-本票只建立基线，不把 `--strict` 接入任何门禁；ticket 06 在四侧迁移完成后清零并转强制。
+| 白名单文件 | 理由 |
+|---|---|
+| `api/src/l02_domain/models.py` | `UsageEvent` 诊断附件字段（§2 白名单事实：附件随行，永不解释） |
+| `api/src/l04_repo/orm.py` | 诊断附件列定义（§2 白名单事实） |
+| `api/src/l05_service/usage_ingest.py` | ingest 透传存储附件（§2 白名单事实） |
+| `api/src/l06_api/routers_ops.py` | 日志关键词检索的内部干草堆（票05 Lead 验收注记）：raw_json 只在服务端内部扫描，不解析实现字段、不出 API 出参 |
+
+白名单之外，系统层任何新出现的 `raw_json` 引用都会被门禁以 `raw-json-read` 规则拒绝。
+
+词表门禁（`ops/checks/terminology_audit.mjs`）覆盖契约出参中性词表：扫描 `web/src` 的字符串/模板字面量与 JSX 文本（注释与 import 路径除外），数据面列名（`trace_id`/`span_id`/`parent_span_id`/`attributes_json`）、wire 词（`gen_ai_*`/`agw.*`/`agentgateway_user`/`keyHash`/`virtualModels`/`frontendPolicies`）、数据面存储文件（`ag-data.db`/`ag_config_dir`）、接收端口 `4318`、`OTLP` 与 `raw_json` 出现即失败；`adapter_id` 审计值与适配器经 `capability_note` 端口提供的文案不在禁用清单内。运行：`node ops/checks/terminology_audit.mjs --boundary-only`（边界单跑）或全量审计（含本节，计入退出码）。
 
 ## 6. 词表规则
 
@@ -141,6 +141,8 @@ usage event、request attempt、correlation key、availability、config revision
 ### 6.3 响应字段
 
 API 与生成契约只使用中性领域字段。新增字段前先回答：换数据面后是否必须改？如果是，字段属于适配器端口，不属于系统契约。
+
+执行检查：`node ops/checks/terminology_audit.mjs`（全量）或 `--boundary-only`——契约出参中性词表为 error 级，违规即 EXIT=1（见 §5.3）。
 
 ## 7. 六类 SPI 端口与遥测生命周期
 
@@ -185,7 +187,7 @@ API 与生成契约只使用中性领域字段。新增字段前先回答：换�
 6. **日志**：payload 读取与保留清理都经端口；系统不再打开数据面日志库。
 7. **能力与文案**：能力键在中性词表内，文案由适配器提供；UI 不出现数据面配置路径或版本语句。
 8. **遥测**：适配器自己采集并归一化为 `RequestAttempt`；系统不新增 trace/span 表或接收器。
-9. **门禁**：`python ops/checks/import_lint.py --strict` 为 0；词表/契约门禁通过；fake adapter 主流程测试通过。
+9. **门禁**：`python ops/checks/import_lint.py`（默认即 strict）为 0；词表/契约门禁（含 `node ops/checks/terminology_audit.mjs` 的边界词表节）通过；fake adapter 主流程测试通过。
 10. **回归**：全量 pytest、ruff、契约生成检查保持绿；用户可见行为无变化。
 
 ## 10. 与其它文档的关系

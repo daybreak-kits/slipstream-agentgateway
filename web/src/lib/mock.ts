@@ -607,18 +607,25 @@ let policyConfig: PolicyConfig = {
 };
 let policyUpdatedAt = Date.parse("2026-11-17T01:05:12");
 
-/** AG 1.7 适配器能力矩阵（l03_adapters/agentgateway/adapter.py describe() 同值）。 */
-const AG_POLICY_CAPABILITIES: PoliciesResponse["capabilities"] = {
-  cors: { supported: true, verified: false, since_version: "1.7.0", note: "数据面 CORS（显式配置才渲染）" },
-  api_key: { supported: true, verified: true, since_version: "1.7.0", note: "keyHash + metadata，mode: strict；enabled=false 时整段不渲染（匿名）" },
-  local_rate_limit: { supported: true, verified: true, since_version: "1.7.0", note: "localRateLimit 是数组；只有全局规则，无逐用户 maxTokens（E12）" },
-  timeout: { supported: true, verified: false, since_version: "1.7.0", note: "request/backend/responseIdle 时长" },
-  transformations: { supported: true, verified: true, since_version: "1.7.0", note: "仅全局 llm.policies.transformations 支持 conditional" },
-  retry: { supported: true, verified: true, since_version: "1.7.0", note: "渲染为顶层 policies[]（target route internal/llm:request）；llm.policies 仍拒绝 retry（E16/E17）" },
-  health: { supported: true, verified: true, since_version: "1.7.0", note: "逐模型 llm.models[].health（unhealthyExpression + eviction）；retry codes 含 4xx 时必须成对（E16/E17）" },
-  request_attempts: { supported: true, verified: true, since_version: "1.7.0", note: "AG 适配器内部 OTLP 采集每次上游尝试，归一化为 RequestAttempt；系统只存尝试事实，不接触 OTLP（ADR-028）" },
-  guardrails_regex: { supported: true, verified: true, since_version: "1.7.0", note: "llm.policies.guardrails（regex mask/reject/audit + 内置敏感信息规则）" },
-  guardrails_webhook: { supported: true, verified: true, since_version: "1.7.0", note: "webhook 护栏仅 reject/audit，target 只能 host（无路径），不支持 scope" },
+/**
+ * mock 数据面能力声明（票05 能力词表中性键；W6 ticket 06 起不再复制具体适配器矩阵）。
+ * 与真实前端同一条消费路径：能力与文案经 API 响应的 CapabilityInfo 出参到达页面，
+ * mock 模式里 mock 扮演数据面，note 是 mock 自有的中性 copy（FakeAdapter 的 "fake: ..."
+ * 惯例同理）；版本元数据用 mock 自己的版本，不借数据面版本号。
+ */
+const MOCK_VERSION = "mock-1.0.0";
+
+const MOCK_POLICY_CAPABILITIES: PoliciesResponse["capabilities"] = {
+  cors: { supported: true, verified: false, since_version: MOCK_VERSION, note: "mock 数据面 CORS（显式配置才渲染）" },
+  api_key: { supported: true, verified: true, since_version: MOCK_VERSION, note: "mock：密钥哈希校验，mode: strict；enabled=false 时整段不渲染（匿名）" },
+  local_rate_limit: { supported: true, verified: true, since_version: MOCK_VERSION, note: "mock：全局规则限流；无逐用户词元上限（E12）" },
+  timeout: { supported: true, verified: false, since_version: MOCK_VERSION, note: "mock：请求/后端/响应空闲三段超时" },
+  transformations: { supported: true, verified: true, since_version: MOCK_VERSION, note: "mock：条件改写仅全局配置支持" },
+  retry: { supported: true, verified: true, since_version: MOCK_VERSION, note: "mock：请求内重试渲染为顶层策略；全局策略段拒绝 retry（E16/E17）" },
+  health: { supported: true, verified: true, since_version: MOCK_VERSION, note: "mock：逐模型健康标记与驱逐；retry codes 含 4xx 时必须成对（E16/E17）" },
+  request_attempts: { supported: true, verified: true, since_version: MOCK_VERSION, note: "mock：适配器内部采集每次上游尝试，归一化为 RequestAttempt；系统只存尝试事实（ADR-028）" },
+  guardrails_regex: { supported: true, verified: true, since_version: MOCK_VERSION, note: "mock：regex mask/reject/audit + 内置敏感信息规则" },
+  guardrails_webhook: { supported: true, verified: true, since_version: MOCK_VERSION, note: "webhook 护栏仅 reject/audit，target 只能 host（无路径），不支持 scope" },
 };
 
 /** 后端 NOTES（routers_policies.py）原文：页级各分区卡的 description。 */
@@ -690,7 +697,7 @@ function policyPayload(): PoliciesResponse {
       api_keys_active: clientKeys.filter((k) => k.status === "active").length,
       users: mockUsers.filter((u) => u.status !== "deleted").length,
     },
-    capabilities: AG_POLICY_CAPABILITIES,
+    capabilities: MOCK_POLICY_CAPABILITIES,
     notes: POLICY_NOTES,
     updated_at_ms: policyUpdatedAt,
   };
@@ -737,15 +744,15 @@ function guardrailPayload(): GuardrailsResponse {
     adapter: "agentgateway",
     items: GUARDRAIL_ITEMS,
     capabilities: {
-      regex: AG_POLICY_CAPABILITIES.guardrails_regex,
-      webhook: AG_POLICY_CAPABILITIES.guardrails_webhook,
+      regex: MOCK_POLICY_CAPABILITIES.guardrails_regex,
+      webhook: MOCK_POLICY_CAPABILITIES.guardrails_webhook,
     },
     note: "supported=False 为路线图说明而非今日可配置；verified=False 表示尚未经数据面实测",
     updated_at_ms: guardrailUpdatedAt,
   };
 }
 
-/** MCP 文档 {servers, port}；transports 能力按 AG 1.7 实测（sse/stdio 可用，http 拒收）。 */
+/** MCP 文档 {servers, port}；transports 是 mock 数据面自有的能力声明（同 policy 端口路径）。 */
 let mcpConfig: { servers: McpServerConfig[]; port: number | null } = {
   servers: [
     {
@@ -764,10 +771,10 @@ let mcpConfig: { servers: McpServerConfig[]; port: number | null } = {
 };
 let mcpUpdatedAt = Date.parse("2026-11-17T01:05:12");
 
-const MCP_TRANSPORT_CAPABILITIES: McpServersResponse["transports"] = {
-  sse: { supported: true, verified: true, since_version: "1.7.0", note: "sse target 使用 host" },
-  stdio: { supported: true, verified: true, since_version: "1.7.0", note: "stdio target: cmd/args/env/clear_env，已 --validate-only 验证" },
-  http: { supported: false, verified: true, since_version: "", note: "pinned 1.7 拒绝 http 变体（no variant of enum LocalMcpTargetSpec）" },
+const MOCK_MCP_TRANSPORTS: McpServersResponse["transports"] = {
+  sse: { supported: true, verified: true, since_version: MOCK_VERSION, note: "sse target 使用 host" },
+  stdio: { supported: true, verified: true, since_version: MOCK_VERSION, note: "mock：stdio target 走 cmd/args/env/clear_env" },
+  http: { supported: false, verified: true, since_version: "", note: "mock：http 传输未支持，保存时会被 422 拒绝" },
 };
 
 function mcpPayload(): McpServersResponse {
@@ -776,8 +783,8 @@ function mcpPayload(): McpServersResponse {
     port: mcpConfig.port,
     defaults: { servers: [], port: null },
     supported: true,
-    transports: MCP_TRANSPORT_CAPABILITIES,
-    note: "AG 1.7 支持顶层 mcp.targets[] + mcp.policies（sse/stdio；http 被 pinned 1.7 拒绝）；该形态已用 --validate-only 验证，targets 由 MCP 配置生成",
+    transports: MOCK_MCP_TRANSPORTS,
+    note: "mock：顶层 mcp 配置支持 sse/stdio（http 保存时会被 422 拒绝）；targets 由 MCP 配置生成",
     updated_at_ms: mcpUpdatedAt,
   };
 }

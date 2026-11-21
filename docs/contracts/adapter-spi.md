@@ -36,8 +36,8 @@ class DataPlaneAdapter(Protocol):
 `validate` 由**上层**在 apply 流程里调用，不是 applier 内部的一步：
 
 1. `l05_service/rendering.py:build_render_plan()` 先做通用 IR 自校验（`l02_domain/validation.py:validate_gateway_ir`），失败 → `APPLY_FAILED` + `details.errors`。
-2. 再调驱动自己的 `adapter.validate(ir)`：驱动可以拒绝通用校验放过的 IR（例如网关不支持某个字段）。失败 → `APPLY_FAILED` + `details.errors`，**此时还没有写 key 文件、没有 render、没有归档版本**。
-3. 只有两步都通过，才 `write_key_files()` → `adapter.render(ir)` → `adapter.apply(artifact)`。
+2. 再调驱动自己的 `adapter.validate(ir)`：驱动可以拒绝通用校验放过的 IR（例如网关不支持某个字段）。失败 → `APPLY_FAILED` + `details.errors`，**此时还没有物化凭据、没有 render、没有归档版本**。
+3. 只有两步都通过，才 `adapter.materialize_credentials(credentials, prune=False)`（写阶段，凭据以中性 `CredentialFile(ref, plaintext)` 意图交接、磁盘格式归适配器）→ `adapter.render(ir)` → `adapter.apply(artifact)`；apply 成功后再跑一次全量物化（`prune=True`）清理白名单之外的陈旧凭据文件（ticket 03/16；`l05_service/rollout.py`）。
 
 顺序理由：驱动校验不通过时，任何落盘都属于「明知不可用仍写文件」，会污染密钥目录与配置版本历史。
 

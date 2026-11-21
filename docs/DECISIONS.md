@@ -507,7 +507,7 @@
 
 ## ADR-029 系统与数据面边界：系统层只依赖标准接口与领域事实
 
-- 状态：已定（2026-11-21，W6 ticket 01；把历史 PLAN 与 ADR-001/006 的口头原则升级为可执行契约）
+- 状态：已定（2026-11-21，W6 ticket 01；把历史 PLAN 与 ADR-001/006 的口头原则升级为可执行契约）。ticket 06 收口复核（2026-11-21）：基线 8 条泄漏全部清零，import-lint 默认即强制（`--strict` 为等价别名），词表门禁扩展覆盖契约出参中性词表，legacy `gateway_usage_events.trace_id` 列退役。
 - 关联：`docs/SYSTEM-BOUNDARY.md`（本 ADR 的可执行细则）、ADR-001（数据面用 agentgateway）、ADR-006（分层与依赖方向）、ADR-028（追踪归适配层）。
 
 **背景**：W5 完成后，适配层是「唯一知道 agentgateway 的地方」这句话只存在于历史快照与未评审 ADR 中。系统 API 直接 import 适配器实现读取日志库、编译 transform；系统 job 直接清理数据面日志；系统服务持有并物化数据面密钥文件；核心 settings、健康与连接接口按某个网关的形状设计；系统表与对外契约出现数据面专有字段和文案。换 LiteLLM 或自研数据面时必须改系统层代码、表和契约，违背「系统独立于网关核心」的产品原则。W6 依据 `.scratch/w6/recon/architecture.md` 的 8 条红线立项，本 ADR 先把边界写成规范，再由后续票据逐条迁移实现。
