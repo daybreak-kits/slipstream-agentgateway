@@ -263,6 +263,8 @@ export const ENDPOINTS = {
   upstreamModelsAdopt: "/admin/upstream-models/adopt-modelsdev",
   upstreamModelsModelsDevStatus: "/admin/upstream-models/modelsdev-status",
   myModels: "/admin/my/models",
+  // ticket 08：每日状态检查结果 + 当前提醒（通知中心轮询）
+  systemStatus: "/admin/system-status",
 } as const;
 
 export const api = {
