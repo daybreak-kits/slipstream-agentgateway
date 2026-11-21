@@ -2164,6 +2164,74 @@ check("接线：指标卡说明文字改用 HoverInfo（原生 title 换成可�
   expect(!src.includes("title={hint}"), "指标卡说明文字不得再用原生 title（键盘与触屏读不到）");
 });
 
+// ---------- 11. 模型参数列与悬浮详情（W7 ticket 09） ----------
+// spec User Story 36/37 + Implementation Decisions「交互与界面-参数」：
+// 参数列只显示输入/输出上限（千分位），其余参数进统一 HoverInfo；缺失值写「未配置」；
+// 正常值不加提示图标；模型管理页与上游详情页两处模型表同一口径。
+check("模型参数列：只显示「输入 xxx / 输出 xxx」，缺失值写「未配置」，不加提示图标", async () => {
+  const { ModelParamsCell } = await load("/src/components/models/model-params-cell.tsx");
+  const html = render(
+    createElement(ModelParamsCell, {
+      row: { parameters: { max_input_tokens: 200000, max_output_tokens: 128000 } },
+    }),
+  );
+  expect(html.includes("输入 200,000 / 输出 128,000"), "参数列必须只显示输入/输出上限（千分位）");
+  expect(html.includes('data-hover-info="trigger"'), "参数列必须挂统一悬浮详情触发元素");
+  expect(!html.includes("<svg"), "正常值不得加提示图标（每行一个图标就是噪音）");
+  const missing = render(
+    createElement(ModelParamsCell, { row: { parameters: { max_input_tokens: 0, max_output_tokens: 0 } } }),
+  );
+  expect(missing.includes("输入 未配置 / 输出 未配置"), "缺失值必须有明确说明「未配置」");
+  expect(!missing.includes("<input"), "缺失值不得渲染成输入框式占位");
+});
+
+check("模型参数明细：完整参数（上下文/模态/能力/思考档位）进悬浮详情，缺失值同样写明", async () => {
+  const { parameterDetailRows } = await load("/src/components/models/model-vocab.ts");
+  const rows = parameterDetailRows({
+    parameters: {
+      max_input_tokens: 200000,
+      max_output_tokens: 128000,
+      reasoning_level: "high",
+      reasoning_levels: ["low", "medium", "high"],
+      default_reasoning_level: "medium",
+      input_types: ["text", "image"],
+      output_types: ["text"],
+      tool_call: true,
+      reasoning: true,
+      attachment: false,
+      structured_output: true,
+    },
+  });
+  const labels = rows.map((row) => row.label);
+  includesAll(labels.join("、"), ["最大输入词元", "最大输出词元", "输入类型", "输出类型", "能力", "推理档位", "思考档位"], "明细字段");
+  const value = (label) => (rows.find((row) => row.label === label) || {}).value;
+  expect(value("最大输入词元") === "200,000", "输入上限要带千分位");
+  expect(value("最大输出词元") === "128,000", "输出上限要带千分位");
+  expect(value("输入类型") === "text / image", "模态要按现有数据字段逐项列出");
+  expect(value("能力") === "工具调用 / 推理 / 结构化输出", "能力只列已开启项");
+  expect(!value("能力").includes("附件"), "未开启的能力不得出现在详情里");
+  expect(value("思考档位") === "low / medium / high（默认 medium）", "思考档位与默认档位要如实透出");
+  const blank = parameterDetailRows({ parameters: { max_input_tokens: 0, max_output_tokens: 0 } });
+  const blankValue = (label) => (blank.find((row) => row.label === label) || {}).value;
+  expect(blankValue("最大输入词元") === "未配置", "详情里缺失的上限也要说明「未配置」");
+  expect(blankValue("最大输出词元") === "未配置", "详情里缺失的上限也要说明「未配置」");
+  expect(blankValue("推理档位") === "未配置", "详情里缺失的档位也要说明「未配置」");
+  expect(blankValue("能力") === "无", "一项能力都没开时写「无」，不留空");
+});
+
+check("接线：两处模型表同一参数列口径，旧的堆叠摘要下线", () => {
+  const models = read("src/pages/models.tsx");
+  const panel = read("src/components/upstreams/models-panel.tsx");
+  includesAll(models, ["ModelParamsCell"], "模型管理页参数列");
+  includesAll(panel, ["ModelParamsCell"], "上游详情模型表参数列");
+  expect(!models.includes("parameterSummary"), "模型管理页不得再用旧的堆叠摘要");
+  expect(!panel.includes("parameterSummary"), "上游详情模型表不得再用旧的堆叠摘要");
+  const vocab = read("src/components/models/model-vocab.ts");
+  expect(!vocab.includes("export function parameterSummary"), "旧的堆叠摘要函数必须下线（否则两套口径并存）");
+  expect(models.includes('label: "参数"'), "模型管理页参数列表头必须是「参数」");
+  expect(panel.includes('header: "参数"'), "上游详情模型表参数列表头必须是「参数」");
+});
+
 // ---------- run ----------
 const failures = [];
 server = await createServer({
