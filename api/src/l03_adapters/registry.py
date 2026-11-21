@@ -24,6 +24,11 @@ def create(name: str, **kwargs: Any) -> DataPlaneAdapter:
 
             register("mock", lambda **kw: MockAdapter(**kw))
             factory = _FACTORIES[name]
+        elif name == "fake":
+            from l03_adapters.fake import FakeAdapter
+
+            register("fake", lambda **kw: FakeAdapter(**kw))
+            factory = _FACTORIES[name]
         elif name == "agentgateway":
             from l03_adapters.agentgateway.adapter import AgentgatewayAdapter
 
@@ -36,19 +41,14 @@ def create(name: str, **kwargs: Any) -> DataPlaneAdapter:
     return factory(**kwargs)
 
 
+def start_telemetry(app: Any, sink: Any, adapter: Any) -> Any:
+    """Start the injected adapter's optional telemetry intake on the app lifespan.
 
-def start_telemetry(app: Any, sink: Any, settings: Any) -> Any:
-    """Start the selected adapter's optional telemetry intake on the app lifespan.
-
-    The composition root knows the adapter name but not its telemetry transport;
-    each driver owns its collection mechanism and returns a handle (or None).
+    The registry owns the lifecycle seam, but the transport stays inside the
+    adapter: no composition-root branch ever names a concrete driver (W6
+    ticket 01; ADR-028/ADR-029). Each driver returns a stoppable handle or None.
     """
-    name = getattr(settings, "data_plane_adapter", "")
-    if name == "agentgateway":
-        from l03_adapters.agentgateway.telemetry import wire_telemetry
-
-        return wire_telemetry(app, sink)
-    return None
+    return adapter.start_telemetry(app, sink)
 
 
 __all__ = ["create", "register", "start_telemetry"]

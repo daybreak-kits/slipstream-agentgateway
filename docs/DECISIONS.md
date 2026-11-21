@@ -1,4 +1,4 @@
-# 决策记录（现行，ADR-001…ADR-028 连续编号）
+# 决策记录（现行，ADR-001…ADR-029 连续编号）
 
 ## ADR-001 数据面用 agentgateway，控制面自研
 
@@ -504,3 +504,33 @@
 **理由**：这样系统数据库与 API 只依赖「请求尝试」这一业务事实；AG 的 OTel 采集是适配器实现细节，未来其它适配器可用 callback/事件/DB 提供同一端口。历史 span 树本就不是业务需求，UI 要的是「第几轮、打到哪个上游、什么结果」。
 
 **后果**：request_attempts 取代 trace_spans（旧表不迁移，历史路由链丢失）；l05/l06 不再 import OTel 接收器；AG 适配器仍会监听一个 loopback 端口（AG 1.7 只支持 push OTLP，E19 已证没有其它可靠的逐次尝试上游身份来源），这是适配器边界内的代价；若要求系统绝对零新增监听端口，只能放弃逐次尝试链。AG 能力矩阵以 observe.request_attempts 暴露，其它适配器无该能力时 UI 隐藏路由链。
+
+## ADR-029 系统与数据面边界：系统层只依赖标准接口与领域事实
+
+- 状态：已定（2026-11-21，W6 ticket 01；把历史 PLAN 与 ADR-001/006 的口头原则升级为可执行契约）
+- 关联：`docs/SYSTEM-BOUNDARY.md`（本 ADR 的可执行细则）、ADR-001（数据面用 agentgateway）、ADR-006（分层与依赖方向）、ADR-028（追踪归适配层）。
+
+**背景**：W5 完成后，适配层是「唯一知道 agentgateway 的地方」这句话只存在于历史快照与未评审 ADR 中。系统 API 直接 import 适配器实现读取日志库、编译 transform；系统 job 直接清理数据面日志；系统服务持有并物化数据面密钥文件；核心 settings、健康与连接接口按某个网关的形状设计；系统表与对外契约出现数据面专有字段和文案。换 LiteLLM 或自研数据面时必须改系统层代码、表和契约，违背「系统独立于网关核心」的产品原则。W6 依据 `.scratch/w6/recon/architecture.md` 的 8 条红线立项，本 ADR 先把边界写成规范，再由后续票据逐条迁移实现。
+
+**决策**：
+
+1. **核心原则**：系统层只依赖标准接口（`l03_adapters.spi` + 注册表）与领域事实。系统层不得 import、拼写或推断具体数据面实现；具体 agentgateway 实现只出现在 `l03_adapters` 内及适配器工厂的构造点。
+2. **判据**：如果某个字段、表、端口、路径、文案或磁盘格式在「换掉 agentgateway、改接 LiteLLM 或自研数据面」后必须修改，它就属于适配层；系统层只允许出现请求、模型、路由意图、金钱、权限与审计六类事实。
+3. **系统事实白名单**：
+   - 请求事实 `UsageEvent`：事件 id、起止/耗时、状态码、对外/上游模型、归因密钥、token 计数；
+   - 尝试事实 `RequestAttempt`：correlation key、attempt_no、上游引用、模型、状态/错误、起止/耗时、outcome；
+   - 路由意图：PublicModel、ModelTarget、priority/weight/when 的业务语义与可用性；
+   - 金钱：cost/charge/margin、ledger、daily aggregate；
+   - 权限与账号：用户、角色、会话、客户密钥元数据；
+   - 审计与配置版本：revision id/operator/reason/status/hash/adapter_id/validation_note。
+   系统表与对外字段使用中性词：usage event、request attempt、correlation key、availability、config revision。数据面列名、SQLite 文件名/路径、版本号、wire 属性名不得作为系统契约。
+4. **适配层吸收清单**：数据面配置与命名空间、协议/端点/端口、客户端调用契约、采集与遥测生命周期、日志存储与 payload 读取、日志保留清理、transform/CEL 编译与预览、凭据物化/清理/磁盘格式、能力词表与用户文案、健康与版本语义。系统只持有凭据元数据与意图。
+5. **六类标准端口**（`DataPlaneAdapter`）：`read_log_payload`、`prune_logs`、`preview_transforms`、`materialize_credentials`、`client_contract`、`capability_note`；`AttemptSink` 与 `start_telemetry`/`stop_telemetry` 生命周期同属 SPI 契约。上层只调用端口，不复制适配器知识。
+6. **依赖方向与 import**：`l06_api`/`l07_jobs` 可依赖 `l05_service`、`l04_repo`、`l02_domain`、`l01_core` 与 `l03_adapters.spi`/`registry`；`l05_service` 只可 import `l03_adapters.spi`；`l02_domain` 不得 import `l03_adapters`。注册表负责适配器实例化与遥测生命周期，系统组合根不得按适配器名字分支。Web 只消费生成契约与系统字段，不得复制适配器能力矩阵。具体规则与检查清单见 `docs/SYSTEM-BOUNDARY.md`。
+7. **词表规则**：系统 API/UI/生成契约只出现产品语言与领域词；适配器名只允许作为 `adapter_id` 审计元数据，不进入用户可见文案；数据面配置路径、wire 字段、`trace/span/OTLP/attributes`、`keyHash`、`agentgateway_user` 等实现词必须由适配器归一化后再进入系统。
+8. **执行与基线**：新增 `ops/checks/import_lint.py`，默认只报告系统层具体数据面引用（W6 基线 8 条，EXIT=0），`--strict` 有引用即 EXIT=1；本票不把 `--strict` 接入门禁，ticket 06 在四侧迁移完成后转强制。新增 fake adapter，使系统在无真实数据面时可跑通启动、health、connection、usage、日志、渲染下发与清理主流程；真实适配器回归保持绿。
+9. **迁移顺序**：本 ADR 只声明契约与基线，用户可见行为不变。日志 payload/保留（ticket 02）、transform 预览/凭据物化（ticket 03）、端点/配置命名空间/遥测（ticket 04）、用量事实（ticket 05）逐侧迁移，ticket 06 清零 import 泄漏并打开严格门禁。
+
+**理由**：如果系统层能直接看见数据面，那么「换数据面不改系统」只能靠自觉；把端口、词表与 import 规则写进规范并配可执行基线，才能让每次局部重构不重新长回数据面形状。fake adapter 是这条原则的反证：系统若真的只依赖 SPI 与领域事实，就应当能在没有 agentgateway 的进程里跑通主流程。
+
+**后果**：系统层短期仍保留 W6 基线的 8 条已知泄漏（由 import-lint 明确列出），不阻塞本票；后续票据必须逐条清零，最终 `--strict` 才能进门禁。适配器需要实现更多端口，但获得完整的替换能力；系统数据库与 API 不再依赖某个数据面的列名、磁盘格式或端点。ADR-001/006 的依赖原则继续有效，本 ADR 是其边界语义的正式裁定与执行化。

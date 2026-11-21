@@ -26,6 +26,7 @@ from l01_core.settings import (
     get_settings,
 )
 from l03_adapters.agentgateway.usage import cleanup_expired_logs
+from l03_adapters.spi import DataPlaneAdapter
 from l04_repo.repository import get_setting
 from l05_service.attempts import cleanup_expired_attempts
 
@@ -60,12 +61,24 @@ def _retention_days(session_factory: sessionmaker) -> int:
 
 
 def cleanup_job(
-    session_factory: sessionmaker, settings: Settings | None = None
+    session_factory: sessionmaker,
+    settings: Settings | None = None,
+    *,
+    adapter: DataPlaneAdapter | None = None,
 ) -> dict[str, int]:
-    """One retention pass: data-plane request logs + control-plane attempts."""
+    """One retention pass: data-plane request logs + control-plane attempts.
+
+    W6 ticket 01 adds the injected-adapter seam: when a driver is provided its
+    ``prune_logs`` port owns the data-plane half (the fake driver and, after
+    ticket 02, the default production path). Without it the historical concrete
+    import keeps the current byte-for-byte behaviour for this baseline ticket.
+    """
     resolved = settings or get_settings()
     days = _retention_days(session_factory)
-    counts = cleanup_expired_logs(resolved.ag_log_db_path, days)
+    if adapter is None:
+        counts = cleanup_expired_logs(resolved.ag_log_db_path, days)
+    else:
+        counts = dict(adapter.prune_logs(days))
     # ADR-028: attempts live in the control-plane DB, not AG's request-log SQLite.
     # Only request_attempts is pruned; usage events / ledger rows are never retention.
     with session_factory() as session:
