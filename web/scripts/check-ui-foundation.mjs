@@ -1317,7 +1317,7 @@ check("日志页：模型格 attempts>0 分叉图标开 popover，独立尝试�
       totalDurationMs: 180,
     }),
   );
-  includesAll(trigger, ['data-slot="log-attempts-trigger"', "查看 3 次尝试的路由链", "尝试 3 次", "aria-label"], "分叉图标按钮");
+  includesAll(trigger, ['data-slot="log-attempts-trigger"', "查看 3 次尝试的路由链", "·", "尝试 3 次", "aria-label"], "分叉图标按钮");
   const page = read("src/pages/logs.tsx");
   includesAll(page, ["RequestAttemptChainPopover", "has_attempts"], "日志页模型格分叉图标接线");
   expect(!page.includes('id: "attempts"'), "独立尝试列必须删除");

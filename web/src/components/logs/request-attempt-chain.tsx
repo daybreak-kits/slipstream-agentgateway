@@ -182,6 +182,9 @@ export function RequestAttemptChainPopover({
           title={label}
         >
           <GitBranch className="h-3.5 w-3.5" aria-hidden="true" />
+          <span className="text-faint" aria-hidden="true">
+            ·
+          </span>
           <span className="text-2xs">尝试 {attemptsCount} 次</span>
         </Button>
       </PopoverTrigger>
