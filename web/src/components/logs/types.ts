@@ -3,8 +3,8 @@
 
 export interface LogRow {
   event_id: string;
-  /** ADR-028：适配器遥测关联键；空串 = 该请求没有尝试链数据。 */
-  trace_id: string;
+  /** ADR-028：跨请求日志与尝试链的中性关联键；空串 = 该请求没有尝试链数据。 */
+  correlation_key: string;
   /** 该请求归一化后的上游尝试次数（0 = 不展示路由链）。 */
   attempts_count?: number;
   has_attempts?: boolean;
@@ -19,7 +19,7 @@ export interface LogRow {
   http_status: number;
   /** 账本归因列：仍是记录到的模型（混合形态下=最终上游模型），不当作请求模型展示。 */
   public_model: string;
-  /** 客户端请求的公开模型（AG attributes_json.agw.ai.original_model）；旧行/缺失为空串，UI 显示「—」。 */
+  /** 客户端请求的公开模型（适配器在采集时归一化）；旧行/缺失为空串，UI 显示「—」。 */
   requested_model: string;
   /** 实际响应的上游模型。 */
   upstream_model: string;
@@ -56,10 +56,8 @@ export interface LogListResponse {
   next_offset: number | null;
 }
 
-/** GET /admin/logs/{event_id}?include_payload=true 的形状：与列表同构 + 原始载荷。 */
-export interface LogDetail extends LogRow {
-  raw_json?: string;
-}
+/** GET /admin/logs/{event_id} 的形状：与列表同构（正文走 payload 端口）。 */
+export type LogDetail = LogRow;
 
 /** GET /admin/logs/{event_id}/payload 的形状（ADR-021）；无行/未开启正文记录时后端 404。 */
 export interface LogPayload {

@@ -121,9 +121,9 @@
 `openapi_extra={"x-money-amount-class": "cost" | "spend"}`，中间件据此决定归哪本账；
 有名称的键直接按上表词表处理。不要用 null 判断“无权”，要用键是否存在。
 
-唯一逃逸口是流式响应（NDJSON/CSV/text）与**字符串化的 JSON 字段**：它们不经过该中间件，
-路由必须在投影处自行 parse→sanitize→dumps（当前显式调用点：ops 详情与 usage event 详情的
-`raw_json`）。普通 `logs:read` 账号读到的 raw_json 里不会出现 `cost`/`charge` 键。
+唯一逃逸口是流式响应（NDJSON/CSV/text）：它们不经过该中间件，路由必须在投影处自行
+sanitize。W6 票05 起 API 不再返回字符串化的原始 wire 行（`raw_json` 只留在系统表内作诊断
+附件），金额键不会借道 raw 字段泄漏。
 
 ## 1. 健康与总览
 
@@ -594,17 +594,17 @@ AES-GCM 密文 + sk-...abcd 掩码。
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | /admin/logs?query=&from_ms=&to_ms=&page_size=&offset=&sort=&order=&has_error= | 请求日志检索 → {total, items, next_offset}；query 支持 `model:x` / `upstream:x` / `user:x` / `key:x` / `status:200`（三位码）/ `status:4xx\|5xx\|2xx…`（区间）/ `latency>ms` / `latency<ms` / `ttft>ms` / `cache>pct` / `stream:true\|false` + 关键词；`user:` 匹配 **user_id 或用户名**（`key:` 已含 user_id），坏 token 一律 422；sort ∈ started_at（默认）/duration_ms/**total_tokens**/cost_micro/charge_micro（按钱排序需对应金额权限），order ∈ asc/desc（默认 desc），has_error=bool 过滤失败请求 |
-| GET | /admin/logs/{event_id}?include_payload= | 单条详情（payload 开关，正文经金额脱敏）；出参带 `trace_id`（适配器遥测关联键，ADR-028） |
+| GET | /admin/logs/{event_id} | 单条详情（与列表行同形；正文走 `/payload` 端口，原始 wire 行不出参）；出参带 `correlation_key`（跨日志与尝试链的中性关联键，ADR-028/029） |
 | GET | /admin/logs/{event_id}/payload | ADR-021 正文读取：设置键 `ag_access_log_llm=full` 时 AG 把 prompt/补全正文落到 `request_log_payloads`，本端点只读取回（AG SQLite 只读连接 + schema 校验）；无该行或正文未存档 → 404；响应过 §0.5 金额脱敏 |
-| GET | /admin/logs/{event_id}/attempts | 权限 `logs:read`。路由链（ADR-028）：`{event_id, trace_id, attempts:[{attempt, upstream_ref, upstream_name, model, status_code, error_type, error_message, duration_ms, outcome, started_at_ms}]}`，attempts 按 attempt 升序（1 起）；无尝试记录或日志无 trace_id → 200 空列表；event 不存在 → 404 `NOT_FOUND`。数据来源：适配器遥测归一化的 `request_attempts` 表（AG 适配器内部 OTLP 采集，AttemptSink 写入），系统层不接触 OTel |
+| GET | /admin/logs/{event_id}/attempts | 权限 `logs:read`。路由链（ADR-028）：`{event_id, correlation_key, attempts:[{attempt, upstream_ref, upstream_name, model, status_code, error_type, error_message, duration_ms, outcome, started_at_ms}]}`，attempts 按 attempt 升序（1 起）；无尝试记录或日志无关联键 → 200 空列表；event 不存在 → 404 `NOT_FOUND`。数据来源：适配器遥测归一化的 `request_attempts` 表（AG 适配器内部 OTLP 采集，AttemptSink 写入），系统层不接触 OTel |
 
 列表/详情共用的行字段（**主键名是 `event_id`，不是 `id`**）：
 
 | 字段 | 说明 |
 |---|---|
 | event_id / started_at_ms / completed_at_ms | 标识与时间（completed_at_ms 由 AG 延迟字段随采集落库） |
-| trace_id | 适配器遥测关联键（ADR-028）；日志→`/admin/logs/{event_id}/attempts` 的 join 键。历史日志或适配器无遥测时为空串 |
-| requested_model | 客户端请求的公开模型名（来自 AG 属性 `attributes_json.agw.ai.original_model`）；旧行/属性缺失时为空串，UI 显示「—」，**不以 `public_model` 回填**（ticket 03） |
+| correlation_key | 跨请求日志与尝试链的中性关联键（ADR-028/029）；日志→`/admin/logs/{event_id}/attempts` 的 join 键。历史日志或适配器无遥测时为空串（票05 前的 `trace_id` 列名已由 init_db 回填为中性列） |
+| requested_model | 客户端请求的公开模型名（适配器在采集时从 wire 属性归一化，系统不再解析 raw）；旧行/缺失时为空串，UI 显示「—」，**不以 `public_model` 回填**（ticket 03/05） |
 | attempts_count / has_attempts | 该请求归一化后的上游尝试次数；0/false 表示无路由链（ADR-028；仅列表出参，详情不重复） |
 | last_failure_status / last_failure_error_type / last_failure_error_message | 最近一次失败尝试的事实字段（HTTP 状态码 / 上游错误类型 / 上游错误文案）；无失败尝试时依次为 null / 空串 / 空串。服务层只回事实、不拼 UI 摘要：行级错误文案由前端 `web/src/components/logs/error-summary.ts` 的 `rowErrorText` 唯一拼装（列表与详情抽屉同形；ticket 04） |
 | duration_ms / time_to_first_token_ms | 总耗时与首字延迟（AG 三延迟字段，ingest 时写入） |
@@ -613,12 +613,12 @@ AES-GCM 密文 + sk-...abcd 掩码。
 | user_id / user_name / api_key_id / api_key_label | 身份（密钥为掩码 `sk-…后缀`；密钥已删时为空串） |
 | input_tokens / output_tokens / total_tokens / cache_read_tokens / cache_write_tokens | 词元五列（缓存列原始值，未并入输入） |
 | cache_ratio | 缓存命中率（%，containment 口径：cached ≤ input 时分母=input） |
-| throughput_tps / is_stream | 输出速度与是否流式（流式=显式标志或 ttft>0；吞吐仅流式且有生成窗口时给值） |
-| has_error / has_payload / error | 失败标记 / 正文存档标记 / **原始**错误文本（只含日志原文，不再由服务层回填尝试摘要；摘要见 `last_failure_*` 与前端拼装） |
+| throughput_tps / is_stream | 输出速度与是否流式（流式=适配器判定列，无判定时回退 ttft>0；吞吐仅流式且有生成窗口时给值） |
+| has_error / has_payload / error | 失败标记 / 正文存档标记 / 归一化错误文本（适配器采集时归一，只含日志原文，不回填尝试摘要；摘要见 `last_failure_*` 与前端拼装） |
 | cost_micro / margin_micro / charge_micro / currency | 三账金额 + 币种（受 §0.5 字段级权限约束，缺权限键缺失） |
 | estimate | true：token 数为估算口径（cache 折叠进 input，stage B 待核） |
 
-注意：`GET /admin/logs` 的列表行是**动态 dict**，`requested_model / attempts_count / has_attempts / last_failure_status / last_failure_error_type / last_failure_error_message` 不进入 `web/src/generated/contract.ts`（gen_ts 只覆盖 Pydantic 响应模型）；这些字段由本表 + pytest（`api/tests/integration/test_logs_requested_model.py` 等）与实际响应约束，不要声称契约生成检查覆盖了它们。
+注意：`GET /admin/logs` 的列表行是**动态 dict**，`requested_model / correlation_key / attempts_count / has_attempts / last_failure_status / last_failure_error_type / last_failure_error_message` 不进入 `web/src/generated/contract.ts`（gen_ts 只覆盖 Pydantic 响应模型）；这些字段由本表 + pytest（`api/tests/integration/test_logs_requested_model.py` 等）与实际响应约束，不要声称契约生成检查覆盖了它们。
 
 ### 4.5 配置下发
 | 方法 | 路径 | 说明 |

@@ -187,7 +187,7 @@ def attempts_for_event(
     row = session.get(GatewayUsageEventORM, event_id)
     if row is None:
         return None
-    key = row.trace_id or ""
+    key = row.correlation_key or ""
     return key, get_attempts(session, key)
 
 

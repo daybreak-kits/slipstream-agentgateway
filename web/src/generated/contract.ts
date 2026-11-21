@@ -154,7 +154,7 @@ export interface LogAttemptOut {
 
 export interface LogAttemptsOut {
   event_id: string;
-  trace_id?: string;
+  correlation_key?: string;
   attempts?: LogAttemptOut[];
 }
 
