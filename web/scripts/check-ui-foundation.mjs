@@ -2120,6 +2120,50 @@ check("登录页 SSR：渐变根容器、三档宽度列、错误区/提示区�
   expect(html.includes('data-slot="login-error"') && html.includes('data-slot="login-hint"'), "错误区与底部提示区必须始终渲染（无错误时也占位）");
 });
 
+// ---------- 10. 统一悬浮详情 HoverInfo（W7 ticket 08） ----------
+// spec「交互与界面-参数」：hover / 键盘 focus / 触屏轻点三路打开同一内容；portal 到页面顶层；
+// 视口碰撞自动翻转/收拢；有可访问名称；禁用与空值是稳定态；关闭后焦点回到触发元素。
+check("HoverInfo：触发元素带槽位、可聚焦，浮层内容走 Portal 不落 SSR DOM", async () => {
+  const { HoverInfo } = await load("/src/components/ui/hover-info.tsx");
+  const html = render(
+    createElement(HoverInfo, { content: "完整参数说明" }, createElement("span", null, "输入 128,000")),
+  );
+  expect(html.includes('data-hover-info="trigger"'), "触发元素必须带 data-hover-info=trigger（不覆盖调用方的 data-slot）");
+  expect(html.includes("输入 128,000"), "触发元素自身内容必须渲染");
+  expect(html.includes('tabindex="0"'), "触发元素必须可聚焦（键盘用户要能读到详情）");
+  expect(!html.includes("完整参数说明"), "浮层内容必须走 Portal（SSR 不落 DOM）");
+});
+
+check("HoverInfo：显式 label 变成触发元素的可访问名称", async () => {
+  const { HoverInfo } = await load("/src/components/ui/hover-info.tsx");
+  const html = render(
+    createElement(
+      HoverInfo,
+      { content: "已关闭，人工启用后恢复", label: "查看模型状态" },
+      createElement("span", null, "关闭"),
+    ),
+  );
+  expect(html.includes('aria-label="查看模型状态"'), "显式 label 必须写进触发元素的 aria-label");
+});
+
+check("HoverInfo：源码契约——Portal 到 body、hover 250ms 延迟、碰撞翻转与收拢", () => {
+  const src = read("src/components/ui/hover-info.tsx");
+  includesAll(src, ["createPortal", "document.body"], "浮层 Portal 挂载点");
+  expect(/HOVER_INFO_DELAY_MS\s*=\s*250/.test(src), "hover 打开延时常量必须是 250ms");
+  includesAll(
+    src,
+    ['role="tooltip"', "getBoundingClientRect", "innerWidth", "innerHeight"],
+    "浮层定位与视口碰撞处理",
+  );
+  includesAll(src, ["maxHeight", "overflow"], "视口放不下时必须收拢（限高 + 滚动）");
+});
+
+check("接线：指标卡说明文字改用 HoverInfo（原生 title 换成可聚焦的悬浮详情）", () => {
+  const src = read("src/components/stat-card.tsx");
+  expect(src.includes("HoverInfo"), "指标卡说明文字必须走统一悬浮详情原语");
+  expect(!src.includes("title={hint}"), "指标卡说明文字不得再用原生 title（键盘与触屏读不到）");
+});
+
 // ---------- run ----------
 const failures = [];
 server = await createServer({
