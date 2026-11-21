@@ -14,6 +14,9 @@
  *   4. 表格页横向滚动 + 冻结操作列在滚动前后都可达；
  *   4b. （W6 ticket 10）模型管理上游/公开两张表：375/768 横滚、操作列贴边 ≤16px、
  *       冻结操作列滚动前后可点、关闭模型行默认置尾；
+ *   4c. （W6 ticket 11）其余数据表（连接密钥/上游渠道/用户/日志/审计/角色/价目/配置版本）：
+ *       375/768 横滚、冻结操作列贴边可点、关闭行默认置尾、连接密钥显式排序尊重排序、
+ *       日志排序列三态图标（未排序 ArrowUpDown 常驻）；
  *   5. 弹窗宽度/高度受视口约束、内容可滚、footer 竖排有间距；
  *      375/768 额外打开上游模型抽屉，断言左右边缘都在视口内、内容区可滚；
  *   6. 375 短视口（375×400）弹窗可滚，提交出口仍可达；
@@ -363,7 +366,67 @@ async function seedFixtures(page) {
   if (!upstream.ok()) {
     throw new MatrixError("创建矩阵上游失败 HTTP " + upstream.status() + "：" + (await upstream.text()).slice(0, 300));
   }
-  return { userName: user.name, username: user.username, upstreamName, upstreamId: (await upstream.json()).id };
+  // W6 ticket 11：其余数据表的置尾/排序断言都要按 id 调管理端点（签发密钥、关用户）。
+  return { userId: (await created.json()).id, userName: user.name, username: user.username, upstreamName, upstreamId: (await upstream.json()).id };
+}
+
+/* W6 ticket 11：其余数据表惰性播种——启用/关闭上游、启用/关闭连接密钥、关闭用户。
+ * 长名无空格保证窄屏必然横滚；关闭行供「默认视图置尾」断言；
+ * 关闭密钥名称字典序小于启用密钥（closed < open），供「显式升序排序尊重排序、不强制置尾」断言。 */
+let rolloutSeeded = false;
+async function ensureRolloutSeeded(page, fixtures) {
+  if (rolloutSeeded) return;
+  rolloutSeeded = true;
+  // 签发密钥会触发配置下发（apply），空库没有公开模型会 502——先保证模型表已播种。
+  await ensureModelsSeeded(page, fixtures);
+  const suffix = Date.now().toString(36);
+  const long = "withaverylongunbreakablenameforoverflow";
+  const post = async (url, data, label) => {
+    const response = await page.request.post(baseUrl() + url, { data });
+    if (!response.ok()) throw new MatrixError(label + "失败 HTTP " + response.status() + "：" + (await response.text()).slice(0, 300));
+    return response.json();
+  };
+  const patch = async (url, data, label) => {
+    const response = await page.request.patch(baseUrl() + url, { data });
+    if (!response.ok()) throw new MatrixError(label + "失败 HTTP " + response.status() + "：" + (await response.text()).slice(0, 300));
+    return response.json().catch(() => ({}));
+  };
+  const openUpstream = await post("/admin/upstreams", {
+    name: "matrixrollupopen" + suffix + long,
+    base_url: "http://127.0.0.1:9",
+    api_style: "openai_chat",
+    api_key: "sk-matrix-roll-o-" + suffix,
+  }, "创建矩阵开启上游");
+  const closedUpstream = await post("/admin/upstreams", {
+    name: "matrixrollupclosed" + suffix + long,
+    base_url: "http://127.0.0.1:9",
+    api_style: "openai_chat",
+    api_key: "sk-matrix-roll-c-" + suffix,
+  }, "创建矩阵关闭上游");
+  await patch("/admin/upstreams/" + closedUpstream.id, { enabled: false }, "关闭矩阵上游");
+  const keyOpen = await post("/admin/users/" + fixtures.userId + "/api-keys", {
+    user_id: fixtures.userId,
+    name: "matrixkeyopen" + suffix + long,
+  }, "创建矩阵密钥");
+  const keyClosed = await post("/admin/users/" + fixtures.userId + "/api-keys", {
+    user_id: fixtures.userId,
+    name: "matrixkeyclosed" + suffix + long,
+  }, "创建矩阵关闭密钥");
+  await patch("/admin/api-keys/" + keyClosed.id + "/status", { status: "disabled" }, "关闭矩阵密钥");
+  const closedUser = await post("/admin/users", {
+    name: "矩阵关闭用户" + suffix + long,
+    username: "matrixclosed_" + suffix,
+    password: "Matrix12345!",
+    role: "customer",
+  }, "创建矩阵关闭用户");
+  await patch("/admin/users/" + closedUser.id, { status: "disabled" }, "关闭矩阵用户");
+  fixtures.rollout = {
+    openUpstreamName: openUpstream.name,
+    closedUpstreamName: closedUpstream.name,
+    openKeyName: keyOpen.name || "matrixkeyopen" + suffix + long,
+    closedKeyName: keyClosed.name || "matrixkeyclosed" + suffix + long,
+    closedUsername: closedUser.name,
+  };
 }
 
 /* W6 ticket 10：模型表数据惰性播种。「登记模型」入口是 ModelsTable 的空态 CTA——
@@ -383,18 +446,30 @@ async function ensureModelsSeeded(page, fixtures) {
     }
     return response.json();
   };
-  await makeModel(wide + "a", true);
+  const modelA = await makeModel(wide + "a", true);
   await makeModel(wide + "b", true);
   const closedModel = await makeModel(wide + "closed", false);
   const publicModel = await page.request.post(baseUrl() + "/admin/public-models", {
-    data: { name: "matrixpublicmodel" + Date.now().toString(36) + "withaverylongunbreakablenameforoverflow", routing_mode: "failover", enabled: false },
+    // W6 ticket 11：必须 enabled —— 渲染器只取 enabled 公开模型（rendering.py :97），
+    // 禁用公开模型即使挂了成员也不会渲染，签发连接密钥触发的 apply 照样 502。
+    data: { name: "matrixpublicmodel" + Date.now().toString(36) + "withaverylongunbreakablenameforoverflow", routing_mode: "failover", enabled: true },
   });
   if (!publicModel.ok()) {
     throw new MatrixError("创建矩阵公开模型失败 HTTP " + publicModel.status() + "：" + (await publicModel.text()).slice(0, 300));
   }
+  const publicJson = await publicModel.json();
+  // W6 ticket 11：公开模型挂一个成员。渲染器跳过无成员公开模型（contract invariant 1），
+  // 全库只有无成员公开模型时，签发连接密钥触发的配置下发会以
+  // APPLY_FAILED「nothing to render: no public models」502 失败（矩阵 RED 轮实测）。
+  const member = await page.request.post(baseUrl() + "/admin/model-targets", {
+    data: { public_model_id: publicJson.id, upstream_model_id: modelA.id, priority: 1 },
+  });
+  if (!member.ok()) {
+    throw new MatrixError("挂矩阵公开模型成员失败 HTTP " + member.status() + "：" + (await member.text()).slice(0, 300));
+  }
   fixtures.upstreamModelName = wide;
   fixtures.closedUpstreamModelName = closedModel.name;
-  fixtures.publicModelName = (await publicModel.json()).name;
+  fixtures.publicModelName = publicJson.name;
 }
 
 async function openOverflow(page) {
@@ -595,6 +670,160 @@ async function assertModelsTable(page, width, fixtures, tabKey) {
     "模型表 scroll/client=" + dims.scrollWidth + "/" + dims.clientWidth +
     "，操作列贴边 " + Math.round(edgeGap) + "px，冻结列滚动前后可操作"
   );
+}
+
+/** 行序查询：在指定滚动容器内按文本找行号（找不到 = -1）。 */
+async function rowIndexOf(wrap, text) {
+  return wrap.evaluate((node, needle) => {
+    const trs = Array.from(node.querySelectorAll("tbody tr"));
+    return trs.findIndex((tr) => tr.textContent.includes(needle));
+  }, text);
+}
+
+/** W6 ticket 11：其余数据表专项——窄屏横滚、冻结操作列滚动前后可点、
+ * 操作列最后一个内容元素贴近滚动容器右缘（≤16px，pr-2 基线）、
+ * 关闭行默认置尾（spec 提供 open/closed 行文本时）。
+ * 表格无数据行（空态）时只断言容器契约并注明，播种表不受影响。 */
+async function assertRolloutTable(page, width, fixtures, spec) {
+  await ensureRolloutSeeded(page, fixtures);
+  if (spec.seedModels) await ensureModelsSeeded(page, fixtures);
+  await goto(page, spec.path);
+  if (spec.listView) {
+    const listView = page.getByRole("button", { name: "列表", exact: true });
+    if (await visible(listView)) {
+      await listView.click();
+      await page.waitForTimeout(250);
+    }
+  }
+  const wrap = page.locator('[data-slot="table-wrap"]').first();
+  await wrap.waitFor({ state: "visible", timeout: 8000 });
+  const dims = await wrap.evaluate((node) => ({
+    scrollWidth: node.scrollWidth,
+    clientWidth: node.clientWidth,
+    overflowX: getComputedStyle(node).overflowX,
+  }));
+  assert(dims.overflowX === "auto" || dims.overflowX === "scroll", spec.label + "容器不是横向滚动容器");
+  if (width < 1024 && spec.expectOverflow !== false) {
+    assert(dims.scrollWidth > dims.clientWidth + 1, width + " 下" + spec.label + "没有横向滚动（scroll=" + dims.scrollWidth + " client=" + dims.clientWidth + "）");
+  }
+  // 操作列目标：优先 spec.rowText 的行，否则全表第一个操作按钮；无按钮列（价目）只锚行。
+  const rows = wrap.locator("tbody tr");
+  const rowLocator = spec.rowText ? rows.filter({ hasText: spec.rowText }).first() : null;
+  const actionTarget = spec.actionButton
+    ? (rowLocator ? rowLocator.getByRole("button", { name: spec.actionButton }).first() : wrap.getByRole("button", { name: spec.actionButton }).first())
+    : rowLocator;
+  const hasTarget = actionTarget && (await visible(actionTarget));
+  if (!hasTarget) {
+    await shot(page, width + "-rollout-" + spec.key);
+    return spec.label + " 空表：容器横滚契约已验，无数据行可量冻结/贴边";
+  }
+  await actionTarget.scrollIntoViewIfNeeded();
+  if (spec.actionButton) {
+    await wrap.evaluate((node) => { node.scrollLeft = 0; });
+    await page.waitForTimeout(200);
+    const startBox = await boxOf(actionTarget);
+    assert(startBox.x >= -0.5 && startBox.x + startBox.width <= width + 0.5, width + " 下" + spec.label + "操作列滚动到最左时不可见（冻结列失效）");
+    await assertClickableAtCenter(page, actionTarget, spec.label + "操作列");
+    await wrap.evaluate((node) => { node.scrollLeft = node.scrollWidth; });
+    await page.waitForTimeout(200);
+    const endBox = await boxOf(actionTarget);
+    assert(endBox.x >= -0.5 && endBox.x + endBox.width <= width + 0.5, width + " 下" + spec.label + "操作列在横向滚动后不可达");
+  }
+  // 贴边：末行操作单元格内最右内容的右缘与滚动容器右缘距离 ≤16px（无按钮时量任意内容元素）。
+  const edgeGap = await wrap.evaluate((node) => {
+    const lastRow = node.querySelector("tbody tr:last-child");
+    if (!lastRow) return null;
+    let maxRight = null;
+    for (const el of lastRow.querySelectorAll("td:last-child *")) {
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0 && (maxRight === null || rect.right > maxRight)) maxRight = rect.right;
+    }
+    return maxRight === null ? null : node.getBoundingClientRect().right - maxRight;
+  });
+  assert(edgeGap !== null, spec.label + "末行没有可量元素");
+  assert(edgeGap <= 16.5, width + " 下" + spec.label + "操作列未贴右边缘（距容器右缘 " + Math.round(edgeGap) + "px > 16px）");
+  // 关闭行默认置尾（可选断言）。
+  if (spec.closedRowText && spec.openRowText) {
+    const openIndex = await rowIndexOf(wrap, spec.openRowText);
+    const closedIndex = await rowIndexOf(wrap, spec.closedRowText);
+    assert(openIndex >= 0 && closedIndex > openIndex, spec.label + "默认视图关闭行必须排在开启行之后（置尾失效：" + JSON.stringify({ openIndex, closedIndex }) + "）");
+  }
+  await shot(page, width + "-rollout-" + spec.key);
+  return (
+    spec.label + " scroll/client=" + dims.scrollWidth + "/" + dims.clientWidth +
+    "，操作列贴边 " + Math.round(edgeGap) + "px" +
+    (spec.actionButton ? "，冻结列滚动前后可点" : "")
+  );
+}
+
+/** W6 ticket 11：连接密钥表显式排序尊重排序——默认视图关闭密钥置尾；
+ * 点击「名称」升序后关闭密钥（字典序在前）必须排最前，不得强制置尾（user story 42）。 */
+async function assertClientKeysRollout(page, width, fixtures) {
+  // spec 里要读 fixtures.rollout 的播种名：必须先播种再构造 spec（对象字面量会立即求值）。
+  await ensureRolloutSeeded(page, fixtures);
+  await assertRolloutTable(page, width, fixtures, {
+    key: "client-keys",
+    path: "/client-keys",
+    label: "连接密钥表",
+    actionButton: "重命名",
+    rowText: fixtures.rollout.openKeyName,
+    openRowText: fixtures.rollout.openKeyName,
+    closedRowText: fixtures.rollout.closedKeyName,
+  });
+  const nameTh = page.locator("th").filter({ hasText: "名称" }).first();
+  // 三态图标（浏览器实证）：未排序 ArrowUpDown 常驻，点击后升序 ArrowUpNarrowWide。
+  const beforeIcon = (await nameTh.locator("svg").first().getAttribute("class")) || "";
+  assert(beforeIcon.includes("lucide-arrow-up-down"), "可排序列未排序必须常驻 ArrowUpDown（当前 " + beforeIcon + "）");
+  // 375 下冻结操作列（约 290px 宽）盖住首列右半：点表头左缘，避开冻结列拦截点击。
+  await nameTh.click({ position: { x: 5, y: 12 } });
+  await page.waitForTimeout(300);
+  assert((await nameTh.getAttribute("aria-sort")) === "ascending", "显式排序后名称列表头必须带 aria-sort=ascending");
+  const afterIcon = (await nameTh.locator("svg").first().getAttribute("class")) || "";
+  assert(afterIcon.includes("lucide-arrow-up-narrow-wide"), "升序必须显示 ArrowUpNarrowWide（当前 " + afterIcon + "）");
+  const wrap2 = page.locator('[data-slot="table-wrap"]').first();
+  const closedIndex = await rowIndexOf(wrap2, fixtures.rollout.closedKeyName);
+  const openIndex = await rowIndexOf(wrap2, fixtures.rollout.openKeyName);
+  assert(openIndex >= 0 && closedIndex >= 0 && closedIndex < openIndex, "显式按名称升序排序后必须尊重排序，关闭密钥（字典序在前）不得强制置尾：" + JSON.stringify({ closedIndex, openIndex }));
+  await shot(page, width + "-rollout-client-keys-sorted");
+  return "默认视图关闭密钥置尾；名称升序后关闭密钥回到字典序位置（尊重排序），三态图标随点击切换";
+}
+
+/** W6 ticket 11：用户表列表视图——关闭用户置尾（树视图不参与置尾，由源码契约钉住）。 */
+async function assertUsersRollout(page, width, fixtures) {
+  await ensureRolloutSeeded(page, fixtures);
+  return assertRolloutTable(page, width, fixtures, {
+    key: "users",
+    path: "/users",
+    label: "用户表（列表视图）",
+    actionButton: "编辑",
+    rowText: fixtures.rollout.closedUsername,
+    openRowText: fixtures.userName,
+    closedRowText: fixtures.rollout.closedUsername,
+    listView: true,
+  });
+}
+
+/** W6 ticket 11：日志页服务端排序表头三态图标——未排序常驻 ArrowUpDown，
+ * 点击后升序 ArrowUpNarrowWide；按钮可访问名保持「按词元排序」不被图标标签污染。
+ * 矩阵站点只起控制面 API（无 relay 流量），空态不渲染表格：此时三态图标契约
+ * 由 check-ui-foundation 的 SortHeader SSR 断言覆盖，这里只验页面可达不崩。 */
+async function assertLogsRollout(page, width, fixtures) {
+  await goto(page, "/logs");
+  const tokensBtn = page.getByRole("button", { name: "按词元排序", exact: true }).first();
+  if (!(await visible(tokensBtn))) {
+    await shot(page, width + "-rollout-logs");
+    return "日志空态（矩阵站点无 relay 流量不渲染表格）：三态图标契约由 SSR 门禁覆盖";
+  }
+  const unsortedIcon = (await tokensBtn.locator("svg").first().getAttribute("class")) || "";
+  assert(unsortedIcon.includes("lucide-arrow-up-down"), "未排序的日志排序列必须常驻 ArrowUpDown（当前 " + unsortedIcon + "）");
+  await tokensBtn.click();
+  await page.waitForTimeout(400);
+  const ascBtn = page.getByRole("button", { name: "按词元排序", exact: true }).first();
+  assert(await visible(ascBtn), "点击后「按词元排序」按钮可访问名被图标 aria-label 污染（必须 aria-hidden）");
+  const ascIcon = (await ascBtn.locator("svg").first().getAttribute("class")) || "";
+  assert(ascIcon.includes("lucide-arrow-up-narrow-wide"), "升序必须显示 ArrowUpNarrowWide（当前 " + ascIcon + "）");
+  await shot(page, width + "-rollout-logs");
+  return "未排序 ArrowUpDown 常驻、点击后升序图标切换、按钮可访问名不变";
 }
 
 async function assertDialog(page, width, height) {
@@ -873,6 +1102,41 @@ async function main() {
           assertModelsTable(page, width, fixtures, "upstream"));
         await test("models-table.public." + label, label + " 公开模型表横滚 + 操作列贴边可操作", () =>
           assertModelsTable(page, width, fixtures, "public"));
+        // W6 ticket 11：全站其余数据表的表格专项（横滚 + 冻结操作列 + 贴边 + 关闭置尾 + 显式排序尊重排序）。
+        await test("rollout-table.client-keys." + label, label + " 连接密钥表横滚 + 贴边 + 关闭行置尾 + 显式排序尊重排序", () =>
+          assertClientKeysRollout(page, width, fixtures));
+        await test("rollout-table.upstreams." + label, label + " 上游渠道表横滚 + 贴边 + 关闭行置尾", () =>
+          assertRolloutTable(page, width, fixtures, {
+            key: "upstreams", path: "/upstreams", label: "上游渠道表", actionButton: "编辑",
+            rowText: fixtures.rollout?.openUpstreamName,
+            openRowText: fixtures.rollout?.openUpstreamName,
+            closedRowText: fixtures.rollout?.closedUpstreamName,
+          }));
+        await test("rollout-table.users." + label, label + " 用户表列表视图关闭行置尾 + 贴边", () =>
+          assertUsersRollout(page, width, fixtures));
+        await test("rollout-table.logs." + label, label + " 日志表排序三态图标 + 横滚容器", () =>
+          assertLogsRollout(page, width, fixtures));
+        await test("rollout-table.audits." + label, label + " 审计表横滚 + 冻结操作列贴边", () =>
+          assertRolloutTable(page, width, fixtures, {
+            key: "audits", path: "/audits", label: "审计表", actionButton: "详情", rowText: "admin",
+          }));
+        await test("rollout-table.roles." + label, label + " 角色表横滚 + 冻结操作列贴边", () =>
+          assertRolloutTable(page, width, fixtures, {
+            key: "roles", path: "/roles", label: "角色表", actionButton: "查看权限",
+            // 角色行内容窄，768 下本就放得下：只要求容器可横滚，不强制溢出。
+            expectOverflow: false,
+          }));
+        await test("rollout-table.pricing." + label, label + " 价目表横滚 + 操作列贴边", () =>
+          assertRolloutTable(page, width, fixtures, {
+            key: "pricing", path: "/pricing", label: "价目表", actionButton: null,
+            rowText: fixtures.upstreamModelName, seedModels: true,
+          }));
+        await test("rollout-table.config-revisions." + label, label + " 配置版本表横滚 + 冻结操作列贴边", () =>
+          assertRolloutTable(page, width, fixtures, {
+            key: "config-revisions", path: "/config-revisions", label: "配置版本表", actionButton: "详情",
+            // 版本行内容窄：只要求容器可横滚；有行时验冻结/贴边，空表只验容器。
+            expectOverflow: false,
+          }));
       }
     }
     await test("runtime.console", "五档交互无新增 console error / 未捕获异常", () => {

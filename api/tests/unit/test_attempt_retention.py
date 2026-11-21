@@ -87,7 +87,7 @@ def test_log_cleanup_job_appends_the_attempt_pass(engine_and_sessionmaker, tmp_p
 
     # A missing AG request-log DB is already a no-op (fresh install / API-only
     # deployment); the appended control-plane attempt pass must still run.
-    counts = cleanup_job(factory, Settings(ag_config_dir=str(tmp_path / "ag-config")))
+    counts = cleanup_job(factory, Settings(data_plane_config_dir=str(tmp_path / "ag-config")))
 
     assert counts == {"request_logs": 0, "request_log_payloads": 0, "request_attempts": 1}
     with factory() as session:

@@ -50,6 +50,8 @@
 
 能力键使用中性词表（如 `routing.priority_failover`、`observe.request_log`、`usage.read_events`、`mcp.targets`）。数据面配置路径（如 `llm.policies.*`、`frontendPolicies.*`）只能作为适配器内部映射，不能成为系统 API 或 UI 的键。
 
+**配置命名空间（ticket 04）**：核心 Settings 只声明中性运行参数（`data_plane_adapter` 选择、`data_plane_config_dir` 部署目录）。数据面专有旋钮迁入适配器命名空间（agentgateway：`l03_adapters/agentgateway/deployment.py`），环境变量名保持不变（`SLIPSTREAM_AG_CONFIG_FILENAME` / `SLIPSTREAM_AG_LLM_PORT` / `SLIPSTREAM_AG_DB_PATH` / `SLIPSTREAM_AG_BINARY`）。迁移策略（迁移而非拒绝）：`SLIPSTREAM_AG_CONFIG_DIR` 继续作为 `SLIPSTREAM_DATA_PLANE_CONFIG_DIR` 的弃用别名被读取，两者同设时中性名优先。connection、health、playground 的端点/端口只来自 `client_contract()`（含 `endpoint_for(purpose)`、`base_url()` 与字节稳定的 `health_fields()`），系统层不拼数据面地址、不拼写数据面 wire 字段名。
+
 ## 4. 依赖方向
 
 ```

@@ -197,6 +197,32 @@ class ClientContract:
     def endpoint_paths(self) -> tuple[str, ...]:
         return tuple(endpoint.path for endpoint in self.endpoints)
 
+    def endpoint_for(self, purpose: str) -> ClientEndpoint | None:
+        """First endpoint declared for one neutral purpose key (None when absent)."""
+        for endpoint in self.endpoints:
+            if endpoint.purpose == purpose:
+                return endpoint
+        return None
+
+    def base_url(self) -> str:
+        """The client-callable data-plane root.
+
+        Adapters that do not share the control-plane host set ``base_url_hint``;
+        the co-location default keeps system code from building addresses.
+        """
+        if self.base_url_hint:
+            return self.base_url_hint.rstrip("/")
+        return f"{self.scheme}://127.0.0.1:{self.default_port}"
+
+    def health_fields(self) -> dict[str, int]:
+        """Legacy /admin/health wire fields sourced from this contract.
+
+        The ``data_plane_port`` key predates ADR-029 and the console renders it,
+        so the wire shape stays byte-stable while the value moves to the adapter;
+        the key is owned here at the adapter boundary, not in a system router.
+        """
+        return {"data_plane_port": self.default_port}
+
 
 @runtime_checkable
 class TelemetryHandle(Protocol):

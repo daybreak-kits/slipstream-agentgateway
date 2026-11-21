@@ -18,6 +18,7 @@ from l01_core.errors import AppError, ErrorCode
 from l01_core.ids import new_id
 from l01_core.settings import get_settings
 from l01_core.timeutil import now_ms
+from l03_adapters.spi import DataPlaneAdapter
 from l04_repo.orm import (
     ApiKeyORM,
     ChargeEntryORM,
@@ -32,7 +33,7 @@ from l04_repo.orm import (
 from l04_repo.repository import get_setting, put_setting
 from l05_service import auth, client_keys
 from l05_service.attempts import AttemptChainSummary, attempt_summaries, attempts_for_event
-from l06_api.deps import page_params, require, session_of
+from l06_api.deps import get_adapter, page_params, require, session_of
 from l06_api.schemas import LogAttemptOut, LogAttemptsOut, PlaygroundRequest
 
 router = APIRouter(tags=["ops"])
@@ -868,7 +869,8 @@ def _playground_identity(session: Session) -> ApiKeyORM:
     """Ensure the playground system user + its internal key exist; return the key.
 
     The plaintext never persists: it is decrypted from key_enc per request and
-    used server-side to call the 3600 data plane (admin-only, low frequency).
+    used server-side to call the configured data plane (admin-only, low
+    frequency).
     """
     settings = get_settings()
     stored = get_setting(session, "playground_user_id")
@@ -899,13 +901,30 @@ def _playground_identity(session: Session) -> ApiKeyORM:
 
 @router.post("/admin/playground/stream", dependencies=[Depends(require("playground:use"))])
 async def playground_stream(
-    payload: PlaygroundRequest, session: Session = Depends(session_of)
+    payload: PlaygroundRequest,
+    session: Session = Depends(session_of),
+    adapter: DataPlaneAdapter = Depends(get_adapter),
 ) -> StreamingResponse:
-    """SSE pass-through to the 3600 data plane using the server-side internal key."""
+    """SSE pass-through to the configured data plane via its client contract.
+
+    The relay address and chat endpoint are adapter client-contract facts
+    (ADR-029 ticket 04): the endpoint is looked up by its neutral purpose key
+    and the URL is contract-owned, so this router never hardcodes a data-plane
+    port or path. The server-side internal key stays here; the plaintext is
+    decrypted per request and never persisted.
+    """
     settings = get_settings()
     key = _playground_identity(session)
     plaintext = AesGcmBox(settings.secret_key).decrypt(key.key_enc)
-    base_url = "http://127.0.0.1:" + str(settings.ag_llm_port)
+    contract = adapter.client_contract()
+    endpoint = contract.endpoint_for("chat.completions")
+    if endpoint is None:
+        raise AppError(
+            ErrorCode.CONFLICT,
+            "当前数据面没有提供模型试验所需的对话端点",
+            details={"adapter": settings.data_plane_adapter},
+        )
+    base_url = contract.base_url()
 
     def relay():
         body = {
@@ -925,7 +944,7 @@ async def playground_stream(
         headers = {"Authorization": "Bearer " + plaintext, "Content-Type": "application/json"}
         with httpx.Client(timeout=300) as client:
             with client.stream(
-                "POST", base_url + "/v1/chat/completions", json=body, headers=headers
+                "POST", base_url + endpoint.path, json=body, headers=headers
             ) as upstream:
                 yield from upstream.iter_text()
 

@@ -118,6 +118,18 @@ def _default_usage_events() -> tuple[UsageEvent, ...]:
     )
 
 
+#: The fake driver's default client contract: same neutral endpoint trio as the
+#: real driver (E14), but no reachable port (0 = no data plane is listening).
+_FAKE_CLIENT_CONTRACT = ClientContract(
+    default_port=0,
+    endpoints=(
+        ClientEndpoint("/v1/chat/completions", ("POST",), "chat.completions"),
+        ClientEndpoint("/v1/models", ("GET",), "models.list"),
+        ClientEndpoint("/v1/embeddings", ("POST",), "embeddings.create"),
+    ),
+)
+
+
 class FakeAdapter:
     """In-memory SPI driver used by boundary tests and local demos."""
 
@@ -127,12 +139,16 @@ class FakeAdapter:
         *,
         usage_events: Sequence[UsageEvent] | None = None,
         healthy: bool = True,
+        contract: ClientContract | None = None,
     ) -> None:
         self.config_dir = config_dir
         self._usage_events = tuple(
             _default_usage_events() if usage_events is None else usage_events
         )
         self._healthy = bool(healthy)
+        # The client contract is configurable so boundary tests can point the
+        # system at a stub data plane without touching system code (t04).
+        self._contract = contract
         self._current: Artifact | None = None
         self._history: dict[str, Artifact] = {}
         self._payloads: dict[str, LogPayload] = {}
@@ -260,14 +276,9 @@ class FakeAdapter:
         )
 
     def client_contract(self) -> ClientContract:
-        return ClientContract(
-            default_port=0,
-            endpoints=(
-                ClientEndpoint("/v1/chat/completions", ("POST",), "chat.completions"),
-                ClientEndpoint("/v1/models", ("GET",), "models.list"),
-                ClientEndpoint("/v1/embeddings", ("POST",), "embeddings.create"),
-            ),
-        )
+        if self._contract is not None:
+            return self._contract
+        return _FAKE_CLIENT_CONTRACT
 
     def capability_note(self, key: str) -> str:
         for capability in _FAKE_CAPABILITIES:

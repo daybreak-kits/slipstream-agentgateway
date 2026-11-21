@@ -5,6 +5,19 @@ admin pair (SLIPSTREAM_ADMIN_USERNAME / SLIPSTREAM_ADMIN_PASSWORD).
 Configuration may also come from a .env file: the repository-root .env is
 loaded first, then the current working directory .env (the closer file wins).
 Real process environment variables always win over .env values.
+
+ADR-029 namespace policy (W6 ticket 04): this model carries neutral run config
+only. Data-plane-specific deployment knobs moved to the adapter namespace
+(``l03_adapters.agentgateway.deployment``), which keeps the historical
+environment names:
+
+* ``SLIPSTREAM_DATA_PLANE_CONFIG_DIR`` - the one neutral deployment location
+  (the only directory the control plane writes). ``SLIPSTREAM_AG_CONFIG_DIR``
+  stays honoured as a deprecated alias so existing deployments keep working;
+  the neutral name wins when both are set (migration, not rejection).
+* ``SLIPSTREAM_AG_CONFIG_FILENAME`` / ``SLIPSTREAM_AG_LLM_PORT`` /
+  ``SLIPSTREAM_AG_DB_PATH`` / ``SLIPSTREAM_AG_BINARY`` - unchanged names, now
+  consumed by the adapter namespace instead of this model.
 """
 
 from __future__ import annotations
@@ -12,13 +25,8 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import model_validator
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-#: File name of the agentgateway log SQLite DB inside ag_config_dir. AG resolves the
-#: rendered relative "ag-data.db" URL next to its config file; retention and the
-#: payload API point at the same file.
-DEFAULT_AG_DB_FILENAME = "ag-data.db"
 
 #: Fallback retention window when the operator setting is absent/invalid.
 DEFAULT_LOG_RETENTION_DAYS = 30
@@ -52,7 +60,9 @@ def dotenv_candidates() -> tuple[Path, ...]:
 class Settings(BaseSettings):
     """Control-plane settings; defaults match docs/PLAN.md section 3 (control plane on 3700)."""
 
-    model_config = SettingsConfigDict(env_prefix="SLIPSTREAM_", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="SLIPSTREAM_", extra="ignore", populate_by_name=True
+    )
 
     def __init__(self, **data: object) -> None:
         # Load .env from the repo root and the process CWD. Passing an explicit
@@ -68,16 +78,17 @@ class Settings(BaseSettings):
     # Local data root (gitignored): SQLite DB and agentgateway config live under .data_store.
     database_url: str = "sqlite:///./.data_store/slipstream.db"
 
-    # Data plane adapter selection and its deployment knobs. The control plane only
-    # ever writes inside ag_config_dir (the apply whitelist).
+    # Neutral data-plane deployment knobs (ADR-029): the adapter selection plus
+    # the one directory the control plane may write. Data-plane-specific shapes
+    # (config filename, client port, log DB path, binary) live in the adapter
+    # namespace; see the module docstring for the env migration policy.
     data_plane_adapter: str = "agentgateway"
-    ag_config_dir: str = "./.data_store/ag-config"
-    ag_config_filename: str = "config.yaml"
-    ag_llm_port: int = 3600
-    ag_db_path: str | None = None
-    # Official binary used for the pre-apply --validate-only gate: unset
-    # auto-detects the pinned path, "" disables the gate (recorded on apply).
-    ag_binary: str | None = None
+    data_plane_config_dir: str = Field(
+        default="./.data_store/ag-config",
+        validation_alias=AliasChoices(
+            "SLIPSTREAM_DATA_PLANE_CONFIG_DIR", "SLIPSTREAM_AG_CONFIG_DIR"
+        ),
+    )
 
     # Single-port deployment: admin UI static assets; empty = auto-detect <repo>/web/dist.
     web_dist_dir: str = ""
@@ -126,27 +137,15 @@ class Settings(BaseSettings):
     def _resolve_config_dir(self) -> Settings:
         """把数据面配置目录归一化为绝对路径。
 
-        ag_config_dir 同时出现在两处：控制面写 key 文件的落盘路径，以及渲染进
-        agentgateway 配置里的资源路径（upstream.apiKey.file）。后者由 agentgateway
-        按「配置文件所在目录」解析，相对路径会被拼成 <config_dir>/.data_store/ag-config/...
-        的双层路径，--validate-only 直接拒绝、apply 返回 502。统一按进程 CWD 解析成
-        绝对路径即可避免。
+        data_plane_config_dir 同时出现在两处：控制面写 key 文件与配置 artifact
+        的落盘路径，以及适配器渲染进配置里的资源路径。具体数据面按「配置文件
+        所在目录」解析相对路径时会出现双层目录，导致 --validate-only 直接拒绝、
+        apply 返回 502。统一按进程 CWD 解析成绝对路径即可避免。
         """
-        self.ag_config_dir = str(Path(self.ag_config_dir).expanduser().resolve())
+        self.data_plane_config_dir = str(
+            Path(self.data_plane_config_dir).expanduser().resolve()
+        )
         return self
-
-    @property
-    def ag_log_db_path(self) -> str:
-        """Filesystem path of the data-plane request-log DB.
-
-        Explicit ag_db_path wins; otherwise the AG default file inside the
-        resolved config dir (the file agentgateway creates for the rendered
-        "sqlite:///ag-data.db" URL). Usage ingestion, the payload API and the
-        retention job share this one source.
-        """
-        if self.ag_db_path:
-            return self.ag_db_path
-        return str(Path(self.ag_config_dir) / DEFAULT_AG_DB_FILENAME)
 
 
 @lru_cache

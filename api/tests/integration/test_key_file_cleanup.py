@@ -21,7 +21,7 @@ from l05_service.rollout import Rollout
 
 
 def _adapter() -> AgentgatewayAdapter:
-    return AgentgatewayAdapter(get_settings().ag_config_dir, ag_binary="")
+    return AgentgatewayAdapter(get_settings().data_plane_config_dir, ag_binary="")
 
 
 def _apply(factory, adapter=None, *, on_failure="raise"):
@@ -34,7 +34,7 @@ def _apply(factory, adapter=None, *, on_failure="raise"):
 
 
 def _keys_dir() -> Path:
-    return Path(get_settings().ag_config_dir) / "keys"
+    return Path(get_settings().data_plane_config_dir) / "keys"
 
 
 def _seed_with_stale_files(engine, factory) -> tuple[Path, Path, Path]:
@@ -57,7 +57,7 @@ def test_successful_apply_materializes_and_removes_only_stale_managed_key_files(
 ):
     engine, factory = engine_and_sessionmaker
     stale, legacy, note = _seed_with_stale_files(engine, factory)
-    outside = Path(get_settings().ag_config_dir) / "outside.key"
+    outside = Path(get_settings().data_plane_config_dir) / "outside.key"
     outside.write_text("outside-secret", encoding="utf-8")
 
     row = _apply(factory)
@@ -165,7 +165,7 @@ def test_rollout_materializes_before_apply_and_prunes_only_after_success(
             calls.append("apply")
             return super().apply(artifact)
 
-    row = _apply(factory, _Recording(get_settings().ag_config_dir, ag_binary=""))
+    row = _apply(factory, _Recording(get_settings().data_plane_config_dir, ag_binary=""))
 
     assert row.status == "active"
     assert calls == [
