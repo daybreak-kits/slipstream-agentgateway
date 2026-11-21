@@ -25,7 +25,7 @@
 | 尝试链 / 路由链 RequestAttempt | ADR-028：一次客户端请求的逐次上游尝试（attempt_no、上游、模型、状态码、错误类型/文本、耗时、结果），存 `request_attempts`；日志页经 `GET /admin/logs/{event_id}/attempts` 读取并展示「N 次尝试」 | 不是请求日志本身（`request_logs` 仍 1 请求 1 行）；历史日志无链路记录时显示「无链路记录」；与 OTel/trace/span 概念无关（系统层不出现） |
 | 冷却互斥 Cooldown exclusivity | 同一 scope 的**单次冷却**与**周期冷却**互斥：一种生效时另一种的创建/改期返回 409 `CONFLICT`，`details` 固定 `{blocking_rule_ids, cooldown_until_ms, window_end_ms}`；仅改 note 的 PATCH 放行（ADR-027，取代 ADR-004 叠加口径） | 批量冷却的冲突项进 `failed[]`，不整体失败；关闭（closed）不参与互斥 |
 | 分流投影 Flow collapse | 分流桑基图隐藏阶段由**后端**按完整五段路径投影重算（`collapse` 参数），隐藏段从路径删除、其余可见段按序连边，节点/边与金额守恒；至少保留 2 段 | 不是前端 splice；mock 不重算投影；未知阶段或不足 2 段 422 |
-| 成员 chip Member chip | 公开模型单页「成员编排」段的分层 chip：每个 chip 展示上游渠道/模型与 priority/weight/when，按层分组、conditional 末位兜底；候选按上游分组搜索 | 不是旧「成员双栏编辑」；chip 的增删/排序会产生整页脏标记，随唯一保存一次提交 |
+| 成员 chip Member chip | 公开模型单页「成员编排」段（W6 ticket 15 起为左 6 右 6 两栏，窄屏堆叠）：**已选成员每个模型一行**，行内直接编辑当前策略需要的字段（failover 只 priority、weighted 加 weight、conditional 加 when，其余字段不渲染）；右栏**候选**按上游渠道分组为 chip、可搜索、点击加入；conditional 末位兜底。两栏最大高度有界、各自内部滚动，列头与候选搜索固定。W5 曾用「成员也是 chip」的分层 chip 流，W6 起成员行内编辑、chip 只用于候选 | 不是旧「成员双栏编辑」；成员增删/行内编辑会产生整页脏标记（页头计数，不推挤布局），随唯一保存一次提交 |
 | 种子计数口径 | demo seed 的真实行数（厂商/上游/上游模型/公开模型/目标/用户/用量事件/计费流水/审计/app_settings/可用性规则/上游密钥）以 `api-contract §6` 为准，DELIVERY 只引用不复写 | 不要在文档里各写一套数字；「一个上游三把等权密钥」并计共 6 条上游密钥 |
 
 ## 2. 路由
@@ -125,7 +125,7 @@ v1 主币种 CNY。
 
 页面类型口径：
 - **列表页**：DataTable + 筛选/分页，行内操作打开表单或详情；
-- **详情/编辑页**：上游渠道整页编辑器（连接与模型/**路由与模型**/请求与响应/其他设置四 Tab，ADR-023；「模型」并入「路由与模型」，「健康」并入「连接与模型」）、模型管理（上游模型/公开模型两 Tab，可用性行内）、网关策略三 Tab、用户设置/运营设置；**公开模型「编辑」进入整页 `/models/public/:id`**（页头 + 基本信息 + 成员编排三段 + 底部唯一保存，ticket 13；成员编排为分层 chip，ticket 14，不再回列表弹窗）；
+- **详情/编辑页**：上游渠道整页编辑器（连接与模型/**路由与模型**/请求与响应/其他设置四 Tab，ADR-023；「模型」并入「路由与模型」，「健康」并入「连接与模型」）、模型管理（上游模型/公开模型两 Tab，可用性行内）、网关策略三 Tab、用户设置/运营设置；**公开模型「编辑」进入整页 `/models/public/:id`**（页头 + 基本信息 + 成员编排三段 + 底部唯一保存，ticket 13；成员编排左 6 右 6、成员行内编辑、候选按上游分组 chip 搜索，W6 ticket 15，不再回列表弹窗）；
 - **仪表盘/报表页**：快速上手、数据看板（区间 + 趋势 + 延迟 + 热力）；账单页移除：花费 → 用户设置·花费，充值/余额/流水 → 用户管理，待补价 → 价目管理「未配价」筛选；
 - **工具页**：模型试验，状态只存浏览器 localStorage；
 - **认证/兜底页**：登录、404；旧入口重定向页（8 个）：`/settings`（→ 用户设置默认段）、`/ops-settings`（→ 运营设置默认段）、`/upstream-prices`、`/downstream-prices` → `/pricing`、`/admins` → `/roles`、`/policies` → `/gateway-policies?tab=policies`、`/guardrails` → `?tab=guardrails`、`/mcp` → `?tab=mcp`；`/cost`、`/revenue`、`/unpriced` 随账单移除一并**删除**（不是重定向；成本入口在 `/settings/spend` 与价目页），导航中不存在这些入口。

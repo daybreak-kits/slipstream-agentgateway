@@ -649,6 +649,11 @@ async function flow5Pricing(s) {
   assert(Array.isArray(original.upstream_models) && original.upstream_models.length > 0, "导出文件没有 upstream_models");
   await s.page.getByText("价目已导出").first().waitFor({ state: "visible", timeout: 5000 }).catch(() => {});
   await s.shot("flow5-prices-exported");
+  // 「价目已导出」toast 出现在工具栏正上方（offset top 80），而导出点击后指针仍停在
+  // 工具栏——sonner 对悬停中的 toast 暂停计时（pauseOnHover 默认 true），toast 不消失
+  // 会一直拦截「导入 JSON」的点击。把指针移开让 toast 走完 3 秒再点。
+  await s.page.mouse.move(400, 400);
+  await s.page.locator("[data-sonner-toast]").first().waitFor({ state: "hidden", timeout: 8000 }).catch(() => {});
   // 改一个成本
   const target = original.upstream_models.find((m) => m.cost_input_per_1m);
   assert(target, "导出里没有带成本价的模型");
@@ -665,6 +670,11 @@ async function flow5Pricing(s) {
   const importBtn = s.page.getByRole("dialog").getByRole("button", { name: /导入/ }).first();
   assert((await importBtn.count()) > 0, "导入弹层没有导入按钮");
   await importBtn.click();
+  // W4-G 确认校准（脚本写作晚于此功能引入前的最后一次全跑）：「开始导入」先弹覆盖行数
+  // 确认（alertdialog「确认导入」），确认后才真正发请求。
+  const confirmBtn = s.page.getByRole("alertdialog").getByRole("button", { name: /确认导入/ }).first();
+  await confirmBtn.waitFor({ state: "visible", timeout: 5000 });
+  await confirmBtn.click();
   await s.page.getByText("价目导入成功").first().waitFor({ state: "visible", timeout: 10000 });
   await s.shot("flow5-prices-imported");
   // 验证后端生效
@@ -677,6 +687,9 @@ async function flow5Pricing(s) {
   await s.page.locator('input[type="file"]').setInputFiles(file);
   await s.page.waitForTimeout(600);
   await s.page.getByRole("dialog").getByRole("button", { name: /导入/ }).first().click();
+  const restoreConfirm = s.page.getByRole("alertdialog").getByRole("button", { name: /确认导入/ }).first();
+  await restoreConfirm.waitFor({ state: "visible", timeout: 5000 }).catch(() => {});
+  await restoreConfirm.click().catch(() => {});
   await s.page.getByText("价目导入成功").first().waitFor({ state: "visible", timeout: 10000 }).catch(() => {});
   return "导出 " + original.upstream_models.length + " 行 → 改 " + target.name + " 成本 " + originalCost + "→" + bumped + " → 导入生效 → 已还原";
 }
@@ -813,8 +826,15 @@ async function main() {
   await test("login.page", "登录页品牌与错误密码", async () => {
     await session.page.goto(BASE_URL + "/login", { waitUntil: "domcontentloaded" });
     await settle(session.page, { quietMs: 400 });
+    // W6 票12 后登录页无 <main> 容器（settle 的 main 锚点在登录页空转），冷启动首帧
+    // React 挂载可能晚于 networkidle——以登录表单为挂载锚点，再断言品牌锁。
+    await session.page.locator("#login-username").waitFor({ state: "visible", timeout: 10000 });
     const text = await session.page.locator("body").innerText().catch(() => "");
-    assert(text.includes("驭流") && text.includes("Slipstream"), "登录页缺少品牌锁");
+    // W6 票12 品牌锁副行用 CSS uppercase 渲染（innerText 返回 SLIPSTREAM），断言不区分大小写。
+    assert(
+      text.includes("驭流") && text.toUpperCase().includes("SLIPSTREAM"),
+      "登录页缺少品牌锁",
+    );
     await session.shot("login");
     await session.page.fill("#login-username", ADMIN_CRED.user);
     await session.page.fill("#login-password", "wrong-password");
