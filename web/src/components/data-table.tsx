@@ -3,7 +3,7 @@ import {
   flexRender, getCoreRowModel, getFilteredRowModel, getPaginationRowModel,
   getSortedRowModel, useReactTable, type ColumnDef, type SortingState,
 } from "@tanstack/react-table";
-import { ArrowDown, ArrowUp, Settings2 } from "lucide-react";
+import { Settings2 } from "lucide-react";
 
 import { ACTION_ICONS } from "@/lib/icons";
 import { Button } from "@/components/ui/button";
@@ -15,12 +15,18 @@ import { Empty } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { PAGE_SIZE_OPTIONS, Pagination } from "@/components/ui/pagination";
 import { Skeleton } from "@/components/ui/skeleton";
+import { SortIndicator } from "@/components/ui/sort-indicator";
 import { Table, TableWrap, TD, TH, THead, TR } from "@/components/ui/table";
 import {
+  ACTION_CELL_WRAPPER_CLASS,
+  rowToneClass,
+  rowToneTrStyle,
   tableColumnCellClass,
   tableColumnHeaderClass,
   type TableColumnLayoutMeta,
+  type TableRowTone,
 } from "@/lib/table-columns";
+import { partitionClosedLast } from "@/lib/table-order";
 import { cn } from "@/lib/utils";
 
 /** 稳定的空数据引用：`data ?? []` 每次渲染都会新建数组，会让 TanStack Table
@@ -69,7 +75,15 @@ function stableColumnRenderer(
     const column = index >= 0 ? (latestColumns.current[index] as Record<string, unknown> | undefined) : undefined;
     const render = column ? column[kind] : undefined;
     if (typeof render === "function") return (render as CellRenderer)(context);
-    return (render as ReactNode) ?? null;
+    if (render !== undefined && render !== null) return render as ReactNode;
+    // W6 ticket 10：列没有自定义 cell 时回退 TanStack 默认行为——渲染 accessor 取到的值，
+    // 不再整列空白（配置版本「操作人」就是只有 accessorKey + header 的列）。
+    if (kind === "cell") {
+      const value = (context as { getValue?: () => unknown }).getValue?.();
+      if (value == null || typeof value === "object") return null;
+      return value as ReactNode;
+    }
+    return null;
   };
   cache.set(cacheKey, renderer);
   return renderer;
@@ -143,12 +157,18 @@ interface DataTableProps<T> {
   storageKey?: string;
   /** 列设置菜单的展示名：表头为函数/自定义节点时用它补充（键为列 id） */
   columnLabels?: Record<string, string>;
+  /** W6 ticket 10（user story 41）：返回 true 的行在默认（未排序）视图置尾；显式列排序激活时
+   * 尊重排序不强制置尾。仅 client 模式生效——server 模式只见到当前页，须由页面在全量数据上先分区。 */
+  closedLast?: (row: T) => boolean;
+  /** W6 ticket 10（user story 41/43）：行状态底色（neutral=关闭微灰 / warning=冷却微黄），
+   * 冻结列经 --row-bg 同步着色。 */
+  rowTone?: (row: T) => TableRowTone | undefined;
 }
 
 /** 全站统一的表格封装：排序 / 全局筛选 / 分页 / 空态 / 加载骨架。 */
 export function DataTable<T>({
   columns, data, loading = false, error, onRetry, emptyText = "暂无数据", emptyDescription, emptyAction,
-  filterPlaceholder, onRowClick, pageSize = 50, paging, storageKey, columnLabels,
+  filterPlaceholder, onRowClick, pageSize = 50, paging, storageKey, columnLabels, closedLast, rowTone,
 }: DataTableProps<T>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = useState("");
@@ -171,8 +191,15 @@ export function DataTable<T>({
     ? Math.floor(serverPaging.offset / Math.max(1, serverPaging.pageSize))
     : 0;
 
+  // W6 ticket 10：默认（未排序）视图关闭行置尾（稳定分区，见 lib/table-order）；
+  // 显式列排序激活时尊重排序不强制置尾（user story 42）。server 模式分区交给页面（只见当前页）。
+  const orderedData = useMemo(() => {
+    if (!closedLast || serverPaging || sorting.length > 0) return data;
+    return partitionClosedLast(data ?? EMPTY_ROWS, closedLast);
+  }, [closedLast, serverPaging, sorting, data]);
+
   const table = useReactTable({
-    data: data ?? EMPTY_ROWS,
+    data: orderedData ?? EMPTY_ROWS,
     columns,
     state: {
       sorting,
@@ -297,6 +324,7 @@ export function DataTable<T>({
                     <TH
                       key={header.id}
                       onClick={canSort ? header.column.getToggleSortingHandler() : undefined}
+                      aria-sort={dir === "asc" ? "ascending" : dir === "desc" ? "descending" : undefined}
                       className={cn(
                         "sticky top-0 z-[var(--z-sticky)] bg-surface-2",
                         canSort && "cursor-pointer hover:text-body",
@@ -305,8 +333,7 @@ export function DataTable<T>({
                     >
                       <span className="inline-flex items-center gap-1">
                         {flexRender(renderHeader(header.column.id), header.getContext())}
-                        {dir === "asc" && <ArrowUp className="h-3 w-3" />}
-                        {dir === "desc" && <ArrowDown className="h-3 w-3" />}
+                        {canSort && <SortIndicator direction={dir} />}
                       </span>
                     </TH>
                   );
@@ -348,22 +375,35 @@ export function DataTable<T>({
                 </td>
               </tr>
             ) : (
-              table.getRowModel().rows.map((row) => (
+              table.getRowModel().rows.map((row) => {
+                const tone = rowTone?.(row.original);
+                return (
                 <TR
                   key={row.id}
-                  className={onRowClick ? "cursor-pointer" : undefined}
+                  className={cn(onRowClick ? "cursor-pointer" : undefined, rowToneClass(tone))}
+                  style={rowToneTrStyle(tone)}
                   onClick={onRowClick ? () => onRowClick(row.original) : undefined}
                 >
-                  {row.getVisibleCells().map((cell) => (
-                    <TD
-                      key={cell.id}
-                      className={tableColumnCellClass(cell.column.columnDef.meta as DataTableMeta | undefined)}
-                    >
-                      {flexRender(renderCell(cell.column.id), cell.getContext())}
-                    </TD>
-                  ))}
+                  {row.getVisibleCells().map((cell) => {
+                    const cellMeta = cell.column.columnDef.meta as DataTableMeta | undefined;
+                    const content = flexRender(renderCell(cell.column.id), cell.getContext());
+                    return (
+                      <TD
+                        key={cell.id}
+                        className={tableColumnCellClass(cellMeta)}
+                      >
+                        {/* W6 ticket 10：操作列（sticky 尾列）内容统一 flex justify-end 贴右边缘。 */}
+                        {cellMeta?.sticky === "right" ? (
+                          <div className={ACTION_CELL_WRAPPER_CLASS}>{content}</div>
+                        ) : (
+                          content
+                        )}
+                      </TD>
+                    );
+                  })}
                 </TR>
-              ))
+                );
+              })
             )}
           </tbody>
         </Table>

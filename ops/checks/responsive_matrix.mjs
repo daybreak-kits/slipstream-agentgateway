@@ -12,6 +12,8 @@
  *      ≥lg 侧栏常驻且可折叠；
  *   3. 顶栏主题、通知、刷新、用户菜单可见可点（窄屏允许收进“更多操作”溢出菜单）；
  *   4. 表格页横向滚动 + 冻结操作列在滚动前后都可达；
+ *   4b. （W6 ticket 10）模型管理上游/公开两张表：375/768 横滚、操作列贴边 ≤16px、
+ *       冻结操作列滚动前后可点、关闭模型行默认置尾；
  *   5. 弹窗宽度/高度受视口约束、内容可滚、footer 竖排有间距；
  *      375/768 额外打开上游模型抽屉，断言左右边缘都在视口内、内容区可滚；
  *   6. 375 短视口（375×400）弹窗可滚，提交出口仍可达；
@@ -360,7 +362,38 @@ async function seedFixtures(page) {
   if (!upstream.ok()) {
     throw new MatrixError("创建矩阵上游失败 HTTP " + upstream.status() + "：" + (await upstream.text()).slice(0, 300));
   }
-  return { userName: user.name, username: user.username, upstreamName };
+  return { userName: user.name, username: user.username, upstreamName, upstreamId: (await upstream.json()).id };
+}
+
+/* W6 ticket 10：模型表数据惰性播种。「登记模型」入口是 ModelsTable 的空态 CTA——
+ * 表格非空时消失，所以抽屉测试必须在空表下跑；模型表断言首次执行时才播种行
+ * （无空格长名保证窄屏必然横滚；最后一个上游模型关闭，供「关闭行默认置尾」断言）。 */
+let modelsSeeded = false;
+async function ensureModelsSeeded(page, fixtures) {
+  if (modelsSeeded) return;
+  modelsSeeded = true;
+  const wide = "matrixupstreammodel" + Date.now().toString(36) + "withaverylongunbreakablenameforoverflow";
+  const makeModel = async (name, enabled) => {
+    const response = await page.request.post(baseUrl() + "/admin/upstream-models", {
+      data: { upstream_id: fixtures.upstreamId, name, model_type: "chat", enabled },
+    });
+    if (!response.ok()) {
+      throw new MatrixError("创建矩阵上游模型失败 HTTP " + response.status() + "：" + (await response.text()).slice(0, 300));
+    }
+    return response.json();
+  };
+  await makeModel(wide + "a", true);
+  await makeModel(wide + "b", true);
+  const closedModel = await makeModel(wide + "closed", false);
+  const publicModel = await page.request.post(baseUrl() + "/admin/public-models", {
+    data: { name: "matrixpublicmodel" + Date.now().toString(36) + "withaverylongunbreakablenameforoverflow", routing_mode: "failover", enabled: false },
+  });
+  if (!publicModel.ok()) {
+    throw new MatrixError("创建矩阵公开模型失败 HTTP " + publicModel.status() + "：" + (await publicModel.text()).slice(0, 300));
+  }
+  fixtures.upstreamModelName = wide;
+  fixtures.closedUpstreamModelName = closedModel.name;
+  fixtures.publicModelName = (await publicModel.json()).name;
 }
 
 async function openOverflow(page) {
@@ -504,6 +537,65 @@ async function assertTable(page, width, height, fixtures) {
   return "表格 scroll/client=" + dims.scrollWidth + "/" + dims.clientWidth + "，操作列滚动前后均可达";
 }
 
+/** W6 ticket 10：模型管理两张表（上游 / 公开）的表格专项——窄屏横滚、冻结操作列可操作、
+ * 操作列按钮贴近表格右边缘（≤16px）、关闭行默认置尾。复用票 09 的 table-responsive 与冻结列基建。 */
+async function assertModelsTable(page, width, fixtures, tabKey) {
+  await ensureModelsSeeded(page, fixtures);
+  await goto(page, tabKey === "public" ? "/models?tab=public" : "/models");
+  const wrap = page.locator('[data-slot="table-wrap"]').first();
+  await wrap.waitFor({ state: "visible", timeout: 8000 });
+  const dims = await wrap.evaluate((node) => ({
+    scrollWidth: node.scrollWidth,
+    clientWidth: node.clientWidth,
+    overflowX: getComputedStyle(node).overflowX,
+  }));
+  assert(dims.overflowX === "auto" || dims.overflowX === "scroll", "模型表容器不是横向滚动容器");
+  assert(
+    dims.scrollWidth > dims.clientWidth + 1,
+    width + " 下" + (tabKey === "public" ? "公开" : "上游") + "模型表没有横向滚动（scroll=" + dims.scrollWidth + " client=" + dims.clientWidth + "）",
+  );
+  const modelName = tabKey === "public" ? fixtures.publicModelName : fixtures.upstreamModelName;
+  const row = page.locator("tbody tr").filter({ hasText: modelName }).first();
+  await row.waitFor({ state: "visible", timeout: 8000 });
+  // 表体在 table-responsive 容器内自滚动：375 下行可能整行在折叠区外，先滚入视口再量盒。
+  await row.scrollIntoViewIfNeeded();
+  const edit = row.getByRole("button", { name: "编辑" }).first();
+  assert(await visible(edit), width + " 下" + (tabKey === "public" ? "公开" : "上游") + "模型行没有可点的编辑按钮");
+  await wrap.evaluate((node) => { node.scrollLeft = 0; });
+  await page.waitForTimeout(200);
+  const startBox = await boxOf(edit);
+  assert(startBox.x >= -0.5 && startBox.x + startBox.width <= width + 0.5, width + " 下" + (tabKey === "public" ? "公开" : "上游") + "模型操作列滚动到最左时不可见（冻结列失效）");
+  await assertClickableAtCenter(page, edit, (tabKey === "public" ? "公开" : "上游") + "模型操作列");
+  // 贴边：最后一个可交互元素的右缘与滚动容器右缘的距离 ≤16px（pr-2 = 8px 基线）。
+  const edgeGap = await wrap.evaluate((node) => {
+    const lastRow = node.querySelector("tbody tr:last-child");
+    const buttons = lastRow ? Array.from(lastRow.querySelectorAll("td:last-child button")) : [];
+    const last = buttons[buttons.length - 1];
+    if (!last) return null;
+    return node.getBoundingClientRect().right - last.getBoundingClientRect().right;
+  });
+  assert(edgeGap !== null, "操作列末行没有可量按钮");
+  assert(edgeGap <= 16.5, width + " 下操作列最后一个按钮未贴右边缘（距容器右缘 " + Math.round(edgeGap) + "px > 16px）");
+  // 关闭行默认置尾：播种的关闭模型必须排在全部启用模型之后（user story 41）。
+  const order = await page.evaluate(
+    ({ closed, enabledSuffix }) => {
+      const rows = Array.from(document.querySelectorAll("tbody tr"));
+      const index = (name) => rows.findIndex((tr) => tr.textContent.includes(name));
+      return { closedIndex: index(closed), firstEnabledIndex: rows.findIndex((tr) => tr.textContent.includes(enabledSuffix)) };
+    },
+    { closed: fixtures.closedUpstreamModelName, enabledSuffix: fixtures.upstreamModelName },
+  );
+  if (tabKey !== "public") {
+    assert(order.firstEnabledIndex >= 0 && order.closedIndex > order.firstEnabledIndex, "默认视图关闭模型行必须排在启用行之后（置尾失效：" + JSON.stringify(order) + "）");
+  }
+  await shot(page, width + "-models-" + tabKey);
+  return (
+    (tabKey === "public" ? "公开" : "上游") +
+    "模型表 scroll/client=" + dims.scrollWidth + "/" + dims.clientWidth +
+    "，操作列贴边 " + Math.round(edgeGap) + "px，冻结列滚动前后可操作"
+  );
+}
+
 async function assertDialog(page, width, height) {
   await goto(page, "/users");
   const create = page.getByRole("button", { name: "新建用户" }).first();
@@ -561,8 +653,14 @@ async function assertShortViewportDialog(page) {
 
 async function assertDrawer(page, width, height) {
   await goto(page, "/models");
-  const open = page.getByRole("button", { name: "登记模型" }).first();
-  assert(await visible(open), width + " 下缺少登记模型入口");
+  // 「登记模型」是空态 CTA：表里有行（ticket 10 播种后）时改走行内「编辑」，
+  // 打开的是同一个 UpstreamModelDrawer，响应式断言等价。
+  const create = page.getByRole("button", { name: "登记模型" }).first();
+  let open = create;
+  if (!(await visible(create))) {
+    open = page.locator("tbody tr").first().getByRole("button", { name: "编辑" }).first();
+    assert(await visible(open), width + " 下缺少登记模型入口或行内编辑入口（无法打开模型抽屉）");
+  }
   await open.click();
   const drawer = page.locator('[data-slot="upstream-model-drawer"]');
   await drawer.waitFor({ state: "visible", timeout: 5000 });
@@ -769,6 +867,11 @@ async function main() {
       }
       if (width === 375 || width === 768) {
         await test("drawer." + label, label + " 上游模型抽屉不超出视口且内容可滚", () => assertDrawer(page, width, height));
+        // W6 ticket 10：模型管理两张表的表格专项（横滚 + 冻结操作列 + 贴边 + 关闭置尾）。
+        await test("models-table.upstream." + label, label + " 上游模型表横滚 + 操作列贴边可操作 + 关闭行置尾", () =>
+          assertModelsTable(page, width, fixtures, "upstream"));
+        await test("models-table.public." + label, label + " 公开模型表横滚 + 操作列贴边可操作", () =>
+          assertModelsTable(page, width, fixtures, "public"));
       }
     }
     await test("runtime.console", "五档交互无新增 console error / 未捕获异常", () => {

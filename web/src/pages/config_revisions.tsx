@@ -175,7 +175,8 @@ export function ConfigRevisionsPage() {
     {
       accessorKey: "id",
       header: "版本",
-      meta: { className: "text-right tnum" },
+      // W6 ticket 10（user story 46）：版本列头身左对齐一致，只保留等宽数字。
+      meta: { className: "tnum" },
       cell: (c) => <span className="tnum">{c.row.original.id}</span>,
     },
     { accessorKey: "operator", header: "操作人" },
