@@ -8,7 +8,7 @@
 > - 分页档位固定 **25/50/100/200**（默认 50），`page_size` 超出档位一律 **422** `VALIDATION_ERROR`；
 >   `offset ≥ 0`，负数 422。唯一来源 `api/src/l06_api/deps.py:ALLOWED_PAGE_SIZES`。
 
-> 基线：`w6/integration`（2026-11-21，W6 ticket 01 至 21 全部合入）。本文覆盖最终接口面（OpenAPI 实测 **100 条路径 / 134 个操作**，不含 `/docs`、`/openapi.json`；W6 新增 `GET /admin/system-status`）。基线数字重跑命令见 §6/§7；`web/src/generated/contract.ts` 由 `ops/contract/gen_ts.py` 从同一 OpenAPI 生成，`--check` 防手改。
+> 基线：`w7/t14-docs-gates`（2026-11-22，W7 ticket 01 至 13 全部合入 `w7/integration`，本票做文档与全量验收收口）。本文覆盖最终接口面（OpenAPI 实测 **98 条路径 / 130 个操作**，不含 `/docs`、`/openapi.json`；W6 新增 `GET /admin/system-status`；W7 删除厂商域后路径/操作比 W6 基线 100/134 各减 4，ADR-030）。基线数字重跑命令见 §6/§7；`web/src/generated/contract.ts` 由 `ops/contract/gen_ts.py` 从同一 OpenAPI 生成，`--check` 防手改。
 
 本文是前后端契约的人类解释与语义基准（Lead 决策，2026-11-17）；组件 schema 的机器可读
 副本由 `python ops/contract/gen_ts.py` 从 FastAPI OpenAPI 生成到
@@ -469,6 +469,9 @@ failover 目标 `priority` 为正整数（升序优先，同值=同层）；weig
 创建响应带 `initial_password`（12 位大小写+数字+符号随机，**仅此一次**，请求显式给 password 则用之）。
 **每个用户都是登录账号**：落库后 `username` 与 `password_hash` 必非空（seed 也写全），用户列表/树
 **不返回 `type` 字段**（W7 取消「类型/无登录帐户」表达，页面只显示「用户名称/登录帐户」）。
+**连接密钥按角色收敛（W7 B 方案）**：customer 只能读/签发/维护**自己的**密钥（签发归属强制当前
+用户，服务端校验越界 403，界面上无用户选择）；admin/reseller 在可见子树内可代签（`user_id`
+须在可见范围）；`apikeys:read/write` 已配给 customer/reseller（键本身不新增，总键数 39）。
 连接密钥一用户最多 50 把（任意状态合计，第 51 把 409 CONFLICT）；库里只存 sha256:<hex> +
 AES-GCM 密文 + sk-...abcd 掩码。
 
@@ -712,15 +715,17 @@ PYTHONPATH=src python scripts/seed_demo.py --keep # 仅用于空 schema；已有
 PYTHONPATH=src python -m uvicorn l06_api.app:create_app --factory --port 3700
 ```
 
-seed 覆盖（连续跑两次后的真实计数，幂等）：3 厂商 / 4 上游（zai-01 是**一个上游三把等权密钥**，
-nebula-01、local-01/02 各一把，共 6 条上游密钥；ADR-026 多密钥平权）/
+seed 覆盖（连续跑两次后的真实计数，幂等；W7 t14 实测）：**无厂商域（ADR-030）**，
+4 上游（`name` 由连接地址生成：open-bigmodel-cn 是**一个上游三把等权密钥**，api-nebula-example
+与两个本地 127-0-0-1:800x 各一把，共 6 条上游密钥；每行带可选 `alias` 字段，seed 默认留空；ADR-026 多密钥平权）/
 16 上游模型（15 个带成本 cost_input/output_per_1m + 1.2 倍率 markup，1 个故意未定价）/
-8 公开模型（6 failover + 2 weighted）/ 16 目标 / 6 用户（根用户 D + 两层分销树，5 把 sk-+64 大写客户端密钥 + 充值流水）/
-15 个模型带进价（另 30 条 cache 价目）/ 7 天 252 条用量事件（cost 与 charge 各 3 条缺价 unpriced）/ 245 条计费流水 /
-2 条配置版本（operator 张三 superseed / 李四 active）/ 64 条审计 / 13 条 app_settings /
+8 公开模型（6 failover + 2 weighted）/ 16 目标 / 6 用户（根用户 D + 两层分销树，5 把 sk- 客户端密钥 + 充值流水）/
+15 个模型带进价（另 30 条缓存价，挂 `upstream_model_id`：cache_read / cache_write 各 15）/
+7 天 252 条用量事件（cost 与 charge 各 3 条缺价 unpriced）/ 245 条计费流水 /
+2 条配置版本（operator 张三 superseded / 李四 active）/ 61 条审计 / 13 条 app_settings /
 2 条可用性规则（ban + cooldown，无排期窗口）/ **6 个账号全部可登录**（W7：每个用户都有登录名与密码，
-没有「无登录帐户」的行）：root（根用户 D，管理用户 `admin`）、admin（张三，管理用户 `admin`）、
-lisi（李四，分销商 `reseller`）、wangwu（王五，客户 `customer`）、finance（财务对账，客户 `customer`）、
+没有「无登录帐户」的行）：root（根用户 D，管理用户 `admin`）、admin（内部平台，管理用户 `admin`）、
+lisi（数据分析组，分销商 `reseller`）、wangwu（试用-临时，客户 `customer`）、finance（财务对账，客户 `customer`）、
 loadtest（压测环境，客户 `customer`）。默认密码 admin12345，可用 `SLIPSTREAM_DEMO_ADMIN_PASSWORD` 覆盖，
 首次登录后修改。
 

@@ -374,6 +374,8 @@
 
 **决策**：只保留一张 `users` 表——username（唯一、**不可修改**）、密码哈希、role、余额、层级、状态同在一行；角色沿用内置 admin/agent/user + 自定义角色；控制台访问 = 有角色且有密码。系统初始化只建一个全权限管理员，账号密码取 `.env` 的 `SLIPSTREAM_ADMIN_USERNAME` / `SLIPSTREAM_ADMIN_PASSWORD`，此后在界面修改即持久化，env 默认值不再生效。`admin_users` 表与 `users.admin_user_id` 关联退役。密码**必填**：本期不做注册/邀请页，用户统一在用户管理页创建，创建时生成 12 位随机默认密码（大小写+数字+符号），弹窗明文展示一次可复制；改密权限——管理员改所有人、代理用户改子树内用户、所有人可自助改自己（验旧密码），接口按 RBAC 权限键 + 用户层级双重校验。
 
+**修订（2026-11-22，W7 t01/t07 收口）**：①内置角色 key 已随 W6 ticket 21 迁移为 `admin` / `customer`（客户）/ `reseller`（分销商），旧 key `user`/`agent` 不保留 alias；②落库硬约束收紧：任何路径（表单创建/导入/seed）落库后 `username` 与 `password_hash` 必非空——创建时仍按本 ADR 自动生成用户名与 12 位一次性密码，也可显式提供；③用户列表/树不再返回「类型」，前端删除「按 username 是否为空推导类型」分支（W7 spec C3/C4/C9：一张表、全员登录）；④连接密钥自助：customer 严格 self-only，admin/reseller 在可见子树内代签（B 方案，`apikeys:read/write` 配到两角色）。
+
 **理由**：一个用户不该因为「权限多」就变成两种实体；分表导致登录、充值、密钥、审计处处做两表 join。
 
 **后果**：登录/会话/审计 actor 改指 `users`；41 权限键与字段级删键（ADR-016）机制不变；迁移脚本合并两表（username 冲突以 admin_users 为准）；ADR-018 的「登录默认」改为 .env 引导（`SLIPSTREAM_ADMIN_USERNAME` / `SLIPSTREAM_ADMIN_PASSWORD`，系统环境变量优先于 `.env`）。
