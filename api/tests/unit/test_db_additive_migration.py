@@ -233,3 +233,145 @@ def test_fresh_db_has_no_is_primary_column_and_accepts_key_rows(tmp_path) -> Non
         assert connection.execute(text("SELECT COUNT(*) FROM upstream_keys")).scalar() == 1
     engine.dispose()
 
+
+def test_init_db_drops_the_retired_vendor_dimension(tmp_path) -> None:
+    """W7 t03 / ADR-030: the vendor domain leaves the schema on old files.
+
+    ``vendors`` and the vendor-keyed ``cost_daily`` are dropped whole (the
+    latter is a derived read model that refresh_cost_daily rebuilds under the
+    model-keyed shape); the vendor columns on upstreams / upstream_prices /
+    cost_entries are dropped in place and surviving rows keep every
+    non-vendor field. No migration script exists on purpose: the mock DB is
+    reset by seed, this pass only keeps an un-reset file honest.
+    """
+    db_path = tmp_path / "old-vendor.db"
+    engine = create_engine("sqlite:///" + db_path.as_posix(), future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE vendors ("
+                "id VARCHAR(64) PRIMARY KEY, name VARCHAR(255), slug VARCHAR(64), "
+                "note TEXT, upstream_seq INTEGER, created_at_ms BIGINT)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE TABLE upstreams ("
+                "id VARCHAR(64) PRIMARY KEY, vendor_id VARCHAR(64), name VARCHAR(255), "
+                "base_url VARCHAR(512), api_style VARCHAR(64), api_key_enc TEXT, "
+                "transforms_json TEXT, max_buffer_bytes INTEGER, enabled BOOLEAN, "
+                "created_at_ms BIGINT)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE TABLE upstream_prices ("
+                "id VARCHAR(64) PRIMARY KEY, vendor_id VARCHAR(64), "
+                "upstream_model VARCHAR(255), upstream_model_id VARCHAR(64), "
+                "item VARCHAR(64), unit_price_micro BIGINT, currency VARCHAR(8), "
+                "effective_from_ms BIGINT, version INTEGER, created_at_ms BIGINT)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE TABLE cost_entries ("
+                "id VARCHAR(64) PRIMARY KEY, gateway_event_id VARCHAR(128), "
+                "vendor_id VARCHAR(64), upstream_model_id VARCHAR(64), "
+                "input_tokens INTEGER, output_tokens INTEGER, "
+                "cache_read_tokens INTEGER, cache_write_tokens INTEGER, "
+                "amount_micro BIGINT, currency VARCHAR(8), "
+                "price_version_id VARCHAR(64), status VARCHAR(32), created_at_ms BIGINT)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE TABLE cost_daily ("
+                "day VARCHAR(10), vendor_id VARCHAR(64), upstream_model VARCHAR(255), "
+                "requests INTEGER, input_tokens INTEGER, output_tokens INTEGER, "
+                "amount_micro BIGINT, currency VARCHAR(8), "
+                "PRIMARY KEY (day, vendor_id, upstream_model))"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO vendors (id, name, slug, note, upstream_seq, created_at_ms) "
+                "VALUES ('vend_old', '旧厂商', 'old', '', 2, 1)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO upstreams (id, vendor_id, name, base_url, api_style, created_at_ms) "
+                "VALUES ('ups_old', 'vend_old', 'old-01', 'https://old.example/v1', "
+                "'openai_chat', 1)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO upstream_prices (id, vendor_id, upstream_model, item, "
+                "unit_price_micro, currency, effective_from_ms, version, created_at_ms) "
+                "VALUES ('upr_old', 'vend_old', 'glm-5.3', 'cache_read', 1000, 'CNY', 0, 1, 1)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO cost_entries (id, gateway_event_id, vendor_id, input_tokens, "
+                "output_tokens, amount_micro, currency, status, created_at_ms) "
+                "VALUES ('cost_old', 'evt_old', 'vend_old', 10, 5, 800, 'CNY', 'ok', 1)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO cost_daily (day, vendor_id, upstream_model, requests, "
+                "input_tokens, output_tokens, amount_micro, currency) "
+                "VALUES ('2026-01-01', 'vend_old', 'glm-5.3', 1, 10, 5, 800, 'CNY')"
+            )
+        )
+
+    init_db(engine)
+    # Startup runs init_db again on the already-migrated shape; both passes are
+    # guarded and must not fail or resurrect the retired dimension.
+    init_db(engine)
+
+    inspector = inspect(engine)
+    assert "vendors" not in inspector.get_table_names()
+    assert "vendor_id" not in {c["name"] for c in inspector.get_columns("upstreams")}
+    price_columns = {c["name"] for c in inspector.get_columns("upstream_prices")}
+    assert "vendor_id" not in price_columns
+    assert "upstream_model" not in price_columns
+    assert "vendor_id" not in {c["name"] for c in inspector.get_columns("cost_entries")}
+    # cost_daily is rebuilt under the new model-keyed shape (vendor_id leaves the PK).
+    daily_columns = {c["name"] for c in inspector.get_columns("cost_daily")}
+    assert "vendor_id" not in daily_columns
+    assert "upstream_model" in daily_columns
+    # Surviving rows keep every non-vendor field.
+    with engine.connect() as connection:
+        upstream = connection.execute(
+            text("SELECT id, name, base_url FROM upstreams WHERE id='ups_old'")
+        ).one()
+        price = connection.execute(
+            text(
+                "SELECT id, item, unit_price_micro, currency FROM upstream_prices "
+                "WHERE id='upr_old'"
+            )
+        ).one()
+        cost = connection.execute(
+            text("SELECT id, amount_micro, currency, status FROM cost_entries WHERE id='cost_old'")
+        ).one()
+    assert tuple(upstream) == ("ups_old", "old-01", "https://old.example/v1")
+    assert tuple(price) == ("upr_old", "cache_read", 1000, "CNY")
+    assert tuple(cost) == ("cost_old", 800, "CNY", "ok")
+    engine.dispose()
+
+
+def test_fresh_db_never_grows_a_vendors_table_or_vendor_column(tmp_path) -> None:
+    """W7 t03 / ADR-030: the fresh shape has no vendor dimension at all."""
+    db_path = tmp_path / "fresh-vendor-free.db"
+    engine = create_engine("sqlite:///" + db_path.as_posix(), future=True)
+    init_db(engine)
+
+    inspector = inspect(engine)
+    assert "vendors" not in inspector.get_table_names()
+    for table in ("upstreams", "upstream_prices", "cost_entries", "cost_daily"):
+        assert "vendor_id" not in {c["name"] for c in inspector.get_columns(table)}
+    engine.dispose()
+
