@@ -15,10 +15,10 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "ops" / "checks" / "import_lint.py"
 
 #: Baseline locations the W6 recon identified; later tickets remove them one by
-#: one and update this list with the strict flip (ticket 06).
+#: one and update this list with the strict flip (ticket 06). Ticket 03 removed
+#: api/src/l06_api/routers_upstreams.py (the transform compiler import).
 BASELINE_PATHS = (
     "api/src/l06_api/routers_log_payload.py",
-    "api/src/l06_api/routers_upstreams.py",
     "api/src/l07_jobs/log_cleanup.py",
     "api/src/l06_api/adapter_factory.py",
     "api/src/l06_api/routers_health.py",
@@ -42,7 +42,7 @@ def _run(*args: str) -> subprocess.CompletedProcess[str]:
 def test_baseline_mode_lists_known_leaks_and_exits_zero() -> None:
     result = _run()
     assert result.returncode == 0, result.stderr or result.stdout
-    assert "findings: 8" in result.stdout
+    assert "findings: 7" in result.stdout
     for path in BASELINE_PATHS:
         assert path in result.stdout, path
 

@@ -17,7 +17,9 @@ from l03_adapters.spi import (
     AdapterInfo,
     ApplyResult,
     Artifact,
+    CredentialFile,
     DataPlaneStatus,
+    MaterializationResult,
     ValidationResult,
     make_artifact,
 )
@@ -33,12 +35,22 @@ class _GateAdapter:
     def __init__(self, result: ApplyResult) -> None:
         self._result = result
         self.applied: list[Artifact] = []
+        self.materialized: tuple[CredentialFile, ...] = ()
 
     def describe(self) -> AdapterInfo:
         return AdapterInfo(adapter_id="agentgateway", version="test")
 
     def validate(self, ir: GatewayIR) -> ValidationResult:
         return ValidationResult(ok=True)
+
+    def materialize_credentials(
+        self, files, *, dry_run: bool = False, prune: bool = True
+    ) -> MaterializationResult:
+        self.materialized = tuple(files)
+        return MaterializationResult(
+            dry_run=dry_run,
+            written=() if dry_run else tuple(file.ref for file in files),
+        )
 
     def render(self, ir: GatewayIR) -> Artifact:
         return make_artifact("llm:\n  port: 3600\n", revision=ir.revision)

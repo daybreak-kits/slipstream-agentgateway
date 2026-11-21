@@ -10,6 +10,7 @@ from l03_adapters.spi import (
     ApplyResult,
     Artifact,
     DataPlaneStatus,
+    MaterializationResult,
     ValidationResult,
     make_artifact,
 )
@@ -29,6 +30,14 @@ class _ScriptedAdapter:
 
     def validate(self, ir: GatewayIR) -> ValidationResult:
         return ValidationResult(ok=True)
+
+    def materialize_credentials(
+        self, files, *, dry_run: bool = False, prune: bool = True
+    ) -> MaterializationResult:
+        return MaterializationResult(
+            dry_run=dry_run,
+            written=() if dry_run else tuple(file.ref for file in files),
+        )
 
     def render(self, ir: GatewayIR) -> Artifact:
         return make_artifact("llm:\n  port: 3600\n", revision=ir.revision)

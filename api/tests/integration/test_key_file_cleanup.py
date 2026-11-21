@@ -1,7 +1,9 @@
-"""Ticket 16: a successful apply prunes stale managed key files (rollout wiring).
+"""Ticket 16/03: a successful apply materializes and prunes keys via the adapter.
 
-Seam: `Rollout.apply` + the real `keys/` directory. Each test seeds the standard
-channel (upstream ups_test, one key row), pre-creates files around the managed
+Seam: `Rollout.apply` + the adapter's materialize_credentials port + the real
+`keys/` directory (the agentgateway driver owns the disk layout; the system
+never writes a key file itself). Each test seeds the standard channel
+(upstream ups_test, one key row), pre-creates files around the managed
 directory and asserts the post-apply disk state — never on private helpers.
 """
 
@@ -13,14 +15,18 @@ from pathlib import Path
 from tests.conftest import seed_channel
 
 from l01_core.settings import get_settings, reset_settings_cache
+from l03_adapters.agentgateway.adapter import AgentgatewayAdapter
 from l03_adapters.mock import MockAdapter
-from l05_service import rendering
 from l05_service.rollout import Rollout
+
+
+def _adapter() -> AgentgatewayAdapter:
+    return AgentgatewayAdapter(get_settings().ag_config_dir, ag_binary="")
 
 
 def _apply(factory, adapter=None, *, on_failure="raise"):
     with factory() as session:
-        row = Rollout(session, adapter or MockAdapter()).apply(
+        row = Rollout(session, adapter or _adapter()).apply(
             "tester", reason="ticket16", on_failure=on_failure
         )
         session.commit()
@@ -46,7 +52,9 @@ def _seed_with_stale_files(engine, factory) -> tuple[Path, Path, Path]:
     return stale, legacy, note
 
 
-def test_successful_apply_removes_only_stale_managed_key_files(engine_and_sessionmaker):
+def test_successful_apply_materializes_and_removes_only_stale_managed_key_files(
+    engine_and_sessionmaker,
+):
     engine, factory = engine_and_sessionmaker
     stale, legacy, note = _seed_with_stale_files(engine, factory)
     outside = Path(get_settings().ag_config_dir) / "outside.key"
@@ -55,10 +63,11 @@ def test_successful_apply_removes_only_stale_managed_key_files(engine_and_sessio
     row = _apply(factory)
 
     assert row.status == "active"
-    # The fresh render keeps its referenced file; '#' is a literal filename char.
+    # The fresh render's credential was materialized through the adapter port;
+    # '#' is a literal filename char.
     current = _keys_dir() / "ups_test#1.key"
     assert current.read_text(encoding="utf-8") == "raw-upstream-key"
-    # Files no longer in the whitelist disappear.
+    # Files no longer in the whitelist disappear (cleanup ran only after success).
     assert not stale.exists()
     assert not legacy.exists()
     # Non-key files and files outside the managed dir are out of scope.
@@ -82,14 +91,21 @@ def test_prune_failure_is_logged_but_does_not_block_the_apply(
 ):
     engine, factory = engine_and_sessionmaker
     _seed_with_stale_files(engine, factory)
+    adapter = _adapter()
+    real_materialize = type(adapter).materialize_credentials
+    phases: list[bool] = []
 
-    def _explode(key_files, **kwargs):
-        raise OSError("disk busy")
+    def _explode_on_cleanup(files, *, dry_run=False, prune=True):
+        phases.append(prune)
+        if prune:  # the post-apply cleanup phase, not the pre-apply write
+            raise OSError("disk busy")
+        return real_materialize(adapter, files, dry_run=dry_run, prune=prune)
 
-    monkeypatch.setattr(rendering, "prune_key_files", _explode)
+    monkeypatch.setattr(adapter, "materialize_credentials", _explode_on_cleanup)
     with caplog.at_level(logging.WARNING, logger="l05_service.rollout"):
-        row = _apply(factory)
+        row = _apply(factory, adapter)
 
+    assert phases == [False, True], "写阶段先于 apply，清理阶段只在其后"
     assert row.status == "active", "清理失败不得把已生效的下发改成失败"
     assert any(
         "key 文件清理" in record.getMessage()
@@ -114,3 +130,49 @@ def test_repeat_apply_keeps_the_current_key_file_and_leaves_no_temp_files(
     assert current.read_bytes() == first_bytes
     assert sorted(path.name for path in _keys_dir().glob("*.key")) == ["ups_test#1.key"]
     assert not list(_keys_dir().glob("*.tmp"))
+
+
+def test_rollout_materializes_before_apply_and_prunes_only_after_success(
+    engine_and_sessionmaker,
+):
+    """Ticket 03 port contract: the adapter sees write-phase then cleanup-phase.
+
+    Keys must exist before apply (the binary gate reads them relative to the
+    config file), and the whitelist cleanup must run only once the apply
+    succeeded — a failed apply leaves the old credentials serving.
+    """
+    engine, factory = engine_and_sessionmaker
+    seed_channel(engine, factory)
+    reset_settings_cache()
+    inner = _adapter()
+    calls: list[str] = []
+    real_materialize = type(inner).materialize_credentials
+
+    class _Recording(AgentgatewayAdapter):
+        def validate(self, ir):
+            calls.append("validate")
+            return super().validate(ir)
+
+        def materialize_credentials(self, files, *, dry_run=False, prune=True):
+            calls.append(f"materialize prune={prune}")
+            return real_materialize(inner, files, dry_run=dry_run, prune=prune)
+
+        def render(self, ir):
+            calls.append("render")
+            return super().render(ir)
+
+        def apply(self, artifact):
+            calls.append("apply")
+            return super().apply(artifact)
+
+    row = _apply(factory, _Recording(get_settings().ag_config_dir, ag_binary=""))
+
+    assert row.status == "active"
+    assert calls == [
+        "validate",
+        "materialize prune=False",
+        "render",
+        "apply",
+        "materialize prune=True",
+    ], calls
+    assert (_keys_dir() / "ups_test#1.key").exists()

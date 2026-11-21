@@ -17,7 +17,6 @@ target 只渲染第一把密钥的一条，无 when 兜底因此天然单条（A
 from __future__ import annotations
 
 import logging
-from pathlib import PurePath
 
 from conftest import seed_channel
 from l01_core.settings import reset_settings_cache
@@ -60,17 +59,18 @@ def test_two_keys_expand_into_two_provider_and_model_entries(engine_and_sessionm
     reset_settings_cache()
     adapter = MockAdapter()
     with factory() as session:
-        ir, key_files = build_render_plan(session, revision="rev_multikey", adapter=adapter)
+        ir, credentials = build_render_plan(session, revision="rev_multikey", adapter=adapter)
     engine.dispose()
 
-    # providers: one per key, E18 names {upstream_id}#{seq}, own key file each
+    # providers: one per key, E18 names {upstream_id}#{seq}, own credential each
     assert [u.id for u in ir.upstreams] == [provider_id("ups_test", 1), provider_id("ups_test", 2)]
-    assert [u.key_file[-len("ups_test#1.key"):] for u in ir.upstreams] == [
-        "ups_test#1.key",
-        "ups_test#2.key",
-    ]
-    assert len(key_files) == 2
-    assert sorted(key_files.values()) == ["raw-upstream-key", "raw-upstream-key-2"]
+    # The IR carries the neutral credential ref; the system composes no disk
+    # path and never chooses the destination (adapter-owned, ticket 03).
+    assert [u.key_file for u in ir.upstreams] == ["ups_test#1", "ups_test#2"]
+    assert [c.ref for c in credentials] == ["ups_test#1", "ups_test#2"]
+    assert sorted(c.plaintext for c in credentials) == ["raw-upstream-key", "raw-upstream-key-2"]
+    assert all(c.path == "" for c in credentials)
+    assert isinstance(credentials, tuple) and len(credentials) == 2
 
     # models: {model}#k{seq} entries, each referencing its key-provider
     assert [(m.id, m.upstream_id) for m in ir.models] == [
@@ -89,11 +89,13 @@ def test_two_keys_expand_into_two_provider_and_model_entries(engine_and_sessionm
     assert [t.priority for t in flagship.targets] == [1, 1]
     assert [t.id for t in flagship.targets] == ["mt_test#k1", "mt_test#k2"]
 
-    # rendered config mirrors the E18 faithful shape
+    # rendered config mirrors the E18 faithful shape; the adapter resolves the
+    # credential ref to its managed keys/ reference (AG resolves provider key
+    # files relative to the config file, where the materializer wrote them)
     config = render_config(ir, llm_port=3600)
     assert [p["name"] for p in config["llm"]["providers"]] == ["ups_test#1", "ups_test#2"]
     assert config["llm"]["providers"][0]["params"]["baseUrl"] == "https://upstream.example/v1"
-    assert config["llm"]["providers"][0]["params"]["apiKey"]["file"].endswith("ups_test#1.key")
+    assert config["llm"]["providers"][0]["params"]["apiKey"]["file"] == "keys/ups_test#1.key"
     assert [m["name"] for m in config["llm"]["models"]] == ["umdl_test#k1", "umdl_test#k2"]
     assert all(m["visibility"] == "internal" for m in config["llm"]["models"])
     assert all(m["params"]["model"] == "glm-5.3" for m in config["llm"]["models"])
@@ -240,11 +242,12 @@ def test_keyless_enabled_upstream_blocks_the_rollout(engine_and_sessionmaker):
             raise AssertionError("keyless upstream must block the rollout")
     engine.dispose()
 
-def test_hash_names_and_key_file_paths_survive_yaml_rendering(engine_and_sessionmaker):
+def test_hash_names_and_key_file_references_survive_yaml_rendering(engine_and_sessionmaker):
     """Ticket 16 跨平台回归：'#' 是 YAML 注释起始符、也是 Windows 合法文件名字符。
 
-    provider/模型名与 key 文件路径都必须被引号包住，否则 AG 读到截断值（"ups_test"）；
-    文件名本身必须保留 '#{seq}' 形态、且是 keys/ 下的单层文件名（无分隔符歧义）。
+    provider/模型名与凭据引用都必须被引号包住，否则 AG 读到截断值（"ups_test"）；
+    系统只在 IR 里携带 '#{seq}' 形态的中性凭据引用（票03），受管 keys/ 文件引用
+    由适配器展开为单层文件名（无分隔符歧义），明文落盘走 materialize 端口。
     """
     engine, factory = engine_and_sessionmaker
     seed_channel(engine, factory)
@@ -254,11 +257,8 @@ def test_hash_names_and_key_file_paths_survive_yaml_rendering(engine_and_session
         ir, _ = build_render_plan(session, revision="rev_hash_yaml", adapter=MockAdapter())
     engine.dispose()
 
-    # 文件名层面：'#' 原样保留，PurePath.name 在 Windows/POSIX 一致
-    assert [PurePath(u.key_file).name for u in ir.upstreams] == [
-        "ups_test#1.key",
-        "ups_test#2.key",
-    ]
+    # 引用层面：'#' 原样保留在中性凭据引用里（ref == provider id）
+    assert [u.key_file for u in ir.upstreams] == ["ups_test#1", "ups_test#2"]
 
     content = render_artifact(ir, llm_port=3600).content
     # 值层面：引号内的 '#' 不会被当成注释；无引号形态则说明渲染丢字符
@@ -271,6 +271,6 @@ def test_hash_names_and_key_file_paths_survive_yaml_rendering(engine_and_session
     for line in key_lines:
         value = line.split("file:", 1)[1].strip()
         assert value.startswith('"') and value.endswith('"'), line
-    assert 'ups_test#1.key"' in content
-    assert 'ups_test#2.key"' in content
+    assert 'keys/ups_test#1.key"' in content
+    assert 'keys/ups_test#2.key"' in content
 
