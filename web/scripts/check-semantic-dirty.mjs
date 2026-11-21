@@ -984,6 +984,25 @@ check("HoverInfo：禁用与空内容是稳定态——不浮层、不新增焦�
   expect(!empty.includes('aria-disabled="true"'), "空内容不是禁用，只是没有详情可展示");
 });
 
+// ---------- 11. 模型参数列（W7 ticket 09）：语义色与缺失值口径 ----------
+check("参数列与悬浮详情：走语义色 token，不写死颜色", () => {
+  const src = read("src/components/models/model-params-cell.tsx");
+  includesAll(src, ["text-body", "text-faint"], "参数单元格与详情行必须走语义色");
+  const magic = src.match(/#[0-9a-fA-F]{3,8}\b|rgba?\(/g);
+  expect(!magic, "参数单元格不得出现魔法色值：" + (magic ?? []).join("、"));
+});
+
+check("缺失值口径：两处模型表共用同一个「未配置」写法", () => {
+  const vocab = read("src/components/models/model-vocab.ts");
+  expect(vocab.includes('PARAM_MISSING = "未配置"'), "缺失值口径必须收在一个常量里");
+  const models = read("src/pages/models.tsx");
+  const panel = read("src/components/upstreams/models-panel.tsx");
+  for (const [file, text] of [["models.tsx", models], ["models-panel.tsx", panel]]) {
+    expect(text.includes("ModelParamsCell"), file + " 必须复用共享参数单元格（缺失值口径不得各写各的）");
+    expect(!text.includes("未声明"), file + " 参数列不得再出现旧口径「未声明」");
+  }
+});
+
 // ---------- run ----------
 server = await createServer({
   configFile: join(webRoot, "vite.config.ts"),
