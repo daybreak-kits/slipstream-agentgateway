@@ -106,9 +106,17 @@ def create_app(
     # dist 不存在时静默跳过（pytest / 纯 API 模式），不阻塞控制面启动。
     mount_web_console(app)
 
+    def _resolve_request_id(request: Request) -> str:
+        """One request id per request: minted by the outer middleware below.
+
+        Exception handlers must reuse it (scope state is shared) so the
+        X-Request-Id header and the JSON body never disagree (W6 ticket 07).
+        """
+        return getattr(request.state, "request_id", "") or uuid.uuid4().hex
+
     @app.exception_handler(AppError)
     async def _app_error_handler(request: Request, exc: AppError) -> JSONResponse:
-        request_id = request.headers.get("X-Request-Id", uuid.uuid4().hex)
+        request_id = _resolve_request_id(request)
         return JSONResponse(
             status_code=exc.status_code,
             content=exc.to_payload(request_id),
@@ -117,7 +125,7 @@ def create_app(
 
     @app.exception_handler(RequestValidationError)
     async def _validation_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
-        request_id = request.headers.get("X-Request-Id", uuid.uuid4().hex)
+        request_id = _resolve_request_id(request)
         error = AppError(
             ErrorCode.VALIDATION_ERROR,
             "request validation failed",
@@ -130,9 +138,32 @@ def create_app(
             headers={"X-Request-Id": request_id},
         )
 
+    @app.exception_handler(Exception)
+    async def _unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
+        """Last-resort 500: uncaught bugs still answer the unified JSON shape.
+
+        Plain-text 500s were the W6 recon root pain (500s.md B1: no code, no
+        request id, no content type). The body pins exactly the three contract
+        fields -- internals stay out of the payload; the traceback still reaches
+        uvicorn's log because ServerErrorMiddleware re-raises after the response.
+        """
+        request_id = _resolve_request_id(request)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "code": ErrorCode.INTERNAL_ERROR.value,
+                "message": "internal server error",
+                "request_id": request_id,
+            },
+            headers={"X-Request-Id": request_id},
+        )
+
     @app.middleware("http")
     async def _request_id_middleware(request: Request, call_next):
         request_id = request.headers.get("X-Request-Id", uuid.uuid4().hex)
+        # scope state is shared with the exception handlers: header and body
+        # carry the SAME id.
+        request.state.request_id = request_id
         response = await call_next(request)
         response.headers["X-Request-Id"] = request_id
         return response

@@ -15,6 +15,9 @@ class ErrorCode(StrEnum):
     UNAUTHORIZED = "UNAUTHORIZED"
     FORBIDDEN = "FORBIDDEN"
     RATE_LIMITED = "RATE_LIMITED"
+    # W6 ticket 07: a missing/unreachable data plane is a dependency state, not
+    # a server bug -- reads degrade to 503 with this stable code, never a 500.
+    DATA_PLANE_UNAVAILABLE = "DATA_PLANE_UNAVAILABLE"
     SCHEMA_MISMATCH = "SCHEMA_MISMATCH"
     APPLY_FAILED = "APPLY_FAILED"
     CRYPTO_FAILED = "CRYPTO_FAILED"
@@ -28,6 +31,7 @@ _HTTP_STATUS: dict[ErrorCode, int] = {
     ErrorCode.UNAUTHORIZED: 401,
     ErrorCode.FORBIDDEN: 403,
     ErrorCode.RATE_LIMITED: 429,
+    ErrorCode.DATA_PLANE_UNAVAILABLE: 503,
     ErrorCode.SCHEMA_MISMATCH: 500,
     ErrorCode.APPLY_FAILED: 502,
     ErrorCode.CRYPTO_FAILED: 500,
