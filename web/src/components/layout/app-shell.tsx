@@ -3,6 +3,7 @@ import { Outlet, useLocation } from "react-router-dom";
 
 import { ErrorBoundary } from "@/components/error-boundary";
 import { RouteFallback } from "@/components/route-fallback";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Sidebar } from "./sidebar";
 import { Topbar } from "./topbar";
 import { NAV_LEAVES } from "./nav-items";
@@ -11,11 +12,18 @@ const COLLAPSE_KEY = "slipstream.sidebar_collapsed";
 
 export function AppShell() {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === "1");
+  // <lg 的 off-canvas 导航与桌面折叠是两套状态：折叠记忆只服务桌面，
+  // 移动端每次进入默认关闭，不读取桌面 localStorage。
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const location = useLocation();
 
   useEffect(() => {
     localStorage.setItem(COLLAPSE_KEY, collapsed ? "1" : "0");
   }, [collapsed]);
+
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [location.pathname]);
 
   // 前缀匹配：/upstreams/:id 等动态路由也能命中标题与分组（最长前缀优先）。
   // 二级导航项的面包屑上级用父项名（运营设置 / 连接地址），一级项用导航分组。
@@ -25,14 +33,36 @@ export function AppShell() {
     .sort((a, b) => b.path.length - a.path.length)[0];
 
   return (
-    <div className="flex h-full overflow-hidden bg-bg">
-      <Sidebar collapsed={collapsed} />
+    <div className="flex h-dvh overflow-hidden bg-bg">
+      {/* ≥lg：常驻侧栏（248/72 可折叠）；<lg 不占布局宽度。 */}
+      <div className="hidden shrink-0 lg:block">
+        <Sidebar collapsed={collapsed} />
+      </div>
+      {/* <lg：off-canvas 抽屉，遮罩 + Esc + 焦点圈由 Radix Sheet 负责。 */}
+      <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+        <SheetContent
+          side="left"
+          className="gap-0 border-r p-0"
+          style={{ width: "min(var(--width-sidebar), 85vw)" }}
+        >
+          <SheetHeader className="sr-only">
+            <SheetTitle>主导航</SheetTitle>
+            <SheetDescription>全站页面导航；选择页面后自动关闭。</SheetDescription>
+          </SheetHeader>
+          <Sidebar
+            collapsed={false}
+            className="w-full border-r-0"
+            onNavigate={() => setMobileNavOpen(false)}
+          />
+        </SheetContent>
+      </Sheet>
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar
           title={match?.label ?? "Slipstream"}
           group={match?.group ?? ""}
           collapsed={collapsed}
           onToggleCollapse={() => setCollapsed((value) => !value)}
+          onOpenMobileNav={() => setMobileNavOpen(true)}
         />
         <main className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-480 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">

@@ -199,7 +199,7 @@ export function PriceTable<T>({
         </div>
       </div>
       {/* 表体内部滚动（DESIGN-AUDIT 四期 §3/§9）：高度公式与 DataTable 一致（17rem 起步，不设最小高度）。 */}
-      <TableWrap className="max-h-[calc(100dvh-17rem)] overflow-y-auto rounded-lg border border-border bg-surface">
+      <TableWrap className="table-responsive overflow-y-auto rounded-lg border border-border bg-surface">
         <Table>
           <THead>
             <tr>

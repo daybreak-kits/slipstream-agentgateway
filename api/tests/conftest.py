@@ -64,7 +64,7 @@ _TEST_TMP_PATTERNS = (
     ".tmp-ag-contract-*",
     ".tmp-status-*",
     ".tmp-ag-config-check",
-    ".tmp-pytest-repo-*",
+    ".tmp-pytest-*",
 )
 
 _LOCK_NAME = ".ag-dir.lock"

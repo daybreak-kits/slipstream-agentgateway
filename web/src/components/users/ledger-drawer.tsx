@@ -46,7 +46,7 @@ export function LedgerDrawer({ userId, userName, onClose }: LedgerDrawerProps) {
         if (!next) onClose();
       }}
     >
-      <SheetContent className="flex flex-col gap-3 sm:max-w-xl" showCloseButton={false}>
+      <SheetContent size="xl" className="flex flex-col gap-3" showCloseButton={false}>
         <SheetHeader className="pr-8">
           <SheetTitle>余额流水 · {userName}</SheetTitle>
           <SheetDescription>预付余额的全部入账/扣减记录，最近 {LEDGER_PAGE_SIZE} 条。</SheetDescription>

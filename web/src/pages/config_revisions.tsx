@@ -70,7 +70,7 @@ function RevisionDetailDrawer({ row, open, onOpenChange }: {
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="flex w-full flex-col gap-0 overflow-hidden sm:max-w-lg">
+      <SheetContent side="right" size="lg" className="flex w-full flex-col gap-0 overflow-hidden">
         <SheetHeader className="border-b border-border px-4 py-3">
           <SheetTitle className="flex flex-wrap items-center gap-1.5 text-sm">
             <span className="tnum">版本 {row?.id ?? "—"}</span>

@@ -153,7 +153,8 @@ export function LogDetailDrawer({ open, row, timezone, onOpenChange }: LogDetail
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="w-[min(94vw,780px)] gap-0 overflow-y-auto p-0 sm:max-w-[780px]"
+        size="xl"
+        className="gap-0 overflow-y-auto p-0"
       >
         <SheetHeader className="sticky top-0 z-10 border-b border-border bg-surface p-4 pr-12">
           <div className="flex items-start justify-between gap-3">

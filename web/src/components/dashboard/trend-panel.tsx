@@ -159,7 +159,7 @@ function TrendPlot({ report, metric, hidden, kind }: TrendPlotProps) {
   }));
 
   return (
-    <div className="h-[320px] w-full min-w-0">
+    <div className="chart-frame w-full min-w-0">
       <ResponsiveContainer width="100%" height="100%">
         <ChartRoot
           data={isMoney ? moneyData : report.points.map((point) => ({ label: point.label, ...point.values }))}

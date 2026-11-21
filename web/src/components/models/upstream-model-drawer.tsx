@@ -170,7 +170,8 @@ interface UpstreamFormState {
 
 /**
  * 上游模型编辑抽屉（ticket 11，替代旧的小弹窗）：
- * - 右侧满高 100vh（宽 820px：760–860 区间），窄屏全宽；内容区滚动、底部动作条固定；
+ * - 右侧满高 h-dvh；<sm 全宽，≥sm 宽 min(820px, 100vw-2rem)（W6 ticket 09 修掉 820px 固定宽度出屏）；
+ *   内容区滚动、底部动作条固定；
  * - 分组：基本信息 / 能力与参数 / 价格 / 状态与冷却；启用开关随「保存」写入，冷却即时生效；
  * - 09 脏标记原语：字段级色条 + 未保存计数 + 底部摘要 + 恢复；保存是唯一主按钮（干净时中性禁用）；
  * - 冷却双模式互斥：单次生效禁周期、周期窗口生效禁单次，说明含阻塞规则与窗口结束时间，始终只有一个「解除」。
@@ -372,9 +373,9 @@ export function UpstreamModelDrawer({
         <SheetContent
           side="right"
           data-slot="upstream-model-drawer"
-          className="flex h-screen w-full flex-col gap-0 border-l bg-surface p-0 sm:w-[820px] sm:min-w-[760px] sm:max-w-[860px]"
+          className="flex h-dvh w-full flex-col gap-0 overflow-hidden border-l bg-surface p-0 sm:w-[min(820px,calc(100vw-2rem))] sm:min-w-0 sm:max-w-[calc(100vw-2rem)]"
         >
-          <SheetHeader className="shrink-0 space-y-1 border-b border-border px-6 py-4 pr-12">
+          <SheetHeader className="shrink-0 space-y-1 border-b border-border px-4 py-4 pr-12 sm:px-6">
             <SheetTitle>{initial !== null ? "编辑上游模型" : "登记上游模型"}</SheetTitle>
             <SheetDescription>
               {initial !== null
@@ -382,9 +383,9 @@ export function UpstreamModelDrawer({
                 : "填写基本信息、能力与价格；保存后可在同一抽屉管理状态与冷却"}
             </SheetDescription>
           </SheetHeader>
-          <div className="flex-1 space-y-6 overflow-y-auto px-6 py-4">
+          <div className="flex-1 space-y-6 overflow-y-auto px-4 py-4 sm:px-6">
             <DrawerSection title="基本信息" dirtyCount={basicDirtyCount}>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <DirtyField dirty={isDirtyField("upstream_id")} onReset={() => resetField("upstream_id")}>
                   <Field label="所属上游">
                     <Select value={form.upstream_id} disabled={initial !== null} onValueChange={(v) => setForm({ ...form, upstream_id: v })}>
@@ -450,7 +451,7 @@ export function UpstreamModelDrawer({
 
             <DrawerSection title="价格" dirtyCount={canCost ? priceDirtyCount : 0} description="billing:cost 才可见">
               {canCost ? (
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <DirtyField dirty={isDirtyField("cost_input_per_1m")} onReset={() => resetField("cost_input_per_1m")}>
                     <Field label="输入成本 / 1M" hint="元，留空 = 未定价">
                       <Input value={form.cost_input_per_1m} onChange={(e) => setForm({ ...form, cost_input_per_1m: e.target.value })} placeholder="如 2.0000" className="tnum" />
@@ -529,7 +530,7 @@ export function UpstreamModelDrawer({
               )}
             </DrawerSection>
           </div>
-          <div className="shrink-0 border-t border-border bg-surface px-6 py-3">
+          <div className="shrink-0 border-t border-border bg-surface px-4 py-3 sm:px-6">
             <DirtyFooter count={dirtyCount} onResetAll={resetAll} saving={save.isPending}>
               <Button variant="outline" size="sm" disabled={save.isPending} onClick={requestClose}>
                 取消
