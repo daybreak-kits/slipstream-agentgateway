@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { HoverInfo } from "@/components/ui/hover-info";
 import { IconBadge } from "@/components/ui/icon-badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fmtPctPoint } from "@/lib/format";
@@ -106,9 +107,11 @@ export function MetricCard({
             </div>
           )}
           {hint !== undefined && (
-            <div className="line-clamp-2 text-2xs leading-snug text-faint" title={hint}>
-              {hint}
-            </div>
+            // 说明文字两行截断：完整文案走统一悬浮详情（hover/键盘/触屏都能读，
+            // 原生 title 只有鼠标能用，键盘与触屏读不到）。
+            <HoverInfo content={hint}>
+              <div className="line-clamp-2 text-2xs leading-snug text-faint">{hint}</div>
+            </HoverInfo>
           )}
         </div>
       </CardContent>
