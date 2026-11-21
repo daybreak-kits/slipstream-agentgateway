@@ -1122,6 +1122,163 @@ async function assertPublicModelSaveRollback(page, fixtures) {
   return "500 拦截：错误内联+值/脏标记保留；解除后真保存：脏清零+服务端已更新";
 }
 
+/* W6 ticket 17：分流图播种——矩阵站点没有 relay 流量，直接向隔离 SQLite 写
+ * usage/charge 行（与 api/tests/integration/test_reports_flow_focus.py 同一張
+ * 路径表），让分流图有确定性的 9 节点闭包可供搜索断言。 */
+let flowSeeded = false;
+async function ensureFlowSeeded(page, fixtures) {
+  if (flowSeeded) return;
+  flowSeeded = true;
+  void fixtures;
+  const serverDir = path.join(OUT, "server");
+  const databaseFile = path.join(serverDir, "matrix.db").replace(/\\/g, "/");
+  const script = path.join(OUT, "seed-flow-events.py");
+  fs.writeFileSync(
+    script,
+    [
+      "import sys, time",
+      "from sqlalchemy import create_engine",
+      "from sqlalchemy.orm import sessionmaker",
+      "from l04_repo.orm import ChargeEntryORM, GatewayUsageEventORM, UserORM",
+      "",
+      'engine = create_engine("sqlite:///" + sys.argv[1])',
+      "Session = sessionmaker(bind=engine, future=True)",
+      "now = int(time.time() * 1000)",
+      'USERS = [("usr_mflow_a", "流甲"), ("usr_mflow_b", "流乙"), ("usr_mflow_c", "流丙")]',
+      "PATHS = [",
+      '    ("usr_mflow_a", "matrixflow公开甲", "matrixflow上游A", "matrixflow渠道X"),',
+      '    ("usr_mflow_a", "matrixflow公开甲", "matrixflow上游B", "matrixflow渠道Y"),',
+      '    ("usr_mflow_b", "matrixflow公开甲", "matrixflow上游A", "matrixflow渠道Y"),',
+      '    ("usr_mflow_b", "matrixflow公开乙", "matrixflow上游A", "matrixflow渠道X"),',
+      '    ("usr_mflow_c", "matrixflow公开乙", "matrixflow上游B", "matrixflow渠道X"),',
+      '    ("usr_mflow_c", "matrixflow公开丙", "matrixflow上游A", "matrixflow渠道X"),',
+      '    ("usr_mflow_a", "matrixflow公开乙", "matrixflow上游A", "matrixflow渠道Y"),',
+      '    ("usr_mflow_b", "matrixflow公开丙", "matrixflow上游B", "matrixflow渠道Y"),',
+      '    ("usr_mflow_a", "matrixflow公开丙", "matrixflow上游B", "matrixflow渠道X"),',
+      "]",
+      "with Session() as session:",
+      '    if session.get(GatewayUsageEventORM, "evt_mflow_0") is not None:',
+      '        print("already")',
+      "        raise SystemExit(0)",
+      "    for user_id, name in USERS:",
+      "        if session.get(UserORM, user_id) is None:",
+      "            session.add(UserORM(id=user_id, name=name, balance_micro=0, created_at_ms=now))",
+      "    for index, (user_id, public_model, upstream_model, provider) in enumerate(PATHS):",
+      "        at = now - 3_600_000 * (index + 1)",
+      '        event_id = "evt_mflow_%d" % index',
+      "        session.add(GatewayUsageEventORM(",
+      "            event_id=event_id,",
+      "            started_at_ms=at,",
+      "            completed_at_ms=at + 1000,",
+      "            duration_ms=1000,",
+      "            time_to_first_token_ms=100,",
+      "            http_status=200,",
+      "            public_model=public_model,",
+      "            upstream_model=upstream_model,",
+      "            provider=provider,",
+      "            input_tokens=10,",
+      "            output_tokens=5,",
+      "            total_tokens=15,",
+      "        ))",
+      "        session.add(ChargeEntryORM(",
+      '            id="ce_" + event_id,',
+      "            gateway_event_id=event_id,",
+      "            user_id=user_id,",
+      "            amount_micro=1000,",
+      '            currency="CNY",',
+      '            status="ok",',
+      "            created_at_ms=at,",
+      "        ))",
+      "    session.commit()",
+      'print("seeded")',
+      "",
+    ].join("\n"),
+  );
+  const python = pythonExecutable();
+  const result = spawnSync(python, [script, databaseFile], {
+    encoding: "utf8",
+    env: { ...process.env, PYTHONPATH: path.join(API_ROOT, "src") },
+    windowsHide: true,
+  });
+  if (result.status !== 0) {
+    throw new MatrixError("分流播种失败：" + (result.stderr || result.stdout || "").slice(0, 400));
+  }
+}
+
+/* W6 ticket 17：分流搜索专项——页头入口、无独立请求链路面板、无「已隐藏」芯片块、
+ * 隐藏阶段卡片高度稳定、阶段轴在右/搜索在左（窄屏堆叠）、搜索高亮链路计数、
+ * 仅显示链路、清除恢复全图。期望计数来自上方播种的 9 条路径（确定性）。 */
+async function assertFlowSearch(page, width, fixtures) {
+  await ensureFlowSeeded(page, fixtures);
+  await goto(page, "/dashboard");
+  // 1. 看板不再有独立「请求链路」面板；「查看分流」入口移到页头仍可达。
+  assert((await page.getByText("请求链路", { exact: true }).count()) === 0, "看板仍渲染独立请求链路面板");
+  const entry = page.getByRole("button", { name: "查看分流" });
+  assert(await visible(entry), width + " 页头缺少「查看分流」入口");
+  await entry.click();
+  const canvas = page.locator('[role="img"][aria-label*="桑基"]');
+  await canvas.waitFor({ state: "visible", timeout: 10_000 });
+  await page.waitForTimeout(700);
+
+  // 2. 无「已隐藏」芯片块；阶段轴在右（≥lg）/堆叠在画布下（<lg），搜索在左。
+  assert((await page.getByText("已隐藏：", { exact: true }).count()) === 0, "「已隐藏」芯片块仍存在");
+  const search = page.locator('[data-slot="flow-search-input"]');
+  const axis = page.locator('[data-slot="flow-stage-axis"]');
+  assert(await visible(search), width + " 分流搜索框不可见");
+  assert(await visible(axis), width + " 分流阶段轴不可见");
+  const searchBox = await boxOf(search);
+  const axisBox = await boxOf(axis);
+  const canvasBox = await boxOf(canvas);
+  if (width >= 1024) {
+    assert(searchBox.x < canvasBox.x + 2, width + " 搜索框不在画布左上（轴右搜索左）");
+    assert(axisBox.x >= canvasBox.x + canvasBox.width - 1, width + " 阶段轴不在画布右侧");
+  } else {
+    assert(axisBox.y >= canvasBox.y + canvasBox.height - 1, width + " 窄屏阶段轴未堆叠在画布下方");
+    assert(searchBox.y <= canvasBox.y, width + " 窄屏搜索框不在画布上方");
+  }
+
+  // 3. 高度稳定：隐藏一个阶段前后，趋势卡片高度不变（芯片块已删，W5 跳动源）。
+  const trendCard = page.locator('[data-slot="card"]').filter({ hasText: "用量趋势" }).first();
+  const cardHeight = async () => (await boxOf(trendCard)).height;
+  await page.waitForTimeout(300);
+  const heightBefore = await cardHeight();
+  await axis.getByRole("button", { name: "公开模型" }).click();
+  await page.waitForTimeout(1_200);
+  const heightAfter = await cardHeight();
+  assert(Math.abs(heightAfter - heightBefore) <= 1, width + " 隐藏阶段后卡片高度跳动：" + heightBefore + " → " + heightAfter);
+  assert((await page.getByText("已隐藏：", { exact: true }).count()) === 0, width + " 隐藏后出现「已隐藏」芯片块");
+  await axis.getByRole("button", { name: "公开模型" }).click();
+  await page.waitForTimeout(900);
+
+  // 4. 搜索高亮：命中 1（公开甲），闭包 = 3 用户 + key + 上游A/B + 渠道X/Y。
+  await search.fill("公开甲");
+  const status = page.locator('[data-slot="flow-search-status"]');
+  await page.waitForTimeout(400);
+  const highlightText = (await status.innerText()).trim();
+  assert(
+    highlightText === "命中 1 · 链路 9 节点 / 10 边",
+    width + " 搜索高亮状态不符（期望 命中 1 · 链路 9 节点 / 10 边）：" + highlightText,
+  );
+
+  // 5. 仅显示搜索目标：只保留该链；清除后恢复全图。
+  const onlyToggle = page.getByRole("switch", { name: "仅显示搜索目标" });
+  assert(await visible(onlyToggle), width + " 缺少「仅显示搜索目标」开关");
+  await onlyToggle.click();
+  await page.waitForTimeout(500);
+  const onlyText = (await status.innerText()).trim();
+  assert(
+    onlyText === "仅显示链路：9 节点 / 10 边",
+    width + " 仅显示链状态不符：" + onlyText,
+  );
+  await search.fill("");
+  await page.waitForTimeout(500);
+  const clearedText = (await status.innerText()).trim();
+  assert(clearedText === "", width + " 清除搜索后未恢复全图（状态残留）：" + clearedText);
+  assert(!(await onlyToggle.isEnabled()), width + " 清除搜索后「仅显示」开关应禁用");
+  await shot(page, width + "-flow-search");
+  return "轴右搜索左（" + Math.round(axisBox.x - canvasBox.x) + "px）· 高度 " + Math.round(heightBefore) + "→" + Math.round(heightAfter) + " 稳定 · 搜索高亮 9/10 · 仅显示链 · 清除恢复";
+}
+
 /* W6 ticket 15：成员编排专项——左6右6行内编辑（行内字段随策略收敛）、行内编辑变脏
  * 页头计数联动、候选按上游分组 chip 搜索固定滚动区外、加入成员走 chip。
  * 375 只验堆叠 + chip 加入 + 搜索；1536 全量并含大列表预算（300 候选时页面高度有界）。
@@ -1720,6 +1877,12 @@ async function main() {
           await test("member-board." + label, label + " 成员编排行内编辑与分组候选", () =>
             assertMemberBoard(page, width, fixtures));
         }
+      }
+      // W6 ticket 17：分流搜索专项（375 窄屏堆叠布局 + 1536 桌面轴右/搜索左，
+      // 两档都断言入口、高度稳定、搜索高亮、仅显示链与清除恢复）。
+      if (width === 375 || width === 1536) {
+        await test("flow-search." + label, label + " 分流图搜索聚焦专项（入口/高度/轴右搜索左/仅显示链）", () =>
+          assertFlowSearch(page, width, fixtures));
       }
     }
     await test("runtime.console", "五档交互无新增 console error / 未捕获异常", () => {

@@ -11,10 +11,11 @@ invalid rules never reach storage.
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
+from l05_service.model_params import MAX_TOKEN_LIMIT
 from l05_service.rollout import RevisionStatus
 
 
@@ -395,19 +396,48 @@ class PlaygroundMessage(BaseModel):
     content: str
 
 
+class PlaygroundResponseFormat(BaseModel):
+    """response_format 只透传 type；text 是上游默认形状，面板不发它。"""
+
+    type: Literal["text", "json_object"]
+
+
 class PlaygroundRequest(BaseModel):
     model: str = Field(min_length=1)
     messages: list[PlaygroundMessage] = Field(min_length=1)
     # Sampling knobs forwarded verbatim to the data plane (t6 contract);
-    # None values never land in the relayed body.
+    # None values never land in the relayed body. Ticket 19: the full panel
+    # set is accepted here and forwarded by the relay whitelist, so no form
+    # field is a dead end any more.
     temperature: float | None = Field(default=None, ge=0, le=2)
     top_p: float | None = Field(default=None, gt=0, le=1)
-    max_tokens: int | None = Field(default=None, ge=1)
+    top_k: int | None = Field(default=None, ge=0)
+    frequency_penalty: float | None = Field(default=None, ge=-2, le=2)
+    presence_penalty: float | None = Field(default=None, ge=-2, le=2)
+    seed: int | None = None
+    # Sanity bounds reuse the model registry's own cap; the per-model
+    # registered max_output_tokens is enforced by the route (routers_ops).
+    max_tokens: int | None = Field(default=None, ge=1, le=MAX_TOKEN_LIMIT)
+    max_completion_tokens: int | None = Field(default=None, ge=1, le=MAX_TOKEN_LIMIT)
+    # Ticket 19: at most 4 non-empty stop sequences (the UI sends one array;
+    # the single-line input is comma separated and folded at parse time).
+    stop: list[Annotated[str, StringConstraints(min_length=1)]] | None = Field(
+        default=None, max_length=4
+    )
+    n: int | None = Field(default=None, ge=1, le=128)
+    response_format: PlaygroundResponseFormat | None = None
+    logprobs: bool | None = None
+    top_logprobs: int | None = Field(default=None, ge=0, le=20)
+    user: str | None = Field(default=None, min_length=1, max_length=256)
     # Full reasoning level set (ticket 18); "default" means 不传 and is dropped
     # by the relay, every other level is forwarded verbatim.
     reasoning_effort: str | None = Field(
         default=None, pattern=r"^(default|none|low|medium|high|xhigh|max)$"
     )
+    # Ticket 19: vendor passthrough box (面板「额外请求字段」). Merged into the
+    # relay body first, so a standard param always wins and the relay-owned
+    # keys (model/messages/stream/stream_options) can never be overridden.
+    extra_fields: dict[str, Any] | None = None
 
 
 class RuleCreate(BaseModel):
@@ -829,3 +859,58 @@ class MyModelOut(BaseModel):
     model_type: str
     parameters: MyModelParameters
     sources: list[str]
+
+
+class FlowStageOut(BaseModel):
+    """GET /admin/reports/flow：一个可见阶段（collapse 后只含剩余段）。"""
+
+    id: str
+    label: str
+
+
+class FlowNodeMetaOut(BaseModel):
+    """flow 节点元数据：稳定 id + 展示名 + 所属阶段 + 指标值（窗口口径）。"""
+
+    id: str
+    label: str
+    stage: Literal["user", "key", "model", "upstream", "channel"]
+    value: int
+
+
+class FlowLinkOut(BaseModel):
+    """flow 边：相邻可见段之间的聚合值；charge 锚首边、cost 锚末边。"""
+
+    source: str
+    target: str
+    requests: int
+    tokens: int
+    cost_micro: int = 0
+    charge_micro: int = 0
+    value: int
+
+
+class FlowTotalsOut(BaseModel):
+    """flow totals：恒等于窗口全量（不随 collapse/focus/q/top_n 变化）。"""
+
+    requests: int
+    tokens: int
+    cost_micro: int = 0
+    charge_micro: int = 0
+
+
+class FlowReportOut(BaseModel):
+    """GET /admin/reports/flow 响应（W6 票 17 进契约；顶层键序即线格式键序）。"""
+
+    metric: Literal["requests", "tokens"]
+    nodes: list[str]
+    node_meta: dict[str, FlowNodeMetaOut]
+    links: list[FlowLinkOut]
+    stages: list[FlowStageOut]
+    totals: FlowTotalsOut
+    currency: str
+    fx_missing: list[str]
+    estimate_note: str
+    range: str
+    from_ms: int
+    to_ms: int
+    timezone: str

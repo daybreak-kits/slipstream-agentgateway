@@ -1506,14 +1506,44 @@ check("分流图隐藏阶段：前端不做跨接重连，隐藏集合作为后�
   includesAll(panel, ["hiddenStages", "collapse: hiddenStages"], "看板 hiddenStages 接线");
 });
 
-check("分流图隐藏阶段：mock 不重算投影，隐藏到两段即禁用请求", () => {
+check("分流图隐藏阶段：mock 按路径投影 collapse（W6 票 17），隐藏到两段即禁用请求", () => {
   const mocks = read("src/components/dashboard/report-mocks.ts");
-  includesAll(mocks, ["mockFlow(metric", "mock 层不重算投影"], "mock 投影口径");
+  includesAll(mocks, ["FLOW_PATHS", "flowChainOf", "flowMatchNodes"], "mock 路径投影与闭包复用");
   const panel = read("src/components/dashboard/trend-panel.tsx");
   expect(
     /FLOW_STAGES\.length - hiddenStages\.length >= 2/.test(panel),
     "隐藏后不足两段时必须禁用 flow 请求（至少保留 2 段）",
   );
+});
+
+// ---------- W6 ticket 17：分流图重构与搜索/focus ----------
+check("分流图票 17：replaceMerge 替换 series、轴右竖排、搜索左、无已隐藏芯片块", () => {
+  const chart = read("src/components/dashboard/flow-chart.tsx");
+  includesAll(
+    chart,
+    [
+      'id: "flow-sankey"',
+      "replaceMerge: [\"series\"]",
+      'data-slot="flow-stage-axis"',
+      'data-slot="flow-search-input"',
+      "仅显示搜索目标",
+      "chart-frame",
+    ],
+    "分流图票 17 结构",
+  );
+  expect(!chart.includes("已隐藏："), "flow-chart 不得再渲染「已隐藏」芯片块（卡片高度跳动源）");
+  const dash = read("src/pages/dashboard.tsx");
+  expect(!dash.includes("RequestChain"), "看板不得再引用 RequestChain（独立请求链路面板已删，组件留给登录页）");
+  includesAll(dash, ["查看分流"], "页头必须保留查看分流入口");
+  includesAll(
+    read("src/components/dashboard/flow-search.ts"),
+    ["flowChainOf", "flowSearchView", "flowMatchNodes"],
+    "搜索闭包纯函数层",
+  );
+  const panel = read("src/components/dashboard/trend-panel.tsx");
+  includesAll(panel, ["FLOW_SERVER_SEARCH_MIN_NODES", "serverNarrowed"], "大数据搜索必须走后端 q（前端不硬算）");
+  const hooks = read("src/components/dashboard/use-reports.ts");
+  includesAll(hooks, ["focus", "q", "topN"], "flow hook 透传 focus/q/topN（后端聚合过滤）");
 });
 
 // ---------- 六期：错误治理（W6 ticket 07）----------
@@ -1680,6 +1710,167 @@ check("上游模型编辑器：思考档位集合与默认档声明控件就位"
     "上游模型编辑器必须能声明档位集合与默认档",
   );
   expect(src.includes('placeholder="留空 = 不声明"') === false, "推理档位自由文本输入必须移除（改为声明档位集合）");
+});
+
+// ---------- 六期：模型试验输出参数真实转发（W6 ticket 19）----------
+// stop 解析与上限口径是纯函数，SSR 加载真实实现断言行为；面板控件用 SSR
+// 渲染断言 DOM。前后端转发白名单同源：后端由 pytest 的 stub 上游实测钉住，
+// 这里钉前端发送面，两边期望列表都来自票 19 的契约。
+
+check("stop 解析：逗号拆分保序去空，旧换行输入折算成同一语义（一次性迁移）", async () => {
+  const { parseStopSequences } = await load("/src/lib/playground.ts");
+  expect(
+    JSON.stringify(parseStopSequences("a, b , c")) === JSON.stringify(["a", "b", "c"]),
+    "逗号拆分、逐项 trim、保序",
+  );
+  expect(
+    JSON.stringify(parseStopSequences("a\nb")) === JSON.stringify(["a", "b"]),
+    "旧换行输入必须折算成逗号语义（票19 一次性迁移）",
+  );
+  expect(
+    JSON.stringify(parseStopSequences("a,\nb,c")) === JSON.stringify(["a", "b", "c"]),
+    "逗号与换行混合时同属分隔符",
+  );
+  expect(
+    parseStopSequences("").length === 0 && parseStopSequences(undefined).length === 0,
+    "空输入不发 stop",
+  );
+  expect(
+    JSON.stringify(parseStopSequences("a,,b")) === JSON.stringify(["a", "b"]),
+    "空项不进请求体（校验层负责提示）",
+  );
+});
+
+check("stop 行内校验：超 4 条与空条目各自有提示，正常输入放行", async () => {
+  const { validateChatParams } = await load("/src/lib/playground.ts");
+  const { EMPTY_PLAYGROUND_PARAMS } = await load("/src/lib/playground-params.ts");
+  const base = { ...EMPTY_PLAYGROUND_PARAMS };
+  const over = validateChatParams({ ...base, stop: "a,b,c,d,e" });
+  expect(over.valid === false, "5 条必须拦截");
+  expect((over.message ?? "").includes("4"), "超限提示必须说明 4 条上限");
+  const empty = validateChatParams({ ...base, stop: "a,,b" });
+  expect(empty.valid === false, "空条目必须拦截");
+  expect((empty.message ?? "").includes("空"), "空条目提示必须说明空条目");
+  const trailing = validateChatParams({ ...base, stop: "a,b," });
+  expect(trailing.valid === false, "尾逗号产生的空条目同样拦截");
+  const ok = validateChatParams({ ...base, stop: "a, b, c, d" });
+  expect(ok.valid === true, "恰好 4 条合法输入必须放行");
+  const newline = validateChatParams({ ...base, stop: "a\nb\nc\nd" });
+  expect(newline.valid === true, "旧换行输入折算后同样放行");
+  expect(
+    validateChatParams({ ...base, stop: "a,b,c,d,e\n" }).valid === false,
+    "换行折算后超限仍然拦截",
+  );
+});
+
+check("输出上限：登记值优先，未登记回退安全默认 32768", async () => {
+  const { maxOutputTokensFor, validateChatParams, DEFAULT_MAX_OUTPUT_TOKENS } = await load(
+    "/src/lib/playground.ts",
+  );
+  const { EMPTY_PLAYGROUND_PARAMS } = await load("/src/lib/playground-params.ts");
+  expect(maxOutputTokensFor(128000) === 128000, "登记值直接采用");
+  expect(maxOutputTokensFor(0) === DEFAULT_MAX_OUTPUT_TOKENS, "0 = 未声明，回退默认");
+  expect(
+    maxOutputTokensFor(null) === DEFAULT_MAX_OUTPUT_TOKENS &&
+      maxOutputTokensFor(undefined) === DEFAULT_MAX_OUTPUT_TOKENS,
+    "无能力数据回退默认",
+  );
+  const registered = validateChatParams(
+    { ...EMPTY_PLAYGROUND_PARAMS, maxTokens: "128000" },
+    { maxOutputTokens: 128000 },
+  );
+  expect(registered.valid === true, "登记上限内的值放行");
+  const over = validateChatParams(
+    { ...EMPTY_PLAYGROUND_PARAMS, maxTokens: "128001" },
+    { maxOutputTokens: 128000 },
+  );
+  expect(over.valid === false, "超登记上限拦截");
+  const fallbackOk = validateChatParams(
+    { ...EMPTY_PLAYGROUND_PARAMS, maxTokens: "32768" },
+    { maxOutputTokens: null },
+  );
+  expect(fallbackOk.valid === true, "无登记数据时安全默认内的值放行");
+  const fallbackOver = validateChatParams(
+    { ...EMPTY_PLAYGROUND_PARAMS, maxTokens: "32769" },
+    { maxOutputTokens: null },
+  );
+  expect(fallbackOver.valid === false, "无登记数据时按安全默认拦截");
+  expect(
+    validateChatParams(
+      { ...EMPTY_PLAYGROUND_PARAMS, maxCompletionTokens: "128001" },
+      { maxOutputTokens: 128000 },
+    ).valid === false,
+    "max_completion_tokens 同受登记上限约束",
+  );
+});
+
+check("参数面板：stop 单行 input、上限回退如实标注（SSR 渲染）", async () => {
+  const { ParamsPanel } = await load("/src/components/playground/params-panel.tsx");
+  const { EMPTY_PLAYGROUND_PARAMS } = await load("/src/lib/playground-params.ts");
+  const props = (modelInfo) => ({
+    value: { ...EMPTY_PLAYGROUND_PARAMS },
+    onChange: () => {},
+    disabled: false,
+    mockMode: false,
+    onOpenModels: () => {},
+    modelInfo,
+  });
+  const src = read("src/components/playground/params-panel.tsx");
+  expect(!src.includes("每行一条"), "stop 的每行一条文案必须移除（改为逗号分隔）");
+  expect(src.includes("逗号分隔"), "stop 占位与文案必须是逗号分隔语义");
+  const html = render(createElement(ParamsPanel, props(null)));
+  expect(html.includes('id="playground-stop"'), "stop 字段保留原 id");
+  expect(!/<textarea[^>]*id="playground-stop"/.test(html), "stop 必须是单行 input，不再是多行 textarea");
+  expect(html.includes("未登记"), "无能力数据时必须如实标注上限回退");
+  const registeredHtml = render(createElement(ParamsPanel, props(t18ChatInfo())));
+  expect(!registeredHtml.includes("未登记"), "已登记上限时不显示回退标注");
+  expect(
+    src.includes("maxOutputTokensFor(modelInfo?.parameters.max_output_tokens)"),
+    "面板上限必须取所选模型登记值（不得再传 null）",
+  );
+});
+
+check("发送路径：页面校验用所选模型登记值，面板说明与控制面转发范围一致", () => {
+  const page = read("src/pages/playground.tsx");
+  includesAll(
+    page,
+    ["maxOutputTokens: activeModelInfo?.parameters.max_output_tokens"],
+    "发送前校验的上限必须来自所选模型登记值",
+  );
+  expect(!page.includes("maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS"), "不得再写死默认上限");
+  const panel = read("src/components/playground/params-panel.tsx");
+  expect(
+    panel.includes("控制面透传") && !panel.includes("待数据面支持后生效"),
+    "面板说明必须反映票19 之后控制面已透传全部参数的现状",
+  );
+  const lib = read("src/lib/playground.ts");
+  includesAll(
+    lib,
+    ["body.extra_fields = params.extraFields"],
+    "额外字段必须整包随 extra_fields 上行，由控制面合并（拍平进顶层会被 schema 丢弃）",
+  );
+  expect(!lib.includes("RESERVED_BODY_KEYS"), "保留键裁决已收敛到后端 relay，前端不得再有一份平行名单");
+  includesAll(
+    lib,
+    [
+      '"temperature"',
+      '"top_p"',
+      '"top_k"',
+      '"frequency_penalty"',
+      '"presence_penalty"',
+      '"seed"',
+      '"max_tokens"',
+      '"max_completion_tokens"',
+      '"stop"',
+      '"n"',
+      '"response_format"',
+      '"logprobs"',
+      '"top_logprobs"',
+      '"user"',
+      '"reasoning_effort"',
+    ],
+    "前端发送白名单必须覆盖后端 schema/relay 的全部标准参数（后端由 pytest 钉住）",
+  );
 });
 
 // ---------- 九、公开模型编辑页紧凑布局与脏标记（W6 ticket 14）----------

@@ -33,10 +33,16 @@ from l04_repo.orm import (
 from l04_repo.repository import get_setting, put_setting
 from l05_service import auth, client_keys
 from l05_service.attempts import AttemptChainSummary, attempt_summaries, attempts_for_event
+from l05_service.models_dev import user_model_parameters
 from l06_api.deps import get_adapter, page_params, require, session_of
 from l06_api.schemas import LogAttemptOut, LogAttemptsOut, PlaygroundRequest
 
 router = APIRouter(tags=["ops"])
+
+#: Keys the relay builds itself; the vendor passthrough box (extra_fields) can
+#: never override them — this is the single reserved-key ruling for the
+#: playground body (the client sends extras nested, no client-side copy).
+_RELAY_OWNED_KEYS = frozenset({"model", "messages", "stream", "stream_options"})
 
 
 # ---------------------------------------------------------------- logs
@@ -899,6 +905,20 @@ def _playground_identity(session: Session) -> ApiKeyORM:
     return session.get(ApiKeyORM, issued.key_id)
 
 
+def _registered_max_output_tokens(session: Session, model: str) -> int | None:
+    """所选模型（公开模型名）登记的 max_output_tokens；未登记/未声明返回 None.
+
+    单一事实源就是 GET /admin/my/models 背后的成员合并逻辑：控制面按「只填空」
+    合并成员参数，前端面板看到的登记值与此处一致，不会各算各的。0 = 未声明，
+    控制面无值可依，per-model 校验跳过（schema 静态上限仍兜底），前端回退
+    安全默认并在 UI 如实标注。
+    """
+    for item in user_model_parameters(session):
+        if item["name"] == model:
+            return item["parameters"]["max_output_tokens"] or None
+    return None
+
+
 @router.post("/admin/playground/stream", dependencies=[Depends(require("playground:use"))])
 async def playground_stream(
     payload: PlaygroundRequest,
@@ -913,6 +933,18 @@ async def playground_stream(
     port or path. The server-side internal key stays here; the plaintext is
     decrypted per request and never persisted.
     """
+    # Ticket 19: the registered max_output_tokens is the backend backstop for
+    # the output token cap; the frontend inline hint is the first layer.
+    registered = _registered_max_output_tokens(session, payload.model)
+    if registered is not None:
+        for field in ("max_tokens", "max_completion_tokens"):
+            value = getattr(payload, field)
+            if value is not None and value > registered:
+                raise AppError(
+                    ErrorCode.VALIDATION_ERROR,
+                    f"{field} 超过所选模型登记的最大输出词元 {registered}",
+                    details={"model": payload.model, "field": field, "registered": registered},
+                )
     settings = get_settings()
     key = _playground_identity(session)
     plaintext = AesGcmBox(settings.secret_key).decrypt(key.key_enc)
@@ -932,12 +964,31 @@ async def playground_stream(
             "stream": True,
             "messages": [m.model_dump() for m in payload.messages],
         }
+        # Ticket 19: the vendor passthrough box goes in first — a standard param
+        # always wins, and the relay-owned keys can never be overridden.
+        for key, value in (payload.extra_fields or {}).items():
+            if key not in _RELAY_OWNED_KEYS:
+                body[key] = value
         # Optional sampling knobs: omitted from the body when the caller left them unset.
         # reasoning_effort "default" means 不传 (ticket 18): it never reaches upstream.
         for field, value in (
             ("temperature", payload.temperature),
             ("top_p", payload.top_p),
+            ("top_k", payload.top_k),
+            ("frequency_penalty", payload.frequency_penalty),
+            ("presence_penalty", payload.presence_penalty),
+            ("seed", payload.seed),
             ("max_tokens", payload.max_tokens),
+            ("max_completion_tokens", payload.max_completion_tokens),
+            ("stop", payload.stop),
+            ("n", payload.n),
+            (
+                "response_format",
+                payload.response_format.model_dump() if payload.response_format else None,
+            ),
+            ("logprobs", payload.logprobs),
+            ("top_logprobs", payload.top_logprobs),
+            ("user", payload.user),
             (
                 "reasoning_effort",
                 None if payload.reasoning_effort == "default" else payload.reasoning_effort,

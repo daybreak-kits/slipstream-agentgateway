@@ -2,7 +2,6 @@ import { useCallback, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { DashboardKpis } from "@/components/dashboard/metric-cards";
-import { RequestChain } from "@/components/layout/request-chain";
 import { PageHeader } from "@/components/layout/page-header";
 import { HeatmapCard } from "@/components/dashboard/heatmap";
 import { LatencyCards } from "@/components/dashboard/latency-cards";
@@ -23,6 +22,8 @@ import { Button } from "@/components/ui/button";
  * 区间状态 {kind:"range",value} | {kind:"custom",fromMs,toMs} 归 TimeRangePicker 所有，
  * 进全部报表 queryKey；keepPreviousData + AbortController 保证切换平滑、连点不排队。
  * ?tab= 写 URL 与旧系统一致；桶边界与币种全部来自接口，前端不自算。
+ * W6 票 17：独立「请求链路」面板已删（与分流图重复，组件留给登录页复用），
+ * 「查看分流」入口移到页头，仍一键直达分流视图。
  */
 export function DashboardPage() {
   const [params, setParams] = useSearchParams();
@@ -58,31 +59,22 @@ export function DashboardPage() {
             {timezone ? ` · 时区 ${timezone}` : ""}
           </>
         }
-        actions={<TimeRangePicker value={timeWindow} onChange={setTimeWindow} />}
+        actions={
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setView("flow");
+                document.getElementById("trend-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+              }}
+            >
+              查看分流
+            </Button>
+            <TimeRangePicker value={timeWindow} onChange={setTimeWindow} />
+          </>
+        }
       />
-
-      <section className="overflow-hidden rounded-card border border-border bg-surface shadow-card">
-        <div aria-hidden="true" className="h-px w-full bg-blueprint opacity-80" />
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
-          <div className="min-w-0">
-            <h2 className="text-sm font-semibold text-title">请求链路</h2>
-            <p className="mt-0.5 text-2xs text-faint">
-              一次调用穿过三层寻址；切换下方「分流」可看真实流量的走向。
-            </p>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setView("flow");
-              document.getElementById("trend-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
-            }}
-          >
-            查看分流
-          </Button>
-        </div>
-        <RequestChain className="px-4 py-4" />
-      </section>
 
       <DashboardKpis
         data={series.data}

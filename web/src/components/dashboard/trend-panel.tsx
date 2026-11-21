@@ -38,6 +38,10 @@ import { timeWindowKey, type TimeWindow } from "@/components/time-range-picker";
 const CHIP =
   "h-7 rounded-control px-2 text-2xs text-body data-[state=on]:bg-primary-soft data-[state=on]:text-primary";
 
+/** 节点数超过阈值后，搜索改走后端 q（生产上万密钥不靠前端硬算，W6 票 17）。 */
+const FLOW_SERVER_SEARCH_MIN_NODES = 600;
+const FLOW_SEARCH_DEBOUNCE_MS = 250;
+
 interface TooltipRow {
   dataKey?: string | number;
   value?: number | string;
@@ -298,15 +302,24 @@ export function TrendPanel({
   const { can } = usePermissions();
   const [hidden, setHidden] = useState<string[]>([]);
   const [hiddenStages, setHiddenStages] = useState<string[]>([]);
+  // 分流搜索：query 原样驱动输入框；小数据前端闭包高亮，大数据（>阈值）防抖后
+  // 走后端 q 过滤（返回的已是链路子图）。「仅显示搜索目标」只作用于前端模式。
+  const [flowQuery, setFlowQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [onlyChain, setOnlyChain] = useState(false);
+  const [fullNodeCount, setFullNodeCount] = useState(0);
   const windowKey = timeWindowKey(window).join("|");
 
-  // 换维度/区间后成员集合与分流轴的隐藏集合都没有意义，一并重置。
+  // 换维度/区间后成员集合、分流轴的隐藏集合与搜索状态都没有意义，一并重置。
   useEffect(() => {
     setHidden([]);
     setHiddenStages([]);
+    setFlowQuery("");
+    setDebouncedQuery("");
+    setOnlyChain(false);
   }, [dimension, windowKey]);
 
-  // 分流五段轴的隐藏集合：换区间后重置，点击节点/芯片/底部轴名都可切换。
+  // 分流五段轴的隐藏集合：换区间后重置，点击节点/右侧阶段轴都可切换。
   // 至少保留两个可见阶段：状态层再兜一次底，任何入口都不能把可见段减到两段以下。
   const toggleStage = useCallback((stageId: string) => {
     setHiddenStages((prev) => {
@@ -316,13 +329,27 @@ export function TrendPanel({
     });
   }, []);
 
+  useEffect(() => {
+    // 组件的 window prop 遮蔽全局 window：这里只能用裸计时器全局。
+    const timer = setTimeout(() => setDebouncedQuery(flowQuery), FLOW_SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [flowQuery]);
+
   const isFlow = view === "flow";
+  // 服务端窄化判定依据「最近一次无 q 全图」的规模，避免被搜索结果的小图误判。
+  const serverSearch = fullNodeCount > FLOW_SERVER_SEARCH_MIN_NODES;
+  const serverQuery = serverSearch ? debouncedQuery.trim() : "";
   const flow = useReportsFlow({
     window,
     metric: metric === "tokens" ? "tokens" : "requests",
     collapse: hiddenStages,
+    q: serverQuery,
     enabled: isFlow && FLOW_STAGES.length - hiddenStages.length >= 2,
   });
+  useEffect(() => {
+    if (!serverQuery && flow.data) setFullNodeCount(flow.data.nodes.length);
+  }, [serverQuery, flow.data]);
+  const serverNarrowed = serverSearch && serverQuery !== "";
   const allowedMetrics = TREND_METRICS.filter((option) => !option.permission || can(option.permission));
   const metricOptions = isFlow
     ? allowedMetrics.filter((option) => option.value === "requests" || option.value === "tokens")
@@ -346,9 +373,11 @@ export function TrendPanel({
   const onRetry = isFlow ? () => void flow.refetch() : onSeriesRetry;
   const emptyText =
     !loading && !error && !(isFlow ? hasFlow : hasSeries)
-      ? isFlow
-        ? "所选区间还没有调用链：先在「上游渠道」与「公开模型」保存一次配置，再发起真实调用"
-        : "所选区间还没有调用记录：换一个时间范围，或先发起一次真实调用"
+      ? isFlow && serverNarrowed
+        ? `没有匹配「${serverQuery}」的节点`
+        : isFlow
+          ? "所选区间还没有调用链：先在「上游渠道」与「公开模型」保存一次配置，再发起真实调用"
+          : "所选区间还没有调用记录：换一个时间范围，或先发起一次真实调用"
       : null;
 
   const toggleMember = (id: string) => {
@@ -394,7 +423,16 @@ export function TrendPanel({
               ))}
             </ToggleGroup>
           </div>
-          <FlowChart data={flow.data} hiddenStages={hiddenStages} onToggleStage={toggleStage} />
+          <FlowChart
+            data={flow.data}
+            hiddenStages={hiddenStages}
+            onToggleStage={toggleStage}
+            query={flowQuery}
+            onQueryChange={setFlowQuery}
+            onlyChain={onlyChain}
+            onOnlyChainChange={setOnlyChain}
+            serverNarrowed={serverNarrowed}
+          />
         </div>
       ) : (
         <div className="space-y-3">
