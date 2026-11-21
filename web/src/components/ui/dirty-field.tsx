@@ -18,10 +18,12 @@ export interface DirtyFieldProps extends Omit<HTMLAttributes<HTMLDivElement>, "c
 }
 
 /**
- * 字段级脏标记（W6 ticket 14 重做）：变脏只换背景色，标记槽绝对定位挂在字段
- * 右上角——不加左 padding、不在文档流里插下方行，任何字段变脏都不改变自身与
- * 后续元素的位置/尺寸（布局零位移）。只标已修改字段——整表高亮是噪音；保存
- * 成功后由父级回填 baseline 自然清除。
+ * 字段级脏标记（W6 ticket 14 重做；W7 ticket 12 收口）：变脏只换浅黄背景，
+ * 不再有左侧深色警示线——2px 线视觉上像页面分隔线（spec「已拍板分歧」A 方案）。
+ * 标记槽绝对定位挂在字段右上角——不加左 padding、不在文档流里插下方行，任何
+ * 字段变脏都不改变自身与后续元素的位置/尺寸（布局零位移）。只标已修改字段——
+ * 整表高亮是噪音；保存成功后由父级回填 baseline 自然清除。「已修改」文字/图标
+ * 与恢复入口保留（W5 D8：不可仅颜色编码）。
  */
 export function DirtyField({
   dirty,
@@ -42,13 +44,6 @@ export function DirtyField({
       )}
       {...rest}
     >
-      {dirty ? (
-        <span
-          aria-hidden="true"
-          data-slot="dirty-bar"
-          className="pointer-events-none absolute inset-y-0 left-0 w-0.5 rounded-full bg-warning"
-        />
-      ) : null}
       {children}
       {dirty ? (
         <div

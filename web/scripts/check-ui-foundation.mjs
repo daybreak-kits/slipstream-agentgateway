@@ -1896,14 +1896,27 @@ check("公开模型页头保存：保存/状态/未保存数量固定页头、�
     "页头保存与只读摘要折叠",
   );
   expect(!page.includes("DirtyFooter"), "保存动作条已上移页头，公开模型页不得再渲染底部 DirtyFooter");
-  // DirtyField：变脏只换背景色，标记槽绝对定位不占布局（不插下方行、不加左 padding）。
+  // DirtyField（W7 ticket 12 收口）：去掉左侧 2px 警示线，变脏只换浅黄背景；
+  // 标记槽绝对定位不占布局（不插下方行、不加左 padding）。
   const dirty = read("src/components/ui/dirty-field.tsx");
   includesAll(
     dirty,
-    ['data-slot="dirty-marker"', "absolute", "inset-y-0 left-0 w-0.5", "bg-warning-soft"],
-    "绝对定位标记槽",
+    ['data-slot="dirty-marker"', "absolute", "bg-warning-soft", "已修改", "恢复"],
+    "绝对定位标记槽与文字/图标信号",
   );
+  expect(!dirty.includes("dirty-bar"), "脏字段不得再渲染左侧警示线 dirty-bar（W7 ticket 12 A 方案）");
+  expect(!/inset-y-0 left-0|w-0\.5/.test(dirty), "不得用绝对定位竖条变相恢复左侧警示线");
   expect(!/\bmt-0\.5\b/.test(dirty), "标记槽不得用文档流 margin（插行会推挤布局）");
+  // PageHeader（W7 ticket 12 预置回归）：说明行与 actions 行解耦——说明列宽不再
+  // 随 actions 变化，脏态徽章变宽不得把说明挤到折行（页头高度必须稳定）。
+  const header = read("src/components/layout/page-header.tsx");
+  includesAll(header, ['data-slot="page-head-row"', "text-pretty", "max-w-[76ch]"], "页头标题行与说明行");
+  expect(
+    header.indexOf('data-slot="page-head-row"') !== -1
+      && header.lastIndexOf("text-pretty") > header.indexOf('data-slot="page-head-row"'),
+    "说明必须在 page-head-row 之后独立成行（与 actions 宽度解耦）",
+  );
+  expect(!header.includes("flex flex-wrap items-end justify-between gap-3"), "不得恢复说明与 actions 同行互斥占宽的旧布局");
 });
 
 check("成员编排容器：桌面左6右6栅格、两栏 min(60vh,560px) 内部滚动、列头固定", () => {
