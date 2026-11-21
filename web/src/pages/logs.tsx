@@ -29,10 +29,7 @@ import {
 import { LogDetailDrawer } from "@/components/logs/log-detail-drawer";
 import { rowErrorText } from "@/components/logs/error-summary";
 import { SortIndicator } from "@/components/ui/sort-indicator";
-import {
-  NoChainRecord,
-  RequestAttemptChainPopover,
-} from "@/components/logs/request-attempt-chain";
+import { RequestAttemptChainPopover } from "@/components/logs/request-attempt-chain";
 import {
   buildLogQuery,
   createDefaultLogFilters,
@@ -48,7 +45,7 @@ import {
 } from "@/components/logs/query";
 import { QuerySyntaxHelp } from "@/components/logs/query-syntax-help";
 import type { LogListResponse, LogRow } from "@/components/logs/types";
-import { TimeRangePicker, timeWindowUsable } from "@/components/time-range-picker";
+import { TimeRangePicker, timeWindowUsable, timeWindowKey } from "@/components/time-range-picker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
@@ -88,7 +85,6 @@ const STATUS_OPTIONS: Array<{ value: LogStatusFilter; label: string }> = [
 const LOG_COLUMN_LABELS: Record<string, string> = {
   datetime: "日期时间",
   model: "模型",
-  attempts: "尝试",
   user: "用户",
   key: "密钥",
   tokens: "词元",
@@ -279,6 +275,7 @@ export function LogsPage() {
           <TimeRangePicker
             value={draft.window}
             onChange={(window) => updateDraft({ window })}
+            highlighted={timeWindowKey(draft.window) !== timeWindowKey(applied.draft.window)}
             className="w-56"
           />
           <Combobox
@@ -314,8 +311,17 @@ export function LogsPage() {
             loading={usersQ.isFetching}
             className="w-44"
           />
-          <Select value={draft.status} onValueChange={(value) => updateDraft({ status: value as LogStatusFilter })}>
-            <SelectTrigger className="h-9 w-44" aria-label="按状态筛选">
+          <Select
+            value={draft.status}
+            onValueChange={(value) => updateDraft({ status: value as LogStatusFilter })}
+          >
+            <SelectTrigger
+              className={cn(
+                "h-9 w-44",
+                draft.status !== applied.draft.status && "filter-dirty border-warning",
+              )}
+              aria-label="按状态筛选"
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -333,7 +339,10 @@ export function LogsPage() {
             value={draft.keyword}
             onChange={(event) => updateDraft({ keyword: event.target.value })}
             placeholder="关键词，或输入 user: / key: / status: / latency&gt; / cache&gt; / stream: 等语法；空格分隔多个条件"
-            className="h-9 min-w-56 flex-1 font-mono text-2xs"
+            className={cn(
+              "h-9 min-w-56 flex-1 font-mono text-2xs",
+              draft.keyword !== applied.draft.keyword && "filter-dirty border-warning",
+            )}
             aria-label="关键词或查询语法"
           />
           <QuerySyntaxHelp />
@@ -341,7 +350,9 @@ export function LogsPage() {
             <ACTION_ICONS.restore className="h-3.5 w-3.5" />
             重置
           </Button>
-          <Button type="submit" variant="primary">
+          {/* W7-D6：查询按钮默认白底（与普通操作按钮同级）；只有筛选有未应用变化时才变强调色，
+              查询成功后 applied 与 draft 对齐，自动恢复白底。 */}
+          <Button type="submit" variant={dirty ? "primary" : "outline"} data-slot="logs-query-button">
             <Search className="h-3.5 w-3.5" />
             查询
           </Button>
@@ -356,10 +367,8 @@ export function LogsPage() {
           </Button>
         </div>
 
-        {queryError || dirty ? (
-          <p className={cn("text-2sm", queryError ? "text-danger-text" : "text-faint")}>
-            {queryError ?? "筛选已修改，点「查询」生效。"}
-          </p>
+        {queryError ? (
+          <p className="text-2sm text-danger-text">{queryError}</p>
         ) : null}
       </form>
 
@@ -543,19 +552,31 @@ function buildLogColumns(spec: LogColumnSpec): ColumnDef<LogRow, unknown>[] {
     {
       id: "model",
       // 两行式（D4）：第一行=客户端请求的公开模型，第二行=实际响应的上游模型，中间轻分割。
-      // 流式/优先级/接口类型不混进这两行（需要时在详情抽屉看）。
+      // W7-D6：独立「尝试」列删除——attempts_count > 0 时在模型旁放分叉图标，点开路由链
+      // popover（懒加载，与详情抽屉同一份数据）；无尝试的行不再渲染占位。
+      // requested_model 缺失时只显示实际上游模型，不再渲染输入框样式的占位文案（W7 US 33）。
       header: "模型",
       enableSorting: false,
       cell: ({ row }) => {
         const item = row.original;
+        const attemptsCount = item.attempts_count ?? 0;
         return (
           <div className="min-w-0">
-            <p
-              className="truncate text-2sm font-medium text-title"
-              title={item.requested_model || item.upstream_model || "-"}
-            >
-              {item.requested_model || item.upstream_model || "-"}
-            </p>
+            <div className="flex items-center gap-1.5">
+              <p
+                className="min-w-0 truncate text-2sm font-medium text-title"
+                title={item.requested_model || item.upstream_model || "-"}
+              >
+                {item.requested_model || item.upstream_model || "-"}
+              </p>
+              {item.has_attempts && attemptsCount > 0 ? (
+                <RequestAttemptChainPopover
+                  eventId={item.event_id}
+                  attemptsCount={attemptsCount}
+                  totalDurationMs={item.duration_ms}
+                />
+              ) : null}
+            </div>
             {item.requested_model ? (
               <p
                 className="mt-0.5 truncate border-t border-border/60 pt-0.5 text-2xs text-faint"
@@ -563,30 +584,8 @@ function buildLogColumns(spec: LogColumnSpec): ColumnDef<LogRow, unknown>[] {
               >
                 {item.upstream_model || "-"}
               </p>
-            ) : item.upstream_model ? (
-              <p className="mt-0.5 border-t border-border/60 pt-0.5 text-2xs text-faint">
-                请求模型未记录
-              </p>
             ) : null}
           </div>
-        );
-      },
-    },
-    {
-      // ticket 04：模型旁的尝试列。有尝试 →「N 次尝试」按钮开路由链 popover；
-      // 历史行没有尝试记录 → 明确写「无链路记录」，不伪造链路。
-      id: "attempts",
-      header: "尝试",
-      enableSorting: false,
-      cell: ({ row }) => {
-        const item = row.original;
-        if (!item.has_attempts) return <NoChainRecord />;
-        return (
-          <RequestAttemptChainPopover
-            eventId={item.event_id}
-            attemptsCount={item.attempts_count ?? 0}
-            totalDurationMs={item.duration_ms}
-          />
         );
       },
     },

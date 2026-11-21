@@ -50,10 +50,10 @@ export function NoChainRecord() {
 }
 
 /**
- * 请求尝试链展示（ticket 04 / ADR-028）：列表 popover 与日志详情抽屉共用本组件，
- * 两处数据都来自 GET /admin/logs/{id}/attempts，不各自拼一份。
- * 折叠行给「上游渠道 · 实际模型 · 状态码 · 耗时 · 错误摘要」；展开详情给状态码、
- * 耗时、上游地址、错误类型、开始时间与错误全文。
+ * 请求尝试链展示（ticket 04 / ADR-028；W7-D6 收进模型格）：列表 popover 与日志详情
+ * 抽屉共用本组件，两处数据都来自 GET /admin/logs/{id}/attempts，不各自拼一份。
+ * 折叠行给「轮次 · 上游渠道 · 实际模型 · 状态码 · 耗时 · 错误摘要」，整行可点/可键盘
+ * 展开——详情（上游地址、错误类型、开始时间与错误全文）收在展开区，长错误不塞折叠行。
  */
 export function RequestAttemptChain({
   attempts,
@@ -77,99 +77,107 @@ export function RequestAttemptChain({
           总耗时 <span className="tnum text-body">{fmtSeconds(totalMs)}</span>
         </p>
       </div>
-      <ol className="space-y-2">
+      <ol className="space-y-1">
         {attempts.map((attempt) => {
           const failed = attemptFailed(attempt);
           return (
             <li
               key={attempt.attempt + "-" + (attempt.started_at_ms ?? 0)}
+              data-slot="attempt-row"
+              data-attempt-no={attempt.attempt}
               className="relative border-l border-border pl-3"
             >
               <span
                 aria-hidden="true"
                 className={cn(
-                  "absolute -left-[3px] top-1.5 h-1.5 w-1.5 rounded-full",
+                  "absolute -left-[3px] top-2 h-1.5 w-1.5 rounded-full",
                   attemptDotClass(attempt.status_code),
                 )}
               />
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-2xs">
-                <span className="font-medium text-title">第 {attempt.attempt} 轮</span>
-                <span className="text-faint">→</span>
-                <span className="text-body" title={attempt.upstream_ref || undefined}>
-                  {attempt.upstream_name || attempt.upstream_ref || "-"}
-                </span>
-                {attempt.model ? (
-                  <>
-                    <span className="text-faint">·</span>
-                    <span className="font-mono text-body">{attempt.model}</span>
-                  </>
-                ) : null}
-                <span className="text-faint">·</span>
-                <Badge tone={attemptTone(attempt.status_code)}>
-                  {attempt.status_code === null || attempt.status_code === undefined
-                    ? "无状态"
-                    : attempt.status_code}
-                </Badge>
-                <span className="text-faint">·</span>
-                <span className="tnum text-body">{fmtSeconds(attempt.duration_ms ?? 0)}</span>
-                {failed ? (
-                  <>
-                    <span className="text-faint">·</span>
-                    <span
-                      className="max-w-[22rem] truncate text-danger-text"
-                      title={attempt.error_message || attempt.error_type || attemptErrorSummary(attempt)}
-                    >
-                      {attemptErrorSummary(attempt)}
-                    </span>
-                  </>
-                ) : null}
-              </div>
-              <details className="group mt-1">
-                <summary className="flex w-fit cursor-pointer list-none items-center gap-1 rounded text-2xs text-faint hover:text-body">
-                  <ChevronDown className="h-3 w-3 transition-transform group-open:rotate-180" />
-                  详情
+              {/* 整行进 summary：点击/键盘 Enter 都能展开详情（W7 US 31/32）。 */}
+              <details data-slot="attempt-detail" data-attempt-no={attempt.attempt} className="group">
+                <summary className="flex w-full cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 rounded text-2xs marker:hidden hover:bg-surface-2/60">
+                  <span className="font-medium text-title">第 {attempt.attempt} 轮</span>
+                  <span className="text-faint">→</span>
+                  <span className="text-body" title={attempt.upstream_ref || undefined}>
+                    {attempt.upstream_name || attempt.upstream_ref || "-"}
+                  </span>
+                  {attempt.model ? (
+                    <>
+                      <span className="text-faint">·</span>
+                      <span className="font-mono text-body">{attempt.model}</span>
+                    </>
+                  ) : null}
+                  <span className="text-faint">·</span>
+                  <Badge tone={attemptTone(attempt.status_code)}>
+                    {attempt.status_code === null || attempt.status_code === undefined
+                      ? "无状态"
+                      : attempt.status_code}
+                  </Badge>
+                  <span className="text-faint">·</span>
+                  <span className="tnum text-body">{fmtSeconds(attempt.duration_ms ?? 0)}</span>
+                  {failed ? (
+                    <>
+                      <span className="text-faint">·</span>
+                      <span
+                        className="max-w-[18rem] truncate text-danger-text"
+                        title={attempt.error_message || attempt.error_type || attemptErrorSummary(attempt)}
+                      >
+                        {attemptErrorSummary(attempt)}
+                      </span>
+                    </>
+                  ) : null}
+                  <ChevronDown
+                    className="ml-auto h-3 w-3 shrink-0 text-faint transition-transform group-open:rotate-180"
+                    aria-hidden="true"
+                  />
                 </summary>
-                <dl className="mt-1 grid grid-cols-1 gap-x-4 gap-y-1 rounded-md border border-border bg-surface-2/60 px-2 py-1.5 text-2xs sm:grid-cols-2">
-                  <div className="min-w-0">
-                    <dt className="text-faint">状态码</dt>
-                    <dd className="text-body">
-                      {attempt.status_code === null || attempt.status_code === undefined
-                        ? "无状态"
-                        : attempt.status_code}
-                    </dd>
-                  </div>
-                  <div className="min-w-0">
-                    <dt className="text-faint">耗时</dt>
-                    <dd className="tnum text-body">{fmtSeconds(attempt.duration_ms ?? 0)}</dd>
-                  </div>
-                  <div className="min-w-0">
-                    <dt className="text-faint">上游地址</dt>
-                    <dd className="break-all font-mono text-body">
-                      {attempt.upstream_ref || "-"}
-                    </dd>
-                  </div>
-                  <div className="min-w-0">
-                    <dt className="text-faint">错误类型</dt>
-                    <dd className="break-all font-mono text-body">
-                      {attempt.error_type || "-"}
-                    </dd>
-                  </div>
-                  <div className="min-w-0">
-                    <dt className="text-faint">开始时间</dt>
-                    <dd className="tnum text-body">
-                      {formatDateTime(attempt.started_at_ms, mode)}
-                    </dd>
-                  </div>
-                  <div className="min-w-0">
-                    <dt className="text-faint">结果</dt>
-                    <dd className="text-body">{outcomeLabel(attempt.outcome) || "-"}</dd>
-                  </div>
-                </dl>
-                {attempt.error_message ? (
-                  <p className="mt-1 whitespace-pre-wrap break-all rounded-md bg-surface-2/60 px-2 py-1.5 text-2xs text-danger-text">
-                    {"错误全文：" + attempt.error_message}
-                  </p>
-                ) : null}
+                <div
+                  data-slot="attempt-detail-body"
+                  className="mt-1 rounded-md border border-border bg-surface-2/60 px-2 py-1.5"
+                >
+                  <dl className="grid grid-cols-1 gap-x-4 gap-y-1 text-2xs sm:grid-cols-2">
+                    <div className="min-w-0">
+                      <dt className="text-faint">状态码</dt>
+                      <dd className="text-body">
+                        {attempt.status_code === null || attempt.status_code === undefined
+                          ? "无状态"
+                          : attempt.status_code}
+                      </dd>
+                    </div>
+                    <div className="min-w-0">
+                      <dt className="text-faint">耗时</dt>
+                      <dd className="tnum text-body">{fmtSeconds(attempt.duration_ms ?? 0)}</dd>
+                    </div>
+                    <div className="min-w-0">
+                      <dt className="text-faint">上游地址</dt>
+                      <dd className="break-all font-mono text-body">
+                        {attempt.upstream_ref || "-"}
+                      </dd>
+                    </div>
+                    <div className="min-w-0">
+                      <dt className="text-faint">错误类型</dt>
+                      <dd className="break-all font-mono text-body">
+                        {attempt.error_type || "-"}
+                      </dd>
+                    </div>
+                    <div className="min-w-0">
+                      <dt className="text-faint">开始时间</dt>
+                      <dd className="tnum text-body">
+                        {formatDateTime(attempt.started_at_ms, mode)}
+                      </dd>
+                    </div>
+                    <div className="min-w-0">
+                      <dt className="text-faint">结果</dt>
+                      <dd className="text-body">{outcomeLabel(attempt.outcome) || "-"}</dd>
+                    </div>
+                  </dl>
+                  {attempt.error_message ? (
+                    <p className="mt-1 whitespace-pre-wrap break-all text-2xs text-danger-text">
+                      {"错误全文：" + attempt.error_message}
+                    </p>
+                  ) : null}
+                </div>
               </details>
             </li>
           );
@@ -180,8 +188,8 @@ export function RequestAttemptChain({
 }
 
 /**
- * 日志列表「N 次尝试」按钮：只有存在尝试的行才渲染；点开才请求路由链（懒加载），
- * 数据与详情抽屉共用同一 query key，两处不会互相矛盾。
+ * 日志模型格旁的分叉图标（W7-D6）：只有存在尝试的行才渲染；图标 + aria-label（纯图标
+ * 按钮惯例），点开才请求路由链（懒加载），数据与详情抽屉共用同一 query key。
  */
 export function RequestAttemptChainPopover({
   eventId,
@@ -195,20 +203,28 @@ export function RequestAttemptChainPopover({
   const [open, setOpen] = useState(false);
   const attemptsQuery = useLogAttempts(eventId, open);
   const attempts = attemptsQuery.data?.attempts ?? [];
+  const label = "查看 " + attemptsCount + " 次尝试的路由链";
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
           variant="ghost"
           size="dense"
-          className="h-6 gap-1 px-1.5 text-2xs text-info-text"
-          aria-label={"查看 " + attemptsCount + " 次尝试的路由链"}
+          className="h-6 w-6 shrink-0 px-0 text-info-text"
+          data-slot="log-attempts-trigger"
+          data-event-id={eventId}
+          aria-label={label}
+          title={label}
         >
-          <GitBranch className="h-3 w-3" aria-hidden="true" />
-          {fmtInt(attemptsCount) + " 次尝试"}
+          <GitBranch className="h-3.5 w-3.5" aria-hidden="true" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-[min(92vw,480px)] p-3">
+      {/* 展开错误全文会把内容撑高：限高在可用空间内滚动，长错误不被裁掉（W7 US 32）。 */}
+      <PopoverContent
+        align="start"
+        className="max-h-[min(70vh,var(--radix-popover-content-available-height))] w-[min(92vw,480px)] overflow-y-auto p-3"
+        data-slot="log-attempts-popover"
+      >
         {attemptsQuery.isPending ? (
           <p className="flex items-center gap-2 text-2xs text-faint">
             <Spinner size="sm" />

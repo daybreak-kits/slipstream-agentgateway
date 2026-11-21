@@ -1249,7 +1249,7 @@ check("日志路由链：无 attempts 显示「无链路记录」，不伪造链
   expect(!html.includes("<details"), "无 attempts 不得渲染尝试详情");
 });
 
-check("日志页：模型旁「N 次尝试」按钮打开 popover（ticket 04 接线）", async () => {
+check("日志页：模型格 attempts>0 分叉图标开 popover，独立尝试列删除（W7 ticket 06 接线）", async () => {
   const { RequestAttemptChainPopover } = await load("/src/components/logs/request-attempt-chain.tsx");
   const trigger = render(
     createElement(RequestAttemptChainPopover, {
@@ -1258,13 +1258,13 @@ check("日志页：模型旁「N 次尝试」按钮打开 popover（ticket 04 �
       totalDurationMs: 180,
     }),
   );
-  includesAll(trigger, ["3 次尝试", "查看 3 次尝试的路由链"], "尝试按钮");
+  includesAll(trigger, ['data-slot="log-attempts-trigger"', "查看 3 次尝试的路由链", "aria-label"], "分叉图标按钮");
   const page = read("src/pages/logs.tsx");
-  includesAll(
-    page,
-    ["RequestAttemptChainPopover", 'id: "attempts"', "无链路记录", "has_attempts"],
-    "日志页尝试列接线",
-  );
+  includesAll(page, ["RequestAttemptChainPopover", "has_attempts"], "日志页模型格分叉图标接线");
+  expect(!page.includes('id: "attempts"'), "独立尝试列必须删除");
+  expect(!page.includes('header: "尝试"'), "不得再有「尝试」表头");
+  expect(!page.includes('attempts: "尝试"'), "列设置不得再有尝试列展示名");
+  expect(!page.includes("请求模型未记录"), "requested_model 缺失不得回退到占位文案");
   const drawer = read("src/components/logs/log-detail-drawer.tsx");
   includesAll(
     drawer,
