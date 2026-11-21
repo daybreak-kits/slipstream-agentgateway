@@ -3,7 +3,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
 import { toast } from "@/lib/notify";
 
-import { isCooling, modelRowRank, modelRowTone, useAvailabilityMutation } from "@/components/models/availability";
+import {
+  coolingUntil, isCooling, modelRowRank, modelRowTone, modelStatusKind, useAvailabilityMutation,
+} from "@/components/models/availability";
 import { UpstreamModelDrawer } from "@/components/models/upstream-model-drawer";
 import { ModelParamsCell } from "@/components/models/model-params-cell";
 import { DataTable } from "@/components/data-table";
@@ -12,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { StatusIcon } from "@/components/ui/status-icon";
 import { api, apiList, ENDPOINTS } from "@/lib/api";
 import { fmtMarkup, fmtPricePerM } from "@/lib/format";
 import { ACTION_ICONS } from "@/lib/icons";
@@ -84,7 +87,13 @@ export function UpstreamModelsPanel({
     {
       accessorKey: "name",
       header: "上游模型",
-      cell: (c) => <span className="tnum font-medium text-title">{c.row.original.name}</span>,
+      // W7 t10：与模型管理页同一口径——非正常状态的名字旁出状态图标（normal 不出图标）。
+      cell: (c) => (
+        <span className="inline-flex items-center gap-1.5">
+          <span className="tnum font-medium text-title">{c.row.original.name}</span>
+          <StatusIcon kind={modelStatusKind(c.row.original)} cooldownUntilMs={coolingUntil(c.row.original)} />
+        </span>
+      ),
     },
     {
       accessorKey: "model_type",

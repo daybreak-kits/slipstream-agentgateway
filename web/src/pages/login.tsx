@@ -68,9 +68,13 @@ function ThemeSwitcher() {
  * 登录页（unslop pass 6/8）：左侧品牌 + 请求链路母题，右侧唯一的入口卡片；
  * 控制台类产品不靠插画，靠「一张链路图」说明自己是什么。
  *
- * W6 票12：低对比浅色渐变背景（静态不动画）、三态主题、密码显隐、错误只标红字段
+ * W6 票12：白底 + 左右布局、三态主题、密码显隐、错误只标红字段
  * 且详情进通知中心、错误区固定预留高度（按钮零位移）、底部提示预留省略、
  * 登录框三档宽度 384/460/576（1x/1.2x/1.5x，user story 32）。
+ *
+ * W7 票13：背景渐变由「低对比」改为「可见但克制」——多层静态柔光（login-gradient，
+ * 见 index.css），白底、布局、三态主题与固定槽契约一律不动；根容器带
+ * data-slot="login-root"，浏览器验收按槽位取样（不以类名存在为准）。
  */
 export function LoginPage() {
   const navigate = useNavigate();
@@ -115,7 +119,7 @@ export function LoginPage() {
   }
 
   return (
-    <div className="login-gradient relative flex min-h-full flex-col p-4 sm:p-6">
+    <div data-slot="login-root" className="login-gradient relative flex min-h-full flex-col p-4 sm:p-6">
       <ThemeSwitcher />
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-blueprint opacity-50" />
       <div className="relative mx-auto my-auto grid w-full max-w-6xl items-center gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:gap-14 2xl:max-w-[1240px] 2xl:grid-cols-[1fr_36rem]">

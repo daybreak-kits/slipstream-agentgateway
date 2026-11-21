@@ -6,7 +6,6 @@ import { toast } from "@/lib/notify";
 import { DataTable } from "@/components/data-table";
 import { ErrorState } from "@/components/governance/panel";
 import { ActionButton } from "@/components/ui/action-button";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { api } from "@/lib/api";
@@ -50,7 +49,6 @@ const COLUMN_LABELS: Record<string, string> = {
   role: "角色",
   balance_micro: "余额",
   keys: "密钥数",
-  status: "状态",
   parent: "层级",
   actions: "操作",
 };
@@ -298,15 +296,6 @@ export function UsersPanel({
         if (keyCountsState === "pending") return <span className="text-2xs text-faint">…</span>;
         if (keyCountsState === "error") return <span className="text-2xs text-faint">-</span>;
         return <span className="tnum">{keyCounts.get(cell.row.original.id) ?? 0}</span>;
-      },
-    },
-    {
-      accessorKey: "status",
-      header: "状态",
-      cell: (cell) => {
-        const status = cell.row.original.status;
-        const tone = status === "active" ? "success" : status === "disabled" ? "warning" : "neutral";
-        return <Badge tone={tone}>{STATUS_LABEL[status] ?? status}</Badge>;
       },
     },
     {

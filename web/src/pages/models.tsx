@@ -4,8 +4,8 @@ import { toast } from "@/lib/notify";
 import { useMatch, useNavigate, useSearchParams } from "react-router-dom";
 
 import {
-  availabilityText, availabilityTone, isCooling, modelRowRank, modelRowTone, periodicByRow, ruleSummary,
-  useAvailabilityMutation, useAvailabilityRulesQuery, useBatchMutation,
+  coolingUntil, isCooling, modelRowRank, modelRowTone, modelStatusKind,
+  periodicByRow, ruleSummary, useAvailabilityMutation, useAvailabilityRulesQuery, useBatchMutation,
 } from "@/components/models/availability";
 import { Field } from "@/components/models/field";
 import { type MemberDraft, nextPriority, targetsPayload, validateMembers } from "@/components/models/member-drafts";
@@ -30,6 +30,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { StatusIcon } from "@/components/ui/status-icon";
 import { Tabs } from "@/components/ui/tabs";
 import { api, apiList, ENDPOINTS } from "@/lib/api";
 import { fmtInt, fmtMarkup, fmtMs, fmtPricePerM, fmtUnitPriceMicro } from "@/lib/format";
@@ -335,14 +336,24 @@ function UpstreamTab() {
     {
       key: "name",
       label: "模型 / 上游",
-      cell: (row) => (
-        <div>
-          <div className="tnum font-medium text-title">{row.name}</div>
-          <div className="text-2xs text-faint">
-            {row.upstream_name ?? "-"}
+      cell: (row) => {
+        const periodic = periodicRules.get(row.id);
+        return (
+          <div>
+            {/* W7 t10：状态列删除后，状态由「行底色 + 操作文案 + 名字旁图标」表达；
+                图标只在非正常状态出现（normal 不出图标也不留占位）。 */}
+            <div className="flex items-center gap-1.5">
+              <span className="tnum font-medium text-title">{row.name}</span>
+              <StatusIcon kind={modelStatusKind(row)} cooldownUntilMs={coolingUntil(row)} />
+            </div>
+            <div className="text-2xs text-faint">
+              {row.upstream_name ?? "-"}
+            </div>
+            {/* 周期规则摘要随状态列一起搬到这里：它不是启停的重复信息，删列不能连带丢掉。 */}
+            {periodic ? <div className="text-2xs text-faint">周期：{ruleSummary(periodic)}</div> : null}
           </div>
-        </div>
-      ),
+        );
+      },
     },
     {
       key: "type",
@@ -376,19 +387,6 @@ function UpstreamTab() {
       className: "text-right tnum",
       headerClassName: "whitespace-nowrap",
       cell: (row) => <span className="text-2sm">{fmtInt(row.target_count ?? 0)}</span>,
-    },
-    {
-      key: "status",
-      label: "状态",
-      cell: (row) => {
-        const periodic = periodicRules.get(row.id);
-        return (
-          <div>
-            <Badge tone={availabilityTone(row)}>{availabilityText(row)}</Badge>
-            {periodic ? <div className="mt-1 text-2xs text-faint">周期：{ruleSummary(periodic)}</div> : null}
-          </div>
-        );
-      },
     },
     ...(canWrite ? [{
       key: "actions",
@@ -830,7 +828,11 @@ function PublicTab() {
       label: "公开名 / 备注",
       cell: (row) => (
         <div>
-          <div className="tnum font-medium text-title">{row.name}</div>
+          {/* W7 t10：与上游模型同一口径——关闭的公开模型在名字旁出状态图标。 */}
+          <div className="flex items-center gap-1.5">
+            <span className="tnum font-medium text-title">{row.name}</span>
+            <StatusIcon kind={modelStatusKind(row)} cooldownUntilMs={coolingUntil(row)} />
+          </div>
           <div className="text-2xs text-faint">{row.note || "-"}</div>
         </div>
       ),
