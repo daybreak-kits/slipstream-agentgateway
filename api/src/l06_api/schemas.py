@@ -581,7 +581,7 @@ class LogAttemptsOut(BaseModel):
     """The routing chain of one request log; empty when the adapter had no telemetry."""
 
     event_id: str
-    trace_id: str = ""
+    correlation_key: str = ""
     attempts: list[LogAttemptOut] = Field(default_factory=list)
 
 

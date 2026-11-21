@@ -55,7 +55,8 @@ def test_fake_adapter_runs_startup_health_and_connection(fake_flow) -> None:
 
 def test_fake_adapter_runs_usage_and_log_flows(fake_flow) -> None:
     client, _engine, _factory = fake_flow
-    default_ids = [event.event_id for event in FakeAdapter().usage(None).events]
+    adapter = FakeAdapter()
+    default_ids = [event.event_id for event in adapter.usage(None).events]
     assert default_ids, "the fake driver must ship deterministic flow events"
 
     pulled = client.post("/admin/usage/pull")
@@ -65,16 +66,29 @@ def test_fake_adapter_runs_usage_and_log_flows(fake_flow) -> None:
     usage = client.get("/admin/usage/events")
     assert usage.status_code == 200, usage.text
     assert {row["event_id"] for row in usage.json()} == set(default_ids)
+    # Usage events carry neutral facts only; the raw wire row is never served.
+    assert all("raw_json" not in row for row in usage.json())
 
     logs = client.get("/admin/logs")
     assert logs.status_code == 200, logs.text
     log_body = logs.json()
     assert {row["event_id"] for row in log_body["items"]} == set(default_ids)
     assert log_body["total"] == len(default_ids)
+    by_id = {row["event_id"]: row for row in log_body["items"]}
+    # The adapter-normalized facts survive the whole ingest -> list path.
+    assert by_id["evt_fake_0001"]["requested_model"] == "fake-chat"
+    assert by_id["evt_fake_0001"]["is_stream"] is True
+    assert by_id["evt_fake_0002"]["error"] == "fake upstream rate limited"
+    assert by_id["evt_fake_0002"]["has_error"] is True
+    assert all(row["has_payload"] is False for row in by_id.values())
+    assert all("raw_json" not in row for row in by_id.values())
 
     detail = client.get(f"/admin/logs/{default_ids[0]}")
     assert detail.status_code == 200, detail.text
-    assert detail.json()["event_id"] == default_ids[0]
+    body = detail.json()
+    assert body["event_id"] == default_ids[0]
+    assert body["requested_model"] == "fake-chat"
+    assert "raw_json" not in body
 
 
 def test_fake_adapter_runs_render_apply_and_cleanup(fake_flow) -> None:

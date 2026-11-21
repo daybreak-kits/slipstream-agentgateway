@@ -41,7 +41,7 @@ def test_init_db_adds_ticket_08_columns_to_existing_table(tmp_path) -> None:
 
 
 def test_init_db_adds_trace_id_and_creates_request_attempts_on_an_old_db(tmp_path) -> None:
-    """ADR-028 additive path: old usage rows keep working and gain an empty trace_id."""
+    """ADR-028 additive path: old usage rows keep working and gain the neutral facts."""
     db_path = tmp_path / "old-usage.db"
     engine = create_engine("sqlite:///" + db_path.as_posix(), future=True)
     with engine.begin() as connection:
@@ -61,16 +61,72 @@ def test_init_db_adds_trace_id_and_creates_request_attempts_on_an_old_db(tmp_pat
     init_db(engine)
 
     inspector = inspect(engine)
-    assert "trace_id" in {column["name"] for column in inspector.get_columns(
-        "gateway_usage_events"
-    )}
     assert inspector.has_table("request_attempts")
+    columns = {column["name"] for column in inspector.get_columns("gateway_usage_events")}
+    # The neutral join column exists; the wire-named one is never re-created on
+    # databases that did not already carry it (ORM mapping retired, ticket 05).
+    assert "correlation_key" in columns
     with engine.connect() as connection:
         value = connection.execute(
-            text("SELECT trace_id FROM gateway_usage_events WHERE event_id='evt_old'")
+            text("SELECT correlation_key FROM gateway_usage_events WHERE event_id='evt_old'")
         ).scalar()
     assert value == ""
     engine.dispose()
+
+
+def test_init_db_adds_neutral_usage_columns_and_backfills_correlation_key(tmp_path) -> None:
+    """Ticket 05: old trace_id values move into the neutral correlation_key column.
+
+    The rename is evaluated additively: the neutral column is added, the join-key
+    values are copied over (pure value move, no reinterpretation), and the legacy
+    wire-named column stays in place until the vocabulary gate retires it.
+    """
+    db_path = tmp_path / "old-usage-trace.db"
+    engine = create_engine("sqlite:///" + db_path.as_posix(), future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE gateway_usage_events ("
+                "event_id VARCHAR(128) PRIMARY KEY, started_at_ms BIGINT, "
+                "trace_id VARCHAR(64) DEFAULT '')"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO gateway_usage_events (event_id, started_at_ms, trace_id) "
+                "VALUES ('evt_keyed', 1, '8f2a1b'), ('evt_blank', 2, '')"
+            )
+        )
+
+    init_db(engine)
+
+    columns = {column["name"] for column in inspect(engine).get_columns("gateway_usage_events")}
+    assert {"correlation_key", "requested_model", "is_stream", "error", "has_payload"} <= columns
+    with engine.connect() as connection:
+        keyed, blank = [
+            row[0]
+            for row in connection.execute(
+                text(
+                    "SELECT correlation_key FROM gateway_usage_events "
+                    "WHERE event_id IN ('evt_keyed', 'evt_blank') ORDER BY started_at_ms"
+                )
+            ).all()
+        ]
+    assert keyed == "8f2a1b"
+    assert blank == ""
+    engine.dispose()
+
+
+def test_init_db_backfill_is_absent_safe_when_trace_id_never_existed(tmp_path) -> None:
+    """A fresh DB (or one already on the neutral shape) needs no backfill pass."""
+    db_path = tmp_path / "fresh-usage.db"
+    engine = create_engine("sqlite:///" + db_path.as_posix(), future=True)
+    init_db(engine)
+    columns = {column["name"] for column in inspect(engine).get_columns("gateway_usage_events")}
+    assert "correlation_key" in columns
+    assert "trace_id" not in columns
+    engine.dispose()
+
 
 def test_init_db_drops_the_retired_upstream_keys_is_primary_column(tmp_path) -> None:
     """Ticket 16: ADR-026 retired the key-level primary flag; old DBs drop it."""

@@ -137,9 +137,9 @@ def test_role_without_billing_gets_no_money_keys(client, engine_and_sessionmaker
     detail = browser.get("/admin/usage/events/evt_filter").json()
     assert "cost" not in detail
     assert "charge" not in detail
-    raw = json.loads(detail["raw_json"])
-    assert raw["trace_id"] == "trace-filter"
-    assert "cost" not in raw and "charge" not in raw
+    # The raw wire row is a diagnostic attachment in the table, never served:
+    # no money key can hide inside a raw JSON string the API no longer returns.
+    assert "raw_json" not in detail
 
     daily = browser.get("/admin/usage/daily").json()
     assert daily and "amount_micro" not in daily[0]
@@ -162,9 +162,8 @@ def test_ordinary_user_sees_spend_fields(client, engine_and_sessionmaker):
     detail = browser.get("/admin/usage/events/evt_filter").json()
     assert detail["charge"]["amount_micro"] == 1000
     assert "cost" not in detail
-    raw = json.loads(detail["raw_json"])
-    assert raw["charge"] == 0.001
-    assert "cost" not in raw
+    # No raw wire row is served, so no money value can hide inside one.
+    assert "raw_json" not in detail
 
 
 def test_cost_endpoints_forbidden_without_billing_cost(client, engine_and_sessionmaker):

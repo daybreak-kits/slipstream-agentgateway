@@ -266,15 +266,18 @@ class AvailabilityRuleORM(Base):
 
 
 class GatewayUsageEventORM(Base):
-    """Append-only ingestion of AG request_logs rows; idempotent by event_id (E6).
+    """Append-only store of normalized usage events; idempotent by event_id (E6).
 
-    Column mapping (request_logs 26 cols): id -> event_id, started_at ->
-    started_at_ms, gen_ai_request_model -> public_model, gen_ai_response_model ->
-    upstream_model, gen_ai_provider_name -> provider, agentgateway_user (= the
-    key metadata.name we render) -> api_key_id, trace_id -> trace_id (M5-a join
-    key to trace_spans). Cache columns are stored raw but billing folds them into
-    input per the lead's conservative rule (billing.md §6, stage B re-checks);
-    reports must label token amounts as estimates.
+    Every column is a neutral system fact (ADR-029 whitelist): the adapter
+    decodes wire columns and attributes into requested_model / is_stream /
+    error / has_payload / correlation_key before ingest, so the system never
+    re-parses data-plane shapes. raw_json stays only as a diagnostic attachment
+    the adapter already collected (never interpreted here). Cache columns are
+    stored as facts but billing folds them into input per the lead's
+    conservative rule (billing.md §6); reports must label token amounts as
+    estimates. W6 ticket 05: the pre-neutrality join column was wire-named
+    (trace_id); its values moved into correlation_key at init time and the old
+    column stays only until the vocabulary gate retires it.
     """
 
     __tablename__ = "gateway_usage_events"
@@ -285,6 +288,9 @@ class GatewayUsageEventORM(Base):
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)
     time_to_first_token_ms: Mapped[int] = mapped_column(Integer, default=0)
     http_status: Mapped[int] = mapped_column(Integer, default=0)
+    # The model the client asked for (normalized by the adapter); blank on rows
+    # that cannot answer, never backfilled from the recorded models.
+    requested_model: Mapped[str] = mapped_column(String(255), default="")
     public_model: Mapped[str] = mapped_column(String(255), default="")
     upstream_model: Mapped[str] = mapped_column(String(255), default="")
     provider: Mapped[str] = mapped_column(String(255), default="")
@@ -294,10 +300,14 @@ class GatewayUsageEventORM(Base):
     total_tokens: Mapped[int] = mapped_column(Integer, default=0)
     cache_read_tokens: Mapped[int] = mapped_column(Integer, default=0)
     cache_write_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str] = mapped_column(Text, default="")
+    has_payload: Mapped[bool] = mapped_column(Boolean, default=False)
     raw_json: Mapped[str] = mapped_column(Text, default="")
-    # M5-a: AG fills request_logs.trace_id when frontendPolicies.tracing is on;
-    # this is the join key to the span tree (span_id is not duplicated here).
-    trace_id: Mapped[str] = mapped_column(String(64), default="")
+    # Adapter-verdicted streaming; NULL = no explicit signal, so reads fall back
+    # to the neutral TTFT rule.
+    is_stream: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
+    # Cross-log/attempt-chain join key (ADR-028), normalized by the adapter.
+    correlation_key: Mapped[str] = mapped_column(String(64), default="")
     ingested_at_ms: Mapped[int] = mapped_column(BigInteger, default=0)
 
 

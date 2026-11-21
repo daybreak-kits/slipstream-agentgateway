@@ -32,7 +32,6 @@ from l04_repo.orm import (
 from l04_repo.repository import get_setting, put_setting
 from l05_service import auth, client_keys
 from l05_service.attempts import AttemptChainSummary, attempt_summaries, attempts_for_event
-from l06_api import field_filter
 from l06_api.deps import page_params, require, session_of
 from l06_api.schemas import LogAttemptOut, LogAttemptsOut, PlaygroundRequest
 
@@ -43,7 +42,12 @@ router = APIRouter(tags=["ops"])
 
 
 def _raw_of(row: GatewayUsageEventORM) -> dict:
-    """Parsed raw_json (the AG request_logs row); {} when absent or malformed."""
+    """Parsed raw_json (the collected wire row); {} when absent or malformed.
+
+    Diagnostic attachment only (ADR-029): keyword search rides it, but every
+    product fact below is a neutral column the adapter normalized at ingest
+    time — the system API never re-derives facts from wire attributes.
+    """
     try:
         value = json.loads(row.raw_json or "{}")
     except ValueError:
@@ -51,58 +55,11 @@ def _raw_of(row: GatewayUsageEventORM) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def _as_bool(value: object) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return value != 0
-    return str(value).strip().lower() in {"true", "1", "yes", "on", "stream"}
-
-
-def _attributes_of(raw: dict) -> dict:
-    """Parsed AG attributes_json (one JSON-text column inside the raw row).
-
-    Old/full-form rows may omit the column and malformed text is tolerated here:
-    both degrade to an empty mapping so no log read can 500 on surplus history.
-    """
-    attrs = raw.get("attributes_json")
-    if isinstance(attrs, str) and attrs.strip():
-        try:
-            attrs = json.loads(attrs)
-        except ValueError:
-            return {}
-    return attrs if isinstance(attrs, dict) else {}
-
-
-#: Mixed-form AG request logs carry the client-requested public model here; the
-#: full-form direct rows only record the final upstream model (E17-M2 evidence).
-_REQUESTED_MODEL_ATTR = "agw.ai.original_model"
-
-_STREAM_ATTR_KEYS = ("gen_ai.request.stream", "gen_ai.request.is_stream", "stream")
-
-
-def _requested_model(raw: dict) -> str:
-    """Client-requested public model, or "" when the row cannot answer.
-
-    Ticket 03: the AG adapter only knows the final upstream model, which the
-    ledger already stores as public_model. The displayed request model comes
-    from attributes_json.agw.ai.original_model; missing/malformed/old rows stay
-    blank ("—" in the UI) and are never backfilled from the recorded models.
-    """
-    value = _attributes_of(raw).get(_REQUESTED_MODEL_ATTR)
-    return value if isinstance(value, str) else ""
-
-
-def _is_stream(raw: dict, ttft_ms: int) -> bool:
-    """Streaming is derived: an explicit flag wins, otherwise a TTFT marks the stream."""
-    for key in ("is_stream", "stream"):
-        if key in raw:
-            return _as_bool(raw[key])
-    attrs = _attributes_of(raw)
-    for key in _STREAM_ATTR_KEYS:
-        if key in attrs:
-            return _as_bool(attrs[key])
-    return ttft_ms > 0
+def _stream_verdict(row: GatewayUsageEventORM) -> bool:
+    """Adapter verdict wins; without one, a TTFT marks the stream (neutral rule)."""
+    if row.is_stream is not None:
+        return bool(row.is_stream)
+    return (row.time_to_first_token_ms or 0) > 0
 
 
 def _cache_ratio(row: GatewayUsageEventORM) -> float | None:
@@ -273,12 +230,15 @@ def _keyword_haystack(
     identity: tuple[str, str, str],
     raw: dict,
 ) -> str:
-    """Bare keywords search the same JSON document the v1 endpoint searched."""
+    """Bare keywords search the neutral facts plus the diagnostic attachment."""
     _, user_name, api_key_label = identity
     return json.dumps(
         {
             "id": row.event_id,
             "models": [row.public_model, row.upstream_model, row.provider],
+            "requested_model": row.requested_model,
+            "correlation_key": row.correlation_key,
+            "error": row.error,
             "identity": [user_name, api_key_label, row.api_key_id],
             "raw": raw,
         },
@@ -301,69 +261,22 @@ def _matches_keywords(
 #
 # Field tokens and ordering are pushed into SQLite so a page never materialises the
 # whole table. These expressions mirror the Python predicates one for one
-# (_is_stream, _as_bool, _cache_ratio); malformed raw_json is excluded from the
-# JSON1 calls first, so json_type/json_extract can never raise. Bare keywords get a
-# LIKE prefilter (a superset) and are then re-checked against the exact JSON
-# document, so totals and paging stay identical to the v1 endpoint.
-
-_TRUE_VALUE_TEXTS = ("true", "1", "yes", "on", "stream")
-
-
-def _json_doc(column):
-    """Column as JSON text only when it parses; NULL keeps JSON1 out of bad rows."""
-    return case((func.json_valid(column) == 1, column), else_=None)
-
-
-def _json_kind(doc, path: str):
-    return func.json_type(doc, literal(path))
-
-
-def _json_bool(doc, path: str):
-    """SQL twin of _as_bool(json_extract(doc, path))."""
-    kind = _json_kind(doc, path)
-    value = func.json_extract(doc, literal(path))
-    return case(
-        (kind == "true", 1),
-        (kind.in_(("integer", "real")), case((value != 0, 1), else_=0)),
-        (
-            kind == "text",
-            case((func.lower(func.trim(value)).in_(_TRUE_VALUE_TEXTS), 1), else_=0),
-        ),
-        else_=0,
-    )
+# (_stream_verdict, _cache_ratio); every filter reads neutral columns, so no JSON1
+# call can raise on malformed diagnostic blobs. Bare keywords get a LIKE prefilter
+# (a superset) and are then re-checked against the exact JSON document, so totals
+# and paging stay identical to the in-memory oracle in test_logs_sql_parity.
 
 
 def _log_stream_expr():
-    """SQL twin of _is_stream over raw_json + ttft, usable in WHERE."""
-    raw = GatewayUsageEventORM.raw_json
-    doc = _json_doc(raw)
-    attrs = func.json_extract(doc, literal("$.attributes_json"))
-    attrs_doc = _json_doc(attrs)
+    """SQL twin of _stream_verdict over the neutral column + ttft, usable in WHERE."""
+    verdict = GatewayUsageEventORM.is_stream
     ttft = func.coalesce(GatewayUsageEventORM.time_to_first_token_ms, 0)
-    fallback = case((ttft > 0, 1), else_=0)
-    whens = [
-        (or_(func.json_valid(raw) == 0, raw.is_(None)), fallback),
-        (_json_kind(doc, "$.is_stream").is_not(None), _json_bool(doc, "$.is_stream")),
-        (_json_kind(doc, "$.stream").is_not(None), _json_bool(doc, "$.stream")),
-    ]
-    for key in _STREAM_ATTR_KEYS:
-        path = '$."' + key + '"'
-        whens.append((_json_kind(attrs_doc, path).is_not(None), _json_bool(attrs_doc, path)))
-    return case(*whens, else_=fallback)
+    return case((verdict.is_not(None), verdict), else_=case((ttft > 0, 1), else_=0))
 
 
 def _log_has_error_expr():
-    """SQL twin of bool(raw.get("error")) — true only when the error negates."""
-    doc = _json_doc(GatewayUsageEventORM.raw_json)
-    kind = _json_kind(doc, "$.error")
-    value = func.json_extract(doc, literal("$.error"))
-    return case(
-        (kind == "true", 1),
-        (kind.in_(("integer", "real")), case((value != 0, 1), else_=0)),
-        (kind == "text", case((value != "", 1), else_=0)),
-        (kind.in_(("array", "object")), case((value.notin_(("[]", "{}")), 1), else_=0)),
-        else_=0,
-    )
+    """SQL twin of bool(row.error): the normalized error column decides."""
+    return case((GatewayUsageEventORM.error != literal(""), 1), else_=0)
 
 
 def _log_cache_expr():
@@ -502,7 +415,15 @@ def _log_order_by(sort: str, order: str):
 _PREFILTER_TOKEN = re.compile(r"^[a-z0-9._@/+:-]+$")
 _PREFILTER_LETTER = re.compile(r"[a-df-z]")
 _LOG_HAYSTACK_TEMPLATE = json.dumps(
-    {"id": "", "models": ["", "", ""], "identity": ["", "", ""], "raw": {}},
+    {
+        "id": "",
+        "models": ["", "", ""],
+        "requested_model": "",
+        "correlation_key": "",
+        "error": "",
+        "identity": ["", "", ""],
+        "raw": {},
+    },
     ensure_ascii=False,
 ).lower()
 
@@ -520,6 +441,9 @@ def _haystack_fallback():
     """
     return or_(
         _non_ascii(GatewayUsageEventORM.raw_json),
+        _non_ascii(GatewayUsageEventORM.requested_model),
+        _non_ascii(GatewayUsageEventORM.correlation_key),
+        _non_ascii(GatewayUsageEventORM.error),
         _non_ascii(GatewayUsageEventORM.event_id),
         _non_ascii(GatewayUsageEventORM.public_model),
         _non_ascii(GatewayUsageEventORM.upstream_model),
@@ -555,6 +479,9 @@ def _keyword_prefilter(keywords: list[str]) -> tuple[list, bool]:
     clauses = [
         or_(
             _like_contains(GatewayUsageEventORM.raw_json, token),
+            _like_contains(GatewayUsageEventORM.requested_model, token),
+            _like_contains(GatewayUsageEventORM.correlation_key, token),
+            _like_contains(GatewayUsageEventORM.error, token),
             _like_contains(GatewayUsageEventORM.event_id, token),
             _like_contains(GatewayUsageEventORM.public_model, token),
             _like_contains(GatewayUsageEventORM.upstream_model, token),
@@ -611,10 +538,9 @@ def _log_page_items(
     session: Session,
     rows: list[GatewayUsageEventORM],
     *,
-    raws: dict[str, dict] | None = None,
     identities: dict[str, tuple[str, str, str]] | None = None,
 ) -> list[dict]:
-    """Assemble items for the selected page only; raw_json and money are lazy."""
+    """Assemble items for the selected page only; money is lazy."""
     if not rows:
         return []
     event_ids = [row.event_id for row in rows]
@@ -630,24 +556,21 @@ def _log_page_items(
             select(ChargeEntryORM).where(ChargeEntryORM.gateway_event_id.in_(event_ids))
         )
     }
-    if raws is None:
-        raws = {row.event_id: _raw_of(row) for row in rows}
     if identities is None:
         identities = _identity_tables_for_rows(session, rows)
     upstream_ids_by_name, public_ids_by_name, priorities = _model_reference_maps(session)
     # Ticket 04: one grouped request_attempts read for the whole page (never N+1).
-    attempts_by_key = attempt_summaries(session, [row.trace_id for row in rows])
+    attempts_by_key = attempt_summaries(session, [row.correlation_key for row in rows])
     items = []
     for row in rows:
         public_id = public_ids_by_name.get(row.public_model, "")
         upstream_id = upstream_ids_by_name.get(row.upstream_model, "")
         cost = cost_by_event.get(row.event_id)
         charge = charge_by_event.get(row.event_id)
-        attempts = attempts_by_key.get(row.trace_id or "")
+        attempts = attempts_by_key.get(row.correlation_key or "")
         items.append(
             _log_item(
                 row,
-                raws[row.event_id],
                 identity=identities[row.event_id],
                 upstream_model_id=upstream_id,
                 target_priority=priorities.get((public_id, upstream_id))
@@ -669,12 +592,11 @@ def _scan_log_keywords(
     *,
     off: int,
     limit: int,
-) -> tuple[int, list[GatewayUsageEventORM], dict[str, dict], dict]:
+) -> tuple[int, list[GatewayUsageEventORM], dict]:
     """Stream the SQL window, re-check the exact JSON haystack and collect the page."""
     keys_by_id, users_by_id = _identity_tables(session)
     total = 0
     page_rows: list[GatewayUsageEventORM] = []
-    page_raws: dict[str, dict] = {}
     page_identities: dict[str, tuple[str, str, str]] = {}
     for row in session.scalars(stmt.execution_options(yield_per=500)):
         raw = _raw_of(row)
@@ -683,15 +605,13 @@ def _scan_log_keywords(
             continue
         if off <= total < off + limit:
             page_rows.append(row)
-            page_raws[row.event_id] = raw
             page_identities[row.event_id] = identity
         total += 1
-    return total, page_rows, page_raws, page_identities
+    return total, page_rows, page_identities
 
 
 def _log_item(
     row: GatewayUsageEventORM,
-    raw: dict,
     *,
     identity: tuple[str, str, str],
     upstream_model_id: str,
@@ -701,13 +621,18 @@ def _log_item(
     currency: str,
     attempts: AttemptChainSummary | None = None,
 ) -> dict:
-    """One record as the UI consumes it; the drawer reuses this exact shape."""
+    """One record as the UI consumes it; the drawer reuses this exact shape.
+
+    Every fact is a neutral column (ADR-029): requested model, streaming,
+    error text and the payload flag were normalized by the adapter at ingest,
+    so nothing here reads the raw diagnostic attachment.
+    """
     user_id, user_name, api_key_label = identity
-    stream = _is_stream(raw, row.time_to_first_token_ms or 0)
-    error = str(raw.get("error") or "")
-    # Ticket 04: the error field is the raw log text only. The row also carries
-    # the last failed attempt's facts; the console composes any fallback wording
-    # so the service layer does not own UI copy.
+    stream = _stream_verdict(row)
+    error = row.error or ""
+    # Ticket 04: the error field is the normalized log text only. The row also
+    # carries the last failed attempt's facts; the console composes any fallback
+    # wording so the service layer does not own UI copy.
     failure = attempts.last_failure if attempts is not None else None
     margin = (
         charge_micro - cost_micro
@@ -716,18 +641,18 @@ def _log_item(
     )
     return {
         "event_id": row.event_id,
-        # M5-a: join key to GET /admin/traces/{trace_id}; empty on old rows or
-        # when AG tracing was disabled at request time.
-        "trace_id": row.trace_id or "",
+        # Cross-log/attempt-chain join key (ADR-028); empty on old rows or when
+        # the adapter had no telemetry for the request.
+        "correlation_key": row.correlation_key or "",
         "started_at_ms": row.started_at_ms,
         "completed_at_ms": row.completed_at_ms,
         "duration_ms": row.duration_ms,
         "time_to_first_token_ms": row.time_to_first_token_ms,
         "http_status": row.http_status,
         "public_model": row.public_model,
-        # Ticket 03: the public model the client asked for, derived from the raw
-        # row; blank on old rows instead of reusing the ledger's recorded model.
-        "requested_model": _requested_model(raw),
+        # The model the client asked for, normalized by the adapter; blank on
+        # rows that cannot answer, never backfilled from the recorded models.
+        "requested_model": row.requested_model or "",
         "upstream_model": row.upstream_model,
         "upstream_model_id": upstream_model_id,
         "target_priority": target_priority,
@@ -745,7 +670,7 @@ def _log_item(
         "throughput_tps": _throughput_tps(row, is_stream=stream),
         "is_stream": stream,
         "has_error": bool(error),
-        "has_payload": bool(raw.get("has_payload")),
+        "has_payload": bool(row.has_payload),
         "error": error,
         "attempts_count": attempts.count if attempts is not None else 0,
         "has_attempts": attempts is not None and attempts.count > 0,
@@ -812,10 +737,10 @@ def search_logs(
             charge=charge_sort,
         )
         stmt = stmt.where(*clauses, *prefilter).order_by(*order_by)
-        total, rows, raws, identities = _scan_log_keywords(
+        total, rows, identities = _scan_log_keywords(
             session, stmt, parsed.keywords, off=off, limit=limit
         )
-        items = _log_page_items(session, rows, raws=raws, identities=identities)
+        items = _log_page_items(session, rows, identities=identities)
     else:
         total = session.scalar(
             _log_join(
@@ -853,7 +778,7 @@ def log_attempts(
     resolved = attempts_for_event(session, event_id)
     if resolved is None:
         raise AppError(ErrorCode.NOT_FOUND, f"log entry not found: {event_id}")
-    trace_id, rows = resolved
+    correlation_key, rows = resolved
     upstream_ids = {row.upstream_ref for row in rows if row.upstream_ref}
     names = (
         {
@@ -867,7 +792,7 @@ def log_attempts(
     )
     return LogAttemptsOut(
         event_id=event_id,
-        trace_id=trace_id,
+        correlation_key=correlation_key,
         attempts=[
             LogAttemptOut(
                 attempt=row.attempt_no,
@@ -890,13 +815,16 @@ def log_detail(
     event_id: str,
     session: Session = Depends(session_of),
     principal: auth.Principal = Depends(require("logs:read")),
-    include_payload: bool = False,
 ) -> dict:
-    """Full record for the drawer; money obeys the same field filter as the list."""
+    """Full record for the drawer; money obeys the same field filter as the list.
+
+    The response carries neutral facts only (ADR-029): the raw wire row stays a
+    diagnostic attachment in the table and request/response bodies are served
+    through the adapter's log-payload port.
+    """
     row = session.get(GatewayUsageEventORM, event_id)
     if row is None:
         raise AppError(ErrorCode.NOT_FOUND, f"log entry not found: {event_id}")
-    raw = _raw_of(row)
     keys_by_id, users_by_id = _identity_tables(session)
     cost = session.scalar(select(CostEntryORM).where(CostEntryORM.gateway_event_id == event_id))
     charge = session.scalar(
@@ -918,10 +846,11 @@ def log_detail(
     )
     # Same attempts facts as the list so the drawer does not drop them once the
     # detail payload replaces the selected list row.
-    attempts = attempt_summaries(session, [row.trace_id or ""]).get(row.trace_id or "")
-    body = _log_item(
+    attempts = attempt_summaries(session, [row.correlation_key or ""]).get(
+        row.correlation_key or ""
+    )
+    return _log_item(
         row,
-        raw,
         identity=_identity_of(row.api_key_id, keys_by_id, users_by_id),
         upstream_model_id=umodel.id if umodel is not None else "",
         target_priority=target.priority if target is not None else None,
@@ -930,13 +859,6 @@ def log_detail(
         currency=(charge.currency if charge else (cost.currency if cost else "")),
         attempts=attempts,
     )
-    if include_payload:
-        # AG strips bodies unless has_payload; scrub before serialising so a
-        # cost-stripped caller cannot read the raw USD cost back out of the JSON.
-        body["raw_json"] = json.dumps(
-            field_filter.sanitize(raw, principal.permissions), ensure_ascii=False
-        )
-    return body
 
 
 # ---------------------------------------------------------------- playground
