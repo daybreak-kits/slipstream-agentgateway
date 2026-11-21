@@ -34,6 +34,14 @@
  *   node ops/checks/terminology_audit.mjs --strict     # warn 也当失败（发布前门禁用）
  *   node ops/checks/terminology_audit.mjs --json       # 机器可读（CI）
  *   node ops/checks/terminology_audit.mjs --root <repo>
+ *   node ops/checks/terminology_audit.mjs --boundary-only   # 只跑边界词表节（ticket 06，见下）
+ *
+ * 边界词表节（W6 ticket 06 / ADR-029 §6）：扫描 web/src 字符串/模板字面量与 JSX 文本，
+ * 数据面列名（trace_id、span_id、parent_span_id、attributes_json）、wire 词（gen_ai_*、
+ * agw.*、agentgateway_user、keyHash、virtualModels、frontendPolicies）、数据面存储文件
+ * （ag-data.db、ag_config_dir）、接收端口 4318、OTLP 与 raw_json 不得进入契约出参；
+ * 注释、import 路径不算文案，adapter_id 审计值与适配器文案端口内容除外。全量审计
+ * 把该节计入退出码（违规即失败）。
  *
  * 证据位置：本脚本输出；需要归档时重定向到 ops/checks/.logs/terminology_audit.log（.logs/ 不入库）。
  */
@@ -58,6 +66,7 @@ for (let i = 0; i < argv.length; i += 1) {
 
 const asJson = flags.has("json");
 const strict = flags.has("strict");
+const boundaryOnly = flags.has("boundary-only");
 const rootDir = flags.has("root") ? path.resolve(String(flags.get("root"))) : DEFAULT_ROOT;
 const webDir = path.join(rootDir, "web");
 const srcDir = path.join(webDir, "src");
@@ -278,6 +287,88 @@ function isCopyCandidate(candidate, source) {
 }
 
 /* ------------------------------------------------------------------ *
+ * 2b. 边界词表（系统契约出参，W6 ticket 06 / ADR-029 §6）
+ *
+ * 数据面列名、wire 属性词、数据面存储文件、接收端口与 OTLP 不得进入契约出参
+ * （生成契约 web/src/generated/contract.ts 与 mock 模式响应都在 web/src 内）。
+ * 判定对象是字符串/模板字面量与 JSX 文本；注释里的历史说明与 import 路径
+ * 不算文案（SYSTEM-BOUNDARY §6.2 例外）。adapter_id 审计值（恰为
+ * "agentgateway" 的字面量）与适配器经 capability_note 端口提供的文案不在
+ * 禁用清单内——数据面列名/端口作为适配器自有事实经端口出参是既定设计。
+ * ------------------------------------------------------------------ */
+
+const BOUNDARY_RULES = [
+  {
+    id: "dp-column",
+    pattern: /\b(?:trace_id|span_id|parent_span_id|attributes_json)\b/g,
+    suggestion: "数据面列名不进契约出参；系统只出现中性领域键（correlation_key 等）",
+  },
+  {
+    id: "dp-wire",
+    pattern: /gen_ai_[\w.]*|agw\.[\w]+|agentgateway_user|keyHash|virtualModels|frontendPolicies/g,
+    suggestion: "wire 属性词由适配器归一化后再进系统；文案用中性词",
+  },
+  {
+    id: "dp-store",
+    pattern: /ag-data\.db|ag_config_dir/g,
+    suggestion: "数据面存储文件/配置目录名属于适配器内部，不进系统契约",
+  },
+  {
+    id: "dp-telemetry",
+    pattern: /\bOTLP\b/g,
+    suggestion: "遥测实现词（OTLP/span/接收器）是适配器内部知识，系统只存 RequestAttempt",
+  },
+  {
+    id: "dp-port",
+    pattern: /\b4318\b/g,
+    suggestion: "数据面接收端口经 client_contract() 出参，不硬编码在系统表面",
+  },
+  {
+    id: "dp-raw",
+    pattern: /\braw_json\b/g,
+    suggestion: "raw_json 是内部诊断附件，API 不返回它（SYSTEM-BOUNDARY §2/§5）",
+  },
+];
+
+const boundaryFindings = [];
+
+/** 边界判定对象：字符串/模板字面量 + JSX 文本；跳过 import 路径，保留对象键。 */
+function boundaryCandidates(source) {
+  return [...scanStringLiterals(source), ...scanJsxText(source)].filter((candidate) => {
+    if (!candidate.text.trim()) return false;
+    if (SKIP_MODULE_SPECIFIER.test(candidate.text.trim())) return false;
+    return true;
+  });
+}
+
+function scanBoundary(file) {
+  const source = fs.readFileSync(file, "utf8");
+  const offsets = buildLineIndex(source);
+  for (const candidate of boundaryCandidates(source)) {
+    for (const rule of BOUNDARY_RULES) {
+      rule.pattern.lastIndex = 0;
+      let match;
+      while ((match = rule.pattern.exec(candidate.text))) {
+        if (match[0].length === 0) {
+          rule.pattern.lastIndex += 1;
+          continue;
+        }
+        const at = locate(offsets, candidate.start + match.index);
+        boundaryFindings.push({
+          file: path.relative(rootDir, file).replace(/\\/g, "/"),
+          line: at.line,
+          column: at.column,
+          rule: rule.id,
+          match: match[0].trim(),
+          snippet: candidate.text.replace(/\s+/g, " ").trim().slice(0, 120),
+          suggestion: rule.suggestion,
+        });
+      }
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ *
  * 3. 扫描 web/src
  * ------------------------------------------------------------------ */
 
@@ -302,6 +393,8 @@ function walk(dir) {
 }
 
 function scanFile(file) {
+  scanBoundary(file);
+  if (boundaryOnly) return; // 边界单跑：只做契约出参词表，不跑 UI 文案规则
   const source = fs.readFileSync(file, "utf8");
   scannedFiles += 1;
   skippedApiFields += (source.match(API_FIELD_COUNTER) ?? []).length;
@@ -342,6 +435,32 @@ walk(srcDir);
 
 const errors = findings.filter((f) => f.severity === "error");
 const warnings = findings.filter((f) => f.severity === "warn");
+
+if (boundaryOnly) {
+  // 边界单跑输出（fixture 测试与 CI 子集用）：只报契约出参词表。
+  if (asJson) {
+    console.log(JSON.stringify({ ok: boundaryFindings.length === 0, boundaryFindings }, null, 2));
+  } else {
+    console.log("# 边界词表（系统契约出参，W6 ticket 06 / ADR-029 §6）");
+    console.log(
+      "范围：web/src 字符串/模板字面量 + JSX 文本（注释与 import 路径不算）；" +
+        "数据面列名（trace_id/span_id/parent_span_id/attributes_json）、wire 词" +
+        "（gen_ai_*/agw.*/agentgateway_user/keyHash/virtualModels/frontendPolicies）、" +
+        "存储文件（ag-data.db/ag_config_dir）、接收端口 4318、OTLP 与 raw_json 不进契约出参；" +
+        "adapter_id 审计值与适配器文案端口内容除外。",
+    );
+    console.log("findings: " + boundaryFindings.length);
+    for (const v of boundaryFindings) {
+      console.log("  " + v.file + ":" + v.line + ":" + v.column + "  [" + v.rule + "] 「" + v.match + "」");
+      console.log("    片段：" + v.snippet);
+      console.log("    建议：" + v.suggestion);
+    }
+    console.log(
+      boundaryFindings.length === 0 ? "RESULT PASS（边界词表干净）" : "RESULT FAIL（边界词表违规 " + boundaryFindings.length + " 处）",
+    );
+  }
+  process.exit(boundaryFindings.length === 0 ? 0 : 1);
+}
 
 /* ------------------------------------------------------------------ *
  * 4. 页面 title 与 logo 资产
@@ -427,10 +546,14 @@ check(
  * ------------------------------------------------------------------ */
 
 const assetsFailed = checks.filter((c) => !c.ok);
-const ok = errors.length === 0 && assetsFailed.length === 0 && (!strict || warnings.length === 0);
+const ok =
+  errors.length === 0 &&
+  boundaryFindings.length === 0 &&
+  assetsFailed.length === 0 &&
+  (!strict || warnings.length === 0);
 
 if (asJson) {
-  console.log(JSON.stringify({ ok, strict, scannedFiles, candidates, skippedApiFields, errors, warnings, checks }, null, 2));
+  console.log(JSON.stringify({ ok, strict, scannedFiles, candidates, skippedApiFields, errors, warnings, boundaryFindings, checks }, null, 2));
 } else {
   console.log("# 术语审计（web/src 文案）");
   console.log("范围：web/src 的 .ts/.tsx/.css 文案 + index.html + public 资产；不含 docs/ 与 README（历史 ADR 原文、调研快照不在门禁内，docs 术语按 docs/GLOSSARY.md 人工核对，ticket 17）。");
@@ -456,13 +579,31 @@ if (asJson) {
     }
   }
   console.log("");
+  console.log("# 边界词表（系统契约出参，W6 ticket 06 / ADR-029 §6）");
+  console.log(
+    "数据面列名（trace_id/span_id/parent_span_id/attributes_json）、wire 词（gen_ai_*/agw.*/" +
+      "agentgateway_user/keyHash/virtualModels/frontendPolicies）、存储文件（ag-data.db/" +
+      "ag_config_dir）、接收端口 4318、OTLP 与 raw_json 不进契约出参（字符串/模板字面量 + JSX 文本；" +
+      "注释与 import 路径除外；adapter_id 审计值与适配器文案端口内容除外）。",
+  );
+  if (boundaryFindings.length === 0) {
+    console.log("✓ 契约出参边界词表干净（findings: 0）");
+  } else {
+    console.log("✗ 边界词表违规 " + boundaryFindings.length + " 处（必须修）：");
+    for (const v of boundaryFindings) {
+      console.log("  " + v.file + ":" + v.line + ":" + v.column + "  [" + v.rule + "] 「" + v.match + "」");
+      console.log("    片段：" + v.snippet);
+      console.log("    建议：" + v.suggestion);
+    }
+  }
+  console.log("");
   console.log("# 页面 title 与 logo 资产");
   for (const c of checks) console.log((c.ok ? "✓ " : "✗ ") + c.title + (c.ok ? "" : " —— " + c.detail));
   console.log("");
   console.log(
     ok
-      ? "RESULT PASS（error " + errors.length + " · warn " + warnings.length + " · 资产 " + (checks.length - assetsFailed.length) + "/" + checks.length + "）"
-      : "RESULT FAIL（error " + errors.length + " · warn " + warnings.length + " · 资产问题 " + assetsFailed.length + " 处）",
+      ? "RESULT PASS（error " + errors.length + " · warn " + warnings.length + " · 边界 " + boundaryFindings.length + " · 资产 " + (checks.length - assetsFailed.length) + "/" + checks.length + "）"
+      : "RESULT FAIL（error " + errors.length + " · warn " + warnings.length + " · 边界 " + boundaryFindings.length + " · 资产问题 " + assetsFailed.length + " 处）",
   );
 }
 

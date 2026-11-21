@@ -53,7 +53,8 @@ def init_db(engine: Engine) -> None:
     config_revisions.validation_note). It never alters a column; ticket 16 also
     drops columns the ORM retired after a database was created. Ticket 05 moves
     the usage join key from its wire-era column name into the neutral
-    correlation_key (values copied, legacy column kept until retirement).
+    correlation_key (values copied); ticket 06 retires the legacy column via
+    ``_RETIRED_COLUMNS`` after the backfill pass.
     """
     Base.metadata.create_all(engine)
     _ensure_additive_columns(engine)
@@ -63,10 +64,16 @@ def init_db(engine: Engine) -> None:
     _ensure_model_markup_default(engine)
 
 
-#: Ticket 16: columns that left the ORM mapping (ADR-026 retired the key-level
-#: primary flag) but still sit in old SQLite files. Dropping them keeps the
-#: mapping honest: no dead column, no accidental read/write of a retired field.
-_RETIRED_COLUMNS: tuple[tuple[str, str], ...] = (("upstream_keys", "is_primary"),)
+#: Columns that left the ORM mapping but still sit in old SQLite files. Dropping
+#: them keeps the mapping honest: no dead column, no accidental read/write of a
+#: retired field. Ticket 16 retired the key-level primary flag (ADR-026); ticket
+#: 06 retires the wire-era usage join column after ticket 05 copied its values
+#: into the neutral correlation_key (the backfill above runs before this drop,
+#: so no value is lost).
+_RETIRED_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("upstream_keys", "is_primary"),
+    ("gateway_usage_events", "trace_id"),
+)
 
 
 def _drop_retired_columns(engine: Engine) -> None:
@@ -94,8 +101,8 @@ def _backfill_usage_correlation_key(engine: Engine) -> None:
     """Ticket 05: copy the wire-era usage join column into correlation_key.
 
     Pure value move (no reinterpretation): old rows keep their chain, new code
-    reads only the neutral name. The legacy column stays in place until the
-    vocabulary gate retires it; a DB without the legacy column skips the pass.
+    reads only the neutral name. Ticket 06 retires the legacy column right after
+    this pass (``_RETIRED_COLUMNS``); a DB without the legacy column skips both.
     """
     from sqlalchemy import inspect, text
 

@@ -276,8 +276,8 @@ class GatewayUsageEventORM(Base):
     stored as facts but billing folds them into input per the lead's
     conservative rule (billing.md §6); reports must label token amounts as
     estimates. W6 ticket 05: the pre-neutrality join column was wire-named
-    (trace_id); its values moved into correlation_key at init time and the old
-    column stays only until the vocabulary gate retires it.
+    (trace_id); its values moved into correlation_key at init time and ticket 06
+    retired the legacy column (base._RETIRED_COLUMNS).
     """
 
     __tablename__ = "gateway_usage_events"
