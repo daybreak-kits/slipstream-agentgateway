@@ -2,7 +2,6 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
-import { useState } from "react";
 import { copyText } from "@/lib/clipboard";
 import { toast } from "@/lib/notify";
 
@@ -28,21 +27,16 @@ export function OneTimeSecretDialog({
   secret,
   onClose,
 }: OneTimeSecretDialogProps) {
-  const [copying, setCopying] = useState(false);
   const copy = async () => {
-    if (copying) return;
-    setCopying(true);
-    try {
-      const ok = await copyText(secret);
-      if (ok) {
-        toast.success("已复制");
-      } else {
-        toast.error("复制失败", {
-          description: "浏览器剪贴板不可用或未授权，请手动抄录下方明文。",
-        });
-      }
-    } finally {
-      setCopying(false);
+    // W6 票 13 契约：复制可重复点击、弹窗不缓存明文——不加 pending 态，
+    // 只在剪贴板写入成功后提示「已复制」，失败 toast 明确错误。
+    const ok = await copyText(secret);
+    if (ok) {
+      toast.success("已复制");
+    } else {
+      toast.error("复制失败", {
+        description: "浏览器剪贴板不可用或未授权，请手动抄录下方明文。",
+      });
     }
   };
   return (
@@ -61,7 +55,7 @@ export function OneTimeSecretDialog({
           {secret}
         </p>
         <DialogFooter>
-          <Button onClick={copy} disabled={copying}>复制</Button>
+          <Button onClick={copy}>复制</Button>
           <Button variant="ghost" onClick={onClose}>
             关闭
           </Button>
