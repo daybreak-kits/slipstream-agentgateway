@@ -1952,6 +1952,174 @@ check("成员编排行内编辑：行内字段按策略收敛、候选按上游�
   includesAll(flow, ["CANDIDATE_CHIP_BUDGET", "展开全部"], "大列表预算截断");
 });
 
+// ---------- 十一、通知中心紧凑布局与密钥弹窗二元按钮（W6 ticket 13）----------
+// 行结构与 hover 详情是真实渲染面：NotificationRow 与 BrandLockup 同惯例导出，
+// SSR 渲染真实 DOM 断言；面板容器走 Radix Portal（SSR 不落 DOM），宽度约束按
+// 源码契约钉住，窄屏行为由 responsive_matrix 的 notification.375 专项兜住。
+const t13Notification = (overrides) => ({
+  id: "matrix-1",
+  kind: "error",
+  title: "查询失败",
+  description: "INTERNAL_ERROR：矩阵模拟上游 5xx 的超长正文，用于验证单行省略与 hover 完整详情可达",
+  at: Date.UTC(2026, 10, 21, 9, 30, 0),
+  read: true,
+  ...overrides,
+});
+
+check("通知行：时间在标题行尾（time[datetime]）、图标与标题垂直居中、正文单行省略", async () => {
+  const { NotificationRow } = await load("/src/components/layout/notification-center.tsx");
+  const html = render(createElement(NotificationRow, { item: t13Notification() }));
+  expect(/<time[^>]+datetime="2026-11-21T/i.test(html), "时间必须是带 datetime 的 time 元素（机器可读）");
+  // 时间在标题行尾：DOM 顺序 title → time → 正文（li 的 title 属性也含全文，所以按元素锚点定序）。
+  const titleAt = html.indexOf('data-slot="notification-title"');
+  const timeAt = html.indexOf('data-slot="notification-time"');
+  const descAt = html.indexOf('data-slot="notification-desc"');
+  expect(titleAt >= 0 && timeAt > titleAt && descAt > timeAt, "时间必须在标题行内（title 元素之后、正文元素之前）");
+  const headTag = html.match(/<div[^>]*data-slot="notification-head"[^>]*>/)?.[0] ?? "";
+  expect(headTag.includes("flex items-center justify-between"), "标题行必须 flex items-center justify-between（时间行尾对齐）");
+  const timeTag = html.match(/<time[^>]*data-slot="notification-time"[^>]*>/)?.[0] ?? "";
+  expect(timeTag.includes("shrink-0"), "时间必须 shrink-0，不得被长标题挤压换行");
+  // 图标垂直居中：16px 图标对 20px 标题行高（text-2sm），mt-0.5 = (20-16)/2 恰好居中。
+  expect(/mt-0\.5 h-4 w-4/.test(html), "图标必须 mt-0.5 + h-4 w-4（对 20px 标题行高垂直居中）");
+  // 正文单行省略：truncate 且不得再有 line-clamp-2。
+  const descTag = html.match(/<p[^>]*data-slot="notification-desc"[^>]*>/)?.[0] ?? "";
+  expect(descTag.includes("truncate"), "正文必须单行 truncate");
+  expect(!html.includes("line-clamp"), "正文不得再 line-clamp-2（紧凑布局契约）");
+  // hover 完整详情：行 title 属性 = 标题 + 正文全文（原生 tooltip 的输入）。
+  expect(
+    /title="查询失败：INTERNAL_ERROR：矩阵模拟上游 5xx[^"]*"/.test(html),
+    "行必须带完整详情 title 属性（hover 可读全文）",
+  );
+});
+
+check("通知行：无正文时 hover 详情只有标题；面板窄屏宽度约束在位（票09 补断言）", async () => {
+  const { NotificationRow } = await load("/src/components/layout/notification-center.tsx");
+  const html = render(
+    createElement(NotificationRow, { item: t13Notification({ kind: "success", description: undefined }) }),
+  );
+  expect(/title="查询失败"/.test(html), "无正文时行 title 仍要有标题详情");
+  expect(!html.includes('data-slot="notification-desc"'), "无正文不得渲染空正文行");
+  const centerSrc = read("src/components/layout/notification-center.tsx");
+  expect(
+    centerSrc.includes("w-[min(20rem,calc(100vw-2rem))]"),
+    "面板必须保留票09 的 min(20rem, 100vw-2rem) 宽度约束（窄屏占满可用宽度）",
+  );
+});
+
+check("密钥弹窗：只有复制与关闭两个同尺寸按钮，复制反馈为已复制", () => {
+  const src = read("src/components/users/one-time-secret-dialog.tsx");
+  // Radix Dialog 走 Portal，SSR 不落 DOM（同 model-dialog 先例）：按源码契约钉住。
+  expect((src.match(/<Button/g) ?? []).length === 2, "弹窗 footer 只能有复制与关闭两个按钮");
+  expect(!src.includes("再次复制") && !src.includes("showRecopy"), "同义的「再次复制」必须移除（与「复制」同动作同入口）");
+  expect(!/\bsize=/.test(src), "复制与关闭必须同尺寸（默认 h-10，不得一个 sm 一个 default）");
+  expect(/<Button[^>]*>\s*复制\s*<\/Button>/.test(src), "缺少复制按钮（主操作，default 尺寸）");
+  expect(/<Button[^>]*>\s*关闭\s*<\/Button>/.test(src), "缺少关闭按钮（ghost 变体，default 尺寸）");
+  expect(src.includes('toast.success("已复制")'), "复制成功文案必须是「已复制」");
+  expect(!src.includes("useState"), "关闭即失效：弹窗不得在前端缓存明文");
+  const clientKeys = read("src/pages/client_keys.tsx");
+  expect(!clientKeys.includes("showRecopy"), "调用方不得再传 showRecopy");
+});
+
+// ---------- 十二、登录页视觉与自适应（W6 ticket 12）----------
+// 登录页是未登录用户看到的第一个界面：三态主题、渐变背景、密码显隐、错误零位移、
+// 三档宽度都钉在这里。SSR 渲染真实 LoginPage（useQuery 失败回落表单，正好是登录态），
+// 通知中心推送等无法 SSR 的契约用源码接线断言兜底。
+const renderLogin = async () => {
+  const { LoginPage } = await load("/src/pages/login.tsx");
+  const { AUTH_ME_QUERY_KEY } = await load("/src/lib/auth.ts");
+  // 共享 queryClient 在前面的 KPI 检查里可能已缓存 me：登录页拿到 me.data 会渲染
+  // <Navigate> 而不是表单，先清掉再渲染，保证落到登录表单分支。
+  queryClient.removeQueries({ queryKey: AUTH_ME_QUERY_KEY });
+  return render(createElement(LoginPage));
+};
+
+/** 从源码里截出 data-slot 元素的开标签，断言类与属性走的是同一处声明。 */
+const loginTagOf = (source, slot) => {
+  const at = source.indexOf('data-slot="' + slot + '"');
+  expect(at >= 0, "登录页缺少 data-slot=" + slot);
+  return source.slice(at, source.indexOf(">", at) + 1);
+};
+
+check("登录页：低对比浅色渐变背景——login-gradient 工具类就位且纯静态不动画", () => {
+  const css = read("src/index.css");
+  expect(css.includes("@utility login-gradient"), "index.css 必须定义 @utility login-gradient");
+  const start = css.indexOf("@utility login-gradient");
+  const block = css.slice(start, css.indexOf("}", start) + 1);
+  expect(block.includes("gradient("), "login-gradient 必须是渐变背景（不是纯色）");
+  expect(block.includes("color-mix(in oklab"), "渐变必须用 color-mix 半透明混合（低对比，不遮正文）");
+  expect(block.includes("var(--"), "渐变色必须走语义 token，明暗主题自适应");
+  expect(!/animation|animate|@keyframes/.test(block), "login-gradient 必须静态：不得含 animation/keyframes（票12：静态不动画）");
+  const page = read("src/pages/login.tsx");
+  expect(page.includes("login-gradient"), "登录页根容器必须使用 login-gradient");
+  expect(!page.includes("animate-"), "登录页不得使用任何 animate-* 动效类（背景静态）");
+});
+
+check("登录页：三态主题复用全站 useTheme——不另起 theme 存储，选项带 aria-pressed", async () => {
+  const page = read("src/pages/login.tsx");
+  expect(page.includes('from "@/lib/theme"'), "登录页必须复用 @/lib/theme 的 useTheme（全站同一份主题状态与持久化）");
+  expect(!page.includes("localStorage"), "登录页不得直接读写 localStorage（主题持久化归 lib/theme 单一来源）");
+  expect(!page.includes("slipstream.theme"), "登录页不得私存主题 key（与 index.html 反闪烁脚本/lib/theme 同源）");
+  const html = await renderLogin();
+  expect(html.includes('data-slot="login-theme"'), "登录页必须渲染三态主题切换器（login-theme）");
+  for (const name of ["浅色", "深色", "跟随系统"]) {
+    expect(html.includes('aria-label="' + name + '"'), "主题切换器缺少选项：" + name);
+  }
+  expect((html.match(/aria-pressed="/g) ?? []).length >= 3, "三态选项必须带 aria-pressed 可访问状态");
+});
+
+check("登录页：密码显隐切换——Eye/EyeOff 图标按钮带 aria-pressed 与槽位", async () => {
+  const page = read("src/pages/login.tsx");
+  expect(/import\s*\{[^}]*\bEye\b/.test(page) && page.includes("EyeOff"), "登录页必须用 lucide Eye/EyeOff 图标做显隐切换");
+  const html = await renderLogin();
+  expect(html.includes('type="password"'), "密码框默认隐藏（type=password）");
+  expect(html.includes('data-slot="login-password-toggle"'), "显隐按钮必须带 login-password-toggle 槽位");
+  expect(html.includes('aria-label="显示密码"'), "显隐按钮默认可访问名必须是「显示密码」");
+  expect(html.includes('aria-label="隐藏密码"') === false, "默认态不得泄漏显示态可访问名（aria-label 随状态切换）");
+  expect(html.includes('aria-pressed="false"'), "显隐按钮必须带 aria-pressed 初始态（false）");
+  expect(page.includes("aria-pressed={showPassword}"), "显隐按钮必须接线 aria-pressed={showPassword}（可访问状态）");
+  expect(page.includes('showPassword ? "隐藏密码" : "显示密码"'), "可访问名必须随显隐状态切换");
+});
+
+check("登录页：错误区固定预留高度——字段 aria-invalid 标红、详情进通知中心", () => {
+  const page = read("src/pages/login.tsx");
+  const errorTag = loginTagOf(page, "login-error");
+  expect(/\bh-10\b/.test(errorTag), "错误区必须固定 h-10 高度（错误出现时按钮零位移，user story 50）");
+  expect(errorTag.includes('aria-live="polite"'), "错误区必须 aria-live=polite（出现时播报，不抢焦点）");
+  expect((page.match(/aria-invalid=\{Boolean\(error\)\}/g) ?? []).length >= 2, "用户名与密码两个输入都必须接线 aria-invalid={Boolean(error)}");
+  expect(page.includes("border-danger"), "出错字段必须有 danger 红边（border-danger）");
+  expect(page.includes("pushErrorNotificationOnce"), "登录失败详情必须进通知中心（复用票07 pushErrorNotificationOnce）");
+  expect(page.includes('from "@/lib/notification-store"'), "通知推送必须走 lib/notification-store 单一来源（不另起通知通道）");
+});
+
+check("登录页：底部提示区预留固定空间——单行省略、hover 显示完整详情", () => {
+  const page = read("src/pages/login.tsx");
+  const hintTag = loginTagOf(page, "login-hint");
+  expect(hintTag.includes("title="), "提示区必须带 title 展示完整详情（hover 可读）");
+  expect(/\btruncate\b/.test(hintTag), "提示区必须 truncate 超长省略（不换行推挤）");
+  expect(/\bh-5\b/.test(hintTag), "提示区必须预留固定 h-5 高度（不随文案增减位移）");
+});
+
+check("登录页：登录框三档宽度 384/460/576（1x/1.2x/1.5x）+ 矮视口压缩契约", () => {
+  const page = read("src/pages/login.tsx");
+  includesAll(page, ["max-w-[384px]", "md:max-w-[460px]", "2xl:max-w-[576px]"], "登录框三档宽度（user story 32）");
+  const css = read("src/index.css");
+  expect(css.includes("@media (max-height: 480px)"), "index.css 必须有矮视口压缩规则（667×375 横屏提交按钮免滚可见，user story 33）");
+  const mediaStart = css.indexOf("@media (max-height: 480px)");
+  const mediaBlock = css.slice(mediaStart, css.indexOf("}", mediaStart) + 1);
+  expect(mediaBlock.includes("login-landscape-hide"), "矮视口规则必须隐藏登录页装饰行（login-landscape-hide）");
+  expect(page.includes("login-landscape-hide"), "登录页装饰行必须挂 login-landscape-hide（横屏压缩）");
+});
+
+check("登录页 SSR：渐变根容器、三档宽度列、错误区/提示区始终渲染（预留空间）", async () => {
+  const html = await renderLogin();
+  expect(html.includes("login-gradient"), "登录页根容器必须有 login-gradient");
+  expect(
+    html.includes("max-w-[384px]") && html.includes("md:max-w-[460px]") && html.includes("2xl:max-w-[576px]"),
+    "登录框列必须带三档宽度类（渲染输出可见，不只源码声明）",
+  );
+  expect(html.includes('data-slot="login-error"') && html.includes('data-slot="login-hint"'), "错误区与底部提示区必须始终渲染（无错误时也占位）");
+});
+
 // ---------- run ----------
 const failures = [];
 server = await createServer({
