@@ -229,13 +229,21 @@ class FakeAdapter:
         )
 
     def materialize_credentials(
-        self, files: Sequence[CredentialFile], *, dry_run: bool = False
+        self,
+        files: Sequence[CredentialFile],
+        *,
+        dry_run: bool = False,
+        prune: bool = True,
     ) -> MaterializationResult:
         requested = {file.ref: file.plaintext for file in files}
-        stale = tuple(sorted(set(self._credentials) - set(requested)))
+        stale = tuple(sorted(set(self._credentials) - set(requested))) if prune else ()
         if dry_run:
             return MaterializationResult(dry_run=True, stale=stale)
-        self._credentials = requested
+        if prune:
+            self._credentials = requested
+        else:
+            # Write phase only: keep the managed refs the cleanup pass will prune.
+            self._credentials = {**self._credentials, **requested}
         return MaterializationResult(
             written=tuple(file.ref for file in files),
             stale=stale,

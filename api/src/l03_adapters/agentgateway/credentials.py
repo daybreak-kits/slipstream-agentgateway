@@ -1,10 +1,9 @@
 """agentgateway credential-file materialization (W6 ticket 01 port).
 
 The system layer owns credential *metadata* only. This adapter-private module
-owns the on-disk format, atomic writes and the managed ``keys/`` whitelist. The
-service layer no longer needs to know a key file path or how to prune one; the
-existing rollout flow still calls the old helper until ticket 03 rewires it, so
-both paths intentionally share the same file conventions during the transition.
+owns the on-disk format, atomic writes and the managed ``keys/`` whitelist; the
+service layer hands over credential intents through ``materialize_credentials``
+(ticket 03) and never learns a key file path or how to prune one.
 """
 
 from __future__ import annotations
@@ -48,7 +47,11 @@ def _stale_files(managed: str, whitelist: set[str]) -> list[str]:
 
 
 def materialize(
-    config_dir: str, files: Sequence[CredentialFile], *, dry_run: bool = False
+    config_dir: str,
+    files: Sequence[CredentialFile],
+    *,
+    dry_run: bool = False,
+    prune: bool = True,
 ) -> MaterializationResult:
     """Write credential files, then prune managed *.key files outside the whitelist.
 
@@ -56,6 +59,9 @@ def materialize(
     building a metadata-only plan). Pruning never leaves the managed ``keys/``
     directory, never touches non-.key files or symlinks, and per-file failures
     are reported instead of raised so an apply can log and continue.
+    ``prune=False`` writes only and leaves the whitelist cleanup for the
+    follow-up full pass (the rollout materializes before its apply gate and
+    prunes after the apply succeeded).
     """
     targets: list[tuple[str, str]] = []
     for file in files:
@@ -64,7 +70,7 @@ def materialize(
             targets.append((path, file.plaintext))
     whitelist = {_identity(path) for path, _ in targets}
     managed = _managed_dir(config_dir)
-    stale = _stale_files(managed, whitelist)
+    stale = _stale_files(managed, whitelist) if prune else []
     if dry_run:
         return MaterializationResult(dry_run=True, stale=tuple(stale))
 

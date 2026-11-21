@@ -129,7 +129,11 @@ class MockAdapter:
         return TransformPreview(after={})
 
     def materialize_credentials(
-        self, files: Sequence[CredentialFile], *, dry_run: bool = False
+        self,
+        files: Sequence[CredentialFile],
+        *,
+        dry_run: bool = False,
+        prune: bool = True,
     ) -> MaterializationResult:
         written = tuple(file.ref for file in files)
         return MaterializationResult(dry_run=dry_run, written=written if not dry_run else ())

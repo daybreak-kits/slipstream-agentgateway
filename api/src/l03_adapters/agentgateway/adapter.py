@@ -420,9 +420,13 @@ class AgentgatewayAdapter:
         )
 
     def materialize_credentials(
-        self, files: Sequence[CredentialFile], *, dry_run: bool = False
+        self,
+        files: Sequence[CredentialFile],
+        *,
+        dry_run: bool = False,
+        prune: bool = True,
     ) -> MaterializationResult:
-        return credentials.materialize(self._config_dir, files, dry_run=dry_run)
+        return credentials.materialize(self._config_dir, files, dry_run=dry_run, prune=prune)
 
     def client_contract(self) -> ClientContract:
         return ClientContract(

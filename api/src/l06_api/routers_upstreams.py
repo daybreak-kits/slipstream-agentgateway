@@ -12,14 +12,11 @@ from l01_core.crypto import SecretBox
 from l01_core.errors import AppError, ErrorCode
 from l01_core.settings import get_settings
 from l02_domain.transforms_codec import parse_transforms, transforms_to_json
-from l03_adapters.agentgateway.transforms import (
-    compile_transforms,
-    compile_warnings,
-)
+from l03_adapters.spi import DataPlaneAdapter
 from l04_repo.orm import UpstreamModelORM, UpstreamORM
 from l04_repo.repository import UPSTREAM_REPO
 from l05_service import crud, upstream_ops
-from l06_api.deps import page_params, require, session_of
+from l06_api.deps import get_adapter, page_params, require, session_of
 from l06_api.schemas import (
     UpstreamBatch,
     UpstreamCreate,
@@ -407,13 +404,17 @@ def put_transforms(
     "/{upstream_id}/transforms/preview",
     dependencies=[Depends(require("transforms:read"))],
 )
-def preview_transforms(upstream_id: str, payload: dict) -> dict:
-    """Compile in memory: before/after plus skip reasons and E9 notes (no store)."""
+def preview_transforms(
+    upstream_id: str, payload: dict, adapter: DataPlaneAdapter = Depends(get_adapter)
+) -> dict:
+    """Compile in memory via the adapter port: before/after plus skip reasons and
+    E9 notes (no store). The concrete compiler is adapter-private."""
     spec = parse_transforms(payload)
+    preview = adapter.preview_transforms(spec)
     return {
         "upstream_id": upstream_id,
         "before": payload,
-        "after": compile_transforms(spec),
-        "skipped": [],
-        "notes": compile_warnings(spec),
+        "after": preview.after,
+        "skipped": list(preview.skipped),
+        "notes": list(preview.notes),
     }
