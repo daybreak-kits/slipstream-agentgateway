@@ -129,6 +129,7 @@ export function UpstreamsPage() {
       if (needle === "") return true;
       return (
         row.name.toLowerCase().includes(needle) ||
+        (row.alias ?? "").toLowerCase().includes(needle) ||
         row.base_url.toLowerCase().includes(needle)
       );
     }),
@@ -243,7 +244,7 @@ export function UpstreamsPage() {
     {
       id: "name",
       accessorKey: "name",
-      header: "名称",
+      header: "上游标志",
       enableSorting: false,
       cell: ({ row }) => {
         const item = row.original;
@@ -261,6 +262,17 @@ export function UpstreamsPage() {
             </div>
           </div>
         );
+      },
+    },
+    {
+      // W7 t04（US 11/50）：上游别名仅展示、可为空；与标志（name）在列表/详情/搜索口径一致。
+      id: "alias",
+      accessorKey: "alias",
+      header: "上游别名",
+      enableSorting: false,
+      cell: ({ row }) => {
+        const alias = (row.original.alias ?? "").trim();
+        return alias === "" ? <span className="text-faint">-</span> : <span className="text-2sm text-body">{alias}</span>;
       },
     },
     {
@@ -382,8 +394,8 @@ export function UpstreamsPage() {
         <Input
           value={search}
           onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-          placeholder="搜索名称或连接地址"
-          aria-label="搜索名称或连接地址"
+          placeholder="搜索标志、别名或连接地址"
+          aria-label="搜索标志、别名或连接地址"
           className="max-w-64"
         />
         <Select value={status} onValueChange={(value) => { setStatus(value); setPage(1); }}>

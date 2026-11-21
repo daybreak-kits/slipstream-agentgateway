@@ -1451,11 +1451,11 @@ export async function mockRequest<T>(path: string, init?: RequestInit): Promise<
   }
   // 契约 3.2：POST body {name?, base_url, api_style, api_key}；name 缺省由 base_url 生成（ADR-023 #6）
   if (init?.method === "POST" && (path.split("?")[0] ?? "") === "/admin/upstreams") {
-    const body = JSON.parse(String(init.body ?? "{}")) as { name?: string; base_url?: string; api_style?: string; api_key?: string };
+    const body = JSON.parse(String(init.body ?? "{}")) as { name?: string; alias?: string; base_url?: string; api_style?: string; api_key?: string };
     const created: Upstream = {
       id: "up_" + String(upstreams.length + 1).padStart(2, "0"),
       name: body.name?.trim() || upstreamNameFromBaseUrl(body.base_url ?? "", upstreams),
-      alias: "",
+      alias: body.alias?.trim() ?? "",
       base_url: body.base_url ?? "",
       api_style: body.api_style ?? "openai_chat",
       transforms: null,
@@ -1466,7 +1466,7 @@ export async function mockRequest<T>(path: string, init?: RequestInit): Promise<
     upstreams.push(created);
     return created as T;
   }
-  // 契约 3.2 PATCH：可改 base_url/api_style/enabled；DELETE 契约未定义，mock 保留容错
+  // 契约 3.2 PATCH：可改 name（留空保持原名，与后端一致）/alias/base_url/api_style/enabled；DELETE 契约未定义，mock 保留容错
   if ((init?.method === "PATCH" || init?.method === "PUT" || init?.method === "DELETE") && /^\/admin\/upstreams\/[^/?]+$/.test(path.split("?")[0] ?? "")) {
     const id = (path.split("?")[0] ?? "").split("/")[3] ?? "";
     const idx = upstreams.findIndex((u) => u.id === id);
@@ -1475,12 +1475,15 @@ export async function mockRequest<T>(path: string, init?: RequestInit): Promise<
       upstreams.splice(idx, 1);
       return { deleted: true } as T;
     }
-    const body = JSON.parse(String(init.body ?? "{}")) as { base_url?: string; api_style?: string; enabled?: boolean };
+    const body = JSON.parse(String(init.body ?? "{}")) as { base_url?: string; api_style?: string; enabled?: boolean; name?: string; alias?: string };
     const row = upstreams[idx];
     if (row) {
       if (body.base_url !== undefined) row.base_url = body.base_url;
       if (body.api_style !== undefined) row.api_style = body.api_style;
       if (body.enabled !== undefined) row.enabled = body.enabled;
+      // W7 t04：标志/别名随保存提交；重名 422 由真实后端执行，mock 演示模式不模拟。
+      if (body.name !== undefined && body.name.trim() !== "") row.name = body.name.trim();
+      if (body.alias !== undefined) row.alias = body.alias.trim();
     }
     return row as T;
   }

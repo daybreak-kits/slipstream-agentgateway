@@ -209,11 +209,12 @@ export function UpstreamModelsPanel({
           onValueChange={(value) => probe.setKeyId(value === SELECT_NONE_VALUE ? "" : value)}
           disabled={probe.running}
         >
+          {/* W7 t04（US 14）：默认项语义去重——只叫「自动使用第一把」，不再与密钥行的「默认」双语义。 */}
           <SelectTrigger aria-label="选择测试密钥" className="h-7 w-52 text-2xs">
-            <SelectValue placeholder="默认（第一把）" />
+            <SelectValue placeholder="自动使用第一把" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={SELECT_NONE_VALUE}>默认（第一把）</SelectItem>
+            <SelectItem value={SELECT_NONE_VALUE}>自动使用第一把</SelectItem>
             {keys.map((key) => (
               <SelectItem key={key.id} value={key.id}>
                 {key.label || key.masked}
