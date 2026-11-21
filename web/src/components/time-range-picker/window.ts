@@ -4,11 +4,22 @@
  *   { kind: "custom", fromMs, toMs }  显式毫秒窗（本周/本月/自定义），成对传 from_ms/to_ms，
  *     后端 F 契约：成对生效，payload range 回显 "custom"。
  */
+import { MAX_CUSTOM_SPAN_DAYS, MAX_CUSTOM_SPAN_MS } from "@/generated/contract";
+
 export type TimeWindowRange = "today" | "24h" | "7d" | "30d";
 
 export type TimeWindow =
   | { kind: "range"; value: TimeWindowRange }
   | { kind: "custom"; fromMs: number; toMs: number };
+
+/**
+ * 自定义窗上限（W6 票 16）：唯一实义定义在后端 l06_api/deps.py，gen_ts.py 同步进
+ * generated/contract.ts，这里只消费契约值并再导出——前端不各写一份，选择器与后端不会漂移。
+ */
+export const TIME_WINDOW_MAX_SPAN_MS = MAX_CUSTOM_SPAN_MS;
+export const TIME_WINDOW_MAX_SPAN_DAYS = MAX_CUSTOM_SPAN_DAYS;
+
+const DAY_MS = 86_400_000;
 
 export const TIME_WINDOW_RANGES: Array<{ value: TimeWindowRange; label: string }> = [
   { value: "24h", label: "近 24 小时" },
@@ -53,6 +64,33 @@ export function nextDayStartMs(at: number | Date): number {
   day.setHours(0, 0, 0, 0);
   day.setDate(day.getDate() + 1);
   return day.getTime();
+}
+
+/**
+ * 日历可回看的天数下界（W6 票 16）：最早可选日 = 今天 00:00 −（上限−1）天。
+ * 上限来自契约（366 天），因此最宽可选窗（最早日 00:00 → 今天次日 00:00 的「零点」）
+ * 恰好等于上限，后端放行；日历不用再各算一份回看天数。
+ */
+export function earliestCustomDayMs(now: number | Date = Date.now()): number {
+  return dayStartMs(now) - (MAX_CUSTOM_SPAN_DAYS - 1) * DAY_MS;
+}
+
+/**
+ * 显式毫秒窗的跨度校验：超出上限时返回给行内提示的文案（带上限与当前天数），
+ * null 表示未超界。发布路径（publish/此刻/零点）先过这里，失败不 onChange、不发请求。
+ */
+export function customWindowSpanError(fromMs: number, toMs: number): string | null {
+  const span = toMs - fromMs;
+  if (span > MAX_CUSTOM_SPAN_MS) {
+    return `时间范围最多 ${MAX_CUSTOM_SPAN_DAYS} 天（当前 ${Math.ceil(span / DAY_MS)} 天），请缩短区间后再查询。`;
+  }
+  return null;
+}
+
+/** 该时间窗是否允许发聚合请求：预设恒可用；自定义窗必须成对有序且不超上限（W6 票 16）。 */
+export function timeWindowUsable(window: TimeWindow): boolean {
+  if (window.kind === "range") return true;
+  return window.toMs > window.fromMs && customWindowSpanError(window.fromMs, window.toMs) === null;
 }
 
 /** 进 react-query queryKey 的稳定片段：预设与毫秒窗互不混淆。 */

@@ -321,7 +321,11 @@ def test_half_window_is_422(client, engine_and_sessionmaker, fixed_now, endpoint
 def test_span_over_366_days_is_422(client, engine_and_sessionmaker, fixed_now, endpoint):
     response = client.get(f"/admin/reports/{endpoint}?from_ms=0&to_ms={366 * DAY_MS + 1}")
     assert response.status_code == 422, response.text
-    assert response.json()["code"] == "VALIDATION_ERROR"
+    payload = response.json()
+    assert payload["code"] == "VALIDATION_ERROR"
+    # W6 ticket 16: the 422 carries the shared cap so clients can format the limit.
+    assert payload["details"]["max_span_ms"] == 366 * DAY_MS
+    assert payload["details"]["max_span_days"] == 366
 
 
 def test_span_of_exactly_366_days_is_allowed(client, engine_and_sessionmaker, fixed_now):
@@ -402,3 +406,72 @@ def test_365d_hour_restriction_survives_only_on_the_enum_path(
     )
     assert ok.status_code == 200
     assert ok.json()["bucket"] == "hour"
+
+
+# ------------------------------------------- overview/margin share the cap (W6 ticket 16)
+#
+# overview and margin read from_ms/to_ms with "0 = beginning / now" defaults; an
+# explicit positive pair must obey the same 366-day cap as the four report
+# routes so a giant window cannot bypass the full-table-abuse guard.
+
+
+@pytest.mark.parametrize("endpoint", ["overview", "margin"])
+@pytest.mark.parametrize(
+    ("span_days", "expected"),
+    [(365, 200), (366, 200), (367, 422)],
+)
+def test_summary_window_span_cap(
+    client, engine_and_sessionmaker, fixed_now, endpoint, span_days, expected
+):
+    response = client.get(
+        f"/admin/reports/{endpoint}?from_ms={AT - span_days * DAY_MS}&to_ms={AT}"
+    )
+    assert response.status_code == expected, response.text
+
+
+@pytest.mark.parametrize("endpoint", ["overview", "margin"])
+def test_summary_window_over_cap_422_carries_the_limit(
+    client, engine_and_sessionmaker, fixed_now, endpoint
+):
+    response = client.get(
+        f"/admin/reports/{endpoint}?from_ms={AT - 367 * DAY_MS}&to_ms={AT}"
+    )
+    assert response.status_code == 422, response.text
+    payload = response.json()
+    assert payload["code"] == "VALIDATION_ERROR"
+    assert payload["details"]["from_ms"] == AT - 367 * DAY_MS
+    assert payload["details"]["to_ms"] == AT
+    assert payload["details"]["max_span_ms"] == 366 * DAY_MS
+    assert payload["details"]["max_span_days"] == 366
+
+
+@pytest.mark.parametrize("endpoint", ["overview", "margin"])
+def test_summary_window_reversed_pair_is_422(
+    client, engine_and_sessionmaker, fixed_now, endpoint
+):
+    response = client.get(f"/admin/reports/{endpoint}?from_ms={AT}&to_ms={AT - DAY_MS}")
+    assert response.status_code == 422, response.text
+    assert response.json()["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.parametrize("endpoint", ["overview", "margin"])
+def test_summary_window_default_and_half_window_semantics_survive(
+    client, engine_and_sessionmaker, fixed_now, endpoint
+):
+    """0/omitted = all time and a one-sided bound keep their documented meaning.
+
+    The cap only binds explicit positive pairs; the beginning/now defaults are
+    not a custom window and must not start 422ing.
+    """
+    assert client.get(f"/admin/reports/{endpoint}").status_code == 200
+    assert client.get(f"/admin/reports/{endpoint}?from_ms=0&to_ms=0").status_code == 200
+    one_sided = client.get(f"/admin/reports/{endpoint}?from_ms={AT - DAY_MS}&to_ms=0")
+    assert one_sided.status_code == 200, one_sided.text
+
+
+def test_custom_span_cap_lives_in_one_place():
+    """The cap is the deps constant the contract codegen exports; nothing else retunes it."""
+    from l06_api import deps
+
+    assert deps.MAX_CUSTOM_SPAN_MS == 366 * DAY_MS
+    assert deps.MAX_CUSTOM_SPAN_DAYS == 366

@@ -3,7 +3,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useMock } from "@/lib/mock";
 
-import { timeWindowKey, type TimeWindow } from "@/components/time-range-picker";
+import { timeWindowKey, timeWindowUsable, type TimeWindow } from "@/components/time-range-picker";
 
 import { mockFlow, mockHeatmap, mockLatency, mockOverview, mockRevisions, mockTimeseries } from "./report-mocks";
 import { normalizeTimeseries, REPORT_PATHS } from "./report-types";
@@ -43,10 +43,14 @@ function windowParams(window: TimeWindow): URLSearchParams {
   return params;
 }
 
-/** 指标卡备用入口：overview 只吃 from_ms/to_ms（0=全时段），报表时区由后端定。 */
+/**
+ * W6 票 16：自定义窗超界（跨度 > 契约上限）时 enabled=false，聚合请求根本不发出——
+ * 这是发布路径校验之外的纵深防御，日志页/未来调用方同样被这扇门覆盖。
+ */
 export function useReportsOverview(window: TimeWindow) {
   return useQuery({
     queryKey: ["reports", "overview", ...timeWindowKey(window)],
+    enabled: timeWindowUsable(window),
     placeholderData: keepPreviousData,
     queryFn: async ({ signal }): Promise<ReportsOverview> => {
       if (useMock) return mockOverview();
@@ -76,7 +80,7 @@ export interface TimeseriesParams {
 export function useReportsTimeseries({ window, dimension, metric, enabled = true }: TimeseriesParams) {
   return useQuery({
     queryKey: ["reports", "timeseries", ...timeWindowKey(window), dimension, metric],
-    enabled,
+    enabled: enabled && timeWindowUsable(window),
     placeholderData: keepPreviousData,
     queryFn: async ({ signal }): Promise<TimeseriesReport> => {
       if (useMock) return mockTimeseries(window, dimension, metric);
@@ -96,6 +100,7 @@ export function useReportsTimeseries({ window, dimension, metric, enabled = true
 export function useReportsLatency(window: TimeWindow) {
   return useQuery({
     queryKey: ["reports", "latency", ...timeWindowKey(window)],
+    enabled: timeWindowUsable(window),
     placeholderData: keepPreviousData,
     queryFn: async ({ signal }): Promise<LatencyReport> => {
       if (useMock) return mockLatency(window);
@@ -146,7 +151,7 @@ export function useReportsFlow({
   const narrowedKey = `${hidden}|${focus.trim()}|${q.trim()}|${topN}`;
   return useQuery({
     queryKey: ["reports", "flow", ...timeWindowKey(window), metric, narrowedKey],
-    enabled,
+    enabled: enabled && timeWindowUsable(window),
     placeholderData: keepPreviousData,
     queryFn: async ({ signal }): Promise<FlowReport> => {
       if (useMock) return mockFlow(metric, collapse, { focus, q, topN });

@@ -48,7 +48,7 @@ import {
 } from "@/components/logs/query";
 import { QuerySyntaxHelp } from "@/components/logs/query-syntax-help";
 import type { LogListResponse, LogRow } from "@/components/logs/types";
-import { TimeRangePicker } from "@/components/time-range-picker";
+import { TimeRangePicker, timeWindowUsable } from "@/components/time-range-picker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
@@ -155,8 +155,11 @@ export function LogsPage() {
   // 耗时语义色的分位锚（W4-F）：与 /admin/logs 同窗口并发拉取。窗口缺省时不传
   // from/to（后端缺省=全时段）；取 all 块——全样本、不过滤 ttft>0 配对，非流式
   // 行的真实耗时也参与锚定（DESIGN-AUDIT §11）。
+  // W6 票 16：超界自定义窗不发请求（与看板同一扇门）；失败不再静默——下方有可见错误态，
+  // 通知中心条目由 lib/api 的票 07 查询失败语义统一去重落条。
   const latencyQuery = useQuery({
     queryKey: ["logs", "latency", applied.from_ms ?? 0, applied.to_ms ?? 0],
+    enabled: timeWindowUsable(applied.draft.window),
     placeholderData: keepPreviousData,
     queryFn: ({ signal }): Promise<LatencyReport> => {
       if (useMock) {
@@ -359,6 +362,18 @@ export function LogsPage() {
           </p>
         ) : null}
       </form>
+
+      {latencyQuery.isError && (
+        <div className="flex flex-wrap items-center gap-2 text-2xs text-danger-text">
+          <span className="min-w-0 truncate">
+            延迟分位加载失败：
+            {latencyQuery.error instanceof Error ? latencyQuery.error.message : "请稍后重试"}
+          </span>
+          <Button variant="outline" size="dense" onClick={() => void latencyQuery.refetch()}>
+            重试
+          </Button>
+        </div>
+      )}
 
       {logsQuery.isError && !logsQuery.data ? (
         <div className="rounded-lg border border-border bg-surface px-6 py-12 text-center">
