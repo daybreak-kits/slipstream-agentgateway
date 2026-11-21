@@ -1,12 +1,13 @@
 """Meta routes the frontend already calls but the skeleton lacked (task-170).
 
-Four endpoints, all additive and isolated here so other router owners are not
+Five endpoints, all additive and isolated here so other router owners are not
 touched:
 
 * GET/PUT /admin/settings      - app_settings key/value store (label + updated_at)
 * GET /admin/audit-logs        - paged, filterable audit trail
 * GET /admin/config/revisions/latest - newest revision (404 when none)
 * GET /admin/overview          - alias of /admin/reports/overview
+* GET /admin/system-status     - daily status check results + notices (W6 ticket 08)
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from l01_core.timeutil import ms_to_iso, now_ms
 from l03_adapters.spi import DataPlaneAdapter
 from l04_repo.orm import AppSettingORM, AuditLogORM, ConfigRevisionORM
 from l04_repo.repository import get_setting, put_setting
-from l05_service import auth, settings_schema
+from l05_service import auth, settings_schema, status_notice
 from l06_api.deps import current_principal, get_adapter, require, session_of
 from l06_api.routers_config import _body as revision_body
 from l06_api.routers_reports import overview as reports_overview
@@ -116,6 +117,16 @@ def put_settings(
     payload_out = _settings_payload(session)
     payload_out["values"] = accepted
     return payload_out
+
+
+@router.get("/admin/system-status")
+def system_status(session: Session = Depends(session_of)) -> dict[str, Any]:
+    """每日状态检查结果与当前提醒（W6 ticket 08）；通知中心轮询此端点。
+
+    全局会话门已挡未登录；不设权限键——状态提醒面向所有登录用户的通知中心，
+    权限收紧会让成员端轮询 403 并在通知中心刷查询失败（票07 语义）。
+    """
+    return status_notice.read_status(session)
 
 
 @router.get("/admin/connection")
