@@ -15,6 +15,8 @@ import type {
 } from "./report-types";
 import type { TimeWindow } from "@/components/time-range-picker";
 
+import { flowChainOf, flowMatchNodes } from "./flow-search";
+
 const ESTIMATE = "mock 数据：词元含缓存估算（阶段 B 待接入）";
 const CURRENCY = "CNY";
 
@@ -332,20 +334,68 @@ export function mockHeatmap(range: HeatmapRange, metric: "tokens" | "cost" | "sp
   };
 }
 
-const FLOW_USERS = ["user:alice", "user:bob", "user:carol"];
-const FLOW_KEYS = ["key:sk-a1", "key:sk-b2", "key:sk-c3"];
-const FLOW_MODELS = ["model:glm", "model:fast", "model:claude"];
-const FLOW_UMODELS = ["umodel:glm-5.3", "umodel:claude-sonnet-4.5", "umodel:gpt-5.2", "umodel:qwen3-max"];
-const FLOW_CHANNELS = ["channel:智谱", "channel:OpenRouter", "channel:青岚云"];
+/**
+ * mock 路径表：每行一条完整五段路径（用户, 密钥, 公开模型, 上游模型, 渠道）。
+ * 与真实后端同构：所有 link 都由路径投影而来，collapse/focus/q/topN 在同一份
+ * 路径上按后端语义运算（W6 票 17，web/scripts/check-flow-mock.mjs 钉住）。
+ */
+const FLOW_PATHS: Array<[string, string, string, string, string]> = [
+  ["user:alice", "key:sk-a1", "model:glm", "umodel:glm-5.3", "channel:智谱"],
+  ["user:alice", "key:sk-a1", "model:fast", "umodel:qwen3-max", "channel:OpenRouter"],
+  ["user:alice", "key:sk-a1", "model:claude", "umodel:claude-sonnet-4.5", "channel:青岚云"],
+  ["user:bob", "key:sk-b2", "model:glm", "umodel:glm-5.3", "channel:智谱"],
+  ["user:bob", "key:sk-b2", "model:fast", "umodel:qwen3-max", "channel:OpenRouter"],
+  ["user:bob", "key:sk-b2", "model:claude", "umodel:gpt-5.2", "channel:智谱"],
+  ["user:carol", "key:sk-c3", "model:glm", "umodel:glm-5.3", "channel:智谱"],
+  ["user:carol", "key:sk-c3", "model:claude", "umodel:claude-sonnet-4.5", "channel:青岚云"],
+  ["user:carol", "key:sk-c3", "model:claude", "umodel:gpt-5.2", "channel:智谱"],
+];
+
+const FLOW_STAGE_TABLE: Array<{ id: FlowReport["node_meta"][string]["stage"]; label: string }> = [
+  { id: "user", label: "用户" },
+  { id: "key", label: "连接密钥" },
+  { id: "model", label: "公开模型" },
+  { id: "upstream", label: "上游模型" },
+  { id: "channel", label: "上游" },
+];
+
+/** mock 收窄参数：与后端 focus/q/top_n 同名同义（见 use-reports FlowParams）。 */
+export interface MockFlowNarrowing {
+  focus?: string;
+  q?: string;
+  topN?: number;
+}
 
 /** mock 分流：五段 用户 → 连接密钥 → 公开模型 → 上游模型 → 上游渠道。 */
-export function mockFlow(metric: "requests" | "tokens", collapse: string[] = []): FlowReport {
-  // mock 层不重算投影：隐藏轴的真实重连由后端 collapse 完成，浏览器冒烟走真实 API。
-  void collapse;
+export function mockFlow(
+  metric: "requests" | "tokens",
+  collapse: string[] = [],
+  narrowing: MockFlowNarrowing = {},
+): FlowReport {
+  // 投影与后端同语义：隐藏段由路径重连（W5-01 splice 跨接的 mock 版），
+  // q/focus 取聚合图闭包，topN 折尾为 other:<stage>，totals 恒等于窗口全量。
   const rand = seeded(metric.length * 20261117);
-  const links: FlowLink[] = [];
+  const hidden = new Set(collapse);
+  const visibleStages = FLOW_STAGE_TABLE.filter((stage) => !hidden.has(stage.id));
+  // 与状态层的下限守卫对齐：mock 里再兜一次「至少两个可见段」。
+  const stages = visibleStages.length >= 2 ? visibleStages : FLOW_STAGE_TABLE;
+  const stageIndexOf = (stage: string) => FLOW_STAGE_TABLE.findIndex((item) => item.id === stage);
+
+  type Slot = {
+    source: string;
+    target: string;
+    requests: number;
+    tokens: number;
+    cost_micro: number;
+    charge_micro: number;
+    value: number;
+    __source: string;
+    __target: string;
+  };
+  const links = new Map<string, Slot>();
   const node_meta: FlowReport["node_meta"] = {};
-  const values = new Map<string, number>();
+  const node_values = new Map<string, number>();
+  const totals = { requests: 0, tokens: 0, cost_micro: 0, charge_micro: 0 };
 
   const label = (id: string): string => id.slice(id.indexOf(":") + 1);
   const stageOf = (id: string): FlowReport["node_meta"][string]["stage"] => {
@@ -353,71 +403,161 @@ export function mockFlow(metric: "requests" | "tokens", collapse: string[] = [])
     if (id.startsWith("key:")) return "key";
     if (id.startsWith("model:")) return "model";
     if (id.startsWith("umodel:")) return "upstream";
+    if (id.startsWith("other:")) return id.slice("other:".length) as FlowReport["node_meta"][string]["stage"];
     return "channel";
   };
   const register = (id: string) => {
     if (!node_meta[id]) node_meta[id] = { id, label: label(id), stage: stageOf(id), value: 0 };
   };
-  const push = (source: string, target: string, requests: number) => {
+
+  for (const path of FLOW_PATHS) {
+    const [user, key, model, umodel, channel] = path;
+    const requests = Math.round(240 + rand() * 420);
     const tokens = Math.round(requests * (620 + rand() * 260));
-    const value = metric === "tokens" ? tokens : requests;
-    register(source);
-    register(target);
-    values.set(source, (values.get(source) ?? 0) + value);
-    values.set(target, (values.get(target) ?? 0) + value);
-    links.push({ source, target, requests, tokens, value });
-  };
-
-  FLOW_USERS.forEach((user, index) =>
-    push(user, FLOW_KEYS[index % FLOW_KEYS.length] ?? "key:sk-a1", Math.round(240 + rand() * 420)),
-  );
-  const weights = [0.42, 0.33, 0.25];
-  FLOW_KEYS.forEach((key, keyIndex) =>
-    FLOW_MODELS.forEach((model, modelIndex) => {
-      const weight = weights[modelIndex] ?? 0.2;
-      push(key, model, Math.round((520 + keyIndex * 90) * weight));
-    }),
-  );
-  // 每个公开模型显式挂到上游模型：漏挂的节点在桑基图里会孤立到第 0 列（红点），
-  // 所以这里必须覆盖 FLOW_UMODELS 的全部四项。
-  const MODEL_TO_UMODELS: Record<string, string[]> = {
-    "model:glm": ["umodel:glm-5.3"],
-    "model:fast": ["umodel:qwen3-max"],
-    "model:claude": ["umodel:claude-sonnet-4.5", "umodel:gpt-5.2"],
-  };
-  FLOW_MODELS.forEach((model) => {
-    for (const target of MODEL_TO_UMODELS[model] ?? [FLOW_UMODELS[0] ?? "umodel:glm-5.3"]) {
-      push(model, target, Math.round(260 + rand() * 220));
+    const charge = requests * 5_200;
+    const cost = requests * 3_360;
+    const allNodes = [user, key, model, umodel, channel];
+    const visibleNodes = allNodes.filter((id) =>
+      stages.some((item) => item.id === stageOf(id)),
+    );
+    for (const id of visibleNodes) register(id);
+    for (let position = 0; position < visibleNodes.length - 1; position += 1) {
+      const source = visibleNodes[position] ?? "";
+      const target = visibleNodes[position + 1] ?? "";
+      const slotKey = source + "\n" + target;
+      const slot = links.get(slotKey) ?? {
+        source,
+        target,
+        requests: 0,
+        tokens: 0,
+        cost_micro: 0,
+        charge_micro: 0,
+        value: 0,
+        __source: source,
+        __target: target,
+      };
+      slot.requests += requests;
+      slot.tokens += tokens;
+      if (position === 0) slot.charge_micro += charge;
+      if (position === visibleNodes.length - 2) slot.cost_micro += cost;
+      links.set(slotKey, slot);
     }
-  });
-  FLOW_UMODELS.forEach((model, index) => {
-    const target = FLOW_CHANNELS[index % FLOW_CHANNELS.length] ?? FLOW_CHANNELS[0];
-    if (target) push(model, target, Math.round(160 + rand() * 180));
-  });
-
-  for (const [id, meta] of Object.entries(node_meta)) {
-    meta.value = values.get(id) ?? 0;
+    const step = metric === "tokens" ? tokens : requests;
+    for (const id of visibleNodes) node_values.set(id, (node_values.get(id) ?? 0) + step);
+    totals.requests += requests;
+    totals.tokens += tokens;
+    totals.cost_micro += cost;
+    totals.charge_micro += charge;
   }
 
-  const totals = {
-    requests: links.filter((link) => link.source.startsWith("user:")).reduce((sum, link) => sum + link.requests, 0),
-    tokens: links.filter((link) => link.source.startsWith("user:")).reduce((sum, link) => sum + link.tokens, 0),
-    cost_micro: 62_400_000,
-    charge_micro: 96_800_000,
+  // 可选收窄（与后端同序）：q → focus → topN；闭包计算复用 flow-search。
+  const graph = { nodes: Object.keys(node_meta), node_meta, links: [...links.values()] };
+  const dropOutside = (keep: Set<string>) => {
+    for (const id of Object.keys(node_meta)) {
+      if (!keep.has(id)) delete node_meta[id];
+    }
+    for (const [slotKey, slot] of [...links.entries()]) {
+      if (!keep.has(slot.__source) || !keep.has(slot.__target)) links.delete(slotKey);
+    }
   };
+  const query = (narrowing.q ?? "").trim();
+  if (query) {
+    dropOutside(flowChainOf(graph, flowMatchNodes(graph, query)));
+  }
+  const focusId = (narrowing.focus ?? "").trim();
+  if (focusId) {
+    dropOutside(flowChainOf(graph, focusId in node_meta ? [focusId] : []));
+  }
+  const topN = narrowing.topN ?? 0;
+  if (topN > 0) {
+    const byStage = new Map<string, string[]>();
+    for (const [id, meta] of Object.entries(node_meta)) {
+      const bucket = byStage.get(meta.stage) ?? [];
+      bucket.push(id);
+      byStage.set(meta.stage, bucket);
+    }
+    const remap = new Map<string, string>();
+    const absorbed = new Map<string, number>();
+    for (const stage of stages) {
+      const bucket = byStage.get(stage.id) ?? [];
+      if (bucket.length <= topN) continue;
+      const ranked = [...bucket].sort((left, right) => {
+        const valueDiff = (node_values.get(right) ?? 0) - (node_values.get(left) ?? 0);
+        if (valueDiff !== 0) return valueDiff;
+        const labelDiff = (node_meta[left]?.label ?? "").localeCompare(node_meta[right]?.label ?? "");
+        return labelDiff !== 0 ? labelDiff : left.localeCompare(right);
+      });
+      const otherId = "other:" + stage.id;
+      let value = 0;
+      for (const dropped of ranked.slice(topN)) {
+        remap.set(dropped, otherId);
+        value += node_values.get(dropped) ?? 0;
+        delete node_meta[dropped];
+      }
+      absorbed.set(otherId, value);
+    }
+    if (absorbed.size > 0) {
+      const folded = new Map<string, Slot>();
+      for (const slot of links.values()) {
+        const source = remap.get(slot.__source) ?? slot.__source;
+        const target = remap.get(slot.__target) ?? slot.__target;
+        const slotKey = source + "\n" + target;
+        const merged = folded.get(slotKey) ?? {
+          source,
+          target,
+          requests: 0,
+          tokens: 0,
+          cost_micro: 0,
+          charge_micro: 0,
+          value: 0,
+          __source: source,
+          __target: target,
+        };
+        merged.requests += slot.requests;
+        merged.tokens += slot.tokens;
+        merged.cost_micro += slot.cost_micro;
+        merged.charge_micro += slot.charge_micro;
+        folded.set(slotKey, merged);
+      }
+      links.clear();
+      for (const [slotKey, slot] of folded) links.set(slotKey, slot);
+      for (const [otherId, value] of absorbed) {
+        node_meta[otherId] = { id: otherId, label: "其他", stage: stageOf(otherId), value };
+        node_values.set(otherId, value);
+      }
+    }
+  }
+
+  const linkRows: FlowLink[] = [...links.values()]
+    .sort(
+      (left, right) =>
+        left.__source.localeCompare(right.__source) || left.__target.localeCompare(right.__target),
+    )
+    .map((slot) => ({
+      source: slot.source,
+      target: slot.target,
+      requests: slot.requests,
+      tokens: slot.tokens,
+      cost_micro: slot.cost_micro,
+      charge_micro: slot.charge_micro,
+      value: metric === "tokens" ? slot.tokens : slot.requests,
+    }));
+  const nodes = Object.keys(node_meta).sort((left, right) => {
+    const stageDiff = stageIndexOf(stageOf(left)) - stageIndexOf(stageOf(right));
+    if (stageDiff !== 0) return stageDiff;
+    const labelDiff = (node_meta[left]?.label ?? "").localeCompare(node_meta[right]?.label ?? "");
+    return labelDiff !== 0 ? labelDiff : left.localeCompare(right);
+  });
+  for (const [id, meta] of Object.entries(node_meta)) {
+    meta.value = node_values.get(id) ?? 0;
+  }
 
   return {
     metric,
-    nodes: Object.keys(node_meta),
+    nodes,
     node_meta,
-    links,
-    stages: [
-      { id: "user", label: "用户" },
-      { id: "key", label: "连接密钥" },
-      { id: "model", label: "公开模型" },
-      { id: "upstream", label: "上游模型" },
-      { id: "channel", label: "上游" },
-    ],
+    links: linkRows,
+    stages: stages.map((stage) => ({ id: stage.id, label: stage.label })),
     totals,
     currency: CURRENCY,
     fx_missing: [],

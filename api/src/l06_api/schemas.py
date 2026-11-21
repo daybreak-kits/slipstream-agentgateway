@@ -822,3 +822,58 @@ class MyModelOut(BaseModel):
     model_type: str
     parameters: MyModelParameters
     sources: list[str]
+
+
+class FlowStageOut(BaseModel):
+    """GET /admin/reports/flow：一个可见阶段（collapse 后只含剩余段）。"""
+
+    id: str
+    label: str
+
+
+class FlowNodeMetaOut(BaseModel):
+    """flow 节点元数据：稳定 id + 展示名 + 所属阶段 + 指标值（窗口口径）。"""
+
+    id: str
+    label: str
+    stage: Literal["user", "key", "model", "upstream", "channel"]
+    value: int
+
+
+class FlowLinkOut(BaseModel):
+    """flow 边：相邻可见段之间的聚合值；charge 锚首边、cost 锚末边。"""
+
+    source: str
+    target: str
+    requests: int
+    tokens: int
+    cost_micro: int = 0
+    charge_micro: int = 0
+    value: int
+
+
+class FlowTotalsOut(BaseModel):
+    """flow totals：恒等于窗口全量（不随 collapse/focus/q/top_n 变化）。"""
+
+    requests: int
+    tokens: int
+    cost_micro: int = 0
+    charge_micro: int = 0
+
+
+class FlowReportOut(BaseModel):
+    """GET /admin/reports/flow 响应（W6 票 17 进契约；顶层键序即线格式键序）。"""
+
+    metric: Literal["requests", "tokens"]
+    nodes: list[str]
+    node_meta: dict[str, FlowNodeMetaOut]
+    links: list[FlowLinkOut]
+    stages: list[FlowStageOut]
+    totals: FlowTotalsOut
+    currency: str
+    fx_missing: list[str]
+    estimate_note: str
+    range: str
+    from_ms: int
+    to_ms: int
+    timezone: str

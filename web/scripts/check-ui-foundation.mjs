@@ -1506,14 +1506,44 @@ check("分流图隐藏阶段：前端不做跨接重连，隐藏集合作为后�
   includesAll(panel, ["hiddenStages", "collapse: hiddenStages"], "看板 hiddenStages 接线");
 });
 
-check("分流图隐藏阶段：mock 不重算投影，隐藏到两段即禁用请求", () => {
+check("分流图隐藏阶段：mock 按路径投影 collapse（W6 票 17），隐藏到两段即禁用请求", () => {
   const mocks = read("src/components/dashboard/report-mocks.ts");
-  includesAll(mocks, ["mockFlow(metric", "mock 层不重算投影"], "mock 投影口径");
+  includesAll(mocks, ["FLOW_PATHS", "flowChainOf", "flowMatchNodes"], "mock 路径投影与闭包复用");
   const panel = read("src/components/dashboard/trend-panel.tsx");
   expect(
     /FLOW_STAGES\.length - hiddenStages\.length >= 2/.test(panel),
     "隐藏后不足两段时必须禁用 flow 请求（至少保留 2 段）",
   );
+});
+
+// ---------- W6 ticket 17：分流图重构与搜索/focus ----------
+check("分流图票 17：replaceMerge 替换 series、轴右竖排、搜索左、无已隐藏芯片块", () => {
+  const chart = read("src/components/dashboard/flow-chart.tsx");
+  includesAll(
+    chart,
+    [
+      'id: "flow-sankey"',
+      "replaceMerge: [\"series\"]",
+      'data-slot="flow-stage-axis"',
+      'data-slot="flow-search-input"',
+      "仅显示搜索目标",
+      "chart-frame",
+    ],
+    "分流图票 17 结构",
+  );
+  expect(!chart.includes("已隐藏："), "flow-chart 不得再渲染「已隐藏」芯片块（卡片高度跳动源）");
+  const dash = read("src/pages/dashboard.tsx");
+  expect(!dash.includes("RequestChain"), "看板不得再引用 RequestChain（独立请求链路面板已删，组件留给登录页）");
+  includesAll(dash, ["查看分流"], "页头必须保留查看分流入口");
+  includesAll(
+    read("src/components/dashboard/flow-search.ts"),
+    ["flowChainOf", "flowSearchView", "flowMatchNodes"],
+    "搜索闭包纯函数层",
+  );
+  const panel = read("src/components/dashboard/trend-panel.tsx");
+  includesAll(panel, ["FLOW_SERVER_SEARCH_MIN_NODES", "serverNarrowed"], "大数据搜索必须走后端 q（前端不硬算）");
+  const hooks = read("src/components/dashboard/use-reports.ts");
+  includesAll(hooks, ["focus", "q", "topN"], "flow hook 透传 focus/q/topN（后端聚合过滤）");
 });
 
 // ---------- 六期：错误治理（W6 ticket 07）----------

@@ -7,7 +7,7 @@ export type PageSizeTier = (typeof PAGE_SIZE_TIERS)[number];
 
 export interface AdoptModelsDevBatchResult {
   refreshed: boolean;
-  snapshot?: Record<string, unknown>;
+  snapshot?: Record<string, number>;
   total: number;
   matched: number;
   filled_models: number;
@@ -24,7 +24,7 @@ export interface AdoptModelsDevResult {
   provider?: string;
   model?: string;
   refreshed?: boolean;
-  results?: Record<string, unknown>;
+  results?: Record<string, string>;
   filled?: string[];
   params_source?: string;
 }
@@ -94,6 +94,51 @@ export interface CorsConfig {
   allow_methods?: string[];
   allow_headers?: string[];
   max_age?: number | null;
+}
+
+export interface FlowLinkOut {
+  source: string;
+  target: string;
+  requests: number;
+  tokens: number;
+  cost_micro?: number;
+  charge_micro?: number;
+  value: number;
+}
+
+export interface FlowNodeMetaOut {
+  id: string;
+  label: string;
+  stage: "user" | "key" | "model" | "upstream" | "channel";
+  value: number;
+}
+
+export interface FlowReportOut {
+  metric: "requests" | "tokens";
+  nodes: string[];
+  node_meta: Record<string, FlowNodeMetaOut>;
+  links: FlowLinkOut[];
+  stages: FlowStageOut[];
+  totals: FlowTotalsOut;
+  currency: string;
+  fx_missing: string[];
+  estimate_note: string;
+  range: string;
+  from_ms: number;
+  to_ms: number;
+  timezone: string;
+}
+
+export interface FlowStageOut {
+  id: string;
+  label: string;
+}
+
+export interface FlowTotalsOut {
+  requests: number;
+  tokens: number;
+  cost_micro?: number;
+  charge_micro?: number;
 }
 
 export interface FxPut {
@@ -177,7 +222,7 @@ export interface McpServerIn {
   path?: string;
   cmd?: string;
   args?: string[];
-  env?: Record<string, unknown>;
+  env?: Record<string, string>;
 }
 
 export interface ModelBulk {

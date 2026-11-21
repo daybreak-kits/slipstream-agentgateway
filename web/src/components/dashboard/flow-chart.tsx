@@ -1,17 +1,19 @@
-import { X } from "lucide-react";
+import { Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as echarts from "echarts/core";
 import { SankeyChart } from "echarts/charts";
 import { TooltipComponent } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 
-import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { fmtInt } from "@/lib/format";
 import { usePermissions } from "@/lib/permissions";
 
 import { fmtMoney } from "./chart-format";
 import { useChartPalette, type ChartPalette } from "./chart-theme";
+import { flowSearchView } from "./flow-search";
 import { FLOW_STAGES, type FlowReport } from "./report-types";
 
 echarts.use([SankeyChart, TooltipComponent, CanvasRenderer]);
@@ -44,14 +46,36 @@ export interface FlowChartProps {
   /** 当前被隐藏的阶段（竖轴）id 列表。 */
   hiddenStages: string[];
   onToggleStage: (stageId: string) => void;
+  /** 搜索框状态归 TrendPanel（服务端窄化模式要把 q 传给后端）。 */
+  query: string;
+  onQueryChange: (value: string) => void;
+  /** 仅显示搜索目标：只保留目标前后整条链。 */
+  onlyChain: boolean;
+  onOnlyChainChange: (value: boolean) => void;
+  /** 大数据服务端窄化：返回的已经是链路子图，前端不再做闭包/高亮。 */
+  serverNarrowed: boolean;
 }
 
 /**
  * 五段桑基：用户 → 连接密钥 → 公开模型 → 上游模型 → 上游渠道。
- * 五段竖轴都可隐藏：点节点隐藏该段，隐藏后图顶部出现「轴名芯片」点击恢复，
- * 图底部一行常驻五段轴名（隐藏的置灰）。echarts 按需引入，实例复用不 dispose（三期性能修）。
+ * 布局（W6 票 17）：搜索框在左上，「仅显示搜索目标」开关随行；阶段轴移到卡片
+ * 右侧竖排（隐藏项删除线可点恢复），「已隐藏」芯片块已删除——恢复入口只有轴，
+ * 卡片高度不随隐藏状态变化（画布恒走 chart-frame token）。
+ * 搜索高亮目标及其祖先/后代链路（flow-search 单向闭包，与后端 focus/q 同语义）；
+ * 大数据（>阈值）由后端 q 过滤，前端不做闭包。
+ * echarts 按需引入，实例复用不 dispose；setOption 用 replaceMerge 替换 series
+ * （固定 series.id），避免 notMerge 整体重建后 hover 触发 getLayout 未定义崩溃。
  */
-export function FlowChart({ data, hiddenStages, onToggleStage }: FlowChartProps) {
+export function FlowChart({
+  data,
+  hiddenStages,
+  onToggleStage,
+  query,
+  onQueryChange,
+  onlyChain,
+  onOnlyChainChange,
+  serverNarrowed,
+}: FlowChartProps) {
   const { can } = usePermissions();
   const palette = useChartPalette();
   // 卡片四态切到内容时容器才挂载，用 state 做 callback ref 才不会错过 init 时机。
@@ -74,12 +98,29 @@ export function FlowChart({ data, hiddenStages, onToggleStage }: FlowChartProps)
   const chartBlocked = visibleStages.length < 2;
   const canHideMoreRef = useRef(canHideMore);
   canHideMoreRef.current = canHideMore;
+  // 下限反馈：到下限后点节点不再静默忽略，提示短暂高亮（纯样式，不改布局）。
+  const [limitFlash, setLimitFlash] = useState(false);
+  const flashTimer = useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
+    };
+  }, []);
+
+  // 搜索闭包（仅前端小数据模式）：命中 + 祖先 + 后代；无命中等价于无高亮。
+  const search =
+    data && !serverNarrowed && query.trim() !== "" ? flowSearchView(data, query) : null;
+  const effectiveSearch = search && search.matchedCount > 0 ? search : null;
+  const chainOnly = Boolean(effectiveSearch && onlyChain);
 
   const option = useMemo(() => {
     if (!data) return null;
     const meta = data.node_meta;
     // 隐藏段由后端按完整路径投影：返回的 links 已重连，前端只负责渲染。
-    const links = data.links;
+    // 仅显示搜索目标时前端再过滤一次（保留链上节点之间的边）。
+    const links = chainOnly
+      ? data.links.filter((link) => effectiveSearch?.chainLinkKeys.has(link.source + "\n" + link.target))
+      : data.links;
     if (links.length === 0) return null;
 
     const used = new Set<string>();
@@ -126,18 +167,37 @@ export function FlowChart({ data, hiddenStages, onToggleStage }: FlowChartProps)
       },
       series: [
         {
+          id: "flow-sankey",
           type: "sankey",
-          data: [...used].map((id) => ({
-            name: id,
-            itemStyle: { color: stageColor(id, data, palette), borderWidth: 0 },
-            label: {
-              formatter: (params: { name?: string }) =>
-                shortLabel(meta[String(params.name ?? "")]?.label ?? String(params.name ?? "")),
-              color: palette.text,
-              fontSize: 11,
+          data: [...used].map((id) => {
+            const dimmed = effectiveSearch ? !effectiveSearch.chainNodeIds.has(id) : false;
+            return {
+              name: id,
+              itemStyle: {
+                color: stageColor(id, data, palette),
+                borderWidth: 0,
+                opacity: dimmed ? 0.12 : 1,
+              },
+              label: {
+                formatter: (params: { name?: string }) =>
+                  shortLabel(meta[String(params.name ?? "")]?.label ?? String(params.name ?? "")),
+                color: dimmed ? palette.faint : palette.text,
+                opacity: dimmed ? 0.55 : 1,
+                fontSize: 11,
+              },
+            };
+          }),
+          links: links.map((link) => ({
+            ...link,
+            lineStyle: {
+              color: "gradient",
+              opacity:
+                effectiveSearch && !effectiveSearch.chainLinkKeys.has(link.source + "\n" + link.target)
+                  ? 0.05
+                  : 0.26,
+              curveness: 0.5,
             },
           })),
-          links,
           emphasis: { focus: "adjacency" },
           nodeWidth: 12,
           nodeGap: 8,
@@ -150,17 +210,23 @@ export function FlowChart({ data, hiddenStages, onToggleStage }: FlowChartProps)
         },
       ],
     };
-  }, [data, palette, canCost, canSpend]);
+  }, [data, palette, canCost, canSpend, effectiveSearch, chainOnly]);
 
   // 实例只随容器挂载/卸载创建销毁一次；点击事件与 resize 观察也只绑一次。
   useEffect(() => {
     if (!element) return;
     const chart = echarts.getInstanceByDom(element) ?? echarts.init(element, undefined, { renderer: "canvas" });
     chartRef.current = chart;
-    // 节点点击 = 隐藏该节点所在段（竖轴）；恢复走顶部芯片或底部轴名行。
+    // 节点点击 = 隐藏该节点所在段（竖轴）；恢复走右侧阶段轴。
     const handleClick = (params: { dataType?: string; name?: unknown }) => {
       if (params.dataType !== "node") return;
-      if (!canHideMoreRef.current) return;
+      if (!canHideMoreRef.current) {
+        // 到下限后点节点给反馈：提示短暂标红，不再静默忽略。
+        setLimitFlash(true);
+        if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
+        flashTimer.current = window.setTimeout(() => setLimitFlash(false), 2000);
+        return;
+      }
       const stage = dataRef.current?.node_meta[String(params.name ?? "")]?.stage;
       if (stage) toggleRef.current(stage);
     };
@@ -177,8 +243,10 @@ export function FlowChart({ data, hiddenStages, onToggleStage }: FlowChartProps)
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart || chart.isDisposed()) return;
-    // 隐藏段过滤掉全部链路时 option 为 null：清空画布，等底部轴名行恢复。
-    if (option) chart.setOption(option, true);
+    // 隐藏段过滤掉全部链路时 option 为 null：清空画布，等右侧阶段轴恢复。
+    // replaceMerge 按固定 series.id 整体替换序列：悬停中的旧元素随 series 一起
+    // 被安全回收，不会在 mouseout 时踩到 getLayout 未定义（W6 票 17）。
+    if (option) chart.setOption(option, { replaceMerge: ["series"] });
     else chart.clear();
   }, [option]);
 
@@ -203,72 +271,125 @@ export function FlowChart({ data, hiddenStages, onToggleStage }: FlowChartProps)
     }
   };
 
+  const stageCount = (stageId: string) => {
+    let count = 0;
+    for (const node of Object.values(data?.node_meta ?? {})) {
+      if (node.stage === stageId) count += 1;
+    }
+    return count;
+  };
+
+  const searchStatus = serverNarrowed
+    ? query.trim() === ""
+      ? ""
+      : data && data.links.length > 0
+        ? `服务端已过滤：链 ${data.nodes.length} 节点 / ${data.links.length} 边`
+        : `没有匹配「${query.trim()}」的节点`
+    : effectiveSearch
+      ? chainOnly
+        ? `仅显示链路：${effectiveSearch.chainNodeCount} 节点 / ${effectiveSearch.chainLinkCount} 边`
+        : `命中 ${effectiveSearch.matchedCount} · 链路 ${effectiveSearch.chainNodeCount} 节点 / ${effectiveSearch.chainLinkCount} 边`
+      : query.trim() === ""
+        ? ""
+        : `没有匹配「${query.trim()}」的节点`;
+
   return (
-    <div className="space-y-2">
-      {hiddenStages.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-2xs text-faint">已隐藏：</span>
-          {stages
-            .filter((stage) => hiddenSet.has(stage.id))
-            .map((stage) => (
-              <Button
-                key={stage.id}
-                variant="outline"
-                size="dense"
-                onClick={() => onToggleStage(stage.id)}
-                title="点击恢复该段"
-                className="gap-1 px-2 text-2xs"
-              >
-                {stage.label}
-                <X className="h-3 w-3 text-faint" strokeWidth={2} aria-hidden="true" />
-              </Button>
-            ))}
-        </div>
-      )}
-      <div className="relative">
-        <div
-          ref={setElement}
-          className="chart-frame w-full min-w-0"
-          role="img"
-          aria-label="调用流向桑基图：用户到连接密钥、公开模型、上游模型、上游渠道"
-        />
-        {chartBlocked && (
-          <div
-            role="status"
-            className="absolute inset-0 flex items-center justify-center rounded-card border border-dashed border-border bg-card px-6 text-center text-sm text-muted-foreground"
-          >
-            至少保留两个可见阶段：请先恢复一个已隐藏阶段，再查看分流图
-          </div>
-        )}
-      </div>
+    <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-2xs text-faint">阶段轴（点击隐藏 / 恢复）</span>
-        <ToggleGroup
-          type="multiple"
-          value={visibleStages}
-          onValueChange={toggleViaGroup}
-          aria-label="分流阶段轴"
-          className="flex-wrap justify-start"
+        <label className="relative flex min-w-0 flex-1 basis-64 items-center sm:max-w-72">
+          <Search aria-hidden="true" className="pointer-events-none absolute left-2 h-3.5 w-3.5 text-faint" />
+          <Input
+            value={query}
+            onChange={(event) => onQueryChange(event.target.value)}
+            placeholder="搜索用户 / 密钥 / 模型 / 渠道"
+            aria-label="搜索分流节点"
+            data-slot="flow-search-input"
+            className="h-8 pl-7 text-2xs"
+          />
+        </label>
+        {!serverNarrowed && (
+          <label className="flex shrink-0 items-center gap-1.5 text-2xs text-body">
+            <Switch
+              checked={onlyChain}
+              onCheckedChange={onOnlyChainChange}
+              disabled={!effectiveSearch}
+              aria-label="仅显示搜索目标"
+              data-slot="flow-only-chain"
+            />
+            仅显示搜索目标
+          </label>
+        )}
+        <span data-slot="flow-search-status" role="status" className="min-w-0 truncate text-2xs text-faint">
+          {searchStatus}
+        </span>
+      </div>
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_150px]">
+        <div className="relative min-w-0">
+          <div
+            ref={setElement}
+            className="chart-frame w-full min-w-0"
+            role="img"
+            aria-label="调用流向桑基图：用户到连接密钥、公开模型、上游模型、上游渠道"
+          />
+          {chartBlocked && (
+            <div
+              role="status"
+              className="absolute inset-0 flex items-center justify-center rounded-card border border-dashed border-border bg-card px-6 text-center text-sm text-muted-foreground"
+            >
+              至少保留两个可见阶段：请先恢复一个已隐藏阶段，再查看分流图
+            </div>
+          )}
+        </div>
+        <aside
+          data-slot="flow-stage-axis"
+          className="flex flex-col gap-1.5 lg:border-l lg:border-border lg:pl-3"
         >
-          {stages.map((stage) => (
-            <ToggleGroupItem
-              key={stage.id}
-              value={stage.id}
-              disabled={!hiddenSet.has(stage.id) && !canHideMore}
+          <span className="text-2xs text-faint">阶段轴（点击隐藏 / 恢复）</span>
+          <ToggleGroup
+            type="multiple"
+            value={visibleStages}
+            onValueChange={toggleViaGroup}
+            aria-label="分流阶段轴"
+            className="flex-col items-stretch justify-start gap-1"
+          >
+            {stages.map((stage) => {
+              const index = FLOW_STAGES.findIndex((item) => item.id === stage.id);
+              const color = palette.series[(index < 0 ? 0 : index) % palette.series.length] ?? palette.primary;
+              const hidden = hiddenSet.has(stage.id);
+              return (
+                <ToggleGroupItem
+                  key={stage.id}
+                  value={stage.id}
+                  disabled={!hidden && !canHideMore}
+                  aria-label={stage.label}
+                  title={hidden ? "点击恢复该段" : "点击隐藏该段"}
+                  className="h-7 justify-start rounded-control px-2 text-2xs data-[state=on]:text-body"
+                >
+                  <span
+                    aria-hidden="true"
+                    className={"h-2 w-2 shrink-0 rounded-full " + (hidden ? "opacity-30" : "")}
+                    style={{ backgroundColor: color }}
+                  />
+                  <span className={hidden ? "line-through opacity-60" : ""}>{stage.label}</span>
+                  <span className="ml-auto tnum shrink-0 tabular-nums text-faint">
+                    {fmtInt(stageCount(stage.id))}
+                  </span>
+                </ToggleGroupItem>
+              );
+            })}
+          </ToggleGroup>
+          {(!canHideMore || limitFlash) && (
+            <span
+              role="status"
+              data-slot="flow-limit-hint"
               className={
-                "h-6 rounded-control px-2 text-2xs data-[state=on]:text-body " +
-                (hiddenSet.has(stage.id) ? "text-faint line-through opacity-60" : "text-body")
+                "text-2xs " + (limitFlash ? "text-danger-text" : "text-faint")
               }
             >
-              {stage.label}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-        {!canHideMore && !chartBlocked && (
-          <span role="status" className="text-2xs text-faint">
-            已到下限：至少保留两个可见阶段，恢复一段后可继续隐藏
-          </span>
-        )}
+              已到下限：至少保留两个可见阶段，恢复一段后可继续隐藏
+            </span>
+          )}
+        </aside>
       </div>
     </div>
   );
