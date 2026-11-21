@@ -109,7 +109,7 @@ export function PublicPricesSection() {
         return (
           <div className="min-w-0">
             <div className="max-w-72 truncate text-body" title={summary || undefined}>
-              {summary || "—"}
+              {summary || "-"}
             </div>
             <div className="text-2xs text-faint">
               {price.priced_members}/{price.total_members} 已定价 ·{" "}

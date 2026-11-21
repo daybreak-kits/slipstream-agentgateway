@@ -38,7 +38,7 @@ AG 的 `request.body`/`response.body` 是**字符串**；可用 `json()` 解析�
 
 ## 4. 不变量
 
-1. **保护头禁止改写**：`authorization`、`api-key`、`x-api-key`、`cookie`、`set-cookie`、`content-type`、`content-length`、`host`、`x-request-id`——界面即拦截，后端也拒绝。
+1. **保护头禁止改写**：`authorization`、`api-key`、`x-api-key`、`cookie`、`set-cookie`、`content-type`、`content-length`、`host`、`x-request-id`：界面即拦截，后端也拒绝。
 2. 无条件条目只能在末位，否则校验失败。
 3. **体上限**：AG 默认缓冲 2 MiB，超限时 body 变量取不到值；超限请求跳过改写并记录原因，不能报 500。
 4. **流式互斥**：`response_body` 规则仅对非流式生效；流式跳过并记 `rewrite_skipped=stream`。

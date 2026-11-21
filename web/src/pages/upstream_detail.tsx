@@ -295,7 +295,7 @@ export function UpstreamDetailPage() {
       ) : null}
     </span>
   ) : (
-    <span className="text-faint">—</span>
+    <span className="text-faint">-</span>
   );
 
   return (
@@ -422,7 +422,7 @@ export function UpstreamDetailPage() {
                 {upstream?.created_at_ms ? (
                   <span className="tnum">{formatDateTime(upstream.created_at_ms, timezone)}</span>
                 ) : (
-                  <span className="text-faint">—</span>
+                  <span className="text-faint">-</span>
                 )}
               </InfoRow>
               {!isNew ? (

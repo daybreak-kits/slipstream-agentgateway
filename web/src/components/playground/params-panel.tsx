@@ -375,7 +375,7 @@ export function ParamsPanel({
                 id="playground-max-tokens"
                 label="max_tokens"
                 hintKey="maxTokens"
-                range={"1–" + limit}
+                range={"1 至 " + limit}
               >
                 <Input
                   id="playground-max-tokens"
@@ -391,7 +391,7 @@ export function ParamsPanel({
                 id="playground-max-completion-tokens"
                 label="max_completion_tokens"
                 hintKey="maxCompletionTokens"
-                range={"1–" + limit}
+                range={"1 至 " + limit}
               >
                 <Input
                   id="playground-max-completion-tokens"
@@ -478,7 +478,7 @@ export function ParamsPanel({
                 <Input
                   id="playground-top-logprobs"
                   inputMode="numeric"
-                  placeholder="0–20"
+                  placeholder="0 至 20"
                   value={value.topLogprobs}
                   disabled={disabled || !value.logprobs}
                   onChange={(event) => patch({ topLogprobs: event.target.value })}

@@ -414,20 +414,20 @@ function SpendSection() {
       </SettingsTile>
       <SettingsTile title="我的花费" hint="近 30 天 · 营收口径">
         <p className="tnum text-metric font-semibold text-title">
-          {stats.charge_micro === null ? "—" : fmtCny(stats.charge_micro)}
+          {stats.charge_micro === null ? "-" : fmtCny(stats.charge_micro)}
         </p>
       </SettingsTile>
       {showCost && (
         <SettingsTile title="成本" hint="近 30 天 · 上游成本（billing:cost）">
           <p className="tnum text-metric font-semibold text-title">
-            {stats.cost_micro === null || stats.cost_micro === undefined ? "—" : fmtCny(stats.cost_micro)}
+            {stats.cost_micro === null || stats.cost_micro === undefined ? "-" : fmtCny(stats.cost_micro)}
           </p>
         </SettingsTile>
       )}
       {showMargin && (
         <SettingsTile title="毛利" hint="近 30 天 · 花费 − 成本">
           <p className="tnum text-metric font-semibold text-title">
-            {stats.margin_micro === null || stats.margin_micro === undefined ? "—" : fmtCny(stats.margin_micro)}
+            {stats.margin_micro === null || stats.margin_micro === undefined ? "-" : fmtCny(stats.margin_micro)}
           </p>
         </SettingsTile>
       )}

@@ -160,7 +160,7 @@ export function ClientKeysPage() {
       meta: { className: "text-right tnum" },
       cell: (cell) => {
         const usedAt = cell.row.original.last_used_at_ms;
-        return <span className="tnum text-2xs">{usedAt ? fmtMs(usedAt) : "—"}</span>;
+        return <span className="tnum text-2xs">{usedAt ? fmtMs(usedAt) : "-"}</span>;
       },
     },
     {

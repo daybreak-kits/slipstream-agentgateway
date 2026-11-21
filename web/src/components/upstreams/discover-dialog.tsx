@@ -111,7 +111,7 @@ export function DiscoverModelsDialog({
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-3 text-2xs text-body">
               <Badge tone={ok ? "success" : "danger"}>{ok ? "连接正常" : "连接失败"}</Badge>
-              <span className="tnum">HTTP {discover.data?.http_status || "—"}</span>
+              <span className="tnum">HTTP {discover.data?.http_status || "-"}</span>
               <span className="tnum">{discover.data?.latency_ms ?? 0} ms</span>
               {discover.data?.protocol ? (
                 <span className="flex items-center gap-1">

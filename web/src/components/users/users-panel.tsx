@@ -292,7 +292,7 @@ export function UsersPanel({
         cell.row.original.username !== "" ? (
           <Badge tone="neutral">控制台</Badge>
         ) : (
-          <span className="text-2xs text-faint">—</span>
+          <span className="text-2xs text-faint">-</span>
         ),
     },
     {
@@ -307,7 +307,7 @@ export function UsersPanel({
       meta: { className: "text-right tnum" },
       cell: (cell) => {
         if (keyCountsState === "pending") return <span className="text-2xs text-faint">…</span>;
-        if (keyCountsState === "error") return <span className="text-2xs text-faint">—</span>;
+        if (keyCountsState === "error") return <span className="text-2xs text-faint">-</span>;
         return <span className="tnum">{keyCounts.get(cell.row.original.id) ?? 0}</span>;
       },
     },
@@ -326,7 +326,7 @@ export function UsersPanel({
       cell: (cell) => {
         const parentId = cell.row.original.parent_user_id;
         const parent = parentId === null ? undefined : byId.get(parentId);
-        return <span className="text-2sm text-muted-foreground">{parent?.name ?? "—"}</span>;
+        return <span className="text-2sm text-muted-foreground">{parent?.name ?? "-"}</span>;
       },
     },
     {

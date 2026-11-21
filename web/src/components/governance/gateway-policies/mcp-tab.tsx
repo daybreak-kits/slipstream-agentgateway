@@ -199,7 +199,7 @@ export function McpTab({ data, draft, onDraftChange, canWrite, dirtyCount }: {
 
   const transportBadge = (transport: McpServerConfig["transport"]) => {
     const cap = data.transports[transport];
-    if (!cap.supported) return <Badge tone="neutral">AG 1.7 拒收</Badge>;
+    if (!cap.supported) return <Badge tone="neutral">数据面拒收</Badge>;
     return cap.verified ? <Badge tone="success">已验证</Badge> : <Badge tone="warning">未实测</Badge>;
   };
 
@@ -208,7 +208,7 @@ export function McpTab({ data, draft, onDraftChange, canWrite, dirtyCount }: {
       <PageToolbar>
         <span className="text-2sm text-faint">
           MCP 服务器落库为顶层 mcp.targets；页级「保存并下发」整份提交并自动 apply。
-          sse/stdio 已用 pinned AG 1.7 --validate-only 验证，http 与 url 字段会被后端显式拒绝。
+          sse/stdio 已通过下发前校验，http 与 url 字段会被后端显式拒绝。
         </span>
         <div className="ml-auto flex items-center gap-1.5">
           {!editing && canWrite ? (
@@ -280,7 +280,7 @@ export function McpTab({ data, draft, onDraftChange, canWrite, dirtyCount }: {
                               {server.transport}
                             </Badge>
                             {!data.transports[server.transport]?.supported && (
-                              <span className="text-2xs text-warning-text">AG 1.7 拒收该传输</span>
+                              <span className="text-2xs text-warning-text">数据面拒收该传输</span>
                             )}
                           </div>
                         </TD>
@@ -290,8 +290,8 @@ export function McpTab({ data, draft, onDraftChange, canWrite, dirtyCount }: {
                             ? [
                                 (server.args ?? []).length > 0 ? (server.args ?? []).join(" ") : "",
                                 Object.keys(server.env ?? {}).length > 0 ? Object.keys(server.env ?? {}).join(", ") : "",
-                              ].filter((item) => item.length > 0).join(" · ") || "—"
-                            : "—"}
+                              ].filter((item) => item.length > 0).join(" · ") || "-"
+                            : "-"}
                         </TD>
                         {editing && (
                           <TD className={FROZEN_COLUMN_CELL_CLASS + " text-right"}>
@@ -321,7 +321,7 @@ export function McpTab({ data, draft, onDraftChange, canWrite, dirtyCount }: {
           {form !== null && (
             <SectionCard
               title={formIndex === null ? "新增 MCP 服务器" : "编辑 MCP 服务器 · " + servers[formIndex]?.name}
-              description="sse 使用 host（AG 1.7 没有 url 字段）；stdio 使用 cmd/args/env。"
+              description="sse 使用 host（没有 url 字段）；stdio 使用 cmd/args/env。"
               actions={transportBadge(form.transport)}
             >
               <div className="space-y-3">
@@ -351,7 +351,7 @@ export function McpTab({ data, draft, onDraftChange, canWrite, dirtyCount }: {
                         <SelectItem value="sse">sse</SelectItem>
                         <SelectItem value="stdio">stdio</SelectItem>
                         <SelectItem value="http" disabled>
-                          http（AG 1.7 拒收）
+                          http（数据面拒收）
                         </SelectItem>
                       </SelectContent>
                     </Select>
@@ -398,7 +398,7 @@ export function McpTab({ data, draft, onDraftChange, canWrite, dirtyCount }: {
                 ) : (
                   <div className="grid gap-3 sm:grid-cols-3">
                     <div className="space-y-1 sm:col-span-2">
-                      <Label className="text-2xs text-body">host（AG 1.7 sse 字段）</Label>
+                      <Label className="text-2xs text-body">host（sse 字段）</Label>
                       <Input
                         value={form.host}
                         placeholder="https://mcp.example"
@@ -450,7 +450,7 @@ export function McpTab({ data, draft, onDraftChange, canWrite, dirtyCount }: {
 
           <SectionCard
             title="传输能力"
-            description="来自适配器能力矩阵；表单会禁用不支持项（http 被 AG 1.7 拒收），后端仍会兜底拒绝。"
+            description="来自适配器能力矩阵；表单会禁用不支持项（http 被数据面拒收），后端仍会兜底拒绝。"
           >
             <div className="grid gap-2 sm:grid-cols-3">
               {(["sse", "stdio", "http"] as const).map((transport) => (

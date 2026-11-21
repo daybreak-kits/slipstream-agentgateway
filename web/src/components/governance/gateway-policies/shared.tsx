@@ -7,7 +7,7 @@ import type { CapabilityInfo } from "@/lib/policies";
 /** 网关策略三 Tab 的共用小件（只放组件，保证 react-refresh 可用）。 */
 
 export function CapabilityBadge({ capability }: { capability: CapabilityInfo }) {
-  if (!capability.supported) return <Badge tone="neutral">AG 1.7 不支持</Badge>;
+  if (!capability.supported) return <Badge tone="neutral">数据面不支持</Badge>;
   return capability.verified ? <Badge tone="success">已验证</Badge> : <Badge tone="warning">未实测</Badge>;
 }
 
@@ -44,7 +44,7 @@ export function Fact({ label, children }: { label: string; children: ReactNode }
 }
 
 export function Chips({ items }: { items: string[] }) {
-  if (items.length === 0) return <span className="text-faint">—</span>;
+  if (items.length === 0) return <span className="text-faint">-</span>;
   return (
     <div className="flex flex-wrap gap-1">
       {items.map((item) => (

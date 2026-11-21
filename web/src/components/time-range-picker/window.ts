@@ -77,5 +77,5 @@ function stamp(ms: number): string {
 /** 触发按钮/副标题用的区间文本：预设名或毫秒窗起止。 */
 export function timeWindowLabel(window: TimeWindow): string {
   if (window.kind === "range") return TIME_WINDOW_LABEL[window.value];
-  return `${stamp(window.fromMs)} – ${stamp(window.toMs)}`;
+  return `${stamp(window.fromMs)} 至 ${stamp(window.toMs)}`;
 }

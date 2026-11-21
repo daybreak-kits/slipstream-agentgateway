@@ -8,7 +8,7 @@ const rpmFmt = new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximu
  * 缺值/非有限值回「—」。
  */
 export function fmtInt(n: number | null | undefined): string {
-  if (n === null || n === undefined || !Number.isFinite(n)) return "—";
+  if (n === null || n === undefined || !Number.isFinite(n)) return "-";
   return intFmt.format(Math.round(n));
 }
 
@@ -18,7 +18,7 @@ export function fmtInt(n: number | null | undefined): string {
  * 卡片、表格、tooltip 等用户直接读数的位置一律用 fmtInt。
  */
 export function fmtCount(n: number | null | undefined): string {
-  if (n === null || n === undefined || !Number.isFinite(n)) return "—";
+  if (n === null || n === undefined || !Number.isFinite(n)) return "-";
   const abs = Math.abs(n);
   if (abs >= 1_000_000_000) {
     const billions = Math.round(n / 1_000_000_000);
@@ -46,7 +46,7 @@ function pad2(value: number): string {
  * null / undefined / NaN / 负数统一显示破折号占位。
  */
 export function formatDuration(ms: number | null | undefined): string {
-  if (ms === null || ms === undefined || !Number.isFinite(ms) || ms < 0) return "—";
+  if (ms === null || ms === undefined || !Number.isFinite(ms) || ms < 0) return "-";
   // 先取 0.01s 整数再格式化，避免 75.765 一类浮点边界被舍成 75.76。
   return (Math.round(ms / 10) / 100).toFixed(2) + "s";
 }
@@ -62,7 +62,7 @@ export function fmtSeconds(ms: number | null | undefined): string {
  * 60s 以上内部取整到秒，不再带小数，保证可读性。
  */
 export function formatDurationAdaptive(ms: number | null | undefined): string {
-  if (ms === null || ms === undefined || !Number.isFinite(ms) || ms < 0) return "—";
+  if (ms === null || ms === undefined || !Number.isFinite(ms) || ms < 0) return "-";
   const centiseconds = Math.round(ms / 10);
   if (centiseconds < 6000) return (centiseconds / 100).toFixed(2) + "s";
   const seconds = Math.floor(centiseconds / 100);
@@ -75,7 +75,7 @@ export function formatDurationAdaptive(ms: number | null | undefined): string {
 
 /** 通用定点小数（均价、成本倍率等派生数）；非有限值回「—」。 */
 export function fmtFixed(n: number, digits = 2): string {
-  if (!Number.isFinite(n)) return "—";
+  if (!Number.isFinite(n)) return "-";
   return n.toFixed(digits);
 }
 
@@ -84,7 +84,7 @@ export function fmtFixed(n: number, digits = 2): string {
  * TPM 属于词元计数，走 fmtInt，不要用本函数。
  */
 export function fmtRpm(n: number | null | undefined): string {
-  if (n === null || n === undefined || !Number.isFinite(n)) return "—";
+  if (n === null || n === undefined || !Number.isFinite(n)) return "-";
   return rpmFmt.format(n);
 }
 
@@ -93,7 +93,7 @@ export function fmtRpm(n: number | null | undefined): string {
  * 例如 0.4148 → 41.5%；缺值/非有限值回「—」。
  */
 export function fmtPct(n: number | null | undefined): string {
-  if (n === null || n === undefined || !Number.isFinite(n)) return "—";
+  if (n === null || n === undefined || !Number.isFinite(n)) return "-";
   return (n * 100).toFixed(1) + "%";
 }
 
@@ -102,24 +102,24 @@ export function fmtPct(n: number | null | undefined): string {
  * 0–1 比例请用 fmtPct，避免重复乘 100。
  */
 export function fmtPctPoint(n: number | null | undefined): string {
-  if (n === null || n === undefined || !Number.isFinite(n)) return "—";
+  if (n === null || n === undefined || !Number.isFinite(n)) return "-";
   return n.toFixed(1) + "%";
 }
 
 /** 吞吐（词元/s）：≥100 取整并千分位，<100 保留 1 位小数；无输出回「—」。 */
 export function fmtThroughput(tps: number | null | undefined): string {
-  if (tps === null || tps === undefined || !Number.isFinite(tps) || tps <= 0) return "—";
+  if (tps === null || tps === undefined || !Number.isFinite(tps) || tps <= 0) return "-";
   return tps >= 100 ? fmtInt(Math.round(tps)) : tps.toFixed(1);
 }
 
 export function fmtTime(iso: string | null): string {
-  if (!iso) return "—";
+  if (!iso) return "-";
   return iso.replace("T", " ").slice(0, 19);
 }
 
 /** 毫秒时间戳按本地时区展示到秒；0/空回「—」。 */
 export function fmtMs(ms: number | null | undefined): string {
-  if (!ms) return "—";
+  if (!ms) return "-";
   const d = new Date(ms);
   return (
     d.getFullYear() +
@@ -159,7 +159,7 @@ export function currencySymbol(currency?: string | null): string {
 }
 
 function moneyText(micro: number | null | undefined, currency: string | null | undefined, digits: number): string {
-  if (micro === null || micro === undefined || !Number.isFinite(micro)) return "—";
+  if (micro === null || micro === undefined || !Number.isFinite(micro)) return "-";
   const value = micro / 1_000_000;
   const sign = value < 0 ? "-" : "";
   return sign + currencySymbol(currency) + Math.abs(value).toFixed(digits);
@@ -188,7 +188,7 @@ export function fmtCny(micro: number): string {
 
 /** 金额的紧凑刻度（y 轴）：1.2K → 1K / 3.4M → 3M 元（轴标签只留整数）。 */
 export function compactMoney(micro: number, currency?: string | null): string {
-  if (!Number.isFinite(micro)) return "—";
+  if (!Number.isFinite(micro)) return "-";
   return currencySymbol(currency) + fmtCount(Math.round(micro / 1_000));
 }
 
@@ -226,7 +226,7 @@ export function yuanInput(micro: number): string {
  */
 export function fmtPriceAmount(value: string | number | null | undefined, currency?: string | null): string {
   const text = value === null || value === undefined ? "" : String(value).trim();
-  if (text === "") return "—";
+  if (text === "") return "-";
   const symbol = currencySymbol(currency);
   const n = Number(text);
   if (!Number.isFinite(n)) return symbol + text;
@@ -239,19 +239,19 @@ export function fmtPriceAmount(value: string | number | null | undefined, curren
  */
 export function fmtPricePerM(value: string | null | undefined): string {
   const amount = fmtPriceAmount(value, "CNY");
-  return amount === "—" ? amount : amount + "/M";
+  return amount === "-" ? amount : amount + "/M";
 }
 
 /** 微单位单价（元 / 1M 词元，micro）按 2 位小数展示；不足 0.01 升 4 位；缺值回「—」。 */
 export function fmtUnitPriceMicro(micro: number | null | undefined, currency?: string | null): string {
-  if (micro === null || micro === undefined || !Number.isFinite(micro)) return "—";
+  if (micro === null || micro === undefined || !Number.isFinite(micro)) return "-";
   return fmtPriceAmount(micro / 1_000_000, currency);
 }
 
 /** 成本倍率文本（W4-C）：2 位小数（×1.20）；值 < 0.01 升 4 位；未配置回「—」。 */
 export function fmtMarkup(value: string | null | undefined): string {
   const text = (value ?? "").trim();
-  if (text === "") return "—";
+  if (text === "") return "-";
   const n = Number(text);
   if (!Number.isFinite(n)) return "×" + text;
   return "×" + n.toFixed(n < 0.01 ? 4 : 2);

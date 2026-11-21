@@ -245,7 +245,7 @@ export function GuardrailsTab({ data, draft, onDraftChange, canWrite, dirtyCount
               </Select>
             </div>
             <p className="text-2xs text-faint sm:col-span-2">
-              AG 1.7 webhook 固定检查 systemPrompt + messages，不支持 scope；target 只接受 host。
+              webhook 固定检查 systemPrompt + messages，不支持 scope；target 只接受 host。
             </p>
           </div>
         ) : (
@@ -441,7 +441,7 @@ export function GuardrailsTab({ data, draft, onDraftChange, canWrite, dirtyCount
         <>
           <SectionCard
             title="流式检查"
-            description="streaming 开关；AG 1.7 支持 Disabled / Enabled。"
+            description="streaming 开关；支持 Disabled / Enabled。"
             actions={<CapabilityBadge capability={caps.regex} />}
           >
             <div className="flex items-center gap-2">
@@ -583,7 +583,7 @@ export function GuardrailsTab({ data, draft, onDraftChange, canWrite, dirtyCount
                       <TD>
                         {item.supported ? <Badge tone="success">支持</Badge> : <Badge tone="neutral">不支持</Badge>}
                       </TD>
-                      <TD className="tnum text-2xs">{item.since_version || "—"}</TD>
+                      <TD className="tnum text-2xs">{item.since_version || "-"}</TD>
                       <TD>
                         {item.verified ? <Badge tone="success">已验证</Badge> : <Badge tone="neutral">未验证</Badge>}
                       </TD>

@@ -164,7 +164,7 @@ function costLabel(usage: PlaygroundUsage): string {
     // 单请求成本很小，按「单请求均值」口径保留 4 位小数（USD 折 micro 后交给统一 formatter）。
     return "成本 " + fmtMoneyAvg(usage.costUsd * 1_000_000, "USD");
   }
-  return "成本 —";
+  return "成本 -";
 }
 
 function UsageLine({ usage, canSeeCost }: { usage: PlaygroundUsage; canSeeCost: boolean }) {
@@ -174,13 +174,13 @@ function UsageLine({ usage, canSeeCost }: { usage: PlaygroundUsage; canSeeCost: 
     "总计 " + fmtInt(usage.totalTokens),
   ];
   if (canSeeCost) parts.push(costLabel(usage));
-  parts.push("TTFT " + (usage.ttftMs === null ? "—" : fmtInt(usage.ttftMs) + "ms"));
+  parts.push("TTFT " + (usage.ttftMs === null ? "-" : fmtInt(usage.ttftMs) + "ms"));
   parts.push(
-    "总耗时 " + (usage.elapsedMs === null ? "—" : fmtSeconds(usage.elapsedMs)),
+    "总耗时 " + (usage.elapsedMs === null ? "-" : fmtSeconds(usage.elapsedMs)),
   );
   parts.push(
     "吞吐 " +
-      (usage.throughput === null ? "—" : fmtThroughput(usage.throughput) + " tok/s"),
+      (usage.throughput === null ? "-" : fmtThroughput(usage.throughput) + " tok/s"),
   );
   if (canSeeCost && typeof usage.chargeMicro === "number") {
     parts.push("花费 " + fmtCny(usage.chargeMicro));

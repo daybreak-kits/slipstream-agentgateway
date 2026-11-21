@@ -96,11 +96,11 @@ class PoliciesSpec:
 - conditional 的 `when` 只有**末位一条**目标可省略（**至多 1 条**），其余必须给 CEL 谓词。
   （E20 收紧，P0-RESULTS §E20：AG 1.7 把该约束实现为硬校验，拒收原文
   `conditional fallback target must be last`；旧不变量「无 when 条目必须是连续末段」
-  比 AG 真实约束宽——多密钥兜底展开成 N 条末段会被 AG validate 拒收（T1-mixed-kn2）——
+  比 AG 真实约束宽：多密钥兜底展开成 N 条末段会被 AG validate 拒收（T1-mixed-kn2），
   故收回为「至多 1 条且必须末位」。AG 按序求值，无 when 条目之后再出现带 when
   条目则后者永不可达。）
 - conditional × 多密钥：**密钥平权不生效（E20）**。AG 对 conditional targets 按
-  first-match 求值——同 when 的多条 `#kN` 条目 validate 合法但运行时首条独占
+  first-match 求值：同 when 的多条 `#kN` 条目 validate 合法但运行时首条独占
   （T2：40:0，无告警），N-1 把密钥静默 0 流量；when + retry/health 三件套下
   也无请求内切换（T4：重试全打同一首条）。因此渲染层 conditional 模式**不展开
   密钥维度**（每个 target 只渲染第一把密钥的一条，渲染时打 warning），要密钥级
@@ -114,7 +114,7 @@ class PoliciesSpec:
 | `UpstreamSpec` | `llm.providers[]` | **数组**，每项 `{name, provider, params}`；`provider` 由 `api_style` 映射，未映射直接 `ValueError`。ADR-026：每把密钥一行（name=`{upstream_id}#{seq}`，各自中性凭据 ref，适配器渲染为自家管理的 `keys/<ref>.key`），`llm.models[]` 禁同名由渲染层自检（E18：validate 静默塌缩，违反即 `ValueError`） |
 | `extra_headers` | `providers[].defaults.requestHeaders.set` | 1.7 的 provider 没有 `params.headers` |
 | `max_buffer_bytes` | 不输出 | 1.7 无该字段；非默认值在 validate 里 warning，不伪造 |
-| `UpstreamModelSpec` | `llm.models[]` | **数组**，`name=model.id`、`provider.reference=upstream_id`、`params.model=upstream_model_name`、`visibility`（默认 internal）。多密钥时 builder 产出 `{model_id}#k{seq}` 条目，公开模型 targets 逐条同层引用（E18 裁决形态）；**conditional 公开模型例外**——targets 每目标只引用第一把 `{model}#k1`（E20） |
+| `UpstreamModelSpec` | `llm.models[]` | **数组**，`name=model.id`、`provider.reference=upstream_id`、`params.model=upstream_model_name`、`visibility`（默认 internal）。多密钥时 builder 产出 `{model_id}#k{seq}` 条目，公开模型 targets 逐条同层引用（E18 裁决形态）；**conditional 公开模型例外**：targets 每目标只引用第一把 `{model}#k1`（E20） |
 | `display_name` | ❌ 显式错误 | 1.7 的 `llm.models[]` 没有 `displayName`（validate: unknown field） |
 | `aliases` / `model_aliases` | ❌ 显式错误 | 1.7 没有 modelAliases 配置面；对外名只能走 virtualModels |
 | `model.guardrails` | `llm.models[].guardrails` | PromptGuard：streaming + request/response regex 规则 |

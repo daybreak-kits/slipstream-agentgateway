@@ -114,7 +114,7 @@ export function UpstreamModelsPanel({
           return <Badge tone="info">测试中…</Badge>;
         }
         const item = probe.session.results[row.id];
-        if (!item) return <span className="text-faint">—</span>;
+        if (!item) return <span className="text-faint">-</span>;
         return <ModelProbeBadge item={item} />;
       },
     },

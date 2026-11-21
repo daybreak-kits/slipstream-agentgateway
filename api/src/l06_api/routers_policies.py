@@ -68,13 +68,12 @@ NOTES = {
         "表达式单独配置不会驱逐主层（E16/E17），必须带 consecutive_failures >= 1"
     ),
     "tracing": (
-        "M5-a 链路追踪：启用后渲染 frontendPolicies.tracing，AG 把每次上游尝试作为"
-        " OTLP/HTTP span 导出到控制面接收器（默认 127.0.0.1:4318）；"
-        "random_sampling 必须为开才产 span（AG 默认 false，E19）"
+        "M5-a 链路追踪：启用后每次上游尝试都会导出到控制面接收器（默认关闭）；"
+        "random_sampling 必须为开才产生尝试记录（默认 false，E19）"
     ),
     "transformations": "默认响应头删除按 ADR-010 追加在用户规则之后；保护头仅控制面记录",
     "guardrails_webhook": "webhook 护栏仅 reject/audit，target 只能是 host（无路径），不支持 scope",
-    "mcp_http": "pinned AG 1.7 拒绝 http 变体；只支持 sse/stdio，http 会在保存时被 422 拒绝",
+    "mcp_http": "数据面拒收 http 变体；只支持 sse/stdio，http 会在保存时被 422 拒绝",
 }
 
 

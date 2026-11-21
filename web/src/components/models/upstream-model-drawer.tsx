@@ -399,7 +399,7 @@ export function UpstreamModelDrawer({
   const capabilityDirtyCount = isDirtyField("parameters") ? 1 : 0;
   const priceDirtyCount = (["cost_input_per_1m", "cost_output_per_1m", "markup"] as const)
     .filter((key) => dirtyFields.has(key)).length;
-  const upstreamName = upstreams.find((item) => item.id === form.upstream_id)?.name ?? "—";
+  const upstreamName = upstreams.find((item) => item.id === form.upstream_id)?.name ?? "-";
   const statusBadge = liveRow !== null ? (
     <Badge tone={availabilityTone(liveRow)}>{availabilityText(liveRow)}</Badge>
   ) : (

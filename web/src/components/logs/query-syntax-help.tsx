@@ -17,11 +17,11 @@ const TOKENS = [
   { token: "user:alice", meaning: "匹配用户 ID 或用户名称", example: "user:alice" },
   { token: "key:WXYZ", meaning: "匹配密钥后缀（列表里的 sk-...WXYZ）或密钥 ID", example: "key:WXYZ" },
   { token: "status:200", meaning: "精确 HTTP 状态码", example: "status:200" },
-  { token: "status:5xx", meaning: "按状态码段筛选（1xx–5xx）", example: "status:5xx" },
+  { token: "status:5xx", meaning: "按状态码段筛选（1xx 至 5xx）", example: "status:5xx" },
   { token: "latency>500", meaning: "总耗时大于 N 毫秒", example: "latency>500" },
   { token: "latency<200", meaning: "总耗时小于 N 毫秒（0 耗时不匹配）", example: "latency<200" },
   { token: "ttft>300", meaning: "首字时间大于 N 毫秒", example: "ttft>300" },
-  { token: "cache>30", meaning: "缓存命中比例大于 N%（0–100）", example: "cache>30" },
+  { token: "cache>30", meaning: "缓存命中比例大于 N%（0 至 100）", example: "cache>30" },
   { token: "stream:true", meaning: "只看流式（true）或非流式（false）请求", example: "stream:true" },
 ];
 
@@ -65,8 +65,8 @@ export function QuerySyntaxHelp() {
               <p className="mt-1 font-mono text-2xs">user:alice stream:true cache&gt;30</p>
               <p className="mt-1 font-mono text-2xs">model:glm status:5xx latency&gt;1000</p>
               <p className="mt-1 text-faint">
-                多个条件同时满足才会返回；status 只接受 3 位状态码或 1xx–5xx，latency / ttft 后必须是毫秒整数，
-                cache 后是 0–100 的百分比。语法写错时后端返回 422 并指出具体位置。
+                多个条件同时满足才会返回；status 只接受 3 位状态码或 1xx 至 5xx，latency / ttft 后必须是毫秒整数，
+                cache 后是 0 至 100 的百分比。语法写错时后端返回 422 并指出具体位置。
               </p>
             </div>
             <p className="text-xs text-faint">

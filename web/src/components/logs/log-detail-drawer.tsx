@@ -95,18 +95,18 @@ export function LogDetailDrawer({ open, row, timezone, onOpenChange }: LogDetail
   };
 
   const targetFields: Array<[string, ReactNode]> = [
-    ["请求模型", view.requested_model || "—"],
-    ["上游模型", view.upstream_model || "—"],
-    ["目标层级", view.target_priority === null ? "—" : "P" + view.target_priority],
-    ["厂商", view.provider || "—"],
+    ["请求模型", view.requested_model || "-"],
+    ["上游模型", view.upstream_model || "-"],
+    ["目标层级", view.target_priority === null ? "-" : "P" + view.target_priority],
+    ["厂商", view.provider || "-"],
     ["请求 ID", <span className="font-mono text-2xs">{view.event_id}</span>],
   ];
 
   const identityFields: Array<[string, ReactNode]> = [
-    ["用户", view.user_name || "—"],
-    ["用户 ID", <span className="font-mono text-2xs">{view.user_id || "—"}</span>],
-    ["密钥", <span className="font-mono text-2xs">{view.api_key_label || "—"}</span>],
-    ["密钥 ID", <span className="font-mono text-2xs">{view.api_key_id || "—"}</span>],
+    ["用户", view.user_name || "-"],
+    ["用户 ID", <span className="font-mono text-2xs">{view.user_id || "-"}</span>],
+    ["密钥", <span className="font-mono text-2xs">{view.api_key_label || "-"}</span>],
+    ["密钥 ID", <span className="font-mono text-2xs">{view.api_key_id || "-"}</span>],
   ];
 
   const timingFields: Array<[string, ReactNode]> = [
@@ -114,7 +114,7 @@ export function LogDetailDrawer({ open, row, timezone, onOpenChange }: LogDetail
     ["完成时间", formatDateTime(view.completed_at_ms, timezone)],
     ["总耗时", fmtSeconds(view.duration_ms)],
     ["首字（TTFT）", fmtSeconds(view.time_to_first_token_ms)],
-    ["吞吐", view.throughput_tps ? fmtThroughput(view.throughput_tps) + " 词元/s" : "—"],
+    ["吞吐", view.throughput_tps ? fmtThroughput(view.throughput_tps) + " 词元/s" : "-"],
     ["流式", view.is_stream ? "是" : "否"],
     ["状态码", <Badge tone={statusTone(view.http_status)}>{statusLabel(view.http_status)}</Badge>],
   ];
@@ -131,7 +131,7 @@ export function LogDetailDrawer({ open, row, timezone, onOpenChange }: LogDetail
   const traceFields: Array<[string, ReactNode]> = [
     [
       "关联键",
-      <span className="font-mono text-2xs">{view.correlation_key || "—"}</span>,
+      <span className="font-mono text-2xs">{view.correlation_key || "-"}</span>,
     ],
     ["含载荷", view.has_payload ? "是" : "否"],
   ];
@@ -164,7 +164,7 @@ export function LogDetailDrawer({ open, row, timezone, onOpenChange }: LogDetail
         <div className="space-y-4 p-4">
           <div className="flex flex-wrap items-center gap-2">
             <Badge tone={statusTone(view.http_status)}>{statusLabel(view.http_status)}</Badge>
-            <span className="text-sm font-medium text-title">{view.requested_model || "—"}</span>
+            <span className="text-sm font-medium text-title">{view.requested_model || "-"}</span>
             <span className="text-faint">→</span>
             <span className="text-sm text-body">{upstreamLabel(view)}</span>
             {view.is_stream ? <Badge tone="info">流式</Badge> : null}
@@ -174,13 +174,13 @@ export function LogDetailDrawer({ open, row, timezone, onOpenChange }: LogDetail
 
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-2xs text-faint">
             <span>
-              用户 <span className="text-body">{view.user_name || "—"}</span>
+              用户 <span className="text-body">{view.user_name || "-"}</span>
             </span>
             <span>
-              密钥 <span className="font-mono text-body">{view.api_key_label || "—"}</span>
+              密钥 <span className="font-mono text-body">{view.api_key_label || "-"}</span>
             </span>
             <span>
-              吞吐 <span className="text-body">{view.throughput_tps ? fmtThroughput(view.throughput_tps) + " 词元/s" : "—"}</span>
+              吞吐 <span className="text-body">{view.throughput_tps ? fmtThroughput(view.throughput_tps) + " 词元/s" : "-"}</span>
             </span>
           </div>
 
@@ -223,7 +223,7 @@ export function LogDetailDrawer({ open, row, timezone, onOpenChange }: LogDetail
                 <p className="text-2xs text-faint">
                   毛利{" "}
                   <span className="tnum text-body">
-                    {margin === undefined || margin === null ? "—" : fmtMoneyAvg(margin, currency)}
+                    {margin === undefined || margin === null ? "-" : fmtMoneyAvg(margin, currency)}
                   </span>{" "}
                   · 花费 − 成本
                 </p>

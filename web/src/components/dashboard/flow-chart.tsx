@@ -301,7 +301,7 @@ export function FlowChart({
           <Input
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
-            placeholder="搜索用户 / 密钥 / 模型 / 渠道"
+            placeholder="搜索用户 / 密钥 / 模型 / 上游"
             aria-label="搜索分流节点"
             data-slot="flow-search-input"
             className="h-8 pl-7 text-2xs"

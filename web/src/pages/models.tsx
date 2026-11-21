@@ -313,7 +313,7 @@ function UpstreamTab() {
           <div>入 {fmtPricePerM(row.cost_input_per_1m)} · 出 {fmtPricePerM(row.cost_output_per_1m)}</div>
         )}
         <div className="text-faint">
-          倍率 {fmtMarkup(row.markup)} · 缓 {cache ? fmtUnitPriceMicro(cache.micro) + "/M" : "—"}
+          倍率 {fmtMarkup(row.markup)} · 缓 {cache ? fmtUnitPriceMicro(cache.micro) + "/M" : "-"}
         </div>
       </div>
     );
@@ -349,7 +349,7 @@ function UpstreamTab() {
         <div>
           <div className="tnum font-medium text-title">{row.name}</div>
           <div className="text-2xs text-faint">
-            {(row.upstream_name ?? "—") + (row.vendor_name ? " · " + row.vendor_name : "")}
+            {(row.upstream_name ?? "-") + (row.vendor_name ? " · " + row.vendor_name : "")}
           </div>
         </div>
       ),
@@ -862,7 +862,7 @@ function PublicTab() {
       cell: (row) => (
         <div>
           <div className="tnum font-medium text-title">{row.name}</div>
-          <div className="text-2xs text-faint">{row.note || "—"}</div>
+          <div className="text-2xs text-faint">{row.note || "-"}</div>
         </div>
       ),
     },
@@ -887,7 +887,7 @@ function PublicTab() {
         return (
           <div>
             <span className="tnum text-2sm">{fmtInt(row.target_count ?? targets.length)}</span>
-            <div className="text-2xs text-faint">{names.length > 0 ? names.join(" · ") + (targets.length > 3 ? " …" : "") : "—"}</div>
+            <div className="text-2xs text-faint">{names.length > 0 ? names.join(" · ") + (targets.length > 3 ? " …" : "") : "-"}</div>
           </div>
         );
       },

@@ -127,14 +127,14 @@ export function LoginPage() {
               <p className="text-2xs font-medium uppercase tracking-[0.12em] text-muted-foreground">Slipstream</p>
             </div>
           </div>
-          <p className="mt-12 text-2xs font-medium uppercase tracking-[0.12em] text-faint">LLM API GATEWAY</p>
+          <p className="mt-12 text-2xs font-medium uppercase tracking-[0.12em] text-faint">模型接口网关</p>
           <p className="mt-3 max-w-lg text-3xl font-semibold tracking-tight text-title">
             把每一次调用，
             <br />
             送进正确的通道。
           </p>
           <p className="mt-4 max-w-md text-sm text-faint">
-            三层寻址、请求内重试与健康驱逐、双账本计费——一个控制面管住从入口到上游的每一步。
+            三层寻址、请求内重试与健康驱逐、双账本计费：一个控制面管住从入口到上游的每一步。
           </p>
           <RequestChain className="mt-8 max-w-xl" />
           <p className="mt-10 font-mono text-2xs text-faint">SLIPSTREAM · 控制面 :3700 · 数据面 :3600</p>

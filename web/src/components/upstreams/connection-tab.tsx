@@ -87,13 +87,13 @@ export function ConnectionTab({
               <div className="flex items-start gap-2 text-2xs">
                 <span className="w-16 shrink-0 pt-0.5 text-faint">对话补全</span>
                 <span className="tnum min-w-0 flex-1 break-all font-mono text-body">
-                  {baseUrl === "" ? "—" : chatUrlFor(baseUrl, draft.apiStyle)}
+                  {baseUrl === "" ? "-" : chatUrlFor(baseUrl, draft.apiStyle)}
                 </span>
               </div>
               <div className="flex items-start gap-2 text-2xs">
                 <span className="w-16 shrink-0 pt-0.5 text-faint">模型列表</span>
                 <span className="tnum min-w-0 flex-1 break-all font-mono text-body">
-                  {baseUrl === "" ? "—" : modelsUrlFor(baseUrl, draft.apiStyle)}
+                  {baseUrl === "" ? "-" : modelsUrlFor(baseUrl, draft.apiStyle)}
                 </span>
               </div>
             </div>

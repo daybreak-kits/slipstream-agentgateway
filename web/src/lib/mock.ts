@@ -642,7 +642,7 @@ const POLICY_NOTES: Record<string, string> = {
   health: "逐模型健康标记与驱逐（llm.models[].health）；表达式单独配置不会驱逐主层（E16/E17），必须带 consecutive_failures >= 1",
   transformations: "默认响应头删除按 ADR-010 追加在用户规则之后；保护头仅控制面记录",
   guardrails_webhook: "webhook 护栏仅 reject/audit，target 只能是 host（无路径），不支持 scope",
-  mcp_http: "pinned AG 1.7 拒绝 http 变体；只支持 sse/stdio，http 会在保存时被 422 拒绝",
+  mcp_http: "数据面拒收 http 变体；只支持 sse/stdio，http 会在保存时被 422 拒绝",
 };
 
 /** effective 是下发前的可读预览（l05_service/policy_store.py policy_effective 同构）。 */

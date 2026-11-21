@@ -18,8 +18,8 @@ export function statusLabel(status: number): string {
 
 /** 上游列：优先展示上游模型名，并用 P{n} 标出该目标在公开模型里的层。 */
 export function upstreamLabel(row: { upstream_model: string; target_priority: number | null }): string {
-  if (row.target_priority === null) return row.upstream_model || "—";
-  return (row.upstream_model || "—") + " · P" + row.target_priority;
+  if (row.target_priority === null) return row.upstream_model || "-";
+  return (row.upstream_model || "-") + " · P" + row.target_priority;
 }
 
 /** 接口类型展示名（GLOSSARY §4 模型类型）：chat 是 OpenAI 兼容面，systemone 是 AG 内置协议。 */
@@ -35,7 +35,7 @@ const MODEL_TYPE_LABELS: Record<string, string> = {
 };
 
 export function modelTypeLabel(modelType: string | null | undefined): string {
-  if (!modelType) return "—";
+  if (!modelType) return "-";
   return MODEL_TYPE_LABELS[modelType] ?? modelType;
 }
 

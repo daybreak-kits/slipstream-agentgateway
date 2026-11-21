@@ -73,11 +73,11 @@ function RevisionDetailDrawer({ row, open, onOpenChange }: {
       <SheetContent side="right" size="lg" className="flex w-full flex-col gap-0 overflow-hidden">
         <SheetHeader className="border-b border-border px-4 py-3">
           <SheetTitle className="flex flex-wrap items-center gap-1.5 text-sm">
-            <span className="tnum">版本 {row?.id ?? "—"}</span>
+            <span className="tnum">版本 {row?.id ?? "-"}</span>
             {meta && <Badge tone={meta.tone}>{meta.label}</Badge>}
           </SheetTitle>
           <SheetDescription className="text-2xs">
-            {row ? fmtMs(row.created_at_ms) : "—"} · 配置发布不可变：回滚生成新版本而不是原地改
+            {row ? fmtMs(row.created_at_ms) : "-"} · 配置发布不可变：回滚生成新版本而不是原地改
           </SheetDescription>
         </SheetHeader>
         <div className="min-h-0 flex-1 space-y-4 overflow-auto px-4 py-3">
@@ -85,13 +85,13 @@ function RevisionDetailDrawer({ row, open, onOpenChange }: {
             <p className="text-2xs font-medium text-title">变更摘要</p>
             <dl className="grid grid-cols-[72px_1fr] gap-x-2 gap-y-1 text-2xs">
               <dt className="text-faint">操作人</dt>
-              <dd className="text-body">{row?.operator || "—"}</dd>
+              <dd className="text-body">{row?.operator || "-"}</dd>
               <dt className="text-faint">备注</dt>
-              <dd className="text-body">{row?.reason || "—"}</dd>
+              <dd className="text-body">{row?.reason || "-"}</dd>
               <dt className="text-faint">适配器</dt>
-              <dd className="font-mono text-body">{row?.adapter_id || "—"}</dd>
+              <dd className="font-mono text-body">{row?.adapter_id || "-"}</dd>
               <dt className="text-faint">上一版本</dt>
-              <dd className="tnum font-mono text-body">{row?.previous_revision_id ?? "—"}</dd>
+              <dd className="tnum font-mono text-body">{row?.previous_revision_id ?? "-"}</dd>
             </dl>
           </section>
 
@@ -99,7 +99,7 @@ function RevisionDetailDrawer({ row, open, onOpenChange }: {
             <p className="text-2xs font-medium text-title">Artifact 摘要</p>
             <div className="flex items-center gap-1.5">
               <code className="min-w-0 flex-1 truncate rounded border border-border bg-surface-2 px-2 py-1 font-mono text-2xs text-body">
-                {row?.artifact_hash || "—"}
+                {row?.artifact_hash || "-"}
               </code>
               {row && (
                 <Button
@@ -198,7 +198,7 @@ export function ConfigRevisionsPage() {
       accessorKey: "reason",
       header: "备注",
       cell: (c) => (
-        <span className="block max-w-80 truncate text-2xs text-faint">{c.row.original.reason || "—"}</span>
+        <span className="block max-w-80 truncate text-2xs text-faint">{c.row.original.reason || "-"}</span>
       ),
     },
     {

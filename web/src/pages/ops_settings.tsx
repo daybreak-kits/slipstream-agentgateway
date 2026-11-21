@@ -362,7 +362,7 @@ function RuntimeSection({ items }: { items: SettingsItem[] }) {
                     </TD>
                     <TD className="tnum">{item.value}</TD>
                     <TD className="tnum text-right text-2xs text-faint">
-                      {item.updated_at ? fmtMs(Date.parse(item.updated_at)) : "—"}
+                      {item.updated_at ? fmtMs(Date.parse(item.updated_at)) : "-"}
                     </TD>
                   </TR>
                 );

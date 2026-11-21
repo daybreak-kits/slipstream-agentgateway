@@ -198,7 +198,7 @@ export function SingleCooldownFields({
       <p className="text-2xs text-faint">
         {invalid && preset === null && custom !== ""
           ? "到期时刻：请选择将来的时间"
-          : "到期时刻：" + (invalid ? "—" : formatDateTime(deadline, timezone)) + "（到期后自动恢复，无需排期）"}
+          : "到期时刻：" + (invalid ? "-" : formatDateTime(deadline, timezone)) + "（到期后自动恢复，无需排期）"}
       </p>
       <Field label="原因" hint="选填，写入冷却规则备注，供其他管理用户查看">
         <Input value={note} onChange={(event) => setNote(event.target.value)} placeholder="如：上游厂商例行维护" />
@@ -319,7 +319,7 @@ export function PeriodicCooldownFields({
         </Field>
       ) : null}
       {recurrence === "monthly" ? (
-        <Field label="生效日期" hint="每月第几天，1–31">
+        <Field label="生效日期" hint="每月第几天，1 至 31">
           <Input type="number" min={1} max={31} value={dayOfMonth} onChange={(e) => setDayOfMonth(e.target.value)} />
         </Field>
       ) : null}

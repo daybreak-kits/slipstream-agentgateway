@@ -89,7 +89,7 @@ export function DashboardKpis({ data, latency, loading, error, onRetry }: Dashbo
       <MetricCard
         label="请求量"
         value={loading ? undefined : fmtInt(requests)}
-        hint={`错误 ${fmtInt(errorCount)} 次 · 错误率 ${requests > 0 ? fmtPct(errorCount / requests) : "—"}`}
+        hint={`错误 ${fmtInt(errorCount)} 次 · 错误率 ${requests > 0 ? fmtPct(errorCount / requests) : "-"}`}
         icon={METRIC_ICONS.requests.icon}
         tone={METRIC_ICONS.requests.tone}
         loading={loading}
@@ -114,7 +114,7 @@ export function DashboardKpis({ data, latency, loading, error, onRetry }: Dashbo
         <MetricCard
           label="费用"
           value={loading || charge === undefined ? undefined : fmtMoney(charge, currency)}
-          hint={avgPerMillion === null ? "平均 — 元/百万词元" : `平均 ${fmtFixed(avgPerMillion)} 元/百万词元`}
+          hint={avgPerMillion === null ? "平均 - 元/百万词元" : `平均 ${fmtFixed(avgPerMillion)} 元/百万词元`}
           icon={METRIC_ICONS.charge.icon}
           tone={METRIC_ICONS.charge.tone}
           loading={loading}
@@ -124,7 +124,7 @@ export function DashboardKpis({ data, latency, loading, error, onRetry }: Dashbo
         <MetricCard
           label="成本 · 毛利率"
           value={loading || cost === undefined ? undefined : fmtMoney(cost, currency)}
-          hint={marginRate === null ? "毛利率 —（缺花费账或暂无金额）" : `毛利率 ${fmtPct(marginRate)}`}
+          hint={marginRate === null ? "毛利率 -（缺花费账或暂无金额）" : `毛利率 ${fmtPct(marginRate)}`}
           icon={METRIC_ICONS.cost.icon}
           tone={METRIC_ICONS.cost.tone}
           loading={loading}

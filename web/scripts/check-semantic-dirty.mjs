@@ -433,7 +433,7 @@ check("CooldownControlPanel：模式禁用/互斥说明/唯一解除/选中态",
   expect(normal.includes("单次冷却表单") && !normal.includes("周期冷却表单"), "只渲染当前选中模式表单");
 
   // 2) 周期窗口生效：单次模式禁用 + 互斥说明（含窗口结束时间）+ 唯一解除。
-  const singleReason = "周期冷却窗口生效期间不能设置单次冷却；阻塞规则：每天 02:00–04:00；窗口至 11-20 12:00，可先解除跳过本窗口";
+  const singleReason = "周期冷却窗口生效期间不能设置单次冷却；阻塞规则：每天 02:00 至 04:00；窗口至 11-20 12:00，可先解除跳过本窗口";
   const blockedSingle = panel(
     { ...baseState, cooling: true, coolingUntilMs: 1, blockedSingle: true, singleBlockReason: singleReason, releaseVisible: true },
     { mode: "single" },
@@ -548,7 +548,7 @@ check("冷却表单：单次预设/自定义截止与周期规则编辑", async 
       onDirtyChange: () => {},
     }),
   );
-  includesAll(periodic, ["已有周期冷却", "每天 02:00–04:00", "删除规则", "重复方式", "开始时间", "结束时间", "备注", "设置周期冷却"], "周期冷却表单");
+  includesAll(periodic, ["已有周期冷却", "每天 02:00 至 04:00", "删除规则", "重复方式", "开始时间", "结束时间", "备注", "设置周期冷却"], "周期冷却表单");
   expect(!periodic.includes("仅跳过当前窗口"), "周期表单不得混入单次解除语义");
 });
 

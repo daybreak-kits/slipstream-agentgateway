@@ -67,7 +67,7 @@ export function timeRangeLabel(
     `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")} ${String(
       date.getHours(),
     ).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-  return `${fmt(start)} – ${fmt(end)}`;
+  return `${fmt(start)} 至 ${fmt(end)}`;
 }
 
 export type IntervalTimezone = "local" | "utc";

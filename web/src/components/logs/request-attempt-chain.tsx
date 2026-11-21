@@ -96,7 +96,7 @@ export function RequestAttemptChain({
                 <span className="font-medium text-title">第 {attempt.attempt} 轮</span>
                 <span className="text-faint">→</span>
                 <span className="text-body" title={attempt.upstream_ref || undefined}>
-                  {attempt.upstream_name || attempt.upstream_ref || "—"}
+                  {attempt.upstream_name || attempt.upstream_ref || "-"}
                 </span>
                 {attempt.model ? (
                   <>
@@ -145,13 +145,13 @@ export function RequestAttemptChain({
                   <div className="min-w-0">
                     <dt className="text-faint">上游地址</dt>
                     <dd className="break-all font-mono text-body">
-                      {attempt.upstream_ref || "—"}
+                      {attempt.upstream_ref || "-"}
                     </dd>
                   </div>
                   <div className="min-w-0">
                     <dt className="text-faint">错误类型</dt>
                     <dd className="break-all font-mono text-body">
-                      {attempt.error_type || "—"}
+                      {attempt.error_type || "-"}
                     </dd>
                   </div>
                   <div className="min-w-0">
@@ -162,7 +162,7 @@ export function RequestAttemptChain({
                   </div>
                   <div className="min-w-0">
                     <dt className="text-faint">结果</dt>
-                    <dd className="text-body">{outcomeLabel(attempt.outcome) || "—"}</dd>
+                    <dd className="text-body">{outcomeLabel(attempt.outcome) || "-"}</dd>
                   </div>
                 </dl>
                 {attempt.error_message ? (
