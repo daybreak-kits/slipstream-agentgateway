@@ -906,19 +906,30 @@ const adminAccounts: AdminAccount[] = [
 
 /**
  * ADR-019 统一用户表（GET /admin/users 与 /admin/users/tree 同行形，见 UserTreeNode）。
- * username 非空 = 可登录控制台（前端「控制台」徽章仅标识，操作显隐一律查权限键）；
- * eu_04 故意不带 username，用来演示纯 API 用户行。
+ * 每个用户都是登录账号（W7）：username 非空即表示可登录，没有「无登录帐户」的行。
  */
 const mockUsers: UserTreeNode[] = [
   { id: "eu_01", name: "内部平台", username: "internal", balance_micro: 1148659200, role: "admin", parent_user_id: null, status: "active", depth: 0, direct_children: 3, subtree_size: 5, created_at_ms: Date.parse("2026-11-01T10:00:00"), updated_at_ms: Date.parse("2026-11-17T01:22:00") },
   { id: "eu_02", name: "数据分析组", username: "data-team", balance_micro: 480000000, role: "reseller", parent_user_id: "eu_01", status: "active", depth: 1, direct_children: 1, subtree_size: 2, created_at_ms: Date.parse("2026-11-10T14:30:00"), updated_at_ms: Date.parse("2026-11-12T09:00:00") },
   { id: "eu_03", name: "试用-临时", username: "trial", balance_micro: 0, role: "customer", parent_user_id: "eu_02", status: "disabled", depth: 2, direct_children: 0, subtree_size: 1, created_at_ms: Date.parse("2026-10-20T09:00:00"), updated_at_ms: Date.parse("2026-11-14T18:00:00") },
-  { id: "eu_04", name: "分销代理", username: "", balance_micro: 230000000, role: "reseller", parent_user_id: "eu_01", status: "active", depth: 1, direct_children: 0, subtree_size: 1, created_at_ms: Date.parse("2026-11-05T11:00:00"), updated_at_ms: Date.parse("2026-11-05T11:00:00") },
+  { id: "eu_04", name: "分销代理", username: "agent", balance_micro: 230000000, role: "reseller", parent_user_id: "eu_01", status: "active", depth: 1, direct_children: 0, subtree_size: 1, created_at_ms: Date.parse("2026-11-05T11:00:00"), updated_at_ms: Date.parse("2026-11-05T11:00:00") },
   { id: "eu_05", name: "华东代理", username: "east-agent", balance_micro: 960000000, role: "customer", parent_user_id: "eu_01", status: "active", depth: 1, direct_children: 0, subtree_size: 1, created_at_ms: Date.parse("2026-11-15T08:20:00"), updated_at_ms: Date.parse("2026-11-15T08:20:00") },
 ];
 
 /** mock 用户序号：创建新用户时递增（id eu_NN）。 */
 let mockUserSeq = mockUsers.length;
+
+/** ADR-019：没填登录帐户时按用户名称派生，重名追加 -2 后缀（与后端 _resolve_username 同口径）。 */
+function deriveMockUsername(name: string): string {
+  const base = (name.trim() || "user").slice(0, 120);
+  let candidate = base;
+  let suffix = 2;
+  while (mockUsers.some((user) => user.username === candidate)) {
+    candidate = `${base}-${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
+}
 
 // —— 角色管理（ADR-023 #4；契约 docs/api-contract.md：GET/POST/PATCH/DELETE /admin/roles） ——
 // 内存 admin_roles：与 lib/roles.ts 的 RoleDefinition 模型同形；member_count 按 mockUsers 实时计算，
@@ -1189,7 +1200,8 @@ export async function mockRequest<T>(path: string, init?: RequestInit): Promise<
     const created: UserTreeNode = {
       id: "eu_" + String(++mockUserSeq).padStart(2, "0"),
       name: body.name ?? "未命名用户",
-      username: body.username ?? "",
+      // 每个用户都是登录账号（W7）：留空则按用户名称派生，绝不产生空登录名。
+      username: body.username?.trim() || deriveMockUsername(body.name ?? "未命名用户"),
       balance_micro: 0,
       role: body.role ?? "customer",
       parent_user_id: parent?.id ?? null,

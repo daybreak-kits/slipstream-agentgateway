@@ -37,14 +37,16 @@ already writes rows only, so the command just records the v2 marker there:
     PYTHONPATH=src python scripts/migrate_multikey_v2.py          # dry-run 预演
     PYTHONPATH=src python scripts/migrate_multikey_v2.py --apply  # 迁移 + v2 标记
 
-Console login (ticket 02 / ADR-019) — every seeded account shares one demo
-password. The seed writes the three console accounts straight onto the unified
-users rows (username + password + role), so no migration pass is involved:
+Console login (ticket 02 / ADR-019 + W7) — every seeded account shares one demo
+password. The seed writes the login credentials straight onto the unified
+users rows (username + password + role), so every user is a login account and
+no migration pass is involved:
 
     default password: admin12345
     override:         SLIPSTREAM_DEMO_ADMIN_PASSWORD=... python scripts/seed_demo.py
     accounts:         admin(管理用户, 内部平台) / lisi(分销商, 数据分析组) /
-                      wangwu(客户, 试用-临时)
+                      wangwu(客户, 试用-临时) / finance(客户, 财务对账) /
+                      loadtest(客户, 压测环境) / root(根用户 D)
 
 Change the password after the first login (用户管理 or PUT /admin/users/{id}/password).
 """
@@ -170,6 +172,17 @@ USERS = [
     ("财务对账", 80_000_000, [80_000_000], "内部平台", "customer"),
     ("压测环境", 50_000_000, [50_000_000], "D", "customer"),
 ]
+
+# ADR-019 + W7：users 单表，用户即登录账号——每个 seed 用户（含根用户 D）都有
+# 登录名与密码，不再存在「无登录帐户」的行。登录名唯一且不可改。
+LOGIN_ACCOUNTS = {
+    "D": "root",
+    "内部平台": "admin",
+    "数据分析组": "lisi",
+    "试用-临时": "wangwu",
+    "财务对账": "finance",
+    "压测环境": "loadtest",
+}
 
 # Cache items are the one price still held by the book (ADR-020): 0.5 CNY / 1M
 # cache tokens, same for every model, because a model row has no cache column.
@@ -368,12 +381,20 @@ def seed(session, rng: random.Random) -> dict[str, object]:
     users: dict[str, object] = {}
     keys: dict[str, object] = {}
     key_texts: dict[str, str] = {}
+    # ADR-019 + W7：users 单表里每个用户都是登录账号——seed 直接写登录名与密码，
+    # 不再留「无登录帐户」的行。演示口令对所有账号相同（可用环境变量覆盖）。
+    demo_password = os.environ.get("SLIPSTREAM_DEMO_ADMIN_PASSWORD", "admin12345")
     root = user_tree.ensure_root_user(session)
+    root.username = LOGIN_ACCOUNTS[root.name]
+    root.password_hash = auth.hash_password(demo_password)
+    root.updated_at_ms = now - 24 * 3_600_000
     users[root.name] = root
     for name, initial_micro, topups, parent_name, role in USERS:
         user = crud.create_user(
             session,
             name=name,
+            username=LOGIN_ACCOUNTS[name],
+            password_hash=auth.hash_password(demo_password),
             parent_user_id=users[parent_name].id,
             role=role,
             actor="seed",
@@ -653,17 +674,8 @@ def seed(session, rng: random.Random) -> dict[str, object]:
     # ---------------- 管理员（RBAC 三角色；默认密码仅用于演示，首次登录后修改） ----------------
     # ADR-019：控制台账号直接写在统一的 users 行上（username 不可改，控制台
     # 访问 = 有角色且有密码）；分销商只能看自己的子树（ticket 04）。
-    demo_password = os.environ.get("SLIPSTREAM_DEMO_ADMIN_PASSWORD", "admin12345")
-    console_accounts = (
-        ("admin", "admin", "内部平台"),
-        ("lisi", "reseller", "数据分析组"),
-        ("wangwu", "customer", "试用-临时"),
-    )
-    for username, role, consumer_name in console_accounts:
-        row = users[consumer_name]
-        row.username = username
-        row.password_hash = auth.hash_password(demo_password)
-        row.role = role
+    # 登录名与密码已在建号时写好（见 LOGIN_ACCOUNTS），这里只回填「更早创建」的痕迹。
+    for row in users.values():
         row.updated_at_ms = now - 24 * 3_600_000
     session.add(
         AuditLogORM(
@@ -743,7 +755,11 @@ def main() -> int:
         print("登录账号: admin / (来自 SLIPSTREAM_DEMO_ADMIN_PASSWORD；其余账号同密码)")
     else:
         print("登录账号: admin / admin12345  ← 默认演示密码，首次登录后请立即修改")
-    print("角色演示: lisi(分销商) / wangwu(客户)，共用同一密码")
+    print(
+        "全部用户都有登录名（共用同一密码）: "
+        + " / ".join(f"{username}({name})" for name, username in LOGIN_ACCOUNTS.items())
+    )
+    print("角色演示: lisi(分销商) / wangwu(客户)")
     print()
     print("现在可以: cd slipstream/api && uvicorn l06_api.app:create_app --factory --port 3700")
     return 0

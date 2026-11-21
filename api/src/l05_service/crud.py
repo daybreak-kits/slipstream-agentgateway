@@ -597,19 +597,25 @@ def create_user(
     session: Session,
     *,
     name: str,
-    username: str | None = None,
-    password_hash: str = "",
+    username: str,
+    password_hash: str,
     balance_micro: int = 0,
     parent_user_id: str | None = None,
     role: str = "customer",
     status: str = "active",
     actor: str = "",
 ) -> UserORM:
-    """One unified user row (ADR-019): role, tree position and optional login.
+    """One unified user row (ADR-019 + W7): role, tree position and login.
 
     username is the immutable login name; password_hash arrives pre-hashed from
-    the auth service (the plaintext never reaches the CRUD layer).
+    the auth service (the plaintext never reaches the CRUD layer). Every user is
+    a login account, so both are mandatory: a row without them would be a
+    "无登录帐户" half-product that can never sign in.
     """
+    if not username or not username.strip():
+        raise AppError(ErrorCode.VALIDATION_ERROR, "username 不能为空（每个用户都是登录账号）")
+    if not password_hash:
+        raise AppError(ErrorCode.VALIDATION_ERROR, "password_hash 不能为空（每个用户都是登录账号）")
     stamp = now_ms()
     user = UserORM(
         id=new_id("user"),
