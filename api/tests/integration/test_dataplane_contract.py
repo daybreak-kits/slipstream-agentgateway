@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 from fastapi.testclient import TestClient
-from tests.conftest import make_admin, new_session_token
+from tests.conftest import make_admin, new_session_token, seed_channel
 
 from l01_core.settings import reset_settings_cache
 from l03_adapters.fake import FakeAdapter
@@ -268,6 +268,238 @@ def test_playground_reasoning_effort_unknown_level_is_a_validation_error(
             "model": "flagship",
             "messages": [{"role": "user", "content": "hello"}],
             "reasoning_effort": "extremely-high",
+        },
+    )
+    assert response.status_code == 422
+
+
+# --------------------------------------------- playground output params (t19)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("top_k", 40),
+        ("seed", 42),
+        ("frequency_penalty", -1.5),
+        ("presence_penalty", 0.5),
+        ("max_completion_tokens", 256),
+        ("stop", ["END", "DONE"]),
+        ("n", 3),
+        ("response_format", {"type": "json_object"}),
+        ("logprobs", True),
+        ("top_logprobs", 5),
+        ("user", "operator-7"),
+    ],
+)
+def test_playground_output_params_are_forwarded_verbatim(
+    fake_dataplane, stub_upstream, field, value
+):
+    """Ticket 19: every panel param crosses the schema AND the relay whitelist.
+
+    The stub records the actual data-plane body, so the assertion proves real
+    forwarding, not just schema acceptance (same technique as ticket 18).
+    """
+    app, client = fake_dataplane
+    app.dependency_overrides[get_adapter] = lambda: FakeAdapter(
+        contract=_fake_contract(stub_upstream)
+    )
+    response = client.post(
+        "/admin/playground/stream",
+        json={
+            "model": "flagship",
+            "messages": [{"role": "user", "content": "hello"}],
+            field: value,
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert len(_StubSSEHandler.received) == 1
+    assert _StubSSEHandler.received[0]["body"][field] == value
+
+
+def test_playground_extra_fields_merge_and_never_override_relay_keys(
+    fake_dataplane, stub_upstream
+):
+    """Ticket 19: the vendor passthrough box merges, standard params win.
+
+    Relay-owned keys (model/messages/stream/stream_options) can never be
+    overridden by the passthrough box; a standard param always beats the same
+    key inside extra_fields.
+    """
+    app, client = fake_dataplane
+    app.dependency_overrides[get_adapter] = lambda: FakeAdapter(
+        contract=_fake_contract(stub_upstream)
+    )
+    response = client.post(
+        "/admin/playground/stream",
+        json={
+            "model": "flagship",
+            "messages": [{"role": "user", "content": "hello"}],
+            "temperature": 0.7,
+            "extra_fields": {
+                "vendor_x": "v",
+                "model": "evil",
+                "messages": [],
+                "stream": False,
+                "stream_options": {"include": True},
+                "temperature": 99.0,
+            },
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert len(_StubSSEHandler.received) == 1
+    body = _StubSSEHandler.received[0]["body"]
+    assert body["vendor_x"] == "v"
+    assert body["model"] == "flagship"
+    assert body["stream"] is True
+    assert body["messages"] == [{"role": "user", "content": "hello"}]
+    assert body["temperature"] == 0.7
+    assert "stream_options" not in body
+
+
+@pytest.mark.parametrize(
+    "stop",
+    [
+        ["a", "b", "c", "d", "e"],
+        ["ok", ""],
+    ],
+)
+def test_playground_stop_out_of_bounds_is_a_validation_error(
+    fake_dataplane, stub_upstream, stop
+):
+    """Ticket 19: stop is at most 4 non-empty strings; more or empty is a 422."""
+    _app, client = fake_dataplane
+    response = client.post(
+        "/admin/playground/stream",
+        json={
+            "model": "flagship",
+            "messages": [{"role": "user", "content": "hello"}],
+            "stop": stop,
+        },
+    )
+    assert response.status_code == 422
+    assert len(_StubSSEHandler.received) == 0
+
+
+# ------------------------------------- max output tokens per registered model (t19)
+
+
+def _seed_registered_model(engine_and_sessionmaker, max_output_tokens: int) -> None:
+    """A public model "t19-model" whose single member registers an output cap."""
+    engine, factory = engine_and_sessionmaker
+    seed_channel(engine, factory)
+    from l04_repo.orm import ModelTargetORM, PublicModelORM, UpstreamModelORM
+
+    with factory() as session:
+        session.add(
+            UpstreamModelORM(
+                id="umdl_t19",
+                upstream_id="ups_test",
+                name="t19-member",
+                model_type="chat",
+                enabled=True,
+                parameters_json=json.dumps({"max_output_tokens": max_output_tokens}),
+                created_at_ms=0,
+            )
+        )
+        session.add(PublicModelORM(id="pmdl_t19", name="t19-model", created_at_ms=0))
+        session.add(
+            ModelTargetORM(
+                id="mt_t19",
+                public_model_id="pmdl_t19",
+                upstream_model_id="umdl_t19",
+                priority=1,
+                created_at_ms=0,
+            )
+        )
+        session.commit()
+
+
+def test_playground_max_tokens_over_the_registered_limit_is_rejected(
+    fake_dataplane, stub_upstream, engine_and_sessionmaker
+):
+    """Ticket 19: the registered max_output_tokens is the backend backstop."""
+    _seed_registered_model(engine_and_sessionmaker, max_output_tokens=8192)
+    app, client = fake_dataplane
+    app.dependency_overrides[get_adapter] = lambda: FakeAdapter(
+        contract=_fake_contract(stub_upstream)
+    )
+    for field in ("max_tokens", "max_completion_tokens"):
+        response = client.post(
+            "/admin/playground/stream",
+            json={
+                "model": "t19-model",
+                "messages": [{"role": "user", "content": "hello"}],
+                field: 8193,
+            },
+        )
+        assert response.status_code == 422, response.text
+        body = response.json()
+        assert body["code"] == "VALIDATION_ERROR"
+        assert "8192" in body["message"]
+        assert field in body["message"]
+    assert len(_StubSSEHandler.received) == 0
+
+
+def test_playground_max_tokens_at_the_registered_limit_is_forwarded(
+    fake_dataplane, stub_upstream, engine_and_sessionmaker
+):
+    """Ticket 19: a value within the registered limit relays untouched."""
+    _seed_registered_model(engine_and_sessionmaker, max_output_tokens=8192)
+    app, client = fake_dataplane
+    app.dependency_overrides[get_adapter] = lambda: FakeAdapter(
+        contract=_fake_contract(stub_upstream)
+    )
+    response = client.post(
+        "/admin/playground/stream",
+        json={
+            "model": "t19-model",
+            "messages": [{"role": "user", "content": "hello"}],
+            "max_tokens": 8192,
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert len(_StubSSEHandler.received) == 1
+    assert _StubSSEHandler.received[0]["body"]["max_tokens"] == 8192
+
+
+def test_playground_max_tokens_without_a_registered_capability_is_forwarded(
+    fake_dataplane, stub_upstream
+):
+    """Ticket 19: no registered capability -> nothing to enforce per model.
+
+    "flagship" is not in the control-plane registry, so the per-model backstop
+    skips (the schema sanity bound still applies); the frontend inline hint
+    uses the safe default and labels it as such.
+    """
+    app, client = fake_dataplane
+    app.dependency_overrides[get_adapter] = lambda: FakeAdapter(
+        contract=_fake_contract(stub_upstream)
+    )
+    response = client.post(
+        "/admin/playground/stream",
+        json={
+            "model": "flagship",
+            "messages": [{"role": "user", "content": "hello"}],
+            "max_tokens": 100000,
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert len(_StubSSEHandler.received) == 1
+    assert _StubSSEHandler.received[0]["body"]["max_tokens"] == 100000
+
+
+def test_playground_max_tokens_absurd_value_is_a_schema_validation_error(
+    fake_dataplane,
+):
+    """Ticket 19: the schema sanity bound is the same 100M cap the registry uses."""
+    _app, client = fake_dataplane
+    response = client.post(
+        "/admin/playground/stream",
+        json={
+            "model": "flagship",
+            "messages": [{"role": "user", "content": "hello"}],
+            "max_tokens": 100_000_001,
         },
     )
     assert response.status_code == 422

@@ -34,7 +34,6 @@ import {
   buildUsage,
   buildUserContent,
   chatParamsFromInput,
-  DEFAULT_MAX_OUTPUT_TOKENS,
   describeChatError,
   describeThinking,
   isAbortError,
@@ -268,8 +267,10 @@ export function PlaygroundPage() {
         toast.error("先选择公开模型");
         return;
       }
+      // 票19：上限用所选模型登记的 max_output_tokens；无登记数据时校验层回退
+      // 安全默认（与面板口径一致），后端还有按登记值的兜底 422。
       const validation = validateChatParams(params, {
-        maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+        maxOutputTokens: activeModelInfo?.parameters.max_output_tokens,
       });
       if (!validation.valid) {
         toast.error("参数不合法", { description: validation.message });
@@ -390,7 +391,7 @@ export function PlaygroundPage() {
         abortRef.current = null;
       }
     },
-    [enrichUsage, params, patchMessage, patchSession],
+    [enrichUsage, params, patchMessage, patchSession, activeModelInfo],
   );
 
   const send = () => {
@@ -404,7 +405,9 @@ export function PlaygroundPage() {
       toast.error("先选择公开模型");
       return;
     }
-    const validation = validateChatParams(params, { maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS });
+    const validation = validateChatParams(params, {
+      maxOutputTokens: activeModelInfo?.parameters.max_output_tokens,
+    });
     if (!validation.valid) {
       toast.error("参数不合法", { description: validation.message });
       return;
