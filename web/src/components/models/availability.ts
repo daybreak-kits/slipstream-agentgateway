@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/lib/notify";
 
 import { ApiError, api, ENDPOINTS } from "@/lib/api";
+import type { TableRowTone } from "@/lib/table-columns";
 import { formatDateTime, useTimezone, type TimezoneMode } from "@/lib/time";
 import type {
   AvailabilityRule, CooldownRecurrence, ModelAvailability, ModelBatchResult,
@@ -171,6 +172,22 @@ export function availabilityTone(row: { enabled: boolean; cooldown_until_ms?: nu
   // 「已关闭」用 warning 语义色（DESIGN-AUDIT 四期 §16 / W4-A1）：中性灰不表达「被人为关闭」的警示。
   if (row.availability?.state === "closed" || !row.enabled) return "warning";
   return "success";
+}
+
+/**
+ * 表格行底色（W6 ticket 10 / user story 41/43）：关闭行微灰、冷却行微黄；
+ * 关闭优先于冷却（closed 行即使残留冷却截止时间也是灰）。正常行无底色。
+ * 上游与公开模型共用：公开模型没有冷却（ADR-025），实际只会命中 neutral。
+ */
+export function modelRowTone(row: { enabled: boolean; cooldown_until_ms?: number; availability?: ModelAvailability }): TableRowTone | undefined {
+  if (row.availability?.state === "closed" || !row.enabled) return "neutral";
+  if (row.availability?.state === "cooling" || isCooling(row)) return "warning";
+  return undefined;
+}
+
+/** 关闭行默认置尾的分区谓词（lib/table-order）：只认「关闭」，冷却不参与置尾。 */
+export function modelRowRank(row: { enabled: boolean; availability?: ModelAvailability }): boolean {
+  return row.availability?.state === "closed" || !row.enabled;
 }
 
 /** 批量部分成功（后端逐条回报 changed/missing/failed）的统一 toast。 */

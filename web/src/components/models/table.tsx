@@ -12,10 +12,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableWrap, TD, TH, THead, TR } from "@/components/ui/table";
 import {
+  ACTION_CELL_WRAPPER_CLASS,
+  rowToneClass,
+  rowToneTrStyle,
   tableColumnCellClass,
   tableColumnHeaderClass,
   type TableColumnLayoutMeta,
+  type TableRowTone,
 } from "@/lib/table-columns";
+import { partitionClosedLast } from "@/lib/table-order";
 import { SELECT_ALL_VALUE } from "@/lib/select-sentinels";
 import { cn } from "@/lib/utils";
 import { ListFilter, Settings2 } from "lucide-react";
@@ -59,6 +64,12 @@ interface ModelsTableProps<T> {
   onClearFilters: () => void;
   /** 行点击回调（W4-C：公开模型整行进入整页编辑器）；传入后行加 cursor-pointer。行内按钮/复选框的点击不触发。 */
   onRowClick?: (row: T) => void;
+  /** W6 ticket 10（user story 41）：返回 true 的行默认置尾（本表无列排序，「默认」恒成立）。
+   * 稳定分区在分页切片前做，跨页顺序一致。 */
+  closedLast?: (row: T) => boolean;
+  /** W6 ticket 10（user story 41/43）：行状态底色（neutral=关闭微灰 / warning=冷却微黄），
+   * 冻结列经 --row-bg 同步着色。冷却行只变色不置尾。 */
+  rowTone?: (row: T) => TableRowTone | undefined;
 }
 
 type ColsMap = Record<string, string[]>;
@@ -96,6 +107,7 @@ export function ModelsTable<T>({
   columns, rows, totalCount, loading = false, error, onRetry,
   storageKey, tabKey, searchText, onSearchChange, searchPlaceholder,
   typeFilter, toolbarEnd, emptyText, emptyAction, onClearFilters, onRowClick,
+  closedLast, rowTone,
 }: ModelsTableProps<T>) {
   const [hiddenCols, setHiddenCols] = useState<string[]>(() => readHiddenCols(storageKey, tabKey));
   const [pageIndex, setPageIndex] = useState(1);
@@ -124,7 +136,12 @@ export function ModelsTable<T>({
 
   const totalPages = Math.max(1, Math.ceil(rows.length / Math.max(1, pageSize)));
   const currentPage = Math.min(pageIndex, totalPages);
-  const pageRows = rows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  // W6 ticket 10：关闭行置尾在分页切片前分区（稳定，启用行保持原序），跨页顺序一致。
+  const orderedRows = useMemo(
+    () => (closedLast ? partitionClosedLast(rows, closedLast) : rows),
+    [closedLast, rows],
+  );
+  const pageRows = orderedRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const colCount = visibleColumns.length;
   const noMatch = totalCount > 0 && rows.length === 0;
 
@@ -235,10 +252,13 @@ export function ModelsTable<T>({
                 </td>
               </tr>
             ) : (
-              pageRows.map((row, index) => (
+              pageRows.map((row, index) => {
+                const tone = rowTone?.(row);
+                return (
                 <TR
                   key={(row as { id?: string }).id ?? index}
-                  className={onRowClick ? "cursor-pointer" : undefined}
+                  className={cn(onRowClick ? "cursor-pointer" : undefined, rowToneClass(tone))}
+                  style={rowToneTrStyle(tone)}
                   onClick={onRowClick
                     ? (event) => {
                         // 行内按钮/复选框/链接有自己的动作，不再触发行点击
@@ -250,11 +270,17 @@ export function ModelsTable<T>({
                 >
                   {visibleColumns.map((col) => (
                     <TD key={col.key} className={cn("h-8 py-0.5", tableColumnCellClass(col))}>
-                      {col.cell(row)}
+                      {/* W6 ticket 10：操作列（sticky 尾列）内容统一 flex justify-end 贴右边缘。 */}
+                      {col.sticky === "right" ? (
+                        <div className={ACTION_CELL_WRAPPER_CLASS}>{col.cell(row)}</div>
+                      ) : (
+                        col.cell(row)
+                      )}
                     </TD>
                   ))}
                 </TR>
-              ))
+                );
+              })
             )}
           </tbody>
         </Table>
