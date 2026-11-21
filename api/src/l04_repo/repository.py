@@ -30,7 +30,6 @@ from l04_repo.orm import (
     UpstreamProbeORM,
     UserDailyORM,
     UserORM,
-    VendorORM,
 )
 
 T = TypeVar("T", bound=Base)
@@ -83,7 +82,6 @@ def put_setting(session: Session, key: str, value_json: str, updated_at_ms: int)
     session.flush()
 
 
-VENDOR_REPO: CrudRepository[VendorORM] = CrudRepository(VendorORM)
 UPSTREAM_REPO: CrudRepository[UpstreamORM] = CrudRepository(UpstreamORM)
 UPSTREAM_KEY_REPO: CrudRepository[UpstreamKeyORM] = CrudRepository(UpstreamKeyORM)
 UPSTREAM_PROBE_REPO: CrudRepository[UpstreamProbeORM] = CrudRepository(UpstreamProbeORM)

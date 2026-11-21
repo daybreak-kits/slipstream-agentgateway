@@ -32,7 +32,6 @@ from l04_repo.orm import (
     PublicModelORM,
     UpstreamModelORM,
     UpstreamORM,
-    VendorORM,
 )
 from l04_repo.repository import (
     MODEL_TARGET_REPO,
@@ -93,7 +92,6 @@ def _um_body(
     *,
     availability: AvailabilitySnapshot,
     upstream_name: str = "",
-    vendor_name: str = "",
     target_count: int = 0,
 ) -> dict:
     state = availability.upstream_model_view(row)
@@ -101,7 +99,6 @@ def _um_body(
         "id": row.id,
         "upstream_id": row.upstream_id,
         "upstream_name": upstream_name,
-        "vendor_name": vendor_name,
         "name": row.name,
         "model_type": row.model_type,
         "model_type_source": row.model_type_source or "default",
@@ -168,12 +165,9 @@ def _model_names(session: Session) -> dict[str, tuple[str, str]]:
     return names
 
 
-def _um_names(session: Session, row: UpstreamModelORM) -> tuple[str, str]:
+def _um_names(session: Session, row: UpstreamModelORM) -> str:
     upstream = session.get(UpstreamORM, row.upstream_id)
-    if upstream is None:
-        return "", ""
-    vendor = session.get(VendorORM, upstream.vendor_id)
-    return upstream.name, (vendor.name if vendor else "")
+    return upstream.name if upstream else ""
 
 
 def _targets_by_public(
@@ -230,11 +224,10 @@ def create_upstream_model(
     )
     _apply_cost_fields(row, payload)
     session.commit()
-    upstream_name, vendor_name = _um_names(session, row)
+    upstream_name = _um_names(session, row)
     return _um_body(
         row,
         upstream_name=upstream_name,
-        vendor_name=vendor_name,
         availability=evaluate(session),
     )
 
@@ -249,7 +242,6 @@ def list_upstream_models(
     limit, off = page_params(page_size, offset)
     models = UPSTREAM_MODEL_REPO.list_all(session, limit=limit, offset=off)
     upstreams = {u.id: u for u in session.scalars(select(UpstreamORM)).all()}
-    vendors = {v.id: v for v in session.scalars(select(VendorORM)).all()}
     counts = {
         key: int(value)
         for key, value in session.execute(
@@ -262,12 +254,10 @@ def list_upstream_models(
     items: list[dict] = []
     for model in models:
         upstream = upstreams.get(model.upstream_id)
-        vendor = vendors.get(upstream.vendor_id) if upstream else None
         items.append(
             _um_body(
                 model,
                 upstream_name=upstream.name if upstream else "",
-                vendor_name=vendor.name if vendor else "",
                 target_count=counts.get(model.id, 0),
                 availability=availability,
             )
@@ -393,7 +383,7 @@ def update_upstream_model(
             session, adapter, principal.username, reason=apply_reason, on_failure="keep-booked"
         )
     availability = evaluate(session)
-    upstream_name, vendor_name = _um_names(session, row)
+    upstream_name = _um_names(session, row)
     target_count = int(
         session.scalar(
             select(func.count())
@@ -405,7 +395,6 @@ def update_upstream_model(
     body = _um_body(
         row,
         upstream_name=upstream_name,
-        vendor_name=vendor_name,
         target_count=target_count,
         availability=availability,
     )

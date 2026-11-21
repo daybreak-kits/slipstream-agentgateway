@@ -62,22 +62,12 @@ class Recurrence(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class Vendor:
-    id: str
-    name: str
-    slug: str = ""
-    note: str = ""
-    upstream_seq: int = 0
-    created_at_ms: int = 0
-
-
-@dataclass(frozen=True, slots=True)
 class Upstream:
     id: str
-    vendor_id: str
     name: str
     base_url: str
     api_style: str
+    alias: str = ""
     api_key_ciphertext: str = ""
     transforms_json: str = ""
     max_buffer_bytes: int = 2097152

@@ -63,8 +63,8 @@ def _body(session: Session, upstream: UpstreamORM) -> dict:
     )
     return {
         "id": upstream.id,
-        "vendor_id": upstream.vendor_id,
         "name": upstream.name,
+        "alias": upstream.alias,
         "base_url": upstream.base_url,
         "api_style": upstream.api_style,
         "api_style_source": upstream_ops.probe_source(session, upstream.id, upstream.api_style),
@@ -92,12 +92,12 @@ def _load(session: Session, upstream_id: str) -> UpstreamORM:
 def create_upstream(payload: UpstreamCreate, session: Session = Depends(session_of)) -> dict:
     upstream = crud.create_upstream(
         session,
-        vendor_id=payload.vendor_id,
         base_url=payload.base_url,
         api_style=payload.api_style,
         api_key=payload.api_key,
         secret_box=_secret_box(),
         name=payload.name,
+        alias=payload.alias,
         transforms=payload.transforms,
         max_buffer_bytes=payload.max_buffer_bytes,
     )

@@ -27,7 +27,6 @@ from l04_repo.orm import (
     UpstreamModelORM,
     UpstreamORM,
     UserORM,
-    VendorORM,
 )
 from l04_repo.repository import (
     AUDIT_REPO,
@@ -36,7 +35,6 @@ from l04_repo.repository import (
     UPSTREAM_MODEL_REPO,
     UPSTREAM_REPO,
     USER_REPO,
-    VENDOR_REPO,
 )
 from l05_service import availability
 from l05_service.model_params import canonical_parameters, validate_type_source
@@ -83,18 +81,6 @@ def _audit(
     )
 
 
-def create_vendor(
-    session: Session, *, name: str, slug: str, note: str = "", actor: str = ""
-) -> VendorORM:
-    _ensure_unique_name(session, VendorORM, name)
-    vendor = VendorORM(
-        id=new_id("vend"), name=name, slug=slug, note=note, created_at_ms=now_ms()
-    )
-    VENDOR_REPO.add(session, vendor)
-    _audit(session, actor=actor, action="create", entity_type="vendor", entity_id=vendor.id)
-    return vendor
-
-
 def _name_from_base_url(base_url: str) -> str:
     """ADR-023 #6: derive the default upstream name from the connection address.
 
@@ -134,30 +120,26 @@ def _generate_upstream_name(session: Session, base_url: str) -> str:
 def create_upstream(
     session: Session,
     *,
-    vendor_id: str | None,
     base_url: str,
     api_style: str,
     api_key: str,
     secret_box: SecretBox,
     name: str | None = None,
+    alias: str = "",
     transforms: dict | None = None,
     max_buffer_bytes: int = 2097152,
     actor: str = "",
 ) -> UpstreamORM:
     """Create an upstream with its single key encrypted inline.
 
-    Naming (ADR-023 #6): an explicitly requested name wins (duplicates are a
-    422 like every other entity); without one, an explicit vendor keeps the
-    `{slug}-{NN}` counter, while a vendor-less upstream derives its name from
-    the connection address (`www-abc-com-8080`, deduplicated with -2/-3).
+    Naming (ADR-023 #6 + ADR-030): an explicitly requested name wins
+    (duplicates are a 422 like every other entity); without one, the name
+    derives from the connection address (`www-abc-com-8080`, deduplicated with
+    -2/-3). alias is a display-only name that never routes or reaches the data
+    plane.
     transforms (optional) is the structured rewrite-rule payload; it validates
     here (protected headers, fallback-last) and stores as canonical JSON.
     """
-    vendor = None
-    if vendor_id is not None:
-        vendor = session.get(VendorORM, vendor_id)
-        if vendor is None:
-            raise AppError(ErrorCode.NOT_FOUND, f"vendor not found: {vendor_id}")
     try:
         ApiStyle(api_style)
     except ValueError:
@@ -175,15 +157,12 @@ def create_upstream(
     if name:
         name = name.strip()
         ensure_unique_name(session, UpstreamORM, name)
-    elif vendor is not None:
-        vendor.upstream_seq += 1
-        name = f"{vendor.slug}-{vendor.upstream_seq:02d}"
     else:
         name = _generate_upstream_name(session, base_url)
     upstream = UpstreamORM(
         id=upstream_id,
-        vendor_id=vendor_id,
         name=name,
+        alias=alias.strip(),
         base_url=base_url,
         api_style=api_style,
         # ADR-026: no inline credential anymore - the key row created below is
@@ -669,12 +648,6 @@ def delete_entity(
     obj = repo.get(session, entity_id)
     if obj is None:
         raise AppError(ErrorCode.NOT_FOUND, f"{orm_class.__tablename__} not found: {entity_id}")
-    if orm_class is VendorORM:
-        orphans = session.scalars(
-            select(UpstreamORM).where(UpstreamORM.vendor_id == entity_id)
-        ).first()
-        if orphans is not None:
-            raise AppError(ErrorCode.CONFLICT, "vendor still has upstreams")
     if orm_class is UpstreamORM:
         orphans = session.scalars(
             select(UpstreamModelORM).where(UpstreamModelORM.upstream_id == entity_id)
