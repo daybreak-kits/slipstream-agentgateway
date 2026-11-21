@@ -42,7 +42,7 @@ type NotifyKey = "notify_email" | "notify_browser" | "notify_weekly";
 
 /** 三个通知偏好只有开关文案不同，统一用一个列表渲染，避免逐块复制。 */
 const NOTIFY_PREFS: { key: NotifyKey; title: string; hint: string }[] = [
-  { key: "notify_email", title: "邮件通知", hint: "仅保存偏好，ticket 16 不实现投递。" },
+  { key: "notify_email", title: "邮件通知", hint: "仅保存偏好，暂不投递。" },
   { key: "notify_browser", title: "浏览器通知", hint: "仅保存偏好，不请求浏览器权限。" },
   { key: "notify_weekly", title: "周报摘要", hint: "仅保存偏好，不发送邮件。" },
 ];

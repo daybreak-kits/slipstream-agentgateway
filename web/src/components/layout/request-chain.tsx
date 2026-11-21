@@ -4,9 +4,9 @@ import { ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const STAGES = [
-  { no: "01", title: "公开模型", caption: "对外别名", detail: "路由模式 · 故障转移 · 权重" },
-  { no: "02", title: "上游渠道", caption: "供应商连接", detail: "密钥 · 地址 · 可用性" },
-  { no: "03", title: "后端模型", caption: "真实调用", detail: "协议风格 · 参数 · 价格" },
+  { no: "01", title: "公开模型", caption: "对外别名", details: ["路由模式 · 故障转移", "权重"] },
+  { no: "02", title: "上游渠道", caption: "供应商连接", details: ["密钥 · 地址", "可用性"] },
+  { no: "03", title: "后端模型", caption: "真实调用", details: ["协议风格 · 参数", "价格"] },
 ];
 
 /**
@@ -23,16 +23,20 @@ export function RequestChain({ className }: { className?: string }) {
         <Fragment key={stage.no}>
           <div className="rounded-card border border-border bg-surface px-3.5 py-3 shadow-card">
             <div className="flex items-baseline justify-between gap-2">
-              <span className="font-mono text-2xs font-medium text-faint">{stage.no}</span>
+              <span className="font-mono text-2xs font-medium text-primary/75">{stage.no}</span>
               <span className="text-2xs text-faint">{stage.caption}</span>
             </div>
             <p className="mt-1.5 text-sm font-semibold text-title">{stage.title}</p>
-            <p className="mt-0.5 text-2xs text-faint">{stage.detail}</p>
+            <div className="mt-0.5 break-keep text-2xs leading-5 text-faint">
+              {stage.details.map((line) => (
+                <span key={line} className="block">{line}</span>
+              ))}
+            </div>
           </div>
           {index < STAGES.length - 1 ? (
             <li aria-hidden="true" className="hidden items-center justify-center sm:flex">
-              <span className="h-px w-6 bg-border-strong" />
-              <ArrowRight className="h-3.5 w-3.5 text-faint" strokeWidth={1.75} />
+              <span className="h-px w-6 bg-primary/30" />
+              <ArrowRight className="h-3.5 w-3.5 text-primary/60" strokeWidth={1.75} />
             </li>
           ) : null}
         </Fragment>

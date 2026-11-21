@@ -5,18 +5,18 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 export const buttonVariants = cva(
-  "inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-control text-sm font-medium transition-colors duration-150 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-2 focus-visible:ring-offset-bg disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+  "inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-control text-sm font-medium transition-colors duration-150 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-2 focus-visible:ring-offset-bg disabled:pointer-events-none disabled:cursor-not-allowed [&_svg]:pointer-events-none [&_svg]:shrink-0",
   {
     variants: {
       variant: {
         // 旧系统的默认按钮就是主色；default 作为 primary 的别名保留
-        default: "bg-primary text-primary-on shadow-xs hover:bg-primary-hover active:bg-primary-active",
-        primary: "bg-primary text-primary-on shadow-xs hover:bg-primary-hover active:bg-primary-active",
-        secondary: "bg-surface-2 text-title hover:bg-[var(--border)] active:bg-[var(--border-strong)]",
-        outline: "border border-border-strong bg-surface text-title hover:bg-surface-2 active:bg-[var(--surface-2)]",
-        ghost: "text-body hover:bg-surface-2 hover:text-title active:bg-[var(--border)]",
-        danger: "bg-danger text-white shadow-xs hover:brightness-95",
-        link: "text-primary underline-offset-4 hover:underline",
+        default: "bg-primary text-primary-on shadow-xs hover:bg-primary-hover active:bg-primary-active disabled:bg-primary-soft disabled:text-primary disabled:shadow-none",
+        primary: "bg-primary text-primary-on shadow-xs hover:bg-primary-hover active:bg-primary-active disabled:bg-primary-soft disabled:text-primary disabled:shadow-none",
+        secondary: "bg-surface-2 text-title hover:bg-[var(--border)] active:bg-[var(--border-strong)] disabled:opacity-50",
+        outline: "border border-border-strong bg-surface text-title hover:bg-surface-2 active:bg-[var(--surface-2)] disabled:opacity-50",
+        ghost: "text-body hover:bg-surface-2 hover:text-title active:bg-[var(--border)] disabled:opacity-50",
+        danger: "bg-danger text-white shadow-xs hover:brightness-95 disabled:opacity-50",
+        link: "text-primary underline-offset-4 hover:underline disabled:opacity-50",
       },
       // 控件高度阶梯：28 dense / 32 sm / 36 md / 40 default / 44 lg
       size: {

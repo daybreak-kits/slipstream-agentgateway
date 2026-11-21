@@ -7,7 +7,7 @@ export function NotFoundPage() {
   return (
     <div className="grid min-h-[60vh] place-items-center">
       <div className="space-y-2 text-center">
-        <p className="text-metric font-semibold text-title">404</p>
+        <h1 className="text-metric font-semibold text-title">404</h1>
         <p className="text-2sm text-body">没有这个页面</p>
         <p className="break-all font-mono text-2xs text-faint">{location.pathname}</p>
         <p className="text-2xs text-faint">地址可能写错，或该页面尚未上线。</p>

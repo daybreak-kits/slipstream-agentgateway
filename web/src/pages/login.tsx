@@ -118,7 +118,7 @@ export function LoginPage() {
     <div className="login-gradient relative flex min-h-full flex-col p-4 sm:p-6">
       <ThemeSwitcher />
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-blueprint opacity-50" />
-      <div className="relative mx-auto my-auto grid w-full max-w-5xl items-center gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:gap-14 2xl:max-w-[1240px] 2xl:grid-cols-[1fr_36rem]">
+      <div className="relative mx-auto my-auto grid w-full max-w-6xl items-center gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:gap-14 2xl:max-w-[1240px] 2xl:grid-cols-[1fr_36rem]">
         <section className="hidden lg:block">
           <div className="flex items-center gap-3">
             <img src="/logo-v10-contrast.svg" alt="" aria-hidden="true" className="h-10 w-10 shrink-0" />

@@ -365,10 +365,10 @@ check("metric-icons：统一 icon/tone 映射覆盖指标条全部指标", () =>
   }
 });
 
-check("指标条：grid gap-3 + 2/3/4/6 列响应式（xl 起六列，八卡 6+2 两行）", () => {
+check("指标条：grid gap-3 + 2/3/4 列响应式（lg 起四列，八卡 4+4 两行）", () => {
   includesAll(
     read("src/components/dashboard/metric-cards.tsx"),
-    ["grid-cols-2", "gap-3", "sm:grid-cols-3", "lg:grid-cols-4", "xl:grid-cols-6"],
+    ["grid-cols-2", "gap-3", "sm:grid-cols-3", "lg:grid-cols-4"],
     "八卡指标条",
   );
   // W4-I：billing 的 cost/unpriced/my-spend 面板是零引用孤儿，已删除；

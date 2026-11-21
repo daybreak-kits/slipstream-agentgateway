@@ -306,14 +306,16 @@ function UpstreamTab() {
     const cache = cachePrices.get(row.name);
     const unpriced = (row.cost_input_per_1m ?? "").trim() === "" && (row.cost_output_per_1m ?? "").trim() === "";
     return (
-      <div className="space-y-0.5">
+      <div className="space-y-0.5 text-2sm tnum">
         {unpriced ? (
           <div className="text-faint">未设置</div>
         ) : (
-          <div>入 {fmtPricePerM(row.cost_input_per_1m)} · 出 {fmtPricePerM(row.cost_output_per_1m)}</div>
+          <div className="whitespace-nowrap" title={"入 " + fmtPricePerM(row.cost_input_per_1m) + " / 出 " + fmtPricePerM(row.cost_output_per_1m)}>
+            {fmtPricePerM(row.cost_input_per_1m)} / {fmtPricePerM(row.cost_output_per_1m)}
+          </div>
         )}
-        <div className="text-faint">
-          倍率 {fmtMarkup(row.markup)} · 缓 {cache ? fmtUnitPriceMicro(cache.micro) + "/M" : "-"}
+        <div className="whitespace-nowrap text-2xs text-faint">
+          倍率 {fmtMarkup(row.markup)} · 缓存 {cache ? fmtUnitPriceMicro(cache.micro) + "/M" : "-"}
         </div>
       </div>
     );
@@ -369,8 +371,9 @@ function UpstreamTab() {
     },
     ...(canCost ? [{
       key: "price",
-      label: "价格（入 / 出 / 倍率）",
-      className: "text-right tnum",
+      label: "价格（入 / 出）",
+      className: "whitespace-nowrap text-right tnum",
+      headerClassName: "whitespace-nowrap",
       cell: priceCell,
     } as ModelColumn<UpstreamModel>] : []),
     {

@@ -25,7 +25,7 @@ export function PageHeader({
         <h1 className="truncate text-h1 font-semibold tracking-tight text-title" title={title}>{title}</h1>
         {description ? (
           <p
-            className="mt-1 max-w-[76ch] truncate text-sm text-faint"
+            className="mt-1 max-w-[76ch] text-pretty text-sm leading-5 text-faint"
             title={typeof description === "string" ? description : undefined}
           >
             {description}

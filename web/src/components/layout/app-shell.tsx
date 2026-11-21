@@ -73,7 +73,7 @@ export function AppShell() {
       </Sheet>
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar
-          title={match?.label ?? "Slipstream"}
+          title={match?.label ?? "页面不存在"}
           group={match?.group ?? ""}
           collapsed={collapsed}
           onToggleCollapse={() => setCollapsed((value) => !value)}

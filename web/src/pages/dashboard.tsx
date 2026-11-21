@@ -51,7 +51,7 @@ export function DashboardPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="看板"
+        title="数据看板"
         description={
           <>
             调用量、词元、成本与花费

@@ -106,7 +106,7 @@ export function MetricCard({
             </div>
           )}
           {hint !== undefined && (
-            <div className="truncate text-2xs text-faint" title={hint}>
+            <div className="line-clamp-2 text-2xs leading-snug text-faint" title={hint}>
               {hint}
             </div>
           )}

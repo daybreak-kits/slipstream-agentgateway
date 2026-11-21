@@ -244,7 +244,7 @@ export const ROUTES: RouteDef[] = [
     layout: "app",
     page: "audits",
     component: "AuditLogsPage",
-    title: "审计",
+    title: "审计日志",
     nav: { section: "系统", icon: "ScrollText", order: 5, permission: "audits:read" },
   },
   {

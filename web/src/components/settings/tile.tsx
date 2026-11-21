@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
  */
 export function SettingsGrid({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div className={cn("grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6", className)}>
+    <div className={cn("grid grid-cols-1 items-start gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6", className)}>
       {children}
     </div>
   );

@@ -405,7 +405,7 @@ export function LogsPage() {
           <Empty
             icon={FileText}
             title="暂无日志"
-            description="数据面尚未产生用量记录；客户端发起请求后会出现在这里。"
+            description="当前时间窗内没有请求记录；调整时间范围或发起一次请求后再试。"
           />
         </div>
       ) : (
@@ -552,16 +552,22 @@ function buildLogColumns(spec: LogColumnSpec): ColumnDef<LogRow, unknown>[] {
           <div className="min-w-0">
             <p
               className="truncate text-2sm font-medium text-title"
-              title={item.requested_model || "-"}
+              title={item.requested_model || item.upstream_model || "-"}
             >
-              {item.requested_model || "-"}
+              {item.requested_model || item.upstream_model || "-"}
             </p>
-            <p
-              className="mt-0.5 truncate border-t border-border/60 pt-0.5 text-2xs text-faint"
-              title={item.upstream_model || "-"}
-            >
-              {item.upstream_model || "-"}
-            </p>
+            {item.requested_model ? (
+              <p
+                className="mt-0.5 truncate border-t border-border/60 pt-0.5 text-2xs text-faint"
+                title={item.upstream_model || "-"}
+              >
+                {item.upstream_model || "-"}
+              </p>
+            ) : item.upstream_model ? (
+              <p className="mt-0.5 border-t border-border/60 pt-0.5 text-2xs text-faint">
+                请求模型未记录
+              </p>
+            ) : null}
           </div>
         );
       },

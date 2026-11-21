@@ -81,9 +81,9 @@ export function DashboardKpis({ data, latency, loading, error, onRetry }: Dashbo
   return (
     <div
       className={cn(
-        // 八卡按每行 6 铺开（DESIGN-AUDIT 四期 §8/§14）：xl 起 6 列（6+2 两行），
-        // 向下 4→3→2 逐档降列；权限裁剪只影响卡片数量，不换栅格模板。
-        "grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6",
+        // 八卡按每行 4 铺开（DESIGN-AUDIT 四期 §8/§14）：lg 起 4 列（4+4 两行），
+        // 向下 3→2 逐档降列；权限裁剪只影响卡片数量，不换栅格模板。
+        "grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4",
       )}
     >
       <MetricCard

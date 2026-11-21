@@ -137,7 +137,7 @@ export function Topbar({ title, group, collapsed, onToggleCollapse, onOpenMobile
           {latest.isPending ? (
             <Skeleton className="h-4 w-24" />
           ) : latest.data ? (
-            <Badge tone="primary" className="tnum">{latest.data.id}</Badge>
+            <Badge tone="primary" className="tnum" title={latest.data.id}>{latest.data.id.slice(0, 8)}</Badge>
           ) : (
             <Badge tone="warning">未知</Badge>
           )}

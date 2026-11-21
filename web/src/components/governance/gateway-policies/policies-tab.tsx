@@ -548,7 +548,7 @@ export function PoliciesTab({ data, draft, onDraftChange, canWrite, dirtyCount }
 
         </>
       ) : (
-        <div className="grid gap-3 lg:grid-cols-2">
+        <div className="grid items-start gap-3 lg:grid-cols-2">
           <SectionCard
             title="跨域 CORS"
             description={data.notes.cors}
