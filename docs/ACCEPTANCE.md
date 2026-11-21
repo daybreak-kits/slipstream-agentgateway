@@ -1,7 +1,7 @@
-# 浏览器验收清单（ACCEPTANCE，五期收口）
+# 浏览器验收清单（ACCEPTANCE，七期收口）
 
-> 本文件把 `.scratch/phase2/spec.md` 的 **50 条 User Stories** 映射成可执行的验收清单：每条给出「验证方式 + 证据位置 + 当前状态」。
-> 基线：`w5/integration`（2026-11-21，五期 ticket 01 至 16 全部合入；二期 01 至 22 仍全绿）。
+> 本文件把 `.scratch/phase2/spec.md` 的 **50 条 User Stories** 映射成可执行的验收清单：每条给出「验证方式 + 证据位置 + 当前状态」；七期（W7）的 spec 必测矩阵逐项映射见 §0.2。
+> 基线：`w7/t14-docs-gates`（2026-11-22，W7 ticket 01 至 14 全部合入 `w7/integration`；二期 01 至 22 仍全绿）。
 > 历史说明：§4 表中 `⏳ ticket xx` 与「PENDING」是二期 ticket 20 首次运行时的快照；**五期已把这些票号对应能力全部实现**，状态一律按 §0.1「五期验收矩阵」与 §7.2 更新后的行理解，最终以 ticket 18 的 `--strict` 报告为准。
 
 ## 0. 一句话结论（2026-11-18 最终）
@@ -26,6 +26,43 @@
 
 运行：`node ops/checks/acceptance_browser.mjs --channel msedge --strict`（单端口 3700；证据 `ops/checks/.logs/acceptance/<时间戳>/`，新截图目录 `.scratch/w5-shots` 由 ticket 18 归档）。
 
+## 0.2 七期（W7）验收矩阵（票 14 执行，对应 `.scratch/w7/spec.md` 必测矩阵逐项）
+
+> 七期验收分三层：API 集成 seam（pytest，临时库 + seed）、浏览器 seam（`ops/checks/acceptance/w7_*.mjs`，隔离端口 + fresh seed）、静态门禁补充。全部 PASS 才算收口；证据见 `docs/DELIVERY.md` §9.4。
+
+| # | spec 必测项 | 自动验证 | 结果 |
+|---|---|---|---|
+| 1 | 用户：新 seed 全部可登录；创建显式提供与自动生成两条路径凭证非空；API 契约无 `type` 字段 | pytest `test_user_accounts.py`（5 用例：seed 全登录/无 type/显式凭证/自动生成/缺凭证拒绝）+ `w6_acceptance` 登录四查 | PASS |
+| 2 | 厂商：旧 vendors 路由返回预期（GET 404 / 其他 405）；上游/价目/账单 API 无 vendor 字段；全仓/DB/seed 无 vendor | pytest `test_no_vendor_dimension.py`（8 用例：schema/路由/权限键/上游/缓存价/账单） | PASS |
+| 3 | 缓存价：同一上游模型不同时间窗口取价正确；删除厂商维度后计费与旧口径同价 | pytest `test_cache_prices_by_model.py`（4 用例）+ `test_seed_billing_golden.py`（黄金同价 2 用例） | PASS |
+| 4 | 密钥：非当前用户签发被拒；切用户后只能看到自己的密钥 | pytest `test_api_keys_multi.py`（子树越界 403）+ `w7_key_copy.mjs`（5 用例：customer 无用户选择、代签入口、复制回退） | PASS |
+| 5 | 成员：weighted/conditional 行只出现对应输入；候选点击加入/再点取消；展开/收起；保存后顺序与字段正确 | `w7_member_table.mjs`（8 用例）+ pytest `test_public_model_single_patch.py` | PASS |
+| 6 | 日志：查询按钮默认白底；改筛选后黄边+变色、查询后恢复；尝试图标只在有 attempts 时出现；popover/展开错误内容正确 | `w7_logs_filters_attempts.mjs`（9 用例）+ pytest `test_logs_attempt_chain.py`、`test_logs_requested_model.py` | PASS |
+| 7 | 状态：normal 无图标；cooling/closed 图标与时间文案正确；状态列不存在 | `w7_status_columns.mjs`（12 用例）+ `check-ui-foundation` StatusIcon 四态断言 | PASS |
+| 8 | HoverInfo：鼠标 hover、Tab 聚焦、触屏点击都能打开；portal 不裁切 | `w7_hover_info.mjs`（7 用例）+ `w7_model_params.mjs`（10 用例，参数列入/出 + 完整参数悬浮） | PASS |
+| 9 | 弹框：Enter/Esc/Tab 行为；危险默认取消；焦点还原 | `w7_dialog_keyboard.mjs`（8 用例） | PASS |
+| 10 | 复制：`navigator.clipboard` 为 undefined 时仍成功或明确报错；无未捕获异常 | `w7_key_copy.mjs`（回退链用例） | PASS |
+| 11 | 权限：customer 只能读/签发自己的密钥；reseller/admin 可见子树内代签；无权限角色拒绝 | pytest `test_api_keys_multi.py`、`test_rbac.py` + `w7_key_copy.mjs` | PASS |
+| 12 | 用户（seed 口径）：username/password_hash 非空且能登录（同矩阵 #1，seed 侧） | pytest `test_user_accounts.py::test_every_seeded_user_has_credentials_and_can_log_in` + `test_seed_demo_multikey.py` | PASS |
+| 13 | 厂商（全仓口径）：API/DB/seed/文档不再出现 vendor 字段、vendors 路由或 vendor_name；缓存价按 upstream_model_id | pytest `test_no_vendor_dimension.py` + `test_seed_billing_golden.py` + 全仓 grep（票 14 §9.4 术语门禁 + 人工 grep） | PASS |
+| 14 | 脏字段：去左线后保留「已修改」文字/图标与恢复入口，键盘可操作；脏/净切换元素位置和尺寸不变 | `w7_dirty_field.mjs`（9 用例，含零位移对比） | PASS |
+| 15 | 登录渐变：浅/深主题截图可见但不压文字；DESIGN-AUDIT §20 门禁通过 | `w7_login_gradient.mjs`（12 用例：存在/可见/克制/层次/静态/可读/零位移）+ `check-ui-foundation` 登录断言 | PASS |
+| 16 | 响应式/主题：无文档级横向溢出；登录渐变不遮挡输入；深色对比度通过 | `responsive_matrix.mjs`（五档 70/0）+ `w7_login_gradient.mjs` 375/768/1440 零位移用例 | PASS |
+
+运行（票 14 复跑口径，全部隔离端口，不碰 3700/3600）：
+
+```bash
+# 先构建（pytest 的 SPA 路由断言与浏览器脚本都需要 web/dist）
+cd web && npm run build && node scripts/check-bundle.mjs && node scripts/check-ui-foundation.mjs && node scripts/check-semantic-dirty.mjs
+cd .. && node ops/checks/terminology_audit.mjs
+# 后端
+cd api && python -m ruff check . --no-cache && python -m pytest -q && python ../ops/contract/gen_ts.py --check
+# 响应式矩阵与六期回归
+cd .. && node ops/checks/responsive_matrix.mjs && node ops/checks/w6_acceptance.mjs
+# W7 十脚本（各自默认隔离端口 3885 至 3907；自起 seed + uvicorn + 静态站点）
+for s in hover_info model_params member_table upstream_identity status_columns dirty_field logs_filters_attempts key_copy login_gradient dialog_keyboard; do node ops/checks/acceptance/w7_$s.mjs; done
+```
+
 ## 1. 环境与启动
 
 必须用 **localhost** 打开管理台（不要混用 127.0.0.1）：会话 cookie 是 SameSite=Lax，跨主机名不会带上（见 `docs/DELIVERY.md` §4.7）。
@@ -38,7 +75,7 @@ npm run build      # tsc --noEmit + vite build → web/dist
 
 # 2) 控制面（3700，同时托管管理台）
 cd C:/Users/microsoft/workspace/webdev/slipstream/api
-PYTHONPATH=src python scripts/seed_demo.py   # 幂等重建演示数据：3 厂商 / 4 上游（zai-01 一渠道三密钥）/ 16 上游模型 / 8 公开模型 / 6 用户（含根用户 D）/ 252 条用量 / 策略·护栏·MCP 样例
+PYTHONPATH=src python scripts/seed_demo.py   # 幂等重建演示数据（W7 t14 实测）：无厂商域 / 4 上游（open-bigmodel-cn 一渠道三密钥，name 由连接地址生成）/ 16 上游模型 / 8 公开模型 / 6 用户（全部有登录凭证）/ 30 条缓存价挂上游模型 / 252 条用量 / 策略·护栏·MCP 样例
 PYTHONPATH=src python -m uvicorn l06_api.app:create_app --factory --host 127.0.0.1 --port 3700
 #   PowerShell: $env:PYTHONPATH="src"; python -m uvicorn l06_api.app:create_app --factory --host 127.0.0.1 --port 3700
 
@@ -46,13 +83,16 @@ PYTHONPATH=src python -m uvicorn l06_api.app:create_app --factory --host 127.0.0
 # 仅本地 HMR 调试：cd web && npm run dev（5173，vite 已代理 /admin、/api 到 3700）
 ```
 
-演示账号（`api/scripts/seed_demo.py`，密码 `admin12345`，可用 `SLIPSTREAM_DEMO_ADMIN_PASSWORD` 覆盖）：
+演示账号（`api/scripts/seed_demo.py`，6 个账号共用密码 `admin12345`，可用 `SLIPSTREAM_DEMO_ADMIN_PASSWORD` 覆盖；W7 起全部账号都有登录凭证）：
 
-| 账号 | 角色 | 用途 |
-|---|---|---|
-| admin | 管理用户（全权限） | 管理员路径 |
-| lisi | 代理用户（建用户/看子树花费/无成本） | 代理权限切片 |
-| wangwu | 普通用户（自身花费/日志/模型试验） | 越权与字段级权限 |
+| 账号 | 显示名 | 角色 | 用途 |
+|---|---|---|---|
+| admin | 内部平台 | 管理用户（全权限） | 管理员路径 |
+| root | D | 管理用户（根用户） | 层级树根 |
+| lisi | 数据分析组 | 分销商（建用户/看子树花费/代签密钥/无成本） | 代理权限切片 |
+| wangwu | 试用-临时 | 客户（自身花费/日志/自助密钥/模型试验） | 越权与字段级权限 |
+| finance | 财务对账 | 客户 | 花费口径 |
+| loadtest | 压测环境 | 客户 | 密钥自助签发演示 |
 
 ## 2. 验收命令与证据
 
@@ -107,7 +147,7 @@ node ops/checks/acceptance_browser.mjs --admin admin:admin12345 --user wangwu:ad
 | 8 | 上游管理：多密钥/连通测试/发现模型/改写/启停/批量/删除保护 | 页面·接口 | `upstream.detail-tabs`（四 Tab：连接与模型/路由与模型/请求与响应/其他设置）+ 手动逐项；API `/admin/upstreams`、`/admin/upstreams/{id}/models` | `upstream-tab-*.png`；smoke_api | ✅（09/10） |
 | 9 | 上游模型编辑含类型/类型来源/参数/成本价/倍率/冷却 | 页面 | 手动：`/models` 上游模型 Tab 行内 100vh 抽屉逐字段（类型/来源/参数/成本价/倍率/冷却） | 抽屉截图 | ✅ 05/09 |
 | 10 | 公开模型创建时输入名称并提示相似上游模型供勾选 | 页面 | 手动：`/models` 公开模型 Tab 新建弹窗输入关键字 | 截图 | ✅ 10 |
-| 11 | 公开模型支持 failover/weighted/conditional + 成员优先级/权重 | 页面·接口 | 手动：`/models/public/:id` 单页「成员编排」段（三模式 + priority/weight/when + 成员 chip） | 单页截图 | ✅ 05/10 |
+| 11 | 公开模型支持 failover/weighted/conditional + 成员优先级/权重 | 页面·接口 | 手动：`/models/public/:id` 单页「成员编排」段（三模式 + priority/weight/when；W7 起已选成员表格、候选原位灰态） | 单页截图 | ✅ 05/10 |
 | 12 | 公开模型只展示按成员加权平均价（不可单独定价） | 页面 | 手动：公开模型价格列只读；API `/admin/public-models` 无单价写入字段 | 截图 + 接口 | ✅ 05 |
 | 13 | 每个上游模型一个倍率，卖价 = 成本 × 倍率 | 页面·接口 | 手动：上游模型编辑中的倍率；API 成本/花费对账 | 截图 + 接口 | ✅ 05 |
 | 14 | 价目管理合并上下游为一个界面 | 页面 | 手动：`/pricing` 单页三段（成本价/缓存价/公开模型售价）；旧 `/upstream-prices`、`/downstream-prices` 为重定向 | 截图 | ✅ 06 |
@@ -123,7 +163,7 @@ node ops/checks/acceptance_browser.mjs --admin admin:admin12345 --user wangwu:ad
 | 24 | 连接令牌页展示统一连接地址与我的密钥 | 页面 | `settings.ia` + 手动：`/settings/tokens` | 截图 | ✅ 16 |
 | 25 | 代理用户创建下级用户并查看子树花费 | 权限·接口 | `agent.permissions`（`users:create`+`billing:subtree`、无 `billing:cost`）；手动 `/users` 新建 + `/settings/spend` 子树 | `report.json` | ✅ 04 |
 | 26 | 管理用户建/编辑自定义角色并分配权限 | 页面·接口 | 手动：`/roles` 角色与权限矩阵（`/admins` 旧入口重定向）；API `/admin/roles`、`/admin/permissions` | 截图 + 接口 | ✅ 03 |
-| 27 | 用户面板统一展示角色/父级/状态 | 页面 | 手动：`/users` 列表列 | 截图 | 🟡（04） |
+| 27 | 用户面板统一展示角色/父级/状态 | 页面 | 手动：`/users` 列表列（W7 起为 用户名称/登录帐户/角色/余额/密钥数/层级，无类型与状态列） | 截图 | 🟡（04） |
 | 28 | 所有权限后端强制执行，改前端/伪造头无法越权 | 权限·接口 | `user.api-permissions`（403 + 权限列表缺失）+ 手动：无 cookie curl `/admin/cost/entries` → 401 | `report.json`；curl 输出 | ✅ |
 | 29 | 真实用户名密码 + 会话登录 | 接口·错误态 | `login.admin`、`login.wrong-password`；手动：退出后回登录页、会话 12h 过期 | `report.json`；`login-wrong-password.png` | ✅ |
 | 30 | 运营设置：连接地址（默认当前地址 + 3600，可改公网 URL） | 页面·接口 | `settings.ia` + 手动 `/ops-settings/connection` | 截图 + 接口 | ✅ 16 |
@@ -162,7 +202,7 @@ node ops/checks/acceptance_browser.mjs --admin admin:admin12345 --user wangwu:ad
 1. `/upstreams` → 任一行「详情」：**四个 Tab**「连接与模型 / 路由与模型 / 请求与响应 / 其他设置」都存在（模型并入路由与模型，健康并入连接与模型）；「连接与模型」支持多行密钥与**逐把**连通测试；「路由与模型」有逐模型「测试」（**模型探测**）、「拉取模型」（`discover-models`，不自动建记录）、重试/健康策略；「请求与响应」可保存改写；「其他设置」含连接地址与运行参数。
 2. 删除保护：被公开模型引用的上游模型不能删（尝试删除应报错/置灰）。
 3. `/models` 上游模型 Tab：行内 100vh 抽屉核对类型/类型来源/参数/成本价/倍率/冷却；逐模型探测徽章（连通/失败/超时/连接失败）与全部探测/取消/清空；逐把密钥测试失败标红。
-4. `/models` 公开模型 Tab：新建时输入名称应提示相似上游模型；列表「编辑」进入整页 `/models/public/:id`（单 PATCH 整页保存、成员编排分层 chip、conditional 末位兜底、价格只读且为成员加权平均）。
+4. `/models` 公开模型 Tab：新建时输入名称应提示相似上游模型；列表「编辑」进入整页 `/models/public/:id`（单 PATCH 整页保存、成员编排已选成员表格 + 候选原位灰态切换（W7 t05）、conditional 末位兜底、价格只读且为成员加权平均）。
 5. 可用性：**没有独立页**（`availability.removed` 断言）。措施只属上游模型（ADR-025）：行内单按钮「冷却」弹窗内切单次/周期，冷却中「解除」；单次与周期互斥 409（详情 `blocking_rule_ids` 可定位），note-only PATCH 放行；公开模型无冷却入口且写操作 422（ADR-027）。
 
 ### 5.3 看板与日志（Story 15 至 21、32 至 33、43 至 44）
@@ -170,13 +210,13 @@ node ops/checks/acceptance_browser.mjs --admin admin:admin12345 --user wangwu:ad
 1. `/dashboard`：柱形/面积/分流三 Tab + 8 KPI 卡 + 7D/30D/365D 热力图 + 延迟分位。**分流图隐藏阶段**：点击图例隐藏一段 → network 出现 `collapse=` 请求、后端重算后单图连通且 totals 守恒、隐藏到 2 段时提示「至少保留两个可见阶段」并禁用继续隐藏、点「已隐藏」徽章可恢复（`dashboard.flow-hide` 覆盖）。
 2. 维度与指标：一次只看一个维度（综合模型/上游模型/上游渠道），指标可选请求/词元/成本/花费。
 3. 延迟口径：TTFT 与 TOTAL 的 P50/95/99；确认页面无 TTFA；样本 < 5 应显示占位而不是 0/NaN。
-4. `/logs`：费用列两行（计费/成本，毛利在报表聚合口径）；模型列两行（公开模型 / 请求模型 → 上游模型）；尝试列「N 次尝试」按钮打开路由链 popover（`attempt_no`/上游/状态码/耗时/错误），历史行显示「无链路记录」（ADR-028，`logs.attempts` 覆盖）。点「详情」核对请求/响应/用量/耗时/错误齐全。
+4. `/logs`：费用列两行（计费/成本，毛利在报表聚合口径）；模型列两行（公开模型 / 请求模型 → 上游模型）；W7 起无独立尝试列：带尝试的行在模型旁显示分叉图标，点开 popover（`attempt_no`/上游/状态码/耗时/错误，可展开错误全文），历史行显示「无链路记录」（ADR-028，`w7_logs_filters_attempts` 覆盖）。点「详情」核对请求/响应/用量/耗时/错误齐全。
 5. 权限：用 wangwu 登录，`/logs` 行内不得出现成本/毛利；用 lisi 登录，花费/日志范围限自己子树（`/settings/spend`；旧 `/revenue` 已删除）。
 
 ### 5.4 账号、权限与设置（Story 22 至 31、46）
 
 1. `/admins`：内置角色不可删；可新建自定义角色并勾选权限；权限矩阵与实际菜单一致。
-2. `/users`：列表展示角色/父级/状态；代理用户（lisi）能新建下级，且新建用户的父级默认是自己。
+2. `/users`：列表展示 用户名称/登录帐户/角色/余额/密钥数/层级（无类型、无状态列，所有行都有登录帐户）；分销商（lisi）能新建下级，且新建用户的父级默认是自己。
 3. 花费：旧 `/revenue` 已删除（不是重定向）。管理用户/代理用户的花费与子树数据在 `/settings/spend`（我的花费）与 `/users`（流水/充值）；普通用户只看自己。
 4. 设置：用户设置 5 段（个人资料 / 主题 / 连接密钥 / 我的花费 / 通知偏好，`/settings/:section`）与运营设置 3 段（连接地址 / 系统参数+正文日志开关 / 运行信息，`/ops-settings/:section`，页内子导航）。主题切换与持久化在顶栏与 `/settings/theme` 均可验收（Story 23）。
 5. 会话：退出后直连任意 `/admin/*` 应 401；登录页错误密码文案来自后端 `GENERIC_LOGIN_ERROR`（`api/src/l05_service/auth.py:33`）。

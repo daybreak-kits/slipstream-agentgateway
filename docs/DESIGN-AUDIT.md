@@ -284,3 +284,8 @@ Conflict Review C8）。白底、左右布局、三态主题、密码显隐、�
 - 模型参数列（W7 t09）：只显示输入/输出上限；完整参数进 HoverInfo（含指标卡示范接线）。门禁：`w7_model_params`（10 用例）、`w7_hover_info`（7 用例）。
 - 登录渐变（W7 t13）：见 §20。
 
+### 21.3 W7 门禁基线（票 14 实测，2026-11-22）
+
+- 静态：`check-ui-foundation` **139/139**、`check-semantic-dirty` **46/46**、`terminology_audit` RESULT PASS（error 0 · warn 0 · 边界 0 · baseline 残留 0 · 资产 10/10）、`tsc`/`eslint`/`vite build` 全绿、`check-bundle` PASS（首包 gzip 216.9 KB / 79 chunk / echarts 148.2 KB）；后端 `pytest` 1026 passed / 8 skipped、`ruff --no-cache` 全过、`gen_ts --check` EXIT=0。
+- 浏览器（隔离端口 + fresh seed）：W7 十脚本 **90 用例全 PASS**（hover_info 7、model_params 10、member_table 8、upstream_identity 10、status_columns 12、dirty_field 9、logs_filters_attempts 9、key_copy 5、login_gradient 12、dialog_keyboard 8）；响应式矩阵五档 **70/0**；六期回归 `w6_acceptance` **36/0**（隔离 3779）。数字矩阵见 `docs/DELIVERY.md` §9.4、`docs/ACCEPTANCE.md` §0.2。
+
