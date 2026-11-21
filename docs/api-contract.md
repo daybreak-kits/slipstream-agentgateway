@@ -1,4 +1,4 @@
-# Slipstream 控制面 API 契约（五期现行稿）
+# Slipstream 控制面 API 契约（六期现行稿）
 
 控制面 base URL：`http://127.0.0.1:3700`
 
@@ -8,7 +8,7 @@
 > - 分页档位固定 **25/50/100/200**（默认 50），`page_size` 超出档位一律 **422** `VALIDATION_ERROR`；
 >   `offset ≥ 0`，负数 422。唯一来源 `api/src/l06_api/deps.py:ALLOWED_PAGE_SIZES`。
 
-> 基线：`w5/integration`（2026-11-21，五期 ticket 01 至 16 全部合入）。本文覆盖最终接口面（OpenAPI 实测 **99 条路径 / 133 个操作**，不含 `/docs`、`/openapi.json`）。基线数字重跑命令见 §6/§7；`web/src/generated/contract.ts` 由 `ops/contract/gen_ts.py` 从同一 OpenAPI 生成，`--check` 防手改。
+> 基线：`w6/integration`（2026-11-21，W6 ticket 01 至 21 全部合入）。本文覆盖最终接口面（OpenAPI 实测 **100 条路径 / 134 个操作**，不含 `/docs`、`/openapi.json`；W6 新增 `GET /admin/system-status`）。基线数字重跑命令见 §6/§7；`web/src/generated/contract.ts` 由 `ops/contract/gen_ts.py` 从同一 OpenAPI 生成，`--check` 防手改。
 
 本文是前后端契约的人类解释与语义基准（Lead 决策，2026-11-17）；组件 schema 的机器可读
 副本由 `python ops/contract/gen_ts.py` 从 FastAPI OpenAPI 生成到
@@ -19,6 +19,8 @@
 二期同步（历史）：真实认证、三角色 RBAC、字段级金额权限、上游多密钥、策略/护栏/MCP 可编辑（ticket 02/03/09/11）；计费/价目/看板/日志/设置/账单/用户层级（ticket 04/05/06/10/12/13/14/16/17）；seed 与 priority 迁移（ticket 19）。
 
 五期同步（W5，2026-11-21）：模型探测 `POST /admin/upstreams/{id}/models/probe` 与「模型拉取」`discover-models` 术语分工（ticket 05）；请求尝试链 `GET /admin/logs/{event_id}/attempts` 与日志行 `requested_model/attempts_count/has_attempts/last_failure_status/last_failure_error_type/last_failure_error_message`（ADR-028、ticket 03/04）；公开模型单事务整页保存（ticket 12，旧 `PUT /admin/public-models/{id}/targets` 删除）；报表分流隐藏阶段后端 `collapse` 投影（ticket 01）；冷却单次/周期互斥 409（ticket 02，ADR-027）；多密钥 `keys/*.key` 白名单清理（ticket 16，ADR-026 补记）。
+
+六期同步（W6，2026-11-21）：系统与数据面边界（ADR-029，`docs/SYSTEM-BOUNDARY.md`）：connection/health/playground 端点来自适配器 `client_contract()`（ticket 04），日志正文走 `read_log_payload` 端口（ticket 02）；错误治理（ticket 07）：500 也返回 JSON 信封（含 `request_id`），无数据面时日志正文/用量拉取返回 503 `DATA_PLANE_UNAVAILABLE`；每日状态检查 `GET /admin/system-status`（ticket 08）；报表分流生产规模收窄参数 `focus`/`q`/`top_n`（ticket 17，默认值输出逐字节不变）；模型试验 `reasoning_effort` 七档与 `stop`（至多 4 条）/`top_k` 真实转发（ticket 18/19）；角色 key 迁移为 `admin`/`customer`/`reseller`，旧 key `user`/`agent` 不保留 alias（ticket 21，迁移脚本 `api/scripts/migrate_roles_w6.py`）。
 
 ## 0. 通用约定
 
@@ -77,7 +79,13 @@
 - 领域校验（`l05_service/*`）也走 422 `VALIDATION_ERROR`，`message` 是中文可读原因（例：
   一次性冷却必须提供 `expires_at_ms`）。
 - 常见 code：VALIDATION_ERROR / NOT_FOUND / CONFLICT / UNAUTHORIZED / SCHEMA_MISMATCH /
-  APPLY_FAILED / CRYPTO_FAILED / INTERNAL_ERROR。
+  APPLY_FAILED / CRYPTO_FAILED / INTERNAL_ERROR / DATA_PLANE_UNAVAILABLE。
+- **未捕获异常（HTTP 500）也是同一 JSON 信封**（W6 ticket 07，不再返回纯文本）：
+  `{"code":"INTERNAL_ERROR","message":"internal server error","request_id":"…"}`（`details` 省略），
+  同样带 `X-Request-Id` 响应头，`request_id` 是定位一次失败的唯一线索。
+- **无数据面/依赖不可达降级 503**（W6 ticket 07）：日志正文读取与用量拉取在数据面未配置或
+  不可达时返回 503 `DATA_PLANE_UNAVAILABLE`（稳定错误码，不是 500）；正文行不存在仍是
+  404 `NOT_FOUND`。前端对 4xx 不自动重试、查询失败不逐查询弹 toast（错误进通知中心或页面内联）。
 - `APPLY_FAILED` 一律 HTTP 502，三个来源靠 `details` 区分：
   - IR 自校验失败（`api/src/l02_domain/validation.py`）：`details.errors` 是错误字符串列表；
   - 适配器校验失败（`adapter.validate(ir)`，发生在写密钥文件与渲染之前）：`details.errors` 同上；
@@ -325,8 +333,27 @@ AG 1.7 拒绝（`mcp.transport.http=false`），保存即 422。渲染到顶层 
 ```
 
 - `base_url` 为运营设置 `gateway_base_url` 的显式配置值，空串=未配置（前端回退当前 host+3600）；
-- `endpoints` 为服务端下发的数据面端点清单，只含对真实 AG 实测过有依据的三条（E14）；前端不自行硬编；
+- `endpoints` 为服务端下发的数据面端点清单。W6 ticket 04（ADR-029）起该清单与 `default_port`
+  只来自适配器 `client_contract()`（端点声明顺序即适配器声明顺序），系统层不硬编数据面端口与路径；
 - `editable` 表示当前账号是否持有 `settings:write`（决定设置页能否改此键）。
+
+### 2.8 GET /admin/system-status（W6 ticket 08）
+权限：任何有效登录（不设权限键：状态提醒面向所有登录用户的通知中心，权限收紧会让成员端轮询
+403 并刷查询失败）。返回每日状态检查结果与当前提醒：
+
+```json
+{"checked_at": "2026-11-21T09:00:00+08:00", "backend_version": "0.1.0",
+ "checks": {"config_hash": {"status": "ok|unknown|mismatch", "expected": "…", "actual": "…", "detail": "…"},
+            "frontend_version": {"status": "…", "expected": "…", "actual": "…", "detail": "…"}},
+ "notices": [{"check": "config_hash", "title": "配置未生效：数据面运行版本与最新配置不一致",
+              "detail": "期望 …；实际 …；检查时间 …。", "notified_at_ms": 1, "notified_at": "…"}]}
+```
+
+- 检查项 `config_hash`：活跃配置 revision hash 与数据面运行 hash 比对；拿不到运行 hash 报
+  `unknown`（不误报也不清除既有问题）。
+- 检查项 `frontend_version`：后端版本与前端构建 `app-version` meta 比对。
+- `notices` 是当前活跃问题的提醒列表（按通知时间倒序）；同一问题 24 小时内去重，恢复后再次
+  提醒；提醒持久化在 `app_settings`，控制面重启不失效。通知中心轮询本端点，页面不阻塞。
 
 ## 3. 资源管理
 
@@ -513,7 +540,7 @@ AES-GCM 密文 + sk-...abcd 掩码。
 | GET | /admin/reports/latency?range=&tz= | {range, from_ms, to_ms, timezone, paired_samples, min_samples, ttft:{samples, p50_ms, p75_ms, p95_ms, p99_ms}, total:{...}, **all:{samples, ttft:{samples, p50_ms, p75_ms, p95_ms}, total:{samples, p50_ms, p75_ms, p95_ms}}**, estimate_note}（W4-F，2026-11-20）。**窗口规则：都缺省=全时段**（from_ms=0/to_ms=0、range 回显 "all"）；给任一则必须成对否则 422；显式 range 枚举保持原行为。`all` 块=**全样本分位**（不过滤配对，非流式请求 ttft=0 也计入，供日志页分位语义色）；`ttft`/`total` 两块仍为**配对样本**口径（ttft>0 且 duration>0）；各块独立套 MIN_PERCENTILE_SAMPLES（<5 全 null，只有 samples）。overview 端点内嵌的 latency 同样带 all 块 |
 | GET | /admin/reports/timeseries?range=7d&bucket=auto&dimension=combo&metric=&metrics=&top_n=10&tz= | {range, bucket, dimension, metric, metrics:[...], from_ms, to_ms, timezone, currency, points:[{bucket_start_ms, label, total, values}], members:[{id, label, total, share, requests, tokens, cost_micro, charge_micro, totals?}], totals:{requests, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, tokens, cost_micro, charge_micro, error_count, active_minutes}, metric_total, folded_members, fx_missing, estimate_note}。dimension ∈ combo/upstream/channel（综合模型/上游模型/上游渠道）；**`metrics=cost_micro,charge_micro` 逗号多指标一次返回**：points[].values 变为 {member_id:{<metric>:value}}，members 增 `totals:{<metric>:total}`；单数 `metric` 向后兼容（values 为 {member_id:value} 平面结构）；top_n 1..50，超出排名的成员折叠为 `other:<dimension>`（label「其他（N）」） |
 | GET | /admin/reports/heatmap?range=7d\|30d\|365d&metric=tokens\|cost\|spend&tz= | {range, mode:"weekday_hour"\|"date_hour", metric, from_ms, to_ms, timezone, currency, columns:[{key,label}×24], rows:[{key, label, values:[24]}], max, total, fx_missing, estimate_note}。7d=星期×小时，30d/365d=日期×小时 |
-| GET | /admin/reports/flow?range=&metric=&from_ms=&to_ms=&tz=&collapse= | 五段桑基 `{metric, nodes, node_meta, links:[{source, target, requests, tokens, value, cost_micro?, charge_micro?}], stages, totals, range, from_ms, to_ms, timezone, currency, fx_missing, estimate_note}`。`collapse` 为逗号分隔的阶段 id（`user,key,model,upstream,channel`，去重、忽略空白项），服务端按完整五元组路径投影：隐藏阶段从路径中删除、其余可见阶段按原顺序连边，节点/边与金额严格守恒（charge 只记首条可见边、cost 只记末条可见边、totals 按完整路径累计一次），`stages` 只返回可见段；未知阶段 → 422 `VALIDATION_ERROR`，details `{collapse, allowed:[user,key,model,upstream,channel]}`；隐藏后少于 2 段 → 422，details `{collapse}`（即最多隐藏 3 段）。`metric` 只认 `requests`/`tokens`，其它值静默回退 `requests`（不 422）；本端点**没有 `top_n`**（top_n 仅 timeseries，隐藏用 `collapse`）；显式 `from_ms/to_ms` 成对窗口优先于 `range`，回显 `range="custom"`；缺省与空 `collapse` 时输出与旧五段实现逐字节一致（默认图不变）。 |
+| GET | /admin/reports/flow?range=&metric=&from_ms=&to_ms=&tz=&collapse=&focus=&q=&top_n= | 五段桑基 `{metric, nodes, node_meta, links:[{source, target, requests, tokens, value, cost_micro?, charge_micro?}], stages, totals, range, from_ms, to_ms, timezone, currency, fx_missing, estimate_note}`。`collapse` 为逗号分隔的阶段 id（`user,key,model,upstream,channel`，去重、忽略空白项），服务端按完整五元组路径投影：隐藏阶段从路径中删除、其余可见阶段按原顺序连边，节点/边与金额严格守恒（charge 只记首条可见边、cost 只记末条可见边、totals 按完整路径累计一次），`stages` 只返回可见段；未知阶段 → 422 `VALIDATION_ERROR`，details `{collapse, allowed:[user,key,model,upstream,channel]}`；隐藏后少于 2 段 → 422，details `{collapse}`（即最多隐藏 3 段）。`metric` 只认 `requests`/`tokens`，其它值静默回退 `requests`（不 422）。**W6 ticket 17 生产规模收窄三参数**（全部可选，缺省=no-op，默认输出与旧五段实现逐字节一致；先 `collapse` 投影，再 `q` → `focus` → `top_n`）：`focus=<node id>` 只保留该节点及祖先+后代闭包链（未知 id 得到空子图）；`q=<文本>` 对节点 label 不区分大小写子串匹配，保留全部命中及其闭包链；`top_n=<n>` 每个可见阶段按指标值保留前 n 个节点、其余折叠为一个 `other:<stage>` 合成节点（0=关闭，负数 → 422 `VALIDATION_ERROR`；折叠只重挂边端点，路径边数与金额锚点守恒，搜索链不会被 top_n 削掉）。子图内边值仍是聚合窗口口径；`stages`/`totals` 恒为完整窗口值。显式 `from_ms/to_ms` 成对窗口优先于 `range`，回显 `range="custom"`。 |
 | GET | /admin/reports/margin | {from_ms, to_ms（回显实际生效窗口；省略/<=0 = 全时段，to_ms 取 now+1ms）, report_currency, by_currency:{<cur>:{charge_micro, cost_micro, margin_micro, fx_rate_micro_to_report}}, report_currency_margin_micro, report_currency_charge_micro, report_currency_cost_micro, fx_missing:[string], estimate_note}。报表币种自身 fx_rate=1000000（无需快照）；外币缺汇率时总额为 null 且列出 fx_missing，补 PUT /admin/fx 后立即折算；失败请求的空币种行不计入任何桶 |
 
 ### 4.2 用量
@@ -638,7 +665,22 @@ AES-GCM 密文 + sk-...abcd 掩码。
 ### 4.6 Playground
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | /admin/playground/stream | SSE 透传数据面（AG llm 3600），text/event-stream；非 2xx 时按错误信封返回 JSON |
+| POST | /admin/playground/stream | SSE 透传数据面，text/event-stream；非 2xx 时按错误信封返回 JSON。转发地址与对话端点来自适配器 `client_contract()`（ADR-029 ticket 04，`endpoint_for("chat.completions")`；适配器无对话端点时 409 `CONFLICT`），系统层不硬编数据面端口与路径 |
+
+body（`PlaygroundRequest`，全部采样旋钮缺省即不进上游 body）：
+
+- `model` / `messages` 必填；`stream` 恒为 true（服务端注入，客户端不能覆盖）。
+- **思考等级 `reasoning_effort`（W6 ticket 18）**：七档枚举 `default|none|low|medium|high|xhigh|max`；
+  `default` 表示「不传」，中继层直接丢弃，其余档位原样转发（越界值 422 `VALIDATION_ERROR`）。
+- **输出参数（W6 ticket 19）**：`stop` 为非空字符串数组（至多 4 条，UI 单行逗号输入在前端折叠）；
+  `top_k`（≥0）、`temperature`（0 至 2）、`top_p`、`frequency_penalty`/`presence_penalty`（-2 至 2）、
+  `seed`、`n`（1 至 128）、`response_format`、`logprobs`、`top_logprobs`（0 至 20）、`user` 均真实转发，
+  不再是表单摆设。
+- **最大输出词元按模型配置校验（W6 ticket 19）**：`max_tokens`/`max_completion_tokens` 超过所选模型
+  登记的 `max_output_tokens` 时 422 `VALIDATION_ERROR`（details 带 `registered`）；模型未登记时只受
+  通用上限约束（`MAX_TOKEN_LIMIT`）。
+- `extra_fields`（面板「额外请求字段」）先并入上游 body：标准参数永远获胜，`model/messages/stream`
+  等中继自有键不能被覆盖。
 
 ### 4.7 用户花费与逐请求台账（ticket 16/17）
 | 方法 | 路径 | 说明 |
