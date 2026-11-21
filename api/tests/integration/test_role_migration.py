@@ -34,7 +34,7 @@ API_ROOT = Path(__file__).resolve().parents[2]
 
 # Representative reads spanning the grants that differ between the three roles.
 GET_PATHS = (
-    "/admin/vendors",
+    "/admin/upstreams",
     "/admin/users",
     "/admin/roles",
     "/admin/reports/overview",
@@ -366,7 +366,7 @@ def test_conflict_is_diagnosed_before_any_write(engine_and_sessionmaker):
                 description="",
                 builtin=False,
                 all_permissions=False,
-                permissions_json=json.dumps(["vendors:read"]),
+                permissions_json=json.dumps(["upstreams:read"]),
                 created_at_ms=1,
                 updated_at_ms=1,
             )

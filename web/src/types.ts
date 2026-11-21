@@ -17,21 +17,11 @@ export interface OverviewStats {
   ttft_p50_ms: number;
   estimate_note: string | null;
 }
-
-export interface Vendor {
-  id: string;
-  name: string;
-  slug: string;
-  note: string | null;
-  upstream_seq: number;
-  created_at_ms: number;
-}
-
-/** 实测 /admin/upstreams：名称形如 {vendor_slug}-NN；counts/last_probe 为 ticket 09 新增 */
+/** 实测 /admin/upstreams：名称由 base_url 生成（ADR-023 #6）；alias 为 t04 展示名 */
 export interface Upstream {
   id: string;
   name: string;
-  vendor_id: string;
+  alias: string;
   base_url: string;
   api_style: string;
   transforms: string | null;
@@ -151,7 +141,6 @@ export interface UpstreamModel {
   created_at_ms: number;
   /** 实测 GET /admin/upstream-models 附带的服务端 join 字段（可缺省） */
   upstream_name?: string;
-  vendor_name?: string;
   /** ticket 10：类型来源（旧系统 default/upstream/manual） */
   model_type_source?: ModelTypeSource;
   /** ticket 10：能力参数块（旧系统 scalar） */
@@ -289,15 +278,14 @@ export interface AvailabilityRule {
 
 export type PriceItem = "input" | "output" | "cache_read" | "cache_write" | "request";
 
-/** 上游价目（成本账）：单价为每 1M tokens 的整数微单位，item=request 时按次 */
+/** 上游价目（成本账，ADR-030 挂 upstream_model_id）：每 1M tokens 的整数微单位 */
 export interface UpstreamPrice {
   id: string;
-  vendor_name: string;
-  upstream_model: string;
+  upstream_model_id: string;
   item: PriceItem;
   unit_price_micro: number;
   currency: string;
-  effective_from: string;
+  effective_from_ms: number;
   version: number;
 }
 
@@ -318,7 +306,6 @@ export interface ChargePrice {
 export interface CostEntry {
   id: string;
   gateway_event_id: string;
-  vendor_id: string;
   upstream_model_id: string;
   input_tokens: number;
   output_tokens: number;

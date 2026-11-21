@@ -36,7 +36,7 @@ with Session() as s:
     for i, cur in enumerate(("CNY", "USD")):
         amount = 100_000_000 if cur == "CNY" else 500_000
         s.add(CostEntryORM(
-            id=f"cost_edge_{cur}", gateway_event_id=f"edge_evt_{cur}", vendor_id="vend_edge",
+            id=f"cost_edge_{cur}", gateway_event_id=f"edge_evt_{cur}",
             upstream_model_id="umdl_edge", input_tokens=1000, output_tokens=500,
             amount_micro=amount, currency=cur, price_version_id="", status="ok",
             created_at_ms=now,

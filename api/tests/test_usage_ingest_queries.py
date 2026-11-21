@@ -47,7 +47,10 @@ MAX_BILLING_SELECTS = 25
 MAX_RECOMPUTE_SELECTS = 25
 # sha256 of the deterministic billing-row digest produced by the pre-refactor code
 # (all amounts/statuses/versions/ledger deltas/daily rows unchanged by the refactor).
-EXPECTED_DIGEST = "ea2d04f47c8b92cb5f6c9c97f0ae52ec6ffa41baaab336320d2ee889d8b803e4"
+# W7 t03 / ADR-030: the digest tuple dropped the retired vendor_id bucket and the
+# cache price rows now key on upstream_model_id; the pinned value moved with the
+# tuple shape while every amount/row count/balance stayed identical.
+EXPECTED_DIGEST = "fe2e29d9c7fa94e6f4b5e6257b4e30236d81de228a601e6520d74e6f9d42b080"
 
 
 class _SelectCounter:
@@ -143,8 +146,7 @@ def _billed_channel(engine_and_sessionmaker) -> tuple:
             [
                 UpstreamPriceORM(
                     id="upr_cache_read",
-                    vendor_id=seed["vendor_id"],
-                    upstream_model="glm-5.3",
+                    upstream_model_id=seed["upstream_model_id"],
                     item="cache_read",
                     unit_price_micro=2_000_000,
                     currency="CNY",
@@ -154,8 +156,7 @@ def _billed_channel(engine_and_sessionmaker) -> tuple:
                 ),
                 UpstreamPriceORM(
                     id="upr_cache_read_old",
-                    vendor_id=seed["vendor_id"],
-                    upstream_model="glm-5.3",
+                    upstream_model_id=seed["upstream_model_id"],
                     item="cache_read",
                     unit_price_micro=1_000_000,
                     currency="CNY",
@@ -197,7 +198,6 @@ def _digest(factory) -> dict:
         cost = [
             (
                 row.gateway_event_id,
-                row.vendor_id,
                 row.upstream_model_id,
                 row.input_tokens,
                 row.output_tokens,
@@ -243,7 +243,6 @@ def _digest(factory) -> dict:
         daily_cost = [
             (
                 row.day,
-                row.vendor_id,
                 row.upstream_model,
                 row.requests,
                 row.input_tokens,

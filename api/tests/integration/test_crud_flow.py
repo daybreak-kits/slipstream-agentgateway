@@ -9,7 +9,6 @@ from sqlalchemy.orm import sessionmaker
 from l01_core.crypto import AesGcmBox, SecretBox, sha256_hex
 from l04_repo.base import init_db
 from l04_repo.orm import UserORM
-from l04_repo.repository import VENDOR_REPO
 from l05_service.client_keys import (
     CANONICAL_CHARSET,
     CANONICAL_LENGTHS,
@@ -19,7 +18,7 @@ from l05_service.client_keys import (
     issue_client_key,
     mask_of,
 )
-from l05_service.crud import create_upstream, create_vendor
+from l05_service.crud import create_upstream
 
 
 @pytest.fixture()
@@ -31,30 +30,27 @@ def session():
         yield db
 
 
-def test_upstream_naming_and_counter_never_reused(session):
-    vendor = create_vendor(session, name="Alpha", slug="alpha")
+def test_upstream_names_dedupe_on_base_url(session):
+    """ADR-030: the default name derives from the base_url; duplicates dedupe -2/-3."""
     one = create_upstream(
-        session, vendor_id=vendor.id, base_url="https://a", api_style="openai_chat",
+        session, base_url="https://a", api_style="openai_chat",
         api_key="k1", secret_box=SecretBox("s"),
     )
     two = create_upstream(
-        session, vendor_id=vendor.id, base_url="https://b", api_style="openai_chat",
+        session, base_url="https://a", api_style="openai_chat",
         api_key="k2", secret_box=SecretBox("s"),
     )
-    assert (one.name, two.name) == ("alpha-01", "alpha-02")
-    VENDOR_REPO.delete(session, two)
     three = create_upstream(
-        session, vendor_id=vendor.id, base_url="https://c", api_style="openai_chat",
+        session, base_url="https://a", api_style="openai_chat",
         api_key="k3", secret_box=SecretBox("s"),
     )
-    assert three.name == "alpha-03"  # deleted numbers are never reused
+    assert [one.name, two.name, three.name] == ["a", "a-2", "a-3"]
 
 
 def test_create_upstream_stores_transforms(session):
-    vendor = create_vendor(session, name="Beta", slug="beta")
     payload = {"request_headers": [{"op": "update", "name": "x-trace", "value": "t"}]}
     upstream = create_upstream(
-        session, vendor_id=vendor.id, base_url="https://b", api_style="openai_chat",
+        session, base_url="https://b", api_style="openai_chat",
         api_key="k", secret_box=SecretBox("s"), transforms=payload, max_buffer_bytes=4096,
     )
     assert '"x-trace"' in upstream.transforms_json

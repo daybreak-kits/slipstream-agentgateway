@@ -64,13 +64,13 @@ def test_wrong_password_and_unknown_user_share_one_401(anon_client, engine_and_s
 
 
 def test_unauthenticated_admin_route_is_401(anon_client):
-    response = anon_client.get("/admin/vendors")
+    response = anon_client.get("/admin/upstreams")
     assert response.status_code == 401
     assert response.json()["code"] == "UNAUTHORIZED"
 
 
 def test_forged_role_header_grants_nothing(anon_client):
-    response = anon_client.get("/admin/vendors", headers={"X-Admin-Role": "admin"})
+    response = anon_client.get("/admin/upstreams", headers={"X-Admin-Role": "admin"})
     assert response.status_code == 401
 
 
@@ -197,7 +197,7 @@ def _hash_of(factory, user_id: str) -> str:
 
 def test_cors_preflight_reaches_cors_layer_without_session(anon_client):
     response = anon_client.options(
-        "/admin/vendors",
+        "/admin/upstreams",
         headers={
             "Origin": "http://localhost:5173",
             "Access-Control-Request-Method": "GET",
@@ -210,7 +210,7 @@ def test_cors_preflight_reaches_cors_layer_without_session(anon_client):
 
 def test_unauthenticated_401_still_carries_cors_headers(anon_client):
     response = anon_client.get(
-        "/admin/vendors", headers={"Origin": "http://localhost:5173"}
+        "/admin/upstreams", headers={"Origin": "http://localhost:5173"}
     )
     assert response.status_code == 401
     assert response.headers["access-control-allow-origin"] == "http://localhost:5173"

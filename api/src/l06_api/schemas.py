@@ -19,19 +19,11 @@ from l05_service.model_params import MAX_TOKEN_LIMIT
 from l05_service.rollout import RevisionStatus
 
 
-class VendorCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=255)
-    slug: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9-]*$")
-    note: str = ""
-
-
 class UpstreamCreate(BaseModel):
-    # ADR-023 #6: 厂商可选 — absent vendor_id means the name derives from the
-    # connection address instead of the vendor slug counter.
-    vendor_id: str | None = None
-    # Honoured when present; otherwise generated server-side (explicit name,
-    # then {slug}-NN for vendor-scoped upstreams, else host:port of base_url).
+    # Honoured when present; otherwise generated server-side from the
+    # connection address (ADR-023 #6 / ADR-030). alias is display-only.
     name: str | None = Field(default=None, max_length=255)
+    alias: str = Field(default="", max_length=255)
     base_url: str = Field(min_length=1, max_length=512)
     api_style: str = Field(min_length=1, max_length=64)
     api_key: str = Field(min_length=1)
@@ -252,15 +244,11 @@ class RefundCreate(BaseModel):
 class UpstreamPriceCreate(BaseModel):
     """One cache price version: the scope key, the item and the price itself.
 
-    The scope key is the upstream model row (upstream_model_id); the vendor_id +
-    upstream_model pair is the legacy key that stays until the vendor domain is
-    removed. Exactly one of the two forms must be filled - the service rejects
-    a missing or mixed key instead of guessing a scope.
+    ADR-030: the scope key is the upstream model row (upstream_model_id) and
+    nothing else - the service rejects a missing key instead of guessing.
     """
 
-    vendor_id: str | None = None
-    upstream_model: str | None = Field(default=None, min_length=1, max_length=255)
-    upstream_model_id: str | None = None
+    upstream_model_id: str = Field(min_length=1)
     item: str = Field(pattern=r"^(input|output|cache_read|cache_write|request)$")
     unit_price_micro: int = Field(ge=0)
     currency: str = Field(default="CNY", min_length=1, max_length=8)
@@ -477,16 +465,13 @@ class RulePatch(BaseModel):
     note: str | None = None
 
 
-class VendorPatch(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=255)
-    note: str | None = None
-
-
 class UpstreamPatch(BaseModel):
     """Partial upstream update. name (ADR-023 #6 改名路径): a non-blank value
-    renames with uniqueness enforced; blank/absent leaves the name untouched."""
+    renames with uniqueness enforced; blank/absent leaves the name untouched.
+    alias is display-only and free-form."""
 
     name: str | None = Field(default=None, max_length=255)
+    alias: str | None = Field(default=None, max_length=255)
     base_url: str | None = Field(default=None, min_length=1, max_length=512)
     api_style: str | None = Field(default=None, min_length=1, max_length=64)
     transforms: dict | None = None

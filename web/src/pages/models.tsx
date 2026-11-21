@@ -58,10 +58,10 @@ async function copyText(text: string): Promise<void> {
   }
 }
 
-/** GET /admin/prices/upstream 行；types.ts 的 UpstreamPrice 与实际返回有出入，这里收窄到用到的字段。 */
+/** GET /admin/prices/upstream 行（ADR-030：挂 upstream_model_id）；收窄到用到的字段。 */
 interface UpstreamPriceRow {
   id: string;
-  upstream_model: string;
+  upstream_model_id: string;
   item: string;
   unit_price_micro: number;
   effective_from_ms: number;
@@ -73,14 +73,14 @@ interface CachePrice {
 }
 
 /** ADR-020：缓存价没有模型行列，只有 /admin/prices/upstream 的 cache_read 版本行；
- * 按模型名取 effective_from_ms 最新的一条。 */
+ * 按模型行 id（upstream_model_id）取 effective_from_ms 最新的一条。 */
 function cacheMapOf(items: UpstreamPriceRow[] | undefined): Map<string, CachePrice> {
   const map = new Map<string, CachePrice>();
   for (const price of items ?? []) {
     if (price.item !== "cache_read") continue;
-    const prev = map.get(price.upstream_model);
+    const prev = map.get(price.upstream_model_id);
     if (!prev || price.effective_from_ms >= prev.fromMs) {
-      map.set(price.upstream_model, { micro: price.unit_price_micro, fromMs: price.effective_from_ms });
+      map.set(price.upstream_model_id, { micro: price.unit_price_micro, fromMs: price.effective_from_ms });
     }
   }
   return map;
@@ -241,7 +241,6 @@ function UpstreamTab() {
       return (
         row.name.toLowerCase().includes(needle) ||
         (row.upstream_name ?? "").toLowerCase().includes(needle) ||
-        (row.vendor_name ?? "").toLowerCase().includes(needle) ||
         row.model_type.toLowerCase().includes(needle)
       );
     }),
@@ -304,7 +303,7 @@ function UpstreamTab() {
 
   // 价格单元格（W4-C）：进价 2 位小数（<0.01 升 4 位）；入出均未配置显示灰字「未设置」（同参数列「未配置」写法）。
   const priceCell = (row: UpstreamModel) => {
-    const cache = cachePrices.get(row.name);
+    const cache = cachePrices.get(row.id);
     const unpriced = (row.cost_input_per_1m ?? "").trim() === "" && (row.cost_output_per_1m ?? "").trim() === "";
     return (
       <div className="space-y-0.5 text-2sm tnum">
@@ -352,7 +351,7 @@ function UpstreamTab() {
         <div>
           <div className="tnum font-medium text-title">{row.name}</div>
           <div className="text-2xs text-faint">
-            {(row.upstream_name ?? "-") + (row.vendor_name ? " · " + row.vendor_name : "")}
+            {row.upstream_name ?? "-"}
           </div>
         </div>
       ),

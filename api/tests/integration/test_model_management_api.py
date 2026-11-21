@@ -109,11 +109,10 @@ def test_upstream_model_metadata_roundtrip(client, engine_and_sessionmaker):
     assert Decimal(created["cost_input_per_1m"]) == Decimal("12.5")
     assert Decimal(created["markup"]) == Decimal("1.3")
 
-    # GET is the table source: joined upstream/vendor names + reference count.
+    # GET is the table source: joined upstream names + reference count.
     listed = client.get("/admin/upstream-models?page_size=200").json()
     seeded = _find(listed, ids["upstream_model_id"])
-    assert seeded["upstream_name"] == "testv-01"
-    assert seeded["vendor_name"] == "Test Vendor"
+    assert seeded["upstream_name"] == "upstream-example"
     assert seeded["target_count"] == 1
     assert seeded["model_type_source"] == "default"
     assert seeded["parameters"]["input_types"] == ["text"]
@@ -313,7 +312,7 @@ def test_public_model_create_members_and_strategy(client, engine_and_sessionmake
     # AG semantics: numeric SMALL first, members returned in routing order.
     assert [target["priority"] for target in body["targets"]] == [1, 2]
     assert body["targets"][0]["upstream_model_name"] == "glm-6-air"
-    assert body["targets"][0]["upstream_name"] == "testv-01"
+    assert body["targets"][0]["upstream_name"] == "upstream-example"
 
     # weighted requires weight >= 1 (renderer rule), conditional only the last may
     # omit "when"; duplicate members are rejected.

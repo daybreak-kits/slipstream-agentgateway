@@ -35,27 +35,14 @@ class Base(DeclarativeBase):
     """Declarative base for every Slipstream control-plane table."""
 
 
-class VendorORM(Base):
-    __tablename__ = "vendors"
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    name: Mapped[str] = mapped_column(String(255), unique=True)
-    slug: Mapped[str] = mapped_column(String(64), unique=True)
-    note: Mapped[str] = mapped_column(Text, default="")
-    upstream_seq: Mapped[int] = mapped_column(Integer, default=0)
-    created_at_ms: Mapped[int] = mapped_column(BigInteger, default=0)
-
-
 class UpstreamORM(Base):
     __tablename__ = "upstreams"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    # ADR-023 #6: 厂商可选 — an upstream may exist without a vendor row; the
-    # name then derives from the connection address instead of the vendor slug.
-    vendor_id: Mapped[str | None] = mapped_column(
-        String(64), ForeignKey("vendors.id"), nullable=True, index=True
-    )
+    # ADR-023 #6 + W7 (ADR-030): name 是唯一「上游标志」，由 base_url 生成且可手改；
+    # alias 只是展示名，不参与路由，也不进入数据面。
     name: Mapped[str] = mapped_column(String(255), unique=True)
+    alias: Mapped[str] = mapped_column(String(255), default="")
     base_url: Mapped[str] = mapped_column(String(512))
     api_style: Mapped[str] = mapped_column(String(64), default="openai_chat")
     api_key_enc: Mapped[str] = mapped_column(Text, default="")
@@ -344,20 +331,15 @@ class RequestAttemptORM(Base):
 class UpstreamPriceORM(Base):
     """Cache cost book, versioned: new row per price change, history never rewritten.
 
-    Two scope keys coexist while the vendor domain is removed (W7 t02): the
-    upstream model row (upstream_model_id, the key the vendor key is replaced
-    by) and the legacy vendor_id + upstream_model pair (dropped together with
-    the vendor domain in t03). A row carries exactly one of them, so the other
-    columns stay NULL - no row is priced twice.
+    ADR-030: the only scope key left is the upstream model row (upstream_model_id);
+    the legacy vendor_id + upstream_model pair left with the vendor domain (W7 t03).
     """
 
     __tablename__ = "upstream_prices"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    vendor_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
-    upstream_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    upstream_model_id: Mapped[str | None] = mapped_column(
-        String(64), ForeignKey("upstream_models.id"), nullable=True, index=True
+    upstream_model_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("upstream_models.id"), index=True
     )
     item: Mapped[str] = mapped_column(String(16))  # input|output|cache_read|cache_write|request
     unit_price_micro: Mapped[int] = mapped_column(BigInteger)  # per 1M tokens, or per request
@@ -386,13 +368,12 @@ class ChargePriceORM(Base):
 
 
 class CostEntryORM(Base):
-    """What WE pay the vendor for one gateway event; amount stays NULL when unpriced."""
+    """What we pay upstream for one gateway event; amount stays NULL when unpriced."""
 
     __tablename__ = "cost_entries"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     gateway_event_id: Mapped[str] = mapped_column(String(128), unique=True, index=True)
-    vendor_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     upstream_model_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)
@@ -446,12 +427,11 @@ class LedgerEntryORM(Base):
 
 
 class CostDailyORM(Base):
-    """Per vendor/model/day cost aggregate; token totals are estimates (cache folded)."""
+    """Per upstream model/day cost aggregate; token totals are estimates (cache folded)."""
 
     __tablename__ = "cost_daily"
 
     day: Mapped[str] = mapped_column(String(10), primary_key=True)
-    vendor_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     upstream_model: Mapped[str] = mapped_column(String(255), primary_key=True)
     requests: Mapped[int] = mapped_column(Integer, default=0)
     input_tokens: Mapped[int] = mapped_column(Integer, default=0)

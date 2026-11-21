@@ -1,7 +1,7 @@
 """Demo seed for the Slipstream control plane (task-170, ticket 19).
 
 Creates a realistic 7-day dataset so every frontend page has something to show:
-3 vendors, 4 upstreams (one zai channel with THREE equal keys, ADR-026),
+4 upstreams (one zai channel with THREE equal keys, ADR-026),
 16 upstream models (cost + 1.2x markup where the row is priced), 8 public
 models (failover + weighted, AG 1.7 小优先 priority), 6 consumers (root user D +
 two-level tree), 5 client keys (sk- + 64 upper case chars), price books
@@ -105,24 +105,19 @@ DAY_MS = 86_400_000
 CNY = "CNY"
 USD = "USD"
 
-# (display name, slug, note)
-VENDORS = [
-    ("智谱 AI", "zai", "智谱开放平台，旗舰 GLM 系列"),
-    ("青岚云", "nebula", "云厂商大模型服务，合规通道"),
-    ("本地推理", "local", "自建 GPU 集群，vLLM 部署"),
-]
-
-# (vendor slug, base_url, api_style, [fake upstream keys])
+# (base_url, api_style, [fake upstream keys])
 # ADR-026: one channel owns N equal-peer keys - the renderer expands each row
 # into its own AG provider ({upstream_id}#{seq}); the demo keeps the zai channel
 # multi-key instead of faking it with three same-base_url upstreams.
+# ADR-030: no vendor dimension - upstream names derive from the base_url
+# (open-bigmodel-cn / api-nebula-example / 127-0-0-1-8000 / 127-0-0-1-8001).
 UPSTREAMS = [
-    ("zai", "https://open.bigmodel.cn/api/paas/v4", "openai_chat",
+    ("https://open.bigmodel.cn/api/paas/v4", "openai_chat",
      ["sk-zai-demo-primary", "sk-zai-demo-backup", "sk-zai-demo-cheap"]),
-    ("nebula", "https://api.nebula.example/v1", "anthropic_messages",
+    ("https://api.nebula.example/v1", "anthropic_messages",
      ["sk-nebula-demo-01"]),
-    ("local", "http://127.0.0.1:8000/v1", "openai_chat", ["sk-local-demo-01"]),
-    ("local", "http://127.0.0.1:8001/v1", "openai_chat", ["sk-local-demo-02"]),
+    ("http://127.0.0.1:8000/v1", "openai_chat", ["sk-local-demo-01"]),
+    ("http://127.0.0.1:8001/v1", "openai_chat", ["sk-local-demo-02"]),
 ]
 
 # labels for the 2nd..Nth key row; the first one is create_upstream's 默认密钥
@@ -227,7 +222,7 @@ def _rebuild_daily(session, days: set[str], currency: str) -> None:
 
     l05_service.refresh_cost_daily currently selects cost entries by
     created_at_ms (always "today") and groups buckets by currency while the
-    table PK is (day, vendor, model), so process_billing trips the UNIQUE
+    table PK is (day, upstream model), so process_billing trips the UNIQUE
     constraint. We neutralise those two functions while billing runs and
     rebuild the read models here from the event's started_at day, merging all
     currencies into the reporting currency.
@@ -243,7 +238,7 @@ def _rebuild_daily(session, days: set[str], currency: str) -> None:
             session.delete(old)
     session.flush()
     events = {e.event_id: e for e in session.scalars(select(GatewayUsageEventORM)).all()}
-    cost_buckets: dict[tuple[str, str, str], dict[str, int]] = {}
+    cost_buckets: dict[tuple[str, str], dict[str, int]] = {}
     for entry in session.scalars(select(CostEntryORM)).all():
         event = events.get(entry.gateway_event_id)
         if event is None:
@@ -251,7 +246,7 @@ def _rebuild_daily(session, days: set[str], currency: str) -> None:
         day = _day_of_ms(event.started_at_ms or 0)
         if day not in days:
             continue
-        key = (day, entry.vendor_id or "?", entry.upstream_model_id or "?")
+        key = (day, entry.upstream_model_id or "?")
         bucket = cost_buckets.setdefault(
             key, {"requests": 0, "input": 0, "output": 0, "amount": 0}
         )
@@ -259,11 +254,10 @@ def _rebuild_daily(session, days: set[str], currency: str) -> None:
         bucket["input"] += entry.input_tokens
         bucket["output"] += entry.output_tokens
         bucket["amount"] += entry.amount_micro or 0
-    for (day, vendor_id, model_id), bucket in cost_buckets.items():
+    for (day, model_id), bucket in cost_buckets.items():
         session.add(
             CostDailyORM(
                 day=day,
-                vendor_id=vendor_id,
                 upstream_model=model_id,
                 requests=bucket["requests"],
                 input_tokens=bucket["input"],
@@ -311,17 +305,11 @@ def seed(session, rng: random.Random) -> dict[str, object]:
     aes_box = AesGcmBox(secret_key)
     now = now_ms()
 
-    vendors: dict[str, object] = {}
-    for name, slug, note in VENDORS:
-        vendors[slug] = crud.create_vendor(session, name=name, slug=slug, note=note, actor="seed")
-
     upstreams: dict[str, object] = {}
-    upstream_vendor: dict[str, str] = {}
     key_counts: dict[str, int] = {}
-    for vendor_slug, base_url, api_style, api_keys in UPSTREAMS:
+    for base_url, api_style, api_keys in UPSTREAMS:
         upstream = crud.create_upstream(
             session,
-            vendor_id=vendors[vendor_slug].id,
             base_url=base_url,
             api_style=api_style,
             api_key=api_keys[0],
@@ -338,8 +326,7 @@ def seed(session, rng: random.Random) -> dict[str, object]:
                 secret_box=secret_box,
                 actor="seed",
             )
-        upstreams[upstream.name] = upstream  # names are slug-01 .. slug-NN
-        upstream_vendor[upstream.name] = vendor_slug
+        upstreams[upstream.name] = upstream  # names derive from the base_url
         key_counts[upstream.name] = len(api_keys)
 
     upstream_models: dict[tuple[str, str], object] = {}
@@ -420,18 +407,19 @@ def seed(session, rng: random.Random) -> dict[str, object]:
             assert first == initial_micro
 
     # ---------------- price books ----------------
-    # ADR-020: cost + markup live on the model row (written above); the only rows
-    # left in upstream_prices are the cache prices, which the model row cannot hold.
+    # ADR-020/ADR-030: cost + markup live on the model row (written above); the
+    # only rows left in upstream_prices are the cache prices, keyed by the
+    # upstream model row (upstream_model_id) and nothing else.
     effective = now - 30 * DAY_MS
     for index, models in UPSTREAM_MODELS.items():
         upstream = index_to_upstream[index]
-        vendor = vendors[upstream_vendor[upstream.name]]
         for model_name, _model_type, priced in models:
             if not priced:
                 continue
+            model = upstream_models[(upstream.name, model_name)]
             for item in ("cache_read", "cache_write"):
                 prices.create_upstream_price(
-                    session, vendor_id=vendor.id, upstream_model=model_name,
+                    session, upstream_model_id=model.id,
                     item=item, unit_price_micro=CACHE_PRICE_MICRO, currency=CNY,
                     effective_from_ms=effective,
                 )
@@ -541,7 +529,7 @@ def seed(session, rng: random.Random) -> dict[str, object]:
         session,
         kind="ban",
         scope="model_target",
-        scope_id=targets[("qwen-max", "local-02", "qwen2.5-32b")].id,
+        scope_id=targets[("qwen-max", "127-0-0-1-8001", "qwen2.5-32b")].id,
         note="连续超时，人工封禁待查",
         actor="admin",
     )
@@ -549,7 +537,7 @@ def seed(session, rng: random.Random) -> dict[str, object]:
         session,
         kind="cooldown",
         scope="model_target",
-        scope_id=targets[("glm-flash", "zai-01", "glm-5.3-air")].id,
+        scope_id=targets[("glm-flash", "open-bigmodel-cn", "glm-5.3-air")].id,
         recurrence="once",
         expires_at_ms=now + 2 * 3_600_000,
         note="429 限流自动冷却 2 小时",
@@ -562,7 +550,7 @@ def seed(session, rng: random.Random) -> dict[str, object]:
         artifact_hash=sha256_hex("seed-revision-1"),
         adapter_id="agentgateway",
         operator="张三",
-        reason="首次上线：3 厂商 / 4 上游 / 8 对外模型",
+        reason="首次上线：4 上游 / 8 对外模型",
         status="superseded",
         previous_revision_id=None,
         created_at_ms=now - 3 * DAY_MS,
@@ -687,7 +675,6 @@ def seed(session, rng: random.Random) -> dict[str, object]:
     )
     session.commit()
     return {
-        "vendors": len(vendors),
         "upstreams": len(upstreams),
         "upstream_models": len(upstream_models),
         "public_models": len(public_models),
@@ -738,7 +725,7 @@ def main() -> int:
     print("数据库:", settings.database_url)
     print(
         "写入: "
-        f"厂商 {summary['vendors']} / 上游 {summary['upstreams']} / "
+        f"上游 {summary['upstreams']} / "
         f"上游模型 {summary['upstream_models']} / 对外模型 {summary['public_models']} / "
         f"目标 {summary['targets']} / 用户 {summary['users']} / "
         f"用量事件 {summary['events']}（其中未定价 {summary['unpriced_events']}）"

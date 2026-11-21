@@ -32,22 +32,17 @@ def list_upstream_prices(
     page_size: int = 50,
     offset: int = 0,
     upstream_model_id: str = "",
-    vendor_id: str = "",
-    upstream_model: str = "",
     item: str = "",
     at_ms: int | None = None,
 ) -> list[dict]:
     """Cache price rows; `at_ms` returns the price in force at that instant.
 
-    Both scope keys are addressable: upstream_model_id (the upstream model row)
-    and the legacy vendor_id + upstream_model pair.
+    The scope is the upstream model row (upstream_model_id), ADR-030.
     """
     limit, off = page_params(page_size, offset)
     rows = prices.list_upstream_prices(
         session,
         upstream_model_id=upstream_model_id,
-        vendor_id=vendor_id,
-        upstream_model=upstream_model,
         item=item,
         at_ms=at_ms,
         limit=limit,
@@ -56,8 +51,6 @@ def list_upstream_prices(
     return [
         {
             "id": row.id,
-            "vendor_id": row.vendor_id,
-            "upstream_model": row.upstream_model,
             "upstream_model_id": row.upstream_model_id,
             "item": row.item,
             "unit_price_micro": row.unit_price_micro,
@@ -79,13 +72,10 @@ def create_upstream_price(
 ) -> dict:
     """Append a new price version; history is never rewritten (billing.md §5).
 
-    The price belongs to the upstream model row (upstream_model_id) or to the
-    legacy vendor+model pair; exactly one of them identifies the scope.
+    The price belongs to the upstream model row (upstream_model_id, ADR-030).
     """
     row = prices.create_upstream_price(
         session,
-        vendor_id=payload.vendor_id,
-        upstream_model=payload.upstream_model,
         upstream_model_id=payload.upstream_model_id,
         item=payload.item,
         unit_price_micro=payload.unit_price_micro,
@@ -126,7 +116,6 @@ def list_cost_entries(
         {
             "id": row.id,
             "gateway_event_id": row.gateway_event_id,
-            "vendor_id": row.vendor_id,
             "upstream_model_id": row.upstream_model_id,
             "input_tokens": row.input_tokens,
             "output_tokens": row.output_tokens,

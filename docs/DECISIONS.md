@@ -1,4 +1,4 @@
-# 决策记录（现行，ADR-001…ADR-029 连续编号）
+# 决策记录（现行，ADR-001…ADR-030 连续编号）
 
 ## ADR-001 数据面用 agentgateway，控制面自研
 
@@ -31,6 +31,12 @@
 - 「渠道 Channel」在业界指传输通道，我们实际指的是上游接入点，长期与「厂商」混淆。
 - 「调用模型 / 调用名 / 调用串」三个词指同一件事，且在前后端含义还不一致。
 - 新仓从零建立，改名成本最低；留别名等于两套词并存，半年后要再审计一次。
+
+**修订注记（2026-11-21，W7 t03 / ADR-030）**：
+
+- Vendor 层整体退役：「厂商」不再是领域实体，命名三层收缩为 `Upstream` / `UpstreamModel` /
+  `PublicModel`；`vendors` 表、`vendors:*` 权限键与 `/admin/vendors` 路由删除。
+- 本 ADR「不留别名与兼容层」的删除方向同样成立：旧厂商字段不做兼容查询，mock 库重置即新形态。
 
 **后果**：旧文档里的 Channel / CallModel / 组合 等词全部失效；代码评审时出现旧名直接打回。
 
@@ -415,7 +421,8 @@
 3. 策略 + 护栏 + MCP 合并为**「网关策略」单页三 Tab**（流量策略/护栏/MCP），共用 validate→保存→apply→版本留档；审计、配置版本保持独立页套统一列表规范。
 4. 管理员页 → **角色管理**（角色 + 权限矩阵；控制台账号作为用户管理的一个 Tab，见 ADR-019）。
 5. 价目管理保留重做（紧凑行高、批量编辑、JSON 导入导出，见 ADR-020）。
-6. 上游（渠道）编辑器整页四 Tab：连接与模型 / 路由与映射 / 请求与响应 / 其他设置；厂商可选；协议自动探测（openai_chat → openai_responses → anthropic_messages → gemini）；无 slug 概念，名称默认由连接地址生成（如 `www-abc-com-8080`）可手改；优先级在路由与映射 Tab 的成员行。
+6. 上游（渠道）编辑器整页四 Tab：连接与模型 / 路由与映射 / 请求与响应 / 其他设置；协议自动探测（openai_chat → openai_responses → anthropic_messages → gemini）；无 slug 概念，名称默认由连接地址生成（如 `www-abc-com-8080`）可手改；优先级在路由与映射 Tab 的成员行。
+   **修订（2026-11-21，W7 t03 / ADR-030）**：「厂商可选」作废——厂商域整体退役，上游名称只由连接地址生成（可手改，重名 422）；新增仅展示的 `alias` 字段（t04），不参与路由与数据面。
 7. 术语：UI 全站「上游渠道」；「关闭/启用」替代封禁；周期冷却窗口期内启用 = 仅跳过当前窗口；密钥一用户多把（上限 50）；日志费用列三行「花费 / 本(成本) / 利(毛利率)」。
 8. **每用户路由策略本期不做**（2026-11-19 用户裁定 R3-4）：AG 无 per-user 路由原语（策略挂模型/路由层，不挂用户），自建等于策略引擎，远期再议；用户设置本期只收偏好/习惯类配置。
 9. 接口两维正交（R3-5）：协议风格（openai_chat / openai_responses / anthropic_messages / gemini + 自动探测依次试）× 接口类型（chat / embedding / rerank / image / video / audio / **systemone（AG 内置协议，E14b 实测）** / custom 自填路径透传）；常见接口面以 OpenRouter 为参考。
@@ -534,3 +541,40 @@
 **理由**：如果系统层能直接看见数据面，那么「换数据面不改系统」只能靠自觉；把端口、词表与 import 规则写进规范并配可执行基线，才能让每次局部重构不重新长回数据面形状。fake adapter 是这条原则的反证：系统若真的只依赖 SPI 与领域事实，就应当能在没有 agentgateway 的进程里跑通主流程。
 
 **后果**：系统层短期仍保留 W6 基线的 8 条已知泄漏（由 import-lint 明确列出），不阻塞本票；后续票据必须逐条清零，最终 `--strict` 才能进门禁。适配器需要实现更多端口，但获得完整的替换能力；系统数据库与 API 不再依赖某个数据面的列名、磁盘格式或端点。ADR-001/006 的依赖原则继续有效，本 ADR 是其边界语义的正式裁定与执行化。
+
+
+## ADR-030 缓存价挂 upstream_model_id，厂商域整体退役
+
+- 状态：已定（2026-11-21 用户裁定；W7 t03，Conflict Review C1/C2）
+
+**背景**：`upstream_prices` 的缓存价在 W7 t02 起支持双键（新键 `upstream_model_id` 与旧键
+`vendor_id + upstream_model` 并存，同价读写）。厂商域在控制台只是展示分组，却要求
+vendors 表、`vendors:*` 权限键、`/admin/vendors` 路由与上游/价目/成本流水的 `vendor_id`
+列贯穿全链路；厂商维度还让缓存价归属产生「厂商+模型名」的歧义键。系统未上线，数据全部
+是 mock。
+
+**决策**：
+
+1. **厂商域整体退役**：删除 `Vendor` 领域对象与 `vendors` 表、`upstreams.vendor_id`、
+   `upstream_prices.vendor_id/upstream_model`、`cost_entries.vendor_id`、`cost_daily.vendor_id`，
+   `vendors:read/write` 权限键退场，`/admin/vendors` 路由删除（旧地址 GET 落 SPA 兜底 404、
+   其他方法 405）。上游即接入实体；名称沿用 ADR-023 #6 由连接地址生成、可手改、重名 422；
+   新增仅展示的 `alias` 字段（不参与路由与数据面，UI 归 t04）。
+2. **缓存价归属键只留 `upstream_model_id`**：`upstream_prices` 一行只挂一个上游模型行；
+   计费读键同步从「厂商+模型名」切换为 `(upstream_model_id, item)`（缓存价是 ADR-020 的
+   唯一例外，本次只换例外的归属键，**不是价格单源回退**——进价/倍率的现行权威仍在模型行）。
+   缺归属键 422；`upstream_model_id` 指向不存在的模型行 404。
+3. **账单金额不因换键变化**：seed（seed=42，同一 mock 数据）的成本/收费/日聚合在删除前后
+   逐一对齐（黄金字面量钉在 `test_seed_billing_golden.py`）。
+4. **不写迁移脚本**（用户裁定）：旧 mock 库由 seed 重置；`init_db` 的退役清理
+   （`_RETIRED_COLUMNS` / `_RETIRED_TABLES`）只为未重置的旧文件保持诚实——厂商列删除、
+   `vendors` 与旧键 `cost_daily` 整表删除后按新形态重建（cost_daily 是派生读模型，
+   `refresh_cost_daily` 重算，无权威事实丢失）。
+
+**理由**：厂商维度是纯展示分组，却要求五处 schema 与一条独立路由/权限面跟随；它还让缓存价
+出现「同厂商下同名模型」的歧义键。删除域比维护双键便宜，且系统未上线、无真实迁移负担。
+换读键与删列必须同票同批：只删列不翻读键会让缓存价静默不计费（账单变少）。
+
+**后果**：`/admin/prices/upstream` 只收 `upstream_model_id`；成本流水与日聚合只认模型行；
+前端上游/价目/账单页面不再有厂商筛选、列与文案；旧厂商痕迹由 seed 重置与退役清理兜底；
+mock 演示数据（`web/src/lib/mock.ts`）同步到无厂商形态。

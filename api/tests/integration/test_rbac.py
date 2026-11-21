@@ -42,8 +42,8 @@ def test_customer_me_has_spend_but_no_cost(engine_and_sessionmaker):
 
 def test_customer_write_is_forbidden_with_403(client, login_cookies):
     response = client.post(
-        "/admin/vendors",
-        json={"name": "V", "slug": "v"},
+        "/admin/upstreams",
+        json={"base_url": "https://v.example/v1", "api_style": "openai_chat", "api_key": "sk-v"},
         cookies=login_cookies("customer"),
     )
     assert response.status_code == 403
@@ -110,7 +110,7 @@ def test_custom_role_grants_exactly_its_permissions(client, engine_and_sessionma
 
     accountant, _ = _client_for(factory, role["key"], username="accountant")
     assert accountant.get("/admin/reports/overview").status_code == 200
-    assert accountant.get("/admin/vendors").status_code == 403
+    assert accountant.get("/admin/upstreams").status_code == 403
     assert set(accountant.get("/admin/auth/me").json()["permissions"]) == {
         "reports:read",
         "billing:cost",

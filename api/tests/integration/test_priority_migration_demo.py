@@ -27,7 +27,6 @@ COUNTED_TABLES = (
     "public_models",
     "upstreams",
     "upstream_models",
-    "vendors",
     "users",
     "config_revisions",
     "gateway_usage_events",

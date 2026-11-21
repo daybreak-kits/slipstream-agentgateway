@@ -30,7 +30,7 @@ import { usePermissions } from "@/lib/permissions";
 import { partitionClosedLast } from "@/lib/table-order";
 import type { TableRowTone } from "@/lib/table-columns";
 import { API_STYLE_LABELS, probeStatusView, upstreamRoutingHref, type UpstreamRow } from "@/components/upstreams/shared";
-import type { UpstreamBatchResult, Vendor } from "@/types";
+import type { UpstreamBatchResult } from "@/types";
 import { PageHeader } from "@/components/layout/page-header";
 
 type BatchAction = "enable" | "disable" | "delete";
@@ -110,7 +110,6 @@ export function UpstreamsPage() {
   const { mode: timezone } = useTimezone();
 
   const q = useQuery({ queryKey: ["upstreams"], queryFn: () => apiList<UpstreamRow>(ENDPOINTS.upstreams) });
-  const vendorsQ = useQuery({ queryKey: ["vendors"], queryFn: () => apiList<Vendor>(ENDPOINTS.vendors) });
 
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
@@ -121,8 +120,6 @@ export function UpstreamsPage() {
   const [batchDelete, setBatchDelete] = useState(false);
 
   const allItems = q.data?.items ?? [];
-  const vendorName = (vendorId: string | null | undefined) =>
-    vendorsQ.data?.items.find((vendor) => vendor.id === vendorId)?.name ?? "未分组";
 
   const needle = search.trim().toLowerCase();
   const rows = useMemo(
@@ -262,7 +259,6 @@ export function UpstreamsPage() {
               </Link>
               {!item.enabled ? <Badge tone="warning">已关闭</Badge> : null}
             </div>
-            <div className="text-2xs text-faint">{vendorName(item.vendor_id)}</div>
           </div>
         );
       },

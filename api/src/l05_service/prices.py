@@ -7,10 +7,9 @@ creates a new version and never rewrites history. The charge book (charge_prices
 is retired: spend is cost x the model row's markup. Amounts are integer micro
 units; missing prices produce status=unpriced with a NULL amount (never a silent 0).
 
-The book has two scope keys while the vendor domain is removed (W7 t02): the
-upstream model row (upstream_model_id) and the legacy vendor_id + upstream_model
-pair. A price row carries exactly one of them; both address the same kind of
-scope, so the same data prices the same under either key (W7: 缓存价改挂上游模型).
+ADR-030: the book has exactly one scope key - the upstream model row
+(upstream_model_id). The legacy vendor_id + upstream_model pair left with the
+vendor domain (W7 t03).
 """
 
 from __future__ import annotations
@@ -33,46 +32,22 @@ from l05_service import money
 from l05_service.money import MICRO, PRICE_ITEMS
 
 
-def _price_scope(
-    *, vendor_id: str | None, upstream_model: str | None, upstream_model_id: str | None
-) -> tuple[list, dict[str, str | None]]:
-    """WHERE conditions and key columns of one price scope.
+def _price_scope(*, upstream_model_id: str | None) -> tuple[list, dict[str, str]]:
+    """WHERE conditions and key columns of one price scope (ADR-030).
 
-    Exactly one key form may be given: the upstream model row or the legacy
-    vendor+model pair. A missing or mixed key is a 422 - the scope is never
-    guessed, because guessing would price a row under the wrong scope.
-
-    "Given" means the field was passed, not that it is non-empty: the legacy
-    key keeps accepting an empty vendor_id, because an upstream may have no
-    vendor (ADR-023) and its price row is then keyed by the empty vendor.
+    The upstream model row is the only scope: a missing key is a 422 - the
+    scope is never guessed, because guessing would price a row under the wrong
+    scope.
     """
-    if upstream_model_id is not None:
-        if vendor_id is not None or upstream_model is not None:
-            raise AppError(
-                ErrorCode.VALIDATION_ERROR,
-                "缓存价只能带一个归属键：upstream_model_id 或 vendor_id+upstream_model",
-                details={"upstream_model_id": upstream_model_id},
-            )
-        return (
-            [UpstreamPriceORM.upstream_model_id == upstream_model_id],
-            {"vendor_id": None, "upstream_model": None, "upstream_model_id": upstream_model_id},
+    if not upstream_model_id:
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR,
+            "缓存价需要一个归属键：upstream_model_id",
+            details={"upstream_model_id": upstream_model_id},
         )
-    if vendor_id is not None and upstream_model:
-        return (
-            [
-                UpstreamPriceORM.vendor_id == vendor_id,
-                UpstreamPriceORM.upstream_model == upstream_model,
-            ],
-            {"vendor_id": vendor_id, "upstream_model": upstream_model, "upstream_model_id": None},
-        )
-    raise AppError(
-        ErrorCode.VALIDATION_ERROR,
-        "缓存价需要一个归属键：upstream_model_id 或 vendor_id+upstream_model",
-        details={
-            "upstream_model_id": upstream_model_id,
-            "vendor_id": vendor_id,
-            "upstream_model": upstream_model,
-        },
+    return (
+        [UpstreamPriceORM.upstream_model_id == upstream_model_id],
+        {"upstream_model_id": upstream_model_id},
     )
 
 
@@ -83,8 +58,6 @@ def create_upstream_price(
     unit_price_micro: int,
     currency: str,
     effective_from_ms: int | None = None,
-    vendor_id: str | None = None,
-    upstream_model: str | None = None,
     upstream_model_id: str | None = None,
 ) -> UpstreamPriceORM:
     """Append a new upstream price version; version = max(existing) + 1 per scope.
@@ -92,9 +65,8 @@ def create_upstream_price(
     Only the cache items remain writable (ADR-020); input / output / request
     prices are rejected because billing never reads them again.
 
-    The scope is the upstream model row (upstream_model_id) or the legacy
-    vendor+model pair. Versions are counted per scope, so the two key forms
-    never steal a version number from each other.
+    The scope is the upstream model row (upstream_model_id); versions are
+    counted per scope.
     """
     if item not in PRICE_ITEMS:
         raise AppError(
@@ -110,10 +82,8 @@ def create_upstream_price(
         )
     if unit_price_micro < 0:
         raise AppError(ErrorCode.VALIDATION_ERROR, "unit_price_micro must be >= 0")
-    conditions, key = _price_scope(
-        vendor_id=vendor_id, upstream_model=upstream_model, upstream_model_id=upstream_model_id
-    )
-    if key["upstream_model_id"] and session.get(UpstreamModelORM, key["upstream_model_id"]) is None:
+    conditions, key = _price_scope(upstream_model_id=upstream_model_id)
+    if session.get(UpstreamModelORM, key["upstream_model_id"]) is None:
         raise AppError(ErrorCode.NOT_FOUND, f"upstream model not found: {key['upstream_model_id']}")
     latest = session.scalars(
         select(UpstreamPriceORM)
@@ -140,14 +110,10 @@ def effective_upstream_price(
     item: str,
     at_ms: int,
     *,
-    vendor_id: str | None = None,
-    upstream_model: str | None = None,
     upstream_model_id: str | None = None,
 ) -> UpstreamPriceORM | None:
     """Latest price version effective at `at_ms` (max effective_from, then version)."""
-    conditions, _key = _price_scope(
-        vendor_id=vendor_id, upstream_model=upstream_model, upstream_model_id=upstream_model_id
-    )
+    conditions, _key = _price_scope(upstream_model_id=upstream_model_id)
     return session.scalars(
         select(UpstreamPriceORM)
         .where(
@@ -163,8 +129,6 @@ def list_upstream_prices(
     session: Session,
     *,
     upstream_model_id: str = "",
-    vendor_id: str = "",
-    upstream_model: str = "",
     item: str = "",
     at_ms: int | None = None,
     limit: int = 50,
@@ -172,18 +136,13 @@ def list_upstream_prices(
 ) -> list[UpstreamPriceORM]:
     """Price rows of one scope; with `at_ms` only the price in force at that instant.
 
-    Filters are ANDed and every key form is addressable (upstream_model_id, or
-    the legacy vendor_id + upstream_model pair). `at_ms` answers "which price
+    Filters are ANDed over the upstream model scope. `at_ms` answers "which price
     applies then": per scope the newest version with effective_from_ms <= at_ms
     wins, exactly like effective_upstream_price.
     """
     conditions = []
     if upstream_model_id:
         conditions.append(UpstreamPriceORM.upstream_model_id == upstream_model_id)
-    if vendor_id:
-        conditions.append(UpstreamPriceORM.vendor_id == vendor_id)
-    if upstream_model:
-        conditions.append(UpstreamPriceORM.upstream_model == upstream_model)
     if item:
         conditions.append(UpstreamPriceORM.item == item)
     if at_ms is not None:
@@ -201,9 +160,9 @@ def list_upstream_prices(
     # One row per scope (the effective one). The book holds a few dozen rows,
     # so the window is resolved here instead of in SQL.
     effective: list[UpstreamPriceORM] = []
-    seen: set[tuple[str | None, str | None, str | None, str]] = set()
+    seen: set[tuple[str, str]] = set()
     for row in rows:
-        scope = (row.vendor_id, row.upstream_model, row.upstream_model_id, row.item)
+        scope = (row.upstream_model_id, row.item)
         if scope in seen:
             continue
         seen.add(scope)

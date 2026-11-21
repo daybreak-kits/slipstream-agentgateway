@@ -73,8 +73,13 @@ def test_seed_is_one_zai_channel_with_three_equal_keys(seeded_demo) -> None:
     channels = _query(
         db_path, "SELECT id, name, base_url, api_key_enc FROM upstreams ORDER BY name"
     )
-    assert [row[1] for row in channels] == ["local-01", "local-02", "nebula-01", "zai-01"]
-    # ADR-026: no vendor is split into several channels sharing one address.
+    assert [row[1] for row in channels] == [
+        "127-0-0-1-8000",
+        "127-0-0-1-8001",
+        "api-nebula-example",
+        "open-bigmodel-cn",
+    ]
+    # ADR-030: each channel is exactly one upstream; its keys never fork into channels.
     assert len({row[2] for row in channels}) == 4
 
     zai_id = next(row[0] for row in channels if row[2] == ZAI_BASE_URL)
@@ -98,7 +103,6 @@ def test_seed_is_one_zai_channel_with_three_equal_keys(seeded_demo) -> None:
     counts = {
         table: _query(db_path, f"SELECT COUNT(*) FROM {table}")[0][0]
         for table in (
-            "vendors",
             "upstreams",
             "upstream_models",
             "public_models",
@@ -106,7 +110,6 @@ def test_seed_is_one_zai_channel_with_three_equal_keys(seeded_demo) -> None:
         )
     }
     assert counts == {
-        "vendors": 3,
         "upstreams": 4,
         "upstream_models": 16,
         "public_models": 8,

@@ -471,8 +471,8 @@ export interface UpstreamBatch {
 }
 
 export interface UpstreamCreate {
-  vendor_id?: string | null;
   name?: string | null;
+  alias?: string;
   base_url: string;
   api_style: string;
   api_key: string;
@@ -534,6 +534,7 @@ export interface UpstreamModelProbeIn {
 
 export interface UpstreamPatch {
   name?: string | null;
+  alias?: string | null;
   base_url?: string | null;
   api_style?: string | null;
   transforms?: Record<string, unknown> | null;
@@ -542,9 +543,7 @@ export interface UpstreamPatch {
 }
 
 export interface UpstreamPriceCreate {
-  vendor_id?: string | null;
-  upstream_model?: string | null;
-  upstream_model_id?: string | null;
+  upstream_model_id: string;
   item: string;
   unit_price_micro: number;
   currency?: string;
@@ -584,15 +583,4 @@ export interface ValidationError {
   type: string;
   input?: unknown;
   ctx?: Record<string, unknown>;
-}
-
-export interface VendorCreate {
-  name: string;
-  slug: string;
-  note?: string;
-}
-
-export interface VendorPatch {
-  name?: string | null;
-  note?: string | null;
 }

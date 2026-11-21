@@ -51,11 +51,11 @@
 - 密码以 scrypt（标准库 `hashlib.scrypt`，N=2^14/r=8/p=1/dklen=32，16 字节盐）哈希，
   格式 `scrypt$N$r$p$salt$digest`；兼容旧 pbkdf2（120000 次）。改密 / 禁用会撤销该账号全部会话；
   会话绝对过期 12 小时，无滑动续期。
-- 角色：内置 `admin`（管理用户，全部 41 个权限）、`customer`（客户）、`reseller`（分销商）；
+- 角色：内置 `admin`（管理用户，全部 39 个权限）、`customer`（客户）、`reseller`（分销商）；
   管理员可自建角色（`admin_roles` 行），内置角色权限不可改、不可删，仍有成员的自定义角色不可删。
   W6/21 起旧 key `user`/`agent` 不再保留 alias；历史库先运行
   `api/scripts/migrate_roles_w6.py --apply`（owner/operator/viewer 同次折叠，权限不变）。
-- 权限键共 41 个，注册表在 `l05_service/rbac.py`，`GET /admin/permissions` 返回分组与 keys；
+- 权限键共 39 个（W7 t03 起 `vendors:read/write` 退场），注册表在 `l05_service/rbac.py`，`GET /admin/permissions` 返回分组与 keys；
   每个接口的权限列写的是权限键；缺权限统一 403 `FORBIDDEN`。五期没有新增权限键：模型探测复用
   `upstream_models:write`，公开模型 PATCH 携带 `targets` 时复用 `model_targets:write`（对照见 §3.2/§3.3）。
 - 字段级金额权限见 §0.5：无 `billing:cost` 时成本/毛利键直接缺失；无 `billing:spend` 时
@@ -97,7 +97,7 @@
   `web/src/generated/contract.ts:PAGE_SIZE_TIERS`，前端分页器不再复制一份。
 - `offset` ≥ 0，负数 → 422。
 - 返回形态（2026-11-17 03:27 Lead 实测确认，前端不得再猜）：
-  - **列表型：裸数组 `[item, ...]`**：vendors / upstreams / upstream-models /
+  - **列表型：裸数组 `[item, ...]`**：upstreams / upstream-models /
     public-models / model-targets / users / api-keys / availability-rules /
     config/revisions / cost/entries / charge/entries / prices/*。
   - **分页信封：只有两处** `/admin/logs` 与 `/admin/audit-logs`，
@@ -105,7 +105,7 @@
   - **自定义对象**：reports/overview（扁平）、reports/trend、reports/flow、unpriced（{cost,charge}）、
     settings（{items}）。
 - 嵌入式字段：public-models 列表项默认嵌 `targets[]`（`?with_targets=false` 可关）；
-  upstream-models 列表项嵌 `upstream_name`、`vendor_name`。
+  upstream-models 列表项嵌 `upstream_name`。
 - 时间字段两套并存：`created_at_ms`（毫秒 epoch，列表接口主用）与
   `created_at`（ISO8601，settings/audit-logs 用）。
 
@@ -357,19 +357,17 @@ AG 1.7 拒绝（`mcp.transport.http=false`），保存即 422。渲染到顶层 
 
 ## 3. 资源管理
 
-### 3.1 厂商 vendors
-| 方法 | 路径 | 权限 | 说明 |
-| --- | --- | --- | --- |
-| GET | /admin/vendors | vendors:read | 列表（page_size/offset） |
-| POST | /admin/vendors | vendors:write | body {name, slug, note?} |
-| PATCH | /admin/vendors/{vendor_id} | vendors:write | 部分字段更新 |
-| DELETE | /admin/vendors/{vendor_id} | vendors:write | 有下游引用时 409 CONFLICT |
+### 3.1 厂商 vendors（已移除，ADR-030）
+
+厂商域整体退役（W7 t03）：`vendors` 表、`vendors:read/write` 权限键与 `/admin/vendors`
+路由全部删除，上游即接入实体。旧地址按项目路由策略返回：GET 404（落 SPA 兜底）、
+其他方法 405。
 
 ### 3.2 上游 upstreams
 | 方法 | 路径 | 权限 | 说明 |
 | --- | --- | --- | --- |
 | GET | /admin/upstreams | upstreams:read | 列表；每项含 `has_api_key`（由密钥行数量派生，`has_api_key == key_count > 0`；只统计 `upstream_keys` 行，**不再回退退役的 `upstreams.api_key_enc` 镜像**，未迁移旧库返回 false/0，前端提示运行 `scripts/migrate_multikey_v2.py`）、`key_count`、`model_count`、`last_probe` |
-| POST | /admin/upstreams | upstreams:write | body {vendor_id?, name?, base_url, api_style, api_key, transforms?, max_buffer_bytes?}；命名规则见下 |
+| POST | /admin/upstreams | upstreams:write | body {name?, alias?, base_url, api_style, api_key, transforms?, max_buffer_bytes?}；命名规则见下 |
 | GET | /admin/upstreams/{upstream_id} | upstreams:read | 详情（含密钥数、模型数、最近探测、`api_style_source`） |
 | PATCH | /admin/upstreams/{upstream_id} | upstreams:write | 可改 name/base_url/api_style/enabled；`name` 可选（缺省或空白=不改名，显式改名重名 422）；api_style 同创建一样接受 `auto`，落库前解析为具体风格 |
 | DELETE | /admin/upstreams/{upstream_id} | upstreams:write | 被 `model_targets` 引用时 409，不级联 |
@@ -390,12 +388,13 @@ AG 1.7 拒绝（`mcp.transport.http=false`），保存即 422。渲染到顶层 
 
 权限对照（易写错，ticket 17 核对）：`test-connection`、`keys/test`、`discover-models`、`import-models`、上游 `batch` 都是 `upstreams:write`；逐模型 `models/probe` 是 `upstream_models:write`（权限注册表注释里的 `model_write` 即该键，ticket 05）；`transforms` 为 `transforms:read` / `transforms:write`；上游密钥 CRUD 为 `upstreams:write`。
 
-命名与厂商可选（ADR-023 #6，工单 D）：
+命名（ADR-023 #6 + ADR-030）：
 
-- `vendor_id` **可空**：不带厂商也能建上游；返回体里 `vendor_id`/`vendor` 相应可为 null（前端 F3 兼容）。
-- 名称取值顺序：请求带 `name` 用请求值（重名 422，与其他实体一致）；未带 name 且显式指定 vendor 时沿用
-  `{slug}-NN` 计数器；vendor 也缺省时由 base_url 生成：取 host:port，`www.abc.com:8080` → `www-abc-com-8080`
-  （http/https 默认端口 80/443 去掉、非 [a-z0-9] 字符折叠为 `-`、重名追加 `-2`/`-3`）。
+- 名称取值顺序：请求带 `name` 用请求值（重名 422，与其他实体一致）；未带时由 base_url 生成：
+  取 host:port，`www.abc.com:8080` → `www-abc-com-8080`（http/https 默认端口 80/443 去掉、
+  非 [a-z0-9] 字符折叠为 `-`、重名追加 `-2`/`-3`）。
+- `alias` 为仅展示的显示名（≤255，可空，ADR-030 新增；UI 归 t04）：不参与命名唯一性与路由，
+  永不进入数据面。
 
 协议自动探测（工单 C，向后兼容）：
 
@@ -516,7 +515,7 @@ AES-GCM 密文 + sk-...abcd 掩码。
   行上（username 唯一不可改 + password_hash + role，见 §3.4）。创建/改角色/改密/停用管理员 =
   对 `/admin/users` 的常规用户操作（授予 admin 角色仅限管理用户；改密走 PUT password；禁用/软删语义同用户）。
   控制台访问 = 该 users 行有角色且有密码。
-- 内置角色：`admin`（管理用户，全部 41 个权限）、`customer`（客户）、`reseller`（分销商）。
+- 内置角色：`admin`（管理用户，全部 39 个权限）、`customer`（客户）、`reseller`（分销商）。
   客户可读主数据/治理/价目/用量报表 + `billing:spend` + `playground:use`；分销商在此之上
   增加 `users:read/create/update` 与 `billing:subtree`。
 - 自定义角色 key 必须匹配 `^[a-z][a-z0-9_]{2,31}$`，权限必须是注册表里的键；授权只认权限键，
@@ -557,7 +556,7 @@ AES-GCM 密文 + sk-...abcd 掩码。
 ### 4.3 价格与对账
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET/POST | /admin/prices/upstream | 上游进价（vendor+model+item，版本自动 +1） |
+| GET/POST | /admin/prices/upstream | 缓存价（挂 `upstream_model_id` + item，版本自动 +1；ADR-030，旧 vendor+model 键已删） |
 | GET/POST | /admin/prices/charge | 对外计费价（mode=markup 万分比 12000=1.2x，或 fixed） |
 | GET | /admin/prices/public-models | prices:read | **公开模型售价**（裸数组，只读派生）：按成员上游模型成本 × 倍率加权平均实时计算，不落库、不独立维护（ADR-017/GLOSSARY §5 口径）；成员价或权重变化后立即生效 |
 | GET | /admin/prices/export | upstream_models:read | **价目 JSON 一键导出**（ADR-020，权威=模型行）：见下方「价目 JSON 导入/导出」 |
@@ -783,7 +782,7 @@ curl -s -b "$J" $B/upstream-models | head -c 300
 ```json
 [{"id":"umdlf8166bfcd98a4dcaaee3c1521170d2ac","upstream_id":"upse0e2183aa0f9491c9aea8f42d25b30b4",
   "name":"glm-5.3","model_type":"chat","enabled":true,"created_at_ms":1794875743938,
-  "upstream_name":"zai-01","vendor_name":"智谱 AI"}]
+  "upstream_name":"open-bigmodel-cn"}]
 ```
 
 ```bash
@@ -809,7 +808,7 @@ curl -s -b "$J" $B/cost/entries | head -c 260
 ```
 ```json
 [{"id":"costea54fabaf41e42a49745f94d93880156","gateway_event_id":"seed_evt_6_000",
-  "vendor_id":"vend0654501d1c30424089c94fffc26567f8","upstream_model_id":"umdl2ab50a3a654f4810ac5c84390846b87a",
+  "upstream_model_id":"umdl2ab50a3a654f4810ac5c84390846b87a",
   "input_tokens":3037,"output_tokens":218,"amount_micro":3127,"currency":"CNY",
   "price_version_id":"uprdbe3b2bbae19400ea254bcfe9c60920d","status":"ok"}]
 ```

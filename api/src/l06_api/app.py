@@ -35,13 +35,11 @@ from l06_api.routers_reports import router as reports_router
 from l06_api.routers_roles import router as roles_router
 from l06_api.routers_upstreams import router as upstreams_router
 from l06_api.routers_usage import router as usage_router
-from l06_api.routers_vendors import router as vendors_router
 from l06_api.spa import mount_web_console
 
 ALL_ROUTERS = (
     health_router,
     auth_router,
-    vendors_router,
     upstreams_router,
     models_router,
     my_models_router,

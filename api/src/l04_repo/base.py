@@ -60,6 +60,8 @@ def init_db(engine: Engine) -> None:
     _ensure_additive_columns(engine)
     _backfill_usage_correlation_key(engine)
     _drop_retired_columns(engine)
+    _drop_retired_tables(engine)
+    Base.metadata.create_all(engine)
     _ensure_username_index(engine)
     _ensure_model_markup_default(engine)
 
@@ -69,10 +71,15 @@ def init_db(engine: Engine) -> None:
 #: retired field. Ticket 16 retired the key-level primary flag (ADR-026); ticket
 #: 06 retires the wire-era usage join column after ticket 05 copied its values
 #: into the neutral correlation_key (the backfill above runs before this drop,
-#: so no value is lost).
+#: so no value is lost). W7 t03 (ADR-030) retires the vendor domain columns;
+#: the old DB is reset by seed, this drop only keeps an un-reset file honest.
 _RETIRED_COLUMNS: tuple[tuple[str, str], ...] = (
     ("upstream_keys", "is_primary"),
     ("gateway_usage_events", "trace_id"),
+    ("upstreams", "vendor_id"),
+    ("upstream_prices", "vendor_id"),
+    ("upstream_prices", "upstream_model"),
+    ("cost_entries", "vendor_id"),
 )
 
 
@@ -81,6 +88,8 @@ def _drop_retired_columns(engine: Engine) -> None:
 
     ALTER TABLE ... DROP COLUMN needs SQLite >= 3.35 (the project's supported
     Python 3.12 runtime bundles a newer one); non-SQLite backends support it too.
+    SQLite refuses to drop a PRIMARY KEY member, so whole retired tables are
+    handled by _drop_retired_tables (which runs after create_all).
     """
     from sqlalchemy import inspect, text
 
@@ -95,6 +104,35 @@ def _drop_retired_columns(engine: Engine) -> None:
             connection.execute(
                 text(f"ALTER TABLE {table_name} DROP COLUMN {column_name}")
             )
+
+
+#: Whole tables that left the ORM mapping (W7 t03, ADR-030). ``cost_daily`` is a
+#: derived read model rebuilt by refresh_cost_daily, so dropping it loses no
+#: authoritative fact; ``vendors`` is the retired vendor domain. Dropping runs
+#: between two create_all passes, so the new-shape table exists afterwards.
+_RETIRED_TABLES: tuple[str, ...] = (
+    "vendors",
+    "cost_daily",
+)
+
+
+def _drop_retired_tables(engine: Engine) -> None:
+    """Drop whole tables that left the ORM mapping, if an old file still has them."""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    for table_name in _RETIRED_TABLES:
+        if not inspector.has_table(table_name):
+            continue
+        # cost_daily keeps its old 3-column PK (day, vendor_id, upstream_model);
+        # only drop it when it still carries the retired vendor dimension, so a
+        # fresh new-shape file is never touched.
+        if table_name == "cost_daily":
+            existing = {column["name"] for column in inspector.get_columns(table_name)}
+            if "vendor_id" not in existing:
+                continue
+        with engine.begin() as connection:
+            connection.execute(text(f"DROP TABLE {table_name}"))
 
 
 def _backfill_usage_correlation_key(engine: Engine) -> None:

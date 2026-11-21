@@ -45,8 +45,6 @@ PERMISSION_GROUPS: tuple[str, ...] = (
 
 PERMISSIONS: tuple[Permission, ...] = (
     # 主数据
-    Permission("vendors:read", "查看上游供应商", "主数据"),
-    Permission("vendors:write", "维护上游供应商", "主数据"),
     Permission("upstreams:read", "查看上游渠道", "主数据"),
     Permission("upstreams:write", "维护上游渠道", "主数据"),
     Permission("upstream_models:read", "查看上游模型", "主数据"),
@@ -120,7 +118,6 @@ BUILTIN_ROLE_RESELLER = "reseller"
 _CUSTOMER_PERMISSIONS: frozenset[str] = frozenset(
     {
         # 只读：主数据/流量治理/治理/价目/用量报表
-        "vendors:read",
         "upstreams:read",
         "upstream_models:read",
         "public_models:read",

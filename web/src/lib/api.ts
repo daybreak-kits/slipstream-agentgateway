@@ -186,7 +186,6 @@ export async function apiList<T>(path: string): Promise<ListEnvelope<T>> {
 /** 后端真实路径（docs/api-contract.md 对齐）；页面只允许从这里取路径。 */
 export const ENDPOINTS = {
   overview: "/admin/reports/overview",
-  vendors: "/admin/vendors",
   upstreams: "/admin/upstreams",
   upstreamModels: "/admin/upstream-models",
   discoverModels: (code: string) => "/admin/upstreams/" + code + "/discover-models",

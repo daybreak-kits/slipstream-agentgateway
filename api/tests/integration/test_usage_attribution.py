@@ -24,12 +24,11 @@ SECOND_MODEL_ROW_ID = "umdl_second"
 
 
 def _second_upstream_sharing_the_model_name(factory, seed: dict) -> None:
-    """Same vendor, same upstream-model name, its own (more expensive) price row."""
+    """Second upstream, same upstream-model name, its own (more expensive) price row."""
     with factory() as session:
         session.add(
             UpstreamORM(
                 id=SECOND_UPSTREAM_ID,
-                vendor_id=seed["vendor_id"],
                 name="testv-02",
                 base_url="https://second.example/v1",
                 api_style="openai_chat",

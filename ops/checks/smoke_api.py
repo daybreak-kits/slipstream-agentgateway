@@ -139,7 +139,7 @@ def main() -> int:
 
         def check_unauthenticated() -> None:
             with httpx.Client(base_url=args.base, timeout=args.timeout) as anon:
-                resp = anon.get("/admin/vendors")
+                resp = anon.get("/admin/upstreams")
                 assert resp.status_code == 401, f"want 401, got {resp.status_code}"
                 assert resp.json().get("code") == "UNAUTHORIZED", resp.text[:200]
 
@@ -147,7 +147,7 @@ def main() -> int:
 
         def check_role_header_ignored() -> None:
             with httpx.Client(base_url=args.base, timeout=args.timeout) as anon:
-                resp = anon.get("/admin/vendors", headers={"X-Admin-Role": "owner"})
+                resp = anon.get("/admin/upstreams", headers={"X-Admin-Role": "owner"})
                 assert resp.status_code == 401, f"X-Admin-Role must not grant identity: {resp.status_code}"
 
         c.check("X-Admin-Role 头不再授予身份", check_role_header_ignored)
@@ -291,7 +291,6 @@ def main() -> int:
             assert len(rows) == expected, f"{path}: want {expected} rows, got {len(rows)}"
 
         for path, expected, label in (
-            ("/admin/vendors", 3, "厂商"),
             ("/admin/upstreams", 4, "上游"),  # 每项须带 has_api_key bool（由密钥行数量派生）
             ("/admin/upstream-models", 16, "上游模型"),
             ("/admin/public-models", 8, "对外模型"),

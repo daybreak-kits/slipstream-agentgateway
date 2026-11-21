@@ -27,7 +27,7 @@ AG request_logs（请求级事实：tokens、实际模型、状态）
       ▼
 gateway_usage_events（不可变事实，event_id 唯一）
       ├──> cost_entries    ← 按上游价目表算钱
-      │        └──> cost_daily（按厂商/模型/天聚合）
+      │        └──> cost_daily（按上游模型/天聚合）
       └──> charge_entries  ← 按下游价目表算钱
                └──> ledger_entries（扣用户余额）
                         └──> user_daily（按用户/天聚合）
@@ -38,10 +38,11 @@ gateway_usage_events（不可变事实，event_id 唯一）
 
 ### 4.1 两张独立的价目表
 
-`upstream_prices(vendor_id, upstream_model, item, unit_price_micro, currency, effective_from, version)`
+`upstream_prices(upstream_model_id, item, unit_price_micro, currency, effective_from_ms, version)`
 - `item` ∈ `input` / `output` / `cache_read` / `cache_write` / `request`
 - 单价单位：**每 1M tokens 的百万分之一币**（整数），或 `per_request` 按次
-- 归属键（W7 t02 expand）：缓存价按 `upstream_model_id` 归属；旧 `vendor_id + upstream_model` 键暂时保留（厂商域删除时随 `vendor_id` 一起退场），一行只带其中一种键。
+- 归属键（ADR-030）：一行只挂一个上游模型行（`upstream_model_id`）；旧 `vendor_id + upstream_model`
+  厂商键已随厂商域退役删除，缺 `upstream_model_id` 422，指向不存在的模型行 404。
 
 `charge_prices(public_model_id, item, mode, value, currency, effective_from, version)`（v1 默认 `mode=markup`、`value=10000` 即 1.0 倍，管理员可改）
 - `mode = markup`：`value` 是倍率（如 12000 = 1.2 倍，万分数避免浮点）
@@ -49,7 +50,7 @@ gateway_usage_events（不可变事实，event_id 唯一）
 
 ### 4.2 两张结果表
 
-`cost_entries`：`id, gateway_event_id, vendor_id, upstream_model_id, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, amount_micro, currency, price_version_id, status(ok|unpriced), created_at`
+`cost_entries`：`id, gateway_event_id, upstream_model_id, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, amount_micro, currency, price_version_id, status(ok|unpriced), created_at`（W7 t03 起无 `vendor_id`，ADR-030）
 
 `charge_entries`：`id, gateway_event_id, user_id, api_key_id, public_model_id, input_tokens, output_tokens, amount_micro, currency, price_version_id, status(ok|unpriced|free), created_at`
 
