@@ -98,3 +98,33 @@ def test_ag_schema_change_fails_loudly(client, ag_db):
         connection.close()
     # fetch_request_payload treats a missing table as "no payload" -> 404.
     assert client.get("/admin/logs/evt_full/payload").status_code == 404
+
+
+def test_payload_endpoint_reads_through_the_adapter_port(client):
+    """W6 t02: the router serves payloads via the adapter SPI port only.
+
+    The request dependency is overridden with the fake driver and there is no
+    AG SQLite anywhere in the environment: a router that still imported the
+    concrete usage reader would 500 on the missing data-plane DB instead of
+    answering from the adapter's own store. The body pins the exact wire shape.
+    """
+    from l03_adapters.fake import FakeAdapter
+    from l06_api.deps import get_adapter
+
+    adapter = FakeAdapter()
+    adapter.seed_payload(
+        "evt_port",
+        request_prompt_json='{"messages":[{"role":"user","content":"你好"}]}',
+        response_completion_json='{"role":"assistant","content":"你好！"}',
+    )
+    client.app.dependency_overrides[get_adapter] = lambda: adapter
+    try:
+        body = client.get("/admin/logs/evt_port/payload")
+    finally:
+        client.app.dependency_overrides.pop(get_adapter, None)
+    assert body.status_code == 200, body.text
+    assert body.json() == {
+        "event_id": "evt_port",
+        "request_prompt_json": '{"messages":[{"role":"user","content":"你好"}]}',
+        "response_completion_json": '{"role":"assistant","content":"你好！"}',
+    }

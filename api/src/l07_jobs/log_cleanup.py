@@ -1,12 +1,13 @@
-"""Daily retention cleanup for the agentgateway request-log database (ADR-021).
+"""Daily retention cleanup for the data-plane request logs (ADR-021).
 
-The data-plane SQLite DB keeps request metadata (request_logs) and optional
-prompt/completion bodies (request_log_payloads). Rows older than the operator
-setting log_retention_days are deleted here, and only here: the control-plane
-ledger (ledger_entries / gateway_usage_events / charge_entries) lives in a
-separate database and must never be touched by retention. ADR-028 appends a
-control-plane request_attempts pass under the same day-granular setting; that
-pass only prunes normalized attempts, never usage facts or the ledger.
+The adapter owns the request-log store: request metadata and the optional
+prompt/completion bodies. Rows older than the operator setting
+log_retention_days are deleted through the adapter's ``prune_logs`` SPI port,
+and only there: the control-plane ledger (ledger_entries / gateway_usage_events
+/ charge_entries) lives in a separate database and must never be touched by
+retention. ADR-028 appends a control-plane request_attempts pass under the same
+day-granular setting; that pass only prunes normalized attempts, never usage
+facts or the ledger.
 
 Registering this as a job means the cleanup follows SLIPSTREAM_JOBS_ENABLED like
 the other in-process jobs; a deployment running jobs on a separate worker gets
@@ -25,10 +26,10 @@ from l01_core.settings import (
     Settings,
     get_settings,
 )
-from l03_adapters.agentgateway.usage import cleanup_expired_logs
 from l03_adapters.spi import DataPlaneAdapter
 from l04_repo.repository import get_setting
 from l05_service.attempts import cleanup_expired_attempts
+from l06_api.adapter_factory import make_adapter
 
 #: Retention is a daily housekeeping task, not a per-minute one.
 LOG_CLEANUP_INTERVAL_S = 24 * 3600
@@ -68,17 +69,15 @@ def cleanup_job(
 ) -> dict[str, int]:
     """One retention pass: data-plane request logs + control-plane attempts.
 
-    W6 ticket 01 adds the injected-adapter seam: when a driver is provided its
-    ``prune_logs`` port owns the data-plane half (the fake driver and, after
-    ticket 02, the default production path). Without it the historical concrete
-    import keeps the current byte-for-byte behaviour for this baseline ticket.
+    W6 ticket 02: the data-plane half always runs through the adapter's
+    ``prune_logs`` SPI port. The production default resolves the configured
+    driver via the composition factory; tests may inject a driver (the fake)
+    directly over the same port.
     """
     resolved = settings or get_settings()
     days = _retention_days(session_factory)
-    if adapter is None:
-        counts = cleanup_expired_logs(resolved.ag_log_db_path, days)
-    else:
-        counts = dict(adapter.prune_logs(days))
+    driver = adapter if adapter is not None else make_adapter(resolved)
+    counts = dict(driver.prune_logs(days))
     # ADR-028: attempts live in the control-plane DB, not AG's request-log SQLite.
     # Only request_attempts is pruned; usage events / ledger rows are never retention.
     with session_factory() as session:
