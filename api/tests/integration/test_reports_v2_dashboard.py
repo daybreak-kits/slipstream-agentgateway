@@ -112,10 +112,10 @@ def test_heatmap_money_metric_follows_permissions(
     for metric in ("cost", "spend"):
         assert client.get(f"/admin/reports/heatmap?range=7d&metric={metric}").status_code == 200
 
-    # 普通用户有 billing:spend、没有 billing:cost：花费可看，成本必须拒绝。
-    viewer = _browser(factory, "user", "u-dash")
-    assert viewer.get("/admin/reports/heatmap?range=7d&metric=spend").status_code == 200
-    assert viewer.get("/admin/reports/heatmap?range=7d&metric=cost").status_code == 403
+    # 客户有 billing:spend、没有 billing:cost：花费可看，成本必须拒绝。
+    customer = _browser(factory, "customer", "u-dash")
+    assert customer.get("/admin/reports/heatmap?range=7d&metric=spend").status_code == 200
+    assert customer.get("/admin/reports/heatmap?range=7d&metric=cost").status_code == 403
 
 
 def test_range_chips_filter_every_card(client, engine_and_sessionmaker, fixed_now):

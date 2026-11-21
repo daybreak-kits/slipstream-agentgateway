@@ -180,9 +180,9 @@ class UserCreate(BaseModel):
     password: str | None = Field(default=None, min_length=8, max_length=256)
     balance_micro: int = Field(default=0, ge=0)
     # Ticket 04 hierarchy: omit parent_user_id to hang the user under the
-    # caller's node (代理用户) or under root D (管理用户).
+    # caller's node (分销商) or under root D (管理用户).
     parent_user_id: str | None = None
-    role: str = Field(default="user", min_length=1, max_length=32)
+    role: str = Field(default="customer", min_length=1, max_length=32)
     status: str = Field(default="active", pattern=r"^(active|disabled)$")
 
 

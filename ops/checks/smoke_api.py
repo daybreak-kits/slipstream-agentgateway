@@ -9,7 +9,7 @@ Run:
     python ops/checks/smoke_api.py --base http://127.0.0.1:3700 --verbose
 
 Every check is a real HTTP request against a running server: shape assertions
-(key presence / counts), RBAC (viewer vs owner), paging guards and the
+(key presence / counts), RBAC (customer vs admin), paging guards and the
 settings PUT round-trip (mutates base_currency then restores it).
 Exit code 0 = all green, 1 = at least one failure, 2 = server unreachable.
 """
@@ -93,7 +93,7 @@ def main() -> int:
     parser.add_argument("--verbose", action="store_true", help="print details for passes too")
     parser.add_argument("--username", default="admin", help="seed 默认管理员")
     parser.add_argument("--password", default="admin12345", help="seed 默认密码")
-    parser.add_argument("--viewer", default="wangwu", help="只读角色账号（seed 内置普通用户）")
+    parser.add_argument("--viewer", default="wangwu", help="只读角色账号（seed 内置客户）")
     args = parser.parse_args()
 
     with httpx.Client(base_url=args.base, timeout=args.timeout) as client:

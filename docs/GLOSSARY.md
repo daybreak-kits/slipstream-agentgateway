@@ -95,16 +95,19 @@ v1 主币种 CNY。
 
 | 术语 | 字段/表 | 定义 | 易混 |
 |---|---|---|---|
-| 角色 Role | `admin_roles` + `admin_users.role` | 权限集合的命名行；内置三角色 + 管理员自建角色 | 不是“用户类型”：角色是控制台权限，用户是 API 消费者 |
-| 管理用户 Admin | 内置角色 `admin` | 拥有全部 41 个权限，可维护角色、管理员与所有配置 | 不是“管理员账号”这个具体人；具体人见 `admin_users` |
-| 代理用户 Agent | 内置角色 `agent` | 普通用户权限 + `users:read/create/update` + `billing:subtree` | 不是“代理人”法律概念；是控制台角色 |
-| 普通用户 User | 内置角色 `user` | 只读主数据/治理/价目/用量报表 + `billing:spend` + `playground:use` | 与 API 消费者 `users` 不是同一张表 |
-| 用户 User | `users` | API 消费者，持有 `api_keys` 与额度；二期支持 `parent_id` 树与代理 | 不是管理员；不要共用一个表 |
+| 角色 Role | `admin_roles` + `users.role` | 权限集合的命名行；内置三角色 + 管理员自建角色 | 不是“用户类型”：角色是控制台权限，用户是 API 消费者 |
+| 管理用户 Admin | 内置角色 `admin` | 拥有全部 41 个权限，可维护角色、管理员与所有配置 | 不是“管理员账号”这个具体人；具体人见 `users` |
+| 分销商 Reseller | 内置角色 `reseller` | 客户权限 + `users:read/create/update` + `billing:subtree` | 旧显示名“代理用户”、旧 key `agent` 均已废弃；是控制台角色，不是法律代理人 |
+| 客户 Customer | 内置角色 `customer` | 只读主数据/治理/价目/用量报表 + `billing:spend` + `playground:use` | 旧显示名“普通用户”、旧 key `user` 均已废弃；与 API 消费者 `users` 不是同一张表 |
+| 用户 User | `users` | API 消费者，持有 `api_keys` 与额度；二期支持 `parent_id` 树与分销层级 | 不是控制台角色 `customer`；不要共用一个表 |
 | 权限 Permission | 代码注册表 | 资源 × 动作（如 `upstreams:write`），二期共 41 个键 | 不是角色名；后端只校验权限键 |
 | 权限矩阵 PermissionMatrix | `GET /admin/permissions` | 按 7 组返回的权限键清单，前端据此渲染勾选矩阵 | 不是静态文档；注册表是唯一来源 |
 | 自定义角色 CustomRole | `admin_roles`（builtin=false） | 管理员自建的角色，权限必须是已注册键；有成员时不可删 | 不是“临时授权”；它就是一等角色 |
 
-内置角色不可改权限、不可删；旧角色名只用于迁移：owner→admin、operator→agent、viewer→user。
+内置角色不可改权限、不可删；角色 key 只有 `admin` / `customer` / `reseller`。
+**破坏性变更（W6 ticket 21）**：旧 key `user`/`agent` 不保留 alias，显示名改为客户 / 分销商；历史库里的 `owner`/`operator`/`viewer` 也在同一次迁移里折叠为 `admin`/`reseller`/`customer`。升级必须先把数据库迁移到新 key：在 `api/` 下运行
+`./.venv/Scripts/python.exe scripts/migrate_roles_w6.py`（默认 dry-run），确认后加 `--apply`；已迁移库再跑为 no-op。
+迁移只改 key 与显示名，逐用户权限与访问范围不变；旧 key 在新代码里既不是 alias 也不会回退到内置定义，升级时由迁移脚本重命名/合并旧行，所以不要在未迁移库上直接启动新版本。
 权限键 41 个：主数据 10 / 流量治理 4 / 治理 7 / 计费 6 / 用量 3 / 账号 10 / 模型试验 1。五期未新增权限键：模型探测复用 `upstream_models:write`，公开模型 PATCH 携带 `targets` 时复用 `model_targets:write`。
 
 ## 8. 页面类型与导航分组（三期最终）

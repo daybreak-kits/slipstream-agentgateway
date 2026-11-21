@@ -129,7 +129,7 @@ def connection_info(
     """统一连接地址：所有登录用户可读，运营设置里可改（ticket 16）。
 
     空字符串 = 未配置，前端回退到浏览器当前 host + 3600 端口；控制面只存显式
-    配置的公网地址，读取侧不需要 settings:read，避免普通用户看不到接入信息。
+    配置的公网地址，读取侧不需要 settings:read，避免客户看不到接入信息。
     """
     raw = get_setting(session, "gateway_base_url")
     configured = ""

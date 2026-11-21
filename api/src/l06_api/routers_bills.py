@@ -27,8 +27,8 @@ def my_spend(
 ) -> dict:
     """Spend by time range for the caller or its subtree.
 
-    `scope=subtree` requires `billing:subtree` (管理用户 + 代理用户 hold it;
-    普通用户 is rejected with 403). Passing `user_id` narrows the window to one
+    `scope=subtree` requires `billing:subtree` (管理用户 + 分销商 hold it;
+    客户 is rejected with 403). Passing `user_id` narrows the window to one
     visible node, which is how the page switches between subtree branches.
     """
     payload = bills.my_spend(

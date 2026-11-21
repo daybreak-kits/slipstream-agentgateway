@@ -161,40 +161,42 @@ def _cleanup_repo_local_test_dirs():
     _sweep_repo_local_test_dirs()
 
 
-class _RepoLocalTmpFactory:
-    """Minimal stand-in for pytest's tmp_path_factory inside the repo.
-
-    The DSH Windows sandbox denies the platform temp area (and pytest's
-    mode-restricted subdirectories), while the repo is writable. The existing
-    suite already creates AG test dirs here; this keeps tmp_path-based tests
-    isolated and sandbox-friendly while still cleaning up after themselves.
-    """
+class _RepoPathFactory:
+    """pytest's tmp dirs use mode=0700, which the Windows file sandbox makes
+    unreadable after creation. Keep test temp trees inside the repo with the
+    default ACL instead; the conftest sweep pattern removes leftovers."""
 
     def __init__(self) -> None:
-        self._root = TEST_TMP_ROOT / (".tmp-pytest-" + uuid4().hex[:8])
-        self._root.mkdir()
+        self.root = TEST_TMP_ROOT / (".tmp-pytest-repo-" + uuid4().hex[:8])
+        self.root.mkdir()
 
-    def mktemp(self, name: str, numbered: bool = True) -> Path:
-        del numbered  # pytest's numbering is not needed by this suite
-        path = self._root / name
-        path.mkdir(parents=True, exist_ok=True)
+    def mktemp(self, basename: str = "tmp", *, numbered: bool = True) -> Path:
+        del numbered
+        path = self.root / (basename + "-" + uuid4().hex[:8])
+        path.mkdir()
         return path
 
     def getbasetemp(self) -> Path:
-        return self._root
+        return self.root
+
+    def cleanup(self) -> None:
+        _rmtree_retry(str(self.root))
 
 
 @pytest.fixture(scope="session")
 def tmp_path_factory():
-    factory = _RepoLocalTmpFactory()
-    yield factory
-    _rmtree_retry(str(factory._root))
+    """Sandbox-safe replacement for pytest's mode=0700 temp root."""
+    factory = _RepoPathFactory()
+    try:
+        yield factory
+    finally:
+        factory.cleanup()
 
 
 @pytest.fixture()
 def tmp_path(tmp_path_factory) -> Path:
-    path = tmp_path_factory.mktemp("case-" + uuid4().hex[:8])
-    yield path
+    """Per-test repo-local temp dir (same contract as pytest's tmp_path)."""
+    return tmp_path_factory.mktemp("test")
 
 
 @pytest.fixture()
@@ -234,7 +236,7 @@ def make_admin(
     *,
     username: str,
     password: str = DEMO_PASSWORD,
-    role: str = "owner",
+    role: str = "admin",
     status: str = "active",
     display_name: str = "",
     user_id: str = "",
@@ -300,9 +302,9 @@ def _fresh_login_limiter():
 
 @pytest.fixture()
 def client(engine_and_sessionmaker):
-    """Authenticated as a default owner; RBAC tests switch roles via login_cookies."""
+    """Authenticated as a default admin; RBAC tests switch roles via login_cookies."""
     _, factory = engine_and_sessionmaker
-    return _authenticated_client(factory, "owner")
+    return _authenticated_client(factory, "admin")
 
 
 @pytest.fixture()
@@ -318,7 +320,7 @@ def login_cookies(engine_and_sessionmaker):
 
     _, factory = engine_and_sessionmaker
 
-    def _login(role: str = "owner") -> dict[str, str]:
+    def _login(role: str = "admin") -> dict[str, str]:
         admin_id = make_admin(
             factory, username="test-" + role + "-" + uuid4().hex[:6], role=role
         )

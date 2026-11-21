@@ -49,9 +49,10 @@
 - 密码以 scrypt（标准库 `hashlib.scrypt`，N=2^14/r=8/p=1/dklen=32，16 字节盐）哈希，
   格式 `scrypt$N$r$p$salt$digest`；兼容旧 pbkdf2（120000 次）。改密 / 禁用会撤销该账号全部会话；
   会话绝对过期 12 小时，无滑动续期。
-- 角色：内置 `admin`（管理用户，全部 41 个权限）、`agent`（代理用户）、`user`（普通用户）；
+- 角色：内置 `admin`（管理用户，全部 41 个权限）、`customer`（客户）、`reseller`（分销商）；
   管理员可自建角色（`admin_roles` 行），内置角色权限不可改、不可删，仍有成员的自定义角色不可删。
-  旧角色名只用于迁移：owner→admin、operator→agent、viewer→user。
+  W6/21 起旧 key `user`/`agent` 不再保留 alias；历史库先运行
+  `api/scripts/migrate_roles_w6.py --apply`（owner/operator/viewer 同次折叠，权限不变）。
 - 权限键共 41 个，注册表在 `l05_service/rbac.py`，`GET /admin/permissions` 返回分组与 keys；
   每个接口的权限列写的是权限键；缺权限统一 403 `FORBIDDEN`。五期没有新增权限键：模型探测复用
   `upstream_models:write`，公开模型 PATCH 携带 `targets` 时复用 `model_targets:write`（对照见 §3.2/§3.3）。
@@ -315,7 +316,7 @@ server 字段：`name` + `transport`(`sse`/`stdio`/`http`)。`sse` 用 `host`（
 AG 1.7 拒绝（`mcp.transport.http=false`），保存即 422。渲染到顶层 `mcp.targets`，不在 `llm:` 内。
 
 ### 2.7 GET /admin/connection
-权限：任何有效登录（不要求 settings:read，普通用户也能看接入信息）。返回统一网关连接地址：
+权限：任何有效登录（不要求 settings:read，客户也能看接入信息）。返回统一网关连接地址：
 
 ```json
 {"base_url": "", "configured": false, "default_port": 3600,
@@ -420,7 +421,7 @@ failover 目标 `priority` 为正整数（升序优先，同值=同层）；weig
 | 方法 | 路径 | 权限 | 说明 |
 | --- | --- | --- | --- |
 | GET/POST | /admin/users | users:read / users:create/update/delete | 用户列表/创建 {name, username?, password?, role?, parent_user_id?, balance_micro?} |
-| GET | /admin/users/tree | users:read | 用户树（按可见范围）：{root_id, root_ids, total, nodes}；nodes 与 /admin/users 行同形并按树深度排序，root_ids 为父节点不在可见范围内的顶层节点（代理用户子树自成森林） |
+| GET | /admin/users/tree | users:read | 用户树（按可见范围）：{root_id, root_ids, total, nodes}；nodes 与 /admin/users 行同形并按树深度排序，root_ids 为父节点不在可见范围内的顶层节点（分销商子树自成森林） |
 | GET | /admin/users/{user_id} | users:read | 详情（余额、消费） |
 | GET | /admin/users/{user_id}/balance/precheck | users:read | 余额前置检查 |
 | POST | /admin/users/{user_id}/balance | users:update（充值/调整/退款） | 充值 {amount_micro, currency, note?} → {ledger_id, balance_after_micro} |
@@ -486,12 +487,14 @@ AES-GCM 密文 + sk-...abcd 掩码。
   行上（username 唯一不可改 + password_hash + role，见 §3.4）。创建/改角色/改密/停用管理员 =
   对 `/admin/users` 的常规用户操作（授予 admin 角色仅限管理用户；改密走 PUT password；禁用/软删语义同用户）。
   控制台访问 = 该 users 行有角色且有密码。
-- 内置角色：`admin`（管理用户，全部 41 个权限）、`agent`（代理用户）、`user`（普通用户）。
-  普通用户是可读主数据/治理/价目/用量报表 + `billing:spend` + `playground:use`；代理用户在此之上
+- 内置角色：`admin`（管理用户，全部 41 个权限）、`customer`（客户）、`reseller`（分销商）。
+  客户可读主数据/治理/价目/用量报表 + `billing:spend` + `playground:use`；分销商在此之上
   增加 `users:read/create/update` 与 `billing:subtree`。
 - 自定义角色 key 必须匹配 `^[a-z][a-z0-9_]{2,31}$`，权限必须是注册表里的键；授权只认权限键，
   不认角色名，所以自定义角色与内置角色等价。
-- 旧角色名只用于迁移：owner→admin、operator→agent、viewer→user；新数据不再写四档角色。
+- 旧角色 key 不是 alias：`user`/`agent`/`owner`/`operator`/`viewer` 不在内置定义、契约或前端常量里；
+  分配一个没有对应 `admin_roles` 行的旧 key 返回 422。升级必须先运行
+  `scripts/migrate_roles_w6.py --apply`，由脚本重命名/合并数据库里的旧行。
 
 ## 4. 报表、用量与计费
 
@@ -640,7 +643,7 @@ AES-GCM 密文 + sk-...abcd 掩码。
 ### 4.7 用户花费与逐请求台账（ticket 16/17）
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | /admin/bills/my-spend?range=30d&scope=self\|subtree&user_id=&tz= | billing:spend（subtree 另需 billing:subtree，普通用户 403）。返回 {range, bucket, timezone, from_ms, to_ms, scope, all_users, user:{id,name,role}\|null, summary:{charges/costs/margins per currency + report_currency 汇总}, series:[{start_ms,label,...}], by_user:[...], by_model:[...]}——登录者本人节点或可见子树的花费/成本/毛利聚合；`user_id` 用于子树页切换分支（须可见）。比值/占比由前端计算 |
+| GET | /admin/bills/my-spend?range=30d&scope=self\|subtree&user_id=&tz= | billing:spend（subtree 另需 billing:subtree，客户 403）。返回 {range, bucket, timezone, from_ms, to_ms, scope, all_users, user:{id,name,role}\|null, summary:{charges/costs/margins per currency + report_currency 汇总}, series:[{start_ms,label,...}], by_user:[...], by_model:[...]}——登录者本人节点或可见子树的花费/成本/毛利聚合；`user_id` 用于子树页切换分支（须可见）。比值/占比由前端计算 |
 | GET | /admin/billing/ledger?page_size=&offset= | ledger:read。**逐请求金额台账**（裸数组）：每条用量事件的 cost（成本账）/ charge（花费账）/ margin = charge - cost / markup = charge÷cost（cost 为 0 或未配价时 null）；按 created_at_ms 降序；金额字段过 §0.5 字段级过滤，无 billing:cost 时 cost/margin 键缺失 |
 
 ## 5. 前端旧路径 → 契约基准（t7 修复清单）
@@ -669,11 +672,11 @@ PYTHONPATH=src python -m uvicorn l06_api.app:create_app --factory --port 3700
 seed 覆盖（连续跑两次后的真实计数，幂等）：3 厂商 / 4 上游（zai-01 是**一个上游三把等权密钥**，
 nebula-01、local-01/02 各一把，共 6 条上游密钥；ADR-026 多密钥平权）/
 16 上游模型（15 个带成本 cost_input/output_per_1m + 1.2 倍率 markup，1 个故意未定价）/
-8 公开模型（6 failover + 2 weighted）/ 16 目标 / 6 用户（根用户 D + 两层代理树，5 把 sk-+64 大写客户端密钥 + 充值流水）/
+8 公开模型（6 failover + 2 weighted）/ 16 目标 / 6 用户（根用户 D + 两层分销树，5 把 sk-+64 大写客户端密钥 + 充值流水）/
 15 个模型带进价（另 30 条 cache 价目）/ 7 天 252 条用量事件（cost 与 charge 各 3 条缺价 unpriced）/ 245 条计费流水 /
 2 条配置版本（operator 张三 superseed / 李四 active）/ 64 条审计 / 13 条 app_settings /
-2 条可用性规则（ban + cooldown，无排期窗口）/ **3 个管理员**：admin（张三，管理用户 `admin`）、lisi（李四，代理用户 `agent`）、
-wangwu（王五，普通用户 `user`）。默认密码 admin12345，可用 `SLIPSTREAM_DEMO_ADMIN_PASSWORD` 覆盖，
+2 条可用性规则（ban + cooldown，无排期窗口）/ **3 个管理员**：admin（张三，管理用户 `admin`）、lisi（李四，分销商 `reseller`）、
+wangwu（王五，客户 `customer`）。默认密码 admin12345，可用 `SLIPSTREAM_DEMO_ADMIN_PASSWORD` 覆盖，
 首次登录后修改。
 
 settings 六个可编辑键均已有值：base_currency=CNY、timezone=Asia/Shanghai、

@@ -12,7 +12,7 @@ from pathlib import Path
 
 from l03_adapters.agentgateway.apply import hash_normalized_text
 
-HEADERS = {"X-Admin-Role": "owner"}
+HEADERS = {"X-Admin-Role": "admin"}
 CONFIG = "llm:\n  port: 3600\n"
 
 

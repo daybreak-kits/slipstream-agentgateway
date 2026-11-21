@@ -29,7 +29,7 @@ def test_root_user_d_bootstraps_and_adopts_orphans(engine_and_sessionmaker):
     with factory() as session:
         session.add(UserORM(id="usr_old", name="v1 旧账号", created_at_ms=1))
         session.commit()
-    owner_id = make_admin(factory, username="root-check", role="owner")
+    owner_id = make_admin(factory, username="root-check", role="admin")
     app = _app_client(factory)  # app start runs ensure_root_user
     app.cookies.set(SESSION_COOKIE, new_session_token(factory, owner_id))
 
@@ -47,12 +47,12 @@ def test_admin_creates_edits_and_disables_user(client):
 
     created = client.post(
         "/admin/users",
-        json={"name": "渠道甲", "role": "agent", "parent_user_id": root_id},
+        json={"name": "渠道甲", "role": "reseller", "parent_user_id": root_id},
     )
     assert created.status_code == 201, created.text
     body = created.json()
     assert body["parent_user_id"] == root_id
-    assert body["role"] == "agent"
+    assert body["role"] == "reseller"
     assert body["status"] == "active"
     assert body["depth"] == 1
 
@@ -67,9 +67,9 @@ def test_admin_creates_edits_and_disables_user(client):
     assert client.patch("/admin/users/" + body["id"], json={"role": "wizard"}).status_code == 422
 
 
-def test_agent_sees_only_its_subtree_and_cannot_cross_branches(engine_and_sessionmaker, client):
+def test_reseller_sees_only_its_subtree_and_cannot_cross_branches(engine_and_sessionmaker, client):
     _, factory = engine_and_sessionmaker
-    agent, agent_admin_id = _client_for(factory, "agent", "agent-owner")
+    agent, agent_admin_id = _client_for(factory, "reseller", "agent-owner")
     child = agent.post("/admin/users", json={"name": "代理下级"})
     assert child.status_code == 201, child.text
     child_id = child.json()["id"]
@@ -106,18 +106,18 @@ def test_agent_sees_only_its_subtree_and_cannot_cross_branches(engine_and_sessio
     assert agent.get(f"/admin/users/{sibling_id}/ledger").status_code == 403
 
 
-def test_agent_cannot_grant_admin_role(engine_and_sessionmaker):
+def test_reseller_cannot_grant_admin_role(engine_and_sessionmaker):
     _, factory = engine_and_sessionmaker
-    agent, _ = _client_for(factory, "agent", "agent-role-gate")
+    agent, _ = _client_for(factory, "reseller", "agent-role-gate")
     denied = agent.post("/admin/users", json={"name": "越权", "role": "admin"})
     assert denied.status_code == 403
     assert denied.json()["code"] == "FORBIDDEN"
 
 
 def test_ordinary_user_has_no_user_admin_access(engine_and_sessionmaker):
-    """普通用户没有 users:read：面板入口隐藏，接口也直接 403。"""
+    """客户没有 users:read：面板入口隐藏，接口也直接 403。"""
     _, factory = engine_and_sessionmaker
-    plain, _ = _client_for(factory, "user", "plain-reader")
+    plain, _ = _client_for(factory, "customer", "plain-reader")
     with factory() as session:
         session.add(
             UserORM(id="usr_plain", name="普通用户本人", parent_user_id=None, created_at_ms=2)

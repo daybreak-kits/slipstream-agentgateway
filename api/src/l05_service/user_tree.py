@@ -9,7 +9,7 @@ the console login IS a users row, so the subtree rule binds by identity —
 - every other role sees only its own node.
 
 Cross-branch reads/writes raise 403 here instead of returning empty data, so a
-代理用户 cannot probe whether a sibling account exists. The billing/dashboard
+分销商 cannot probe whether a sibling account exists. The billing/dashboard
 tickets call `visible_ids` too: this module is the single implementation of the
 subtree rule.
 """
@@ -183,10 +183,9 @@ def principal_node(session: Session, principal: Principal) -> UserORM | None:
 
 
 def _role_key_for(principal: Principal) -> str:
-    key = rbac.normalize_role_key(principal.role)
-    if key in rbac.BUILTIN_ROLE_KEYS:
-        return key
-    return rbac.BUILTIN_ROLE_USER
+    if principal.role in rbac.BUILTIN_ROLE_KEYS:
+        return principal.role
+    return rbac.BUILTIN_ROLE_CUSTOMER
 
 
 def ensure_principal_node(session: Session, principal: Principal) -> UserORM:
@@ -255,14 +254,13 @@ def assert_parent_allowed(
 
 def assert_can_grant_role(session: Session, principal: Principal, role_key: str) -> str:
     """Only an unrestricted role may create/anoint another 管理用户."""
-    key = rbac.normalize_role_key(role_key)
-    if key == rbac.BUILTIN_ROLE_ADMIN and not has_global_scope(principal):
+    if role_key == rbac.BUILTIN_ROLE_ADMIN and not has_global_scope(principal):
         raise AppError(
             ErrorCode.FORBIDDEN,
             "只有管理用户可分配管理用户角色",
             details={"role": role_key},
         )
-    return key
+    return role_key
 
 
 def assert_no_cycle(session: Session, user_id: str, parent_id: str) -> None:

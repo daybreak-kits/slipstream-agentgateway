@@ -227,13 +227,13 @@ def test_cooldown_daily_requires_windows(client, engine_and_sessionmaker):
     assert response.json()["code"] == "VALIDATION_ERROR"
 
 
-def test_viewer_cannot_create_rule(client, login_cookies, engine_and_sessionmaker):
+def test_customer_cannot_create_rule(client, login_cookies, engine_and_sessionmaker):
     engine, factory = engine_and_sessionmaker
     ids = seed_channel(engine, factory)
     response = client.post(
         "/admin/availability-rules",
         json={"kind": "ban", "scope": "upstream", "scope_id": ids["upstream_id"]},
-        cookies=login_cookies("viewer"),
+        cookies=login_cookies("customer"),
     )
     assert response.status_code == 403
     assert response.json()["code"] == "FORBIDDEN"

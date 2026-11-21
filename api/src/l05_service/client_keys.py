@@ -187,7 +187,7 @@ def delete_client_key(session: Session, key_id: str) -> None:
 
 
 def reveal_client_key(session: Session, key_id: str, box: AesGcmBox) -> str:
-    """Copy-key feature: decrypt the stored plaintext copy (owner/admin only + audit)."""
+    """Copy-key feature: decrypt the stored plaintext copy (caller checked by the API + audit)."""
     row = session.get(ApiKeyORM, key_id)
     if row is None:
         raise AppError(ErrorCode.NOT_FOUND, f"api key not found: {key_id}")

@@ -56,7 +56,7 @@ def test_upstream_model_cost_fields_are_hidden_without_billing_cost(
         json={"cost_input_per_1m": "2.5", "cost_output_per_1m": "10", "markup": "1.2"},
     )
     # 普通用户有 upstream_models:read 但没有 billing:cost：成本键整体缺席。
-    viewer = make_admin(factory, username="pricing-viewer", role="user")
+    viewer = make_admin(factory, username="pricing-viewer", role="customer")
     browser = _app_client(factory)
     browser.cookies.set(SESSION_COOKIE, new_session_token(factory, viewer))
     rows = browser.get("/admin/upstream-models").json()
@@ -140,7 +140,7 @@ def test_billing_ledger_has_cost_spend_margin_and_field_permissions(
     assert row["markup"] == "1.2000"
 
     # 普通用户: billing:spend + ledger:read but no billing:cost -> spend only.
-    admin_id = make_admin(factory, username="ledger-user", role="user")
+    admin_id = make_admin(factory, username="ledger-user", role="customer")
     browser = _app_client(factory)
     browser.cookies.set(SESSION_COOKIE, new_session_token(factory, admin_id))
     user_rows = browser.get("/admin/billing/ledger").json()

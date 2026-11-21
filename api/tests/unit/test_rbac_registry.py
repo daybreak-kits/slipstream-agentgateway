@@ -31,7 +31,7 @@ def test_builtin_roles_only_grant_registered_permissions() -> None:
 
 def test_three_builtin_roles_carry_the_console_names() -> None:
     names = {role.key: role.name for role in rbac.BUILTIN_ROLES}
-    assert names == {"admin": "管理用户", "user": "普通用户", "agent": "代理用户"}
+    assert names == {"admin": "管理用户", "customer": "客户", "reseller": "分销商"}
 
 
 def test_admin_role_is_all_permissions() -> None:
@@ -40,28 +40,30 @@ def test_admin_role_is_all_permissions() -> None:
     assert by_key["admin"].builtin is True
 
 
-def test_ordinary_user_sees_spend_but_never_cost_or_creation_rights() -> None:
-    user = rbac.role_definition("user")
-    assert "billing:spend" in user.permissions
-    assert "billing:cost" not in user.permissions
-    assert "users:create" not in user.permissions
-    assert "users:read" not in user.permissions
+def test_customer_sees_spend_but_never_cost_or_creation_rights() -> None:
+    customer = rbac.role_definition("customer")
+    assert "billing:spend" in customer.permissions
+    assert "billing:cost" not in customer.permissions
+    assert "users:create" not in customer.permissions
+    assert "users:read" not in customer.permissions
 
 
-def test_agent_user_creates_subordinates_and_reads_subtree_spend() -> None:
-    agent = rbac.role_definition("agent")
-    assert {"users:read", "users:create", "users:update"} <= agent.permissions
-    assert "billing:subtree" in agent.permissions
-    assert "billing:cost" not in agent.permissions
-    assert "users:delete" not in agent.permissions
+def test_reseller_creates_subordinates_and_reads_subtree_spend() -> None:
+    reseller = rbac.role_definition("reseller")
+    assert {"users:read", "users:create", "users:update"} <= reseller.permissions
+    assert "billing:subtree" in reseller.permissions
+    assert "billing:cost" not in reseller.permissions
+    assert "users:delete" not in reseller.permissions
 
 
-def test_legacy_role_names_alias_to_builtin_keys() -> None:
-    assert rbac.normalize_role_key("owner") == "admin"
-    assert rbac.normalize_role_key("admin") == "admin"
-    assert rbac.normalize_role_key("operator") == "agent"
-    assert rbac.normalize_role_key("viewer") == "user"
-    assert rbac.normalize_role_key("custom_ops") == "custom_ops"
+def test_retired_role_names_are_not_aliases() -> None:
+    # W6/21: no compatibility layer - old keys must fail closed and be migrated
+    # in the database, never silently mapped to a built-in role.
+    for old in ("user", "agent", "owner", "operator", "viewer"):
+        assert rbac.role_definition(old) is None
+        assert rbac.permissions_for_role_key(old) == frozenset()
+    assert not hasattr(rbac, "normalize_role_key")
+    assert not hasattr(rbac, "LEGACY_ROLE_ALIASES")
 
 
 def test_require_permission_rejects_with_403() -> None:
