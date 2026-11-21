@@ -532,36 +532,35 @@ def seed(session, rng: random.Random) -> dict[str, object]:
     ).all()
     for chain_index, event in enumerate(chain_events):
         event.correlation_key = f"seed_trace_{chain_index + 1}"
-        first_model = event.upstream_model
-        first_ref = event.provider or ""
-        provider_id = first_ref.split("#", 1)[0]
-        first_name = upstream_name_by_id.get(provider_id, provider_id)
-        first_key_seq = first_ref.split("#", 1)[1] if "#" in first_ref else "1"
-        other = next(
-            (upstream for upstream in upstreams.values() if upstream.id != provider_id),
+        # Keep the event's own provider/model attribution untouched: cost entries
+        # are already derived from it, and the billing golden must not move.
+        second_ref = event.provider or ""
+        second_provider_id = second_ref.split("#", 1)[0]
+        second_name = upstream_name_by_id.get(second_provider_id, second_provider_id)
+        second_key_seq = second_ref.split("#", 1)[1] if "#" in second_ref else "1"
+        second_model = event.upstream_model
+        first_upstream = next(
+            (upstream for upstream in upstreams.values() if upstream.id != second_provider_id),
             next(iter(upstreams.values())),
         )
-        other_name = upstream_name_by_id[other.id]
-        second_candidates = [
+        first_name = upstream_name_by_id[first_upstream.id]
+        first_candidates = [
             model_name
             for (upstream_name, model_name) in upstream_models
-            if upstream_name == other_name and model_name != first_model
+            if upstream_name == first_name and model_name != second_model
         ]
-        second_model = second_candidates[0] if second_candidates else first_model
+        if not first_candidates:
+            continue
+        first_model = first_candidates[0]
         first_duration = 620 + chain_index * 40
         second_duration = 900 + chain_index * 30
         event.duration_ms = first_duration + second_duration
         event.completed_at_ms = event.started_at_ms + event.duration_ms
-        # The request ultimately succeeded on the second upstream; keep usage /
-        # cost attribution on the provider that answered, while the attempts keep
-        # the failed first hop.
-        event.provider = other.id + "#1"
-        event.upstream_model = second_model
         session.add_all([
             RequestAttemptORM(
                 correlation_key=event.correlation_key,
                 attempt_no=1,
-                upstream_ref=f"{first_name}#{first_key_seq}",
+                upstream_ref=f"{first_name}#1",
                 model=first_model,
                 status_code=500,
                 error_type="upstream_error",
@@ -575,7 +574,7 @@ def seed(session, rng: random.Random) -> dict[str, object]:
             RequestAttemptORM(
                 correlation_key=event.correlation_key,
                 attempt_no=2,
-                upstream_ref=f"{other_name}#1",
+                upstream_ref=f"{second_name}#{second_key_seq}",
                 model=second_model,
                 status_code=200,
                 error_type="",
