@@ -461,19 +461,18 @@ check("CooldownControlPanel：模式禁用/互斥说明/唯一解除/选中态",
   expect(periodicMode.includes("周期冷却表单") && !periodicMode.includes("单次冷却表单"), "切换模式后只渲染周期表单");
 });
 
-check("上游模型满高抽屉：右侧 100vh、四组内容、固定底栏与 09 脏标记", () => {
+check("上游模型满高抽屉：右侧满高、视口自适应宽度、四组内容、固定底栏与 09 脏标记", () => {
   const text = read("src/components/models/upstream-model-drawer.tsx");
   includesAll(
     text,
     [
-      // 右侧满高抽屉：侧边、100vh、760–860px 宽、窄屏全宽
+      // 右侧满高抽屉：侧边、满高（h-dvh）、宽度封顶 820px 且受视口约束（W6 票09 自适应改造）
       "SheetContent",
       'side="right"',
-      "h-screen",
+      "h-dvh",
       "w-full",
-      "sm:w-[820px]",
-      "sm:min-w-[760px]",
-      "sm:max-w-[860px]",
+      "sm:w-[min(820px,calc(100vw-2rem))]",
+      "sm:max-w-[calc(100vw-2rem)]",
       // 三段式骨架：可滚动内容 + 固定底栏
       "flex-1",
       "overflow-y-auto",
