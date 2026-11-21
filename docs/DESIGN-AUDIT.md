@@ -11,16 +11,16 @@
 
 | 检查项 | 结果 | 证据 |
 |---|---|---|
-| 渐变文字 / 多色渐变装饰 | 无 | `web/src` 无 `bg-clip-text`、`text-gradient`；全仓仅 2 处 `linear-gradient`，都在 `web/src/index.css:414-415`，用于 1px 网格背景线（功能性背景，非装饰） |
+| 渐变文字 / 多色渐变装饰 | 无 | `web/src` 无 `bg-clip-text`、`text-gradient`；全仓仅 3 处 `linear-gradient`：`web/src/index.css:459-460` 用于 1px 网格背景线、`:471` 为登录页低对比浅色渐变（W6 ticket 12，功能性背景，非装饰） |
 | 发光 / 玻璃拟态 | 无 | 无 `drop-shadow`、`blur-*`、`backdrop-blur`、glow 类；阴影只有 2 个 token：`--shadow-card`、`--shadow-pop`（`web/src/index.css:34-35`） |
 | 单一主色 | 是（靛蓝） | `--primary: #4f46e5`（浅色）/ `#818cf8`（深色），`--primary-soft: #eef2ff`；success/warning/danger 只作状态色；图表 16 槽独立（`web/src/index.css:141-208`） |
 | emoji 标签 | 无 | `web/src` 无 emoji；图标统一 `lucide-react` |
-| 夸张动效 | 无 | `animate-pulse` 仅 3 处：流式输出光标（`components/playground/message-list.tsx:318`）、指标加载态（`components/ui/metric-pills.tsx:62`）、骨架屏（`components/ui/skeleton.tsx:4`）；`animate-spin` 仅 `components/ui/spinner.tsx:7` 且带 `motion-reduce:animate-none`；无 `hover:scale`/`hover:-translate` |
+| 夸张动效 | 无 | `animate-pulse` 仅 2 处：流式输出光标（`components/playground/message-list.tsx:319`）、骨架屏（`components/ui/skeleton.tsx:4`）；`animate-spin` 仅 `components/ui/spinner.tsx:7` 且带 `motion-reduce:animate-none`；无 `hover:scale`/`hover:-translate` |
 | 字体与圆角 | 统一 token | `--font-sans: Inter, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif`；`--font-mono: "JetBrains Mono"`；圆角 6/8/12/16（`--radius-*`，`web/src/index.css:11-17`） |
 | 图表连线渐变 | 有意设计 | `web/src/components/dashboard/flow-chart.tsx` 的 sankey `lineStyle`（`color: "gradient"`, `opacity: 0.26`）：连线按源/目标色渐变，透明度已压低，不构成发光感；该文件同时承载分流图隐藏阶段的图例交互（§18 工单 01） |
 | toast 遮挡表单 | 已修 | 统一策略在 `web/src/lib/toast-policy.ts`（`TOAST_POSITION="top-right"`、`TOAST_OFFSET={top:80,right:16}`、3000ms、最多 3 条）；`components/ui/sonner.tsx` 的 Toaster 用 `position={TOAST_POSITION}` / 同一 offset，`web/src/main.tsx` 不覆盖。7abfb6b 的 `bottom-right` 方案已废弃（会压住表格底部与 sticky 操作列），本表旧描述已按实际修正 |
 | 控件可读名称 | 已修 | `pages/settings.tsx` 显示名/邮件通知/浏览器通知/周报摘要/个人简介补 `aria-label`；三个通知开关改由 `NOTIFY_PREFS` 列表统一渲染 |
-| 登录页固定配色 | 保留 | `--login-*` 是登录域专用（不随主题的深色画布），`web/src/index.css:186-194`；未改 |
+| 登录页配色 | W6 票12 重设计 | 低对比浅色渐变根容器（静态不动画）+ 三态主题（跟随全站主题状态）+ 登录框三档宽度 384/460/576 + 密码显隐 + 错误区固定预留；`web/src/index.css` 登录域 token 与矮视口压缩契约在位，`pages/login.tsx` 为唯一实现 |
 
 ## 复跑方式
 
@@ -211,3 +211,22 @@ grep -rn "bg-gradient\|text-gradient\|drop-shadow\|blur-\|hover:scale\|animate-p
 cd web && node scripts/check-ui-foundation.mjs && node scripts/check-semantic-dirty.mjs
 node ops/checks/acceptance_browser.mjs --channel msedge --strict   # 单端口 3700，含 §18 新交互
 ```
+
+## 19. W6 实现落点（2026-11-21 收口，票 22 核对）
+
+> 与 §18 同口径的六期实现地图；冲突处已按 W6 现状修正（登录页配色、animate-pulse 计数、渐变计数、成员编排形态，见 §逐项核对）。
+
+| W6 工单 | 能力 | 实现落点 | 门禁/验收证据 |
+| --- | --- | --- | --- |
+| 01/06 | 边界契约 + import/词表门禁收口 | `docs/SYSTEM-BOUNDARY.md`（ADR-029 细则）、`ops/checks/import_lint.py`（默认即 strict）、词表门禁扩 `--boundary-only` 与现行 docs 扫描（ticket 20） | `import_lint` findings 0（default=strict） |
+| 02 至 05 | 端口迁移（payload/清理/transform/凭据/端点/用量事实） | SPI 六端口 + 注册表；connection/health/playground 走 `client_contract()`；数据面配置迁适配器命名空间 | pytest contract/integration 套件 |
+| 07 | 错误治理 | `l06_api/app.py` 未捕获异常 JSON 信封（`INTERNAL_ERROR` + `request_id`）；503 `DATA_PLANE_UNAVAILABLE`；前端 4xx 不重试、不逐查询 toast | `check-ui-foundation` 错误形状断言；pytest `test_errors_shape.py` |
+| 08 | 每日状态通知 | `l07_jobs.status_notice` + `GET /admin/system-status`（§api-contract 2.8）；通知中心去重 24h | pytest `test_status_notice.py` |
+| 09 至 11 | 自适应 + 表格收口 | Tailwind 默认断点；侧栏 off-canvas、表格冻结操作列、关闭行置尾、冷却行底色、四态排序图标 | `responsive_matrix.mjs` 五档矩阵 |
+| 12/13 | 登录重设计 + 通知/密钥弹窗 | `pages/login.tsx`（渐变、三态主题、密码显隐、错误区固定）；通知时间/正文单行省略；密钥弹窗复制/关闭同尺寸 | `check-ui-foundation` 登录断言 |
+| 14/15 | 公开模型紧凑两栏 + 成员行内编辑 | `components/models/public-model-page.tsx` + `member-chip-flow.tsx`（左 6 右 6、行内编辑随策略收敛、候选分组 chip 搜索、页头脏计数） | `check-semantic-dirty` 40/40 |
+| 16 | 看板日期守卫 | 366 天上限单一来源 + 提交前校验，overview/margin 同窗保护 | `check-dashboard-date-guard.mjs` 8/8 |
+| 17 | 分流图重设计 | 阶段轴右侧、搜索左侧、隐藏块删除、后端 `focus`/`q`/`top_n` | `check-flow-mock.mjs` 8 PASS |
+| 18/19 | 模型试验参数 | `reasoning_effort` 七档（default 不传）、`stop`（至多 4 条）/`top_k` 转发、max_output_tokens 后端兜底 | pytest `test_dataplane_contract.py` |
+| 20 | 术语/破折号 | 产品名统一、em/en dash 棘轮（`terminology_baseline.json`） | `terminology_audit.mjs` PASS |
+| 21 | 角色迁移 | key `admin`/`customer`/`reseller`，无 alias；`api/scripts/migrate_roles_w6.py` | pytest `test_role_migration.py` + `test_role_key_audit.py` |
