@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
+import { copyText } from "@/lib/clipboard";
 import { toast } from "@/lib/notify";
 
 interface OneTimeSecretDialogProps {
@@ -26,9 +27,17 @@ export function OneTimeSecretDialog({
   secret,
   onClose,
 }: OneTimeSecretDialogProps) {
-  const copy = () => {
-    void navigator.clipboard.writeText(secret);
-    toast.success("已复制");
+  const copy = async () => {
+    // W6 票 13 契约：复制可重复点击、弹窗不缓存明文——不加 pending 态，
+    // 只在剪贴板写入成功后提示「已复制」，失败 toast 明确错误。
+    const ok = await copyText(secret);
+    if (ok) {
+      toast.success("已复制");
+    } else {
+      toast.error("复制失败", {
+        description: "浏览器剪贴板不可用或未授权，请手动抄录下方明文。",
+      });
+    }
   };
   return (
     <Dialog

@@ -182,3 +182,106 @@ def test_agent_cannot_issue_a_key_for_another_branch(engine_and_sessionmaker, cl
         f"/admin/users/{other['id']}/api-keys", json={"user_id": other["id"]}
     )
     assert denied.status_code == 403
+
+
+# ---------------------------------------------------------------- W7 t07: 自助密钥（B 方案）
+
+def _role_browser(factory, role: str, username: str):
+    """W7 内置角色浏览器：customer/reseller 直接登录，不再自建自定义角色。"""
+    from tests.conftest import _app_client, make_admin, new_session_token
+
+    from l06_api.deps import SESSION_COOKIE
+
+    admin_id = make_admin(factory, username=username, role=role)
+    client = _app_client(factory)
+    client.cookies.set(SESSION_COOKIE, new_session_token(factory, admin_id))
+    return client, admin_id
+
+
+def test_customer_sees_and_issues_only_own_keys(engine_and_sessionmaker, client):
+    """B 方案：customer 拿到 apikeys:read/write 后读/签都严格 self-only。"""
+    _, factory = engine_and_sessionmaker
+    seeded = seed_channel(engine_and_sessionmaker[0], factory)
+    alice_id = seeded["user_id"]  # 另一个客户 alice（seed 自带一把密钥）
+
+    customer, customer_id = _role_browser(factory, "customer", "w7-customer-1")
+
+    # 1) 读：customer 的密钥列表只含自己的（初始 0 把，alice 的密钥不可见）。
+    rows = customer.get("/admin/api-keys").json()
+    assert rows == [], rows
+
+    # 2) 签自己的：200。
+    issued = customer.post(
+        f"/admin/users/{customer_id}/api-keys", json={"user_id": customer_id}
+    )
+    assert issued.status_code == 201, issued.text
+
+    # 3) 签他人的：403。
+    denied = customer.post(f"/admin/users/{alice_id}/api-keys", json={"user_id": alice_id})
+    assert denied.status_code == 403
+    assert denied.json()["code"] == "FORBIDDEN"
+
+    # 4) 读：列表只含自己刚签的那把。
+    rows = customer.get("/admin/api-keys").json()
+    assert {row["user_id"] for row in rows} == {customer_id}
+    assert alice_id not in {row["user_id"] for row in rows}
+
+
+def test_customer_cannot_rename_status_rotate_or_delete_foreign_keys(
+    engine_and_sessionmaker, client
+):
+    """apikeys:write 的维护动作同样走 user scope：他人的密钥一律 403。
+
+    rename/status/rotate/delete 在 t07 之前只拦 apikeys:write、不查 key 归属，
+    customer 一旦拿到 apikeys:write 就能按 id 改别人的密钥——这是本票要堵的口子。
+    """
+    _, factory = engine_and_sessionmaker
+    seeded = seed_channel(engine_and_sessionmaker[0], factory)
+    foreign_key_id = seeded["key_id"]  # alice 的密钥
+
+    customer, _customer_id = _role_browser(factory, "customer", "w7-customer-2")
+    assert (
+        customer.patch(f"/admin/api-keys/{foreign_key_id}", json={"name": "改名"}).status_code
+        == 403
+    )
+    assert (
+        customer.patch(
+            f"/admin/api-keys/{foreign_key_id}/status", json={"status": "disabled"}
+        ).status_code
+        == 403
+    )
+    assert customer.post(f"/admin/api-keys/{foreign_key_id}/rotate").status_code == 403
+    assert customer.delete(f"/admin/api-keys/{foreign_key_id}").status_code == 403
+    # 未知密钥保持 404，不因角色不同泄露存在性。
+    assert customer.delete("/admin/api-keys/nope").status_code == 404
+
+
+def test_reseller_proxy_issues_inside_subtree_only(engine_and_sessionmaker, client):
+    """B 方案：reseller 在可见子树内可代签，子树外 403；admin 全树可签。"""
+    _, factory = engine_and_sessionmaker
+    seed_channel(engine_and_sessionmaker[0], factory)
+    reseller, reseller_id = _role_browser(factory, "reseller", "w7-reseller-1")
+
+    # reseller 建一个挂在自身节点下的下级客户（子树内）。
+    child = client.post(
+        "/admin/users",
+        json={"name": "下级客户", "role": "customer", "parent_user_id": reseller_id},
+    )
+    assert child.status_code == 201, child.text
+    child_id = child.json()["id"]
+
+    # 子树内代签：200。
+    ok = reseller.post(f"/admin/users/{child_id}/api-keys", json={"user_id": child_id})
+    assert ok.status_code == 201, ok.text
+
+    # 子树外（admin 直挂根的分支）：403。
+    other = client.post("/admin/users", json={"name": "外部分支"})
+    assert other.status_code == 201, other.text
+    other_id = other.json()["id"]
+    denied = reseller.post(f"/admin/users/{other_id}/api-keys", json={"user_id": other_id})
+    assert denied.status_code == 403
+    assert denied.json()["code"] == "FORBIDDEN"
+
+    # admin 全树可签：同一目标 200。
+    admin_ok = client.post(f"/admin/users/{other_id}/api-keys", json={"user_id": other_id})
+    assert admin_ok.status_code == 201, admin_ok.text
