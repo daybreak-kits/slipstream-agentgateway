@@ -1480,7 +1480,7 @@ check("成员编排：展示名统一「上游渠道/模型」，术语不单用
   const flow = read("src/components/models/member-chip-flow.tsx");
   includesAll(
     flow,
-    ["第 ", "搜索上游渠道或模型", 'data-slot="member-layer"', 'data-slot="member-chip"', 'data-slot="member-candidate-add"', "@/components/ui/combobox", "@/components/ui/button", "末位兜底"],
+    ["第 ", "搜索上游渠道或模型", 'data-slot="member-layer"', 'data-slot="member-row"', 'data-slot="member-candidate-chip"', "@/components/ui/button", "末位兜底"],
     "成员 chip 流结构",
   );
   for (const file of [
@@ -1592,6 +1592,126 @@ check("错误治理接线：main.tsx retry 接策略函数，api.ts 查询失败
   expect(toasts > 0 && toasts === guarded, "api.ts 的每个 toast.error 都必须在 !isQuery（写操作）分支内");
 });
 
+// ---------- 六期：模型试验思考等级与模型能力声明（W6 ticket 18）----------
+// 档位收敛与 chat 判定是纯函数，SSR 加载真实实现断言行为；控件可见性渲染
+// 真实面板断言 DOM（Select 选项在 SSR 不落 DOM，选项集合由纯函数检查兜住）。
+const t18ChatInfo = () => ({
+  name: "glm-5.3",
+  model_type: "chat",
+  sources: ["glm-5.3"],
+  parameters: {
+    max_input_tokens: 200000,
+    max_output_tokens: 128000,
+    reasoning_level: "high",
+    reasoning_levels: ["default", "low", "high", "xhigh"],
+    default_reasoning_level: "low",
+    input_types: ["text"],
+    output_types: ["text"],
+    tool_call: true,
+    reasoning: true,
+    attachment: false,
+    structured_output: true,
+  },
+});
+const t18EmbeddingInfo = () => ({
+  name: "embed-v4",
+  model_type: "embedding",
+  sources: ["embed-v4"],
+  parameters: {
+    ...t18ChatInfo().parameters,
+    reasoning_levels: [],
+    default_reasoning_level: "",
+  },
+});
+
+check("思考档位全集与标签：default..max 七档，default 的语义是「不发送」", async () => {
+  const lib = await load("/src/lib/playground.ts");
+  expect(
+    JSON.stringify(lib.REASONING_LEVELS) ===
+      JSON.stringify(["default", "none", "low", "medium", "high", "xhigh", "max"]),
+    "档位集合必须是 default/none/low/medium/high/xhigh/max 的既定顺序",
+  );
+  for (const level of lib.REASONING_LEVELS) {
+    expect(
+      typeof lib.REASONING_LEVEL_LABELS[level] === "string" &&
+        lib.REASONING_LEVEL_LABELS[level].length > 0,
+      "每个档位都要有中文标签：" + level,
+    );
+  }
+  expect(
+    lib.REASONING_LEVEL_LABELS.default.includes("不发送"),
+    "default 档位标签必须说明「不发送」语义",
+  );
+});
+
+check("档位收敛：有声明按声明保序，未声明回退全部档位，非法值不产生空选择器", async () => {
+  const { reasoningLevelOptions, normalizeDeclaredDefault } = await load("/src/lib/playground.ts");
+  expect(
+    JSON.stringify(reasoningLevelOptions(["low", "default"])) === JSON.stringify(["low", "default"]),
+    "有声明时按声明保序收敛",
+  );
+  expect(reasoningLevelOptions([]).length === 7, "空声明回退全部七档");
+  expect(reasoningLevelOptions(undefined).length === 7, "缺声明字段回退全部七档");
+  expect(reasoningLevelOptions(["ultra"]).length === 7, "声明只有未知值时回退全部档位");
+  expect(normalizeDeclaredDefault("high") === "high", "已声明默认档原样采用");
+  expect(
+    normalizeDeclaredDefault("") === "default" && normalizeDeclaredDefault(undefined) === "default",
+    "未声明默认档回退 default",
+  );
+  expect(normalizeDeclaredDefault("ultra") === "default", "非法默认档回退 default");
+});
+
+check("chat 判定：model_type === chat 才显示思考档位", async () => {
+  const { isChatModel } = await load("/src/lib/playground.ts");
+  expect(isChatModel(t18ChatInfo()) === true, "chat 模型必须判定为 chat");
+  expect(isChatModel(t18EmbeddingInfo()) === false, "embedding 模型不得判定为 chat");
+  expect(isChatModel(null) === false && isChatModel(undefined) === false, "无模型数据不得判定为 chat");
+});
+
+check("参数面板：仅 chat 模型渲染思考档位控件，厂商开关移除", async () => {
+  const { ParamsPanel } = await load("/src/components/playground/params-panel.tsx");
+  const { EMPTY_PLAYGROUND_PARAMS } = await load("/src/lib/playground-params.ts");
+  const props = (modelInfo) => ({
+    value: { ...EMPTY_PLAYGROUND_PARAMS },
+    onChange: () => {},
+    disabled: false,
+    mockMode: false,
+    onOpenModels: () => {},
+    modelInfo,
+  });
+  const chatHtml = render(createElement(ParamsPanel, props(t18ChatInfo())));
+  expect(chatHtml.includes("思考档位"), "chat 模型必须显示思考档位控件");
+  expect(chatHtml.includes("不发送"), "default 档位语义「不传」必须有提示文案");
+  expect(!chatHtml.includes("thinking 开关"), "厂商私有开关已从思考档位控件移除");
+  const embeddingHtml = render(createElement(ParamsPanel, props(t18EmbeddingInfo())));
+  expect(!embeddingHtml.includes("思考档位"), "embedding 等非 chat 模型不得出现思考档位控件");
+  const noInfoHtml = render(createElement(ParamsPanel, props(null)));
+  expect(!noInfoHtml.includes("思考档位"), "无模型能力数据时不显示思考档位控件");
+});
+
+check("模型对话框：底部档位随模型能力收敛（Radix Dialog 走 Portal，SSR 不落 DOM，按源码契约钉住）", () => {
+  const src = read("src/components/playground/model-dialog.tsx");
+  includesAll(
+    src,
+    ["reasoningLevelOptions(modelInfo?.parameters.reasoning_levels)", "isChatModel(modelInfo)"],
+    "对话框档位行必须按模型声明收敛且仅 chat 模型显示",
+  );
+  expect(!src.includes('"不指定"') && !src.includes("thinking 开关"), "旧的不指定/厂商开关档位必须移除");
+  expect(src.includes("默认档不发送 reasoning_effort"), "default 档位语义要有提示文案");
+  const page = read("src/pages/playground.tsx");
+  includesAll(page, ["normalizeDeclaredDefault", "modelInfo={activeModelInfo}"], "页面必须把模型能力传给对话框并按声明默认档初始化");
+});
+
+check("上游模型编辑器：思考档位集合与默认档声明控件就位", () => {
+  const src = read("src/components/models/upstream-model-drawer.tsx");
+  includesAll(
+    src,
+    ["REASONING_LEVELS", "reasoning_levels", "default_reasoning_level"],
+    "上游模型编辑器必须能声明档位集合与默认档",
+  );
+  expect(src.includes('placeholder="留空 = 不声明"') === false, "推理档位自由文本输入必须移除（改为声明档位集合）");
+});
+
 // ---------- 九、公开模型编辑页紧凑布局与脏标记（W6 ticket 14）----------
 check("公开模型紧凑布局：基本信息三列、策略三张横向卡片", () => {
   const page = read("src/components/models/public-model-page.tsx");
@@ -1642,6 +1762,33 @@ check("成员编排容器：桌面左6右6栅格、两栏 min(60vh,560px) 内部
     ],
     "成员编排两栏容器",
   );
+});
+
+// ---------- 十、公开模型成员编排行内编辑与分组候选（W6 ticket 15）----------
+check("成员编排行内编辑：行内字段按策略收敛、候选按上游分组 chip、搜索固定滚动区外", () => {
+  const flow = read("src/components/models/member-chip-flow.tsx");
+  // 行内编辑：priority 常驻；weight 仅 weighted、when 仅 conditional——其余模式的字段
+  // 完全不渲染（不是 disabled 摆着误导），票15 的核心契约。
+  includesAll(
+    flow,
+    ['data-slot="member-row"', 'aria-label="priority"', 'aria-label="weight"', 'aria-label="when"', 'data-slot="member-row-remove"'],
+    "行内编辑行",
+  );
+  expect(!flow.includes("@/components/ui/combobox"), "候选区不得再用 Combobox 单控件（票15 换按上游分组 chip）");
+  expect(!flow.includes("MemberChipEditor"), "行内编辑直接落在成员行上，不得保留点击展开式编辑器");
+  // 候选：按上游渠道分组渲染（candidateGroups + filterCandidateGroups 复用），chip 点击即加入。
+  includesAll(
+    flow,
+    ["candidateGroups(", "filterCandidateGroups(", 'data-slot="member-candidate-group"', 'data-slot="member-candidate-chip"', "加入成员"],
+    "候选分组 chip",
+  );
+  // 搜索框固定在滚动区外：右栏里搜索框必须出现在 member-scroll 之前（列头槽位）。
+  const right = flow.slice(flow.indexOf('data-slot="member-board-right"'));
+  const searchAt = right.indexOf('aria-label="搜索上游渠道或模型"');
+  const scrollAt = right.indexOf('data-slot="member-scroll"');
+  expect(searchAt >= 0 && scrollAt > searchAt, "候选搜索框必须渲染在 member-scroll 之前（固定在滚动区外）");
+  // 大列表：候选超预算截断渲染并提供「展开全部」，避免上千模型把页面拉到无限长。
+  includesAll(flow, ["CANDIDATE_CHIP_BUDGET", "展开全部"], "大列表预算截断");
 });
 
 // ---------- run ----------

@@ -20,10 +20,16 @@ INPUT_TYPES = ("text", "image", "audio", "video", "file")
 OUTPUT_TYPES = ("text", "image", "audio", "embedding")
 MAX_TOKEN_LIMIT = 100_000_000
 
+#: Full reasoning effort level set (ticket 18); "default" means 不传 — the
+#: playground relay drops it instead of forwarding (routers_ops.py).
+REASONING_LEVELS = ("default", "none", "low", "medium", "high", "xhigh", "max")
+
 DEFAULT_PARAMETERS: dict[str, Any] = {
     "max_input_tokens": 0,
     "max_output_tokens": 0,
     "reasoning_level": "",
+    "reasoning_levels": [],
+    "default_reasoning_level": "",
     "input_types": ["text"],
     "output_types": ["text"],
     "tool_call": False,
@@ -81,6 +87,10 @@ def canonical_parameters(payload: dict | None) -> str:
     data["max_input_tokens"] = _token_limit(data["max_input_tokens"], "max_input_tokens")
     data["max_output_tokens"] = _token_limit(data["max_output_tokens"], "max_output_tokens")
     data["reasoning_level"] = _reasoning_level(data["reasoning_level"])
+    data["reasoning_levels"] = _reasoning_levels(data["reasoning_levels"])
+    data["default_reasoning_level"] = _default_reasoning_level(
+        data["default_reasoning_level"], data["reasoning_levels"]
+    )
     data["input_types"] = _modalities(data["input_types"], "input_types", INPUT_TYPES)
     data["output_types"] = _modalities(data["output_types"], "output_types", OUTPUT_TYPES)
     for flag in BOOL_FIELDS:
@@ -105,6 +115,44 @@ def _reasoning_level(value: object) -> str:
     if not isinstance(value, str) or len(value) > 32:
         raise AppError(
             ErrorCode.VALIDATION_ERROR, "reasoning_level 必须是不超过 32 字符的字符串"
+        )
+    return value
+
+
+def _reasoning_levels(value: object) -> list[str]:
+    """声明的思考档位集合；空 = 未声明，选择器回退全部档位。"""
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise AppError(ErrorCode.VALIDATION_ERROR, "reasoning_levels 必须是字符串列表")
+    ordered: list[str] = []
+    for item in value:
+        if item not in REASONING_LEVELS:
+            raise AppError(
+                ErrorCode.VALIDATION_ERROR,
+                f"reasoning_levels 含未知档位: {item!r}",
+                details={"known": list(REASONING_LEVELS)},
+            )
+        if item not in ordered:
+            ordered.append(item)
+    return ordered
+
+
+def _default_reasoning_level(value: object, declared: list[str]) -> str:
+    """默认档；非空时必须是已知档位，且落在声明的档位集合内。"""
+    if value is None or value == "":
+        return ""
+    if not isinstance(value, str) or value not in REASONING_LEVELS:
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR,
+            f"default_reasoning_level 含未知档位: {value!r}",
+            details={"known": list(REASONING_LEVELS)},
+        )
+    if declared and value not in declared:
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR,
+            "default_reasoning_level 必须在 reasoning_levels 内",
+            details={"declared": declared},
         )
     return value
 

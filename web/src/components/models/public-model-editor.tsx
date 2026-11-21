@@ -41,9 +41,12 @@ export function PublicModelEditor({ id }: { id: string }) {
     queryFn: () => apiList<PublicModel>(ENDPOINTS.publicModels),
     refetchInterval: 30_000,
   });
+  // 成员候选需要全量上游模型：列表端点分页档位 25/50/100/200（默认 50），
+  // 这里取最大档 200（与 upstream-model-drawer 兑入同一口径）；键加 editor 段避免
+  // 改变表格/全局搜索等共用键的取数行为，前缀失效（["upstream-models"]）仍然命中。
   const qModels = useQuery({
-    queryKey: ["upstream-models"],
-    queryFn: () => apiList<UpstreamModel>(ENDPOINTS.upstreamModels),
+    queryKey: ["upstream-models", "editor"],
+    queryFn: () => apiList<UpstreamModel>(ENDPOINTS.upstreamModels + "?page_size=200"),
   });
   const model = useMemo(() => (q.data?.items ?? []).find((row) => row.id === id) ?? null, [q.data, id]);
   const upstreamModels = qModels.data?.items ?? [];

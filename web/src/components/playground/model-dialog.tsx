@@ -22,12 +22,15 @@ import {
 } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
 import {
+  isChatModel,
   loadRecentPlaygroundModels,
+  reasoningLevelOptions,
   rememberPlaygroundModel,
-  THINKING_MODE_LABELS,
+  REASONING_LEVEL_LABELS,
   type PlaygroundModel,
-  type ThinkingMode,
+  type ReasoningLevel,
 } from "@/lib/playground";
+import type { MyModelOut } from "@/types";
 import { cn } from "@/lib/utils";
 
 const ROUTING_LABELS: Record<PlaygroundModel["routingMode"], string> = {
@@ -42,14 +45,6 @@ const ROUTING_ORDER: Array<PlaygroundModel["routingMode"]> = [
   "conditional",
 ];
 
-/** 对话框底部只放控制面真正支持的档位，避免选了不生效的旧档。 */
-const THINKING_LEVELS: Array<{ value: ThinkingMode; label: string }> = [
-  { value: "off", label: "不指定" },
-  { value: "low", label: "low" },
-  { value: "medium", label: "medium" },
-  { value: "high", label: "high" },
-];
-
 export interface ModelDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -59,8 +54,10 @@ export interface ModelDialogProps {
   onRetry: () => void;
   value: string;
   onSelect: (name: string) => void;
-  thinkingMode: ThinkingMode;
-  onThinkingModeChange: (mode: ThinkingMode) => void;
+  thinkingMode: ReasoningLevel;
+  onThinkingModeChange: (mode: ReasoningLevel) => void;
+  /** 票18：当前模型的参数合集；档位按声明收敛，非 chat 模型不显示档位行。 */
+  modelInfo?: MyModelOut | null;
 }
 
 export function ModelDialog({
@@ -74,6 +71,7 @@ export function ModelDialog({
   onSelect,
   thinkingMode,
   onThinkingModeChange,
+  modelInfo,
 }: ModelDialogProps) {
   const [recent, setRecent] = useState<string[]>([]);
   const list = useMemo(() => models ?? [], [models]);
@@ -83,9 +81,9 @@ export function ModelDialog({
   }, [open]);
 
   const selected = list.find((model) => model.name === value);
-  const thinkingLabel =
-    THINKING_LEVELS.find((level) => level.value === thinkingMode)?.label ??
-    THINKING_MODE_LABELS[thinkingMode];
+  const showThinking = isChatModel(modelInfo);
+  const thinkingLevels = reasoningLevelOptions(modelInfo?.parameters.reasoning_levels);
+  const thinkingLabel = REASONING_LEVEL_LABELS[thinkingMode];
 
   const recentModels = useMemo(
     () =>
@@ -194,27 +192,31 @@ export function ModelDialog({
         </Command>
 
         <div className="space-y-2 border-t border-border px-4 py-3">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="mr-1 text-2xs text-faint">思考等级</span>
-            {THINKING_LEVELS.map((level) => (
-              <Button
-                key={level.value}
-                size="sm"
-                variant={thinkingMode === level.value ? "primary" : "outline"}
-                className="h-7 px-2 text-2xs"
-                onClick={() => onThinkingModeChange(level.value)}
-              >
-                {level.label}
-              </Button>
-            ))}
-            <Badge tone="neutral" className="ml-auto tnum">
+          {showThinking ? (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="mr-1 text-2xs text-faint">思考等级</span>
+              {thinkingLevels.map((level) => (
+                <Button
+                  key={level}
+                  size="sm"
+                  variant={thinkingMode === level ? "primary" : "outline"}
+                  className="h-7 px-2 text-2xs"
+                  onClick={() => onThinkingModeChange(level)}
+                >
+                  {REASONING_LEVEL_LABELS[level]}
+                </Button>
+              ))}
+            </div>
+          ) : null}
+          <div className="flex items-center gap-2">
+            <p className="min-w-0 flex-1 text-2xs leading-relaxed text-faint">
+              当前 {value || "未选择模型"} · 思考 {thinkingLabel}。
+              默认档不发送 reasoning_effort；其余档位按值转发到上游。
+            </p>
+            <Badge tone="neutral" className="tnum">
               {selected ? selected.targetCount + " 个目标" : "未选择"}
             </Badge>
           </div>
-          <p className="text-2xs leading-relaxed text-faint">
-            当前 {value || "未选择模型"} · 思考 {thinkingLabel}。控制面只透传
-            low / medium / high；其余档位在右侧「高级」分组里，选中后会保留但不会发送。
-          </p>
         </div>
       </DialogContent>
     </Dialog>

@@ -825,9 +825,7 @@ const conditionalMembers = [
   { upstream_model_id: "um_02", priority: "2", weight: "", when: 'request.tier == "std"' },
   { upstream_model_id: "um_03", priority: "3", weight: "", when: "" },
 ];
-const inputTag = (html, label) => (html.match(new RegExp('<input[^>]*aria-label="' + label + '"[^>]*>')) ?? [""])[0];
-// Input 的 className 自带 disabled:opacity-50，不能用 includes("disabled") 判断；看布尔属性本体。
-const inputDisabled = (html, label) => inputTag(html, label).includes(' disabled=""');
+const inputTags = (html, label) => [...html.matchAll(new RegExp('<input[^>]*aria-label="' + label + '"[^>]*>', "g"))].map((match) => match[0]);
 
 check("member-chip：成员名统一「上游渠道/模型」，按 priority 分层且同层保序", async () => {
   const chip = await load("/src/components/models/member-chip.ts");
@@ -870,30 +868,34 @@ check("member-chip：conditional 顺序/末位兜底与候选按上游渠道分�
   expect(chip.conditionalMultiKeyHint([{ upstream_model_id: "um_01" }], chipUpstreamModels, [{ id: "up_01", name: "zai-01", key_count: 1 }]) === null, "单密钥不提示 E20");
 });
 
-check("MemberChipFlow：分层 chip、conditional 顺序/兜底与候选分组搜索（SSR）", async () => {
+check("MemberChipFlow：每成员一行行内编辑、候选按上游分组 chip 搜索（SSR，票15）", async () => {
   const flowView = await load("/src/components/models/member-chip-flow.tsx");
   const html = render(createElement(flowView.MemberChipFlow, {
     members: chipMembers, upstreamModels: chipUpstreamModels, fallbackNames: new Map(), mode: "failover", onChange: () => {},
   }));
   includesAll(
     html,
-    ['data-slot="member-chip-flow"', 'data-slot="member-layer"', 'data-slot="member-chip"', 'data-slot="member-candidates"', 'data-slot="member-candidate-add"', "第 1 层", "第 2 层", "同层 P2C 平权", "zai-01/glm-5.3", "zai-01/glm-5.3-flash", "nebula-01/nebula-chat-1"],
-    "成员 chip 流",
+    ['data-slot="member-chip-flow"', 'data-slot="member-layer"', 'data-slot="member-row"', 'data-slot="member-board-left"', 'data-slot="member-board-right"', "第 1 层", "第 2 层", "同层 P2C 平权", "zai-01/glm-5.3", "zai-01/glm-5.3-flash", "nebula-01/nebula-chat-1"],
+    "成员行内编辑流",
   );
-  expect(!html.includes("glm-5.3 · zai-01") && !html.includes("zai-01 · glm-5.3"), "chip 命名不能再用「模型名 · 上游名」");
-  expect((html.match(/data-slot="member-chip"/g) ?? []).length === 3, "每个成员一个 chip");
-  expect((html.match(/<button[^>]*data-slot="member-chip"/g) ?? []).length === 3, "chip 本体必须是「编辑成员」按钮（点 chip 即编辑）");
-  expect((html.match(/data-slot="member-chip-remove"/g) ?? []).length === 3, "每个 chip 一个移除按钮");
+  expect(!html.includes("glm-5.3 · zai-01") && !html.includes("zai-01 · glm-5.3"), "成员命名不能再用「模型名 · 上游名」");
+  expect((html.match(/data-slot="member-row"/g) ?? []).length === 3, "每个成员一行");
+  // failover 行内只渲染 priority：weight/when 输入完全不出现（disabled 也不行）。
+  expect(inputTags(html, "priority").length === 3, "每行必须有一个 priority 行内输入");
+  expect(!html.includes('aria-label="weight"'), "failover 行不得渲染 weight 输入");
+  expect(!html.includes('aria-label="when"'), "failover 行不得渲染 when 输入");
+  expect((html.match(/data-slot="member-row-remove"/g) ?? []).length === 3, "每行一个移除按钮");
   includesAll(html, ["移除 zai-01/glm-5.3", "移除 nebula-01/nebula-chat-1"], "移除按钮必须点名成员");
-  expect(html.includes('role="combobox"'), "候选区必须用 ui/Combobox 原语选择上游模型");
-  includesAll(html, ["加入成员"], "候选区要有「加入成员」动作");
-
-  const conditional = render(createElement(flowView.MemberChipFlow, {
-    members: conditionalMembers, upstreamModels: chipUpstreamModels, fallbackNames: new Map(), mode: "conditional", onChange: () => {},
-  }));
-  expect((conditional.match(/data-slot="chip-order"/g) ?? []).length === 3, "conditional 每个 chip 必须显示顺序徽标");
-  expect((conditional.match(/data-slot="chip-fallback"/g) ?? []).length === 1, "只有末位成员显示兜底标签");
-  includesAll(conditional, ["末位兜底", "request.tier"], "conditional 必须显示 when 与兜底");
+  // 候选：按上游渠道分组 chip，点击 chip 即加入；搜索框固定在滚动区外（member-scroll 之前）。
+  expect(!html.includes('role="combobox"'), "候选区不得再用 Combobox 单控件");
+  const rightAt = html.indexOf('data-slot="member-board-right"');
+  const searchAt = html.indexOf('aria-label="搜索上游渠道或模型"');
+  const scrollAt = html.indexOf('data-slot="member-scroll"', rightAt);
+  expect(searchAt > rightAt && scrollAt > searchAt, "候选搜索框必须固定在滚动区外（列头内、member-scroll 之前）");
+  const chips = html.match(/data-slot="member-candidate-chip"/g) ?? [];
+  expect(chips.length === 1, "只渲染未加入的候选 chip（chipMembers 已占 um_01/02/03），实际 " + chips.length);
+  includesAll(html, ["加入成员 nebula-01/nebula-embed-1", 'data-slot="member-candidate-group"', "nebula-01"], "候选 chip 点击加入");
+  expect(html.includes('data-upstream-model-id="um_04"'), "候选 chip 必须带上游模型 id");
 
   const weighted = render(createElement(flowView.MemberChipFlow, {
     members: [
@@ -902,30 +904,21 @@ check("MemberChipFlow：分层 chip、conditional 顺序/兜底与候选分组�
     ],
     upstreamModels: chipUpstreamModels, fallbackNames: new Map(), mode: "weighted", onChange: () => {},
   }));
-  includesAll(weighted, ["weight 60", "weight 40"], "weighted 必须在 chip 上显示 weight");
+  const weightInputs = inputTags(weighted, "weight");
+  expect(weightInputs.length === 2, "weighted 每行必须可编辑 weight");
+  expect(weightInputs.some((tag) => tag.includes('value="60"')), "weight 输入必须回显草稿值");
+  expect(!weighted.includes('aria-label="when"'), "weighted 行不得渲染 when 输入");
   expect((weighted.match(/data-slot="member-layer"/g) ?? []).length === 1, "同 priority 的 weighted 成员同层");
-});
 
-check("MemberChipEditor：按模式启停 priority/weight/when 并能从 chip 移除", async () => {
-  const flowView = await load("/src/components/models/member-chip-flow.tsx");
-  const base = {
-    member: { upstream_model_id: "um_01", priority: "1", weight: "6", when: "a == 1" },
-    label: "zai-01/glm-5.3",
-    mode: "failover",
-    onChange: () => {},
-    onRemove: () => {},
-    onClose: () => {},
-  };
-  const failover = render(createElement(flowView.MemberChipEditor, base));
-  includesAll(failover, ['data-slot="member-chip-editor"', 'aria-label="priority"', 'aria-label="weight"', 'aria-label="when"', "移除成员", "完成"], "chip 编辑器");
-  expect(!inputDisabled(failover, "priority"), "priority 永远可编辑");
-  expect(inputDisabled(failover, "weight") && inputDisabled(failover, "when"), "failover 只编辑 priority");
-  const weighted = render(createElement(flowView.MemberChipEditor, { ...base, mode: "weighted" }));
-  expect(!inputDisabled(weighted, "weight"), "weighted 必须可编辑 weight");
-  expect(inputDisabled(weighted, "when"), "weighted 不需要 when");
-  const conditional = render(createElement(flowView.MemberChipEditor, { ...base, mode: "conditional" }));
-  expect(!inputDisabled(conditional, "when"), "conditional 必须可编辑 when");
-  expect(inputDisabled(conditional, "weight"), "conditional 不需要 weight");
+  const conditional = render(createElement(flowView.MemberChipFlow, {
+    members: conditionalMembers, upstreamModels: chipUpstreamModels, fallbackNames: new Map(), mode: "conditional", onChange: () => {},
+  }));
+  expect((conditional.match(/data-slot="chip-order"/g) ?? []).length === 3, "conditional 每行必须显示顺序徽标");
+  expect((conditional.match(/data-slot="chip-fallback"/g) ?? []).length === 1, "只有末位成员显示兜底标签");
+  expect(inputTags(conditional, "when").length === 3, "conditional 每行可编辑 when");
+  expect(inputTags(conditional, "when").some((tag) => tag.includes('value="request.tier')), "when 输入必须回显 CEL 谓词");
+  expect(!conditional.includes('aria-label="weight"'), "conditional 行不得渲染 weight 输入");
+  includesAll(conditional, ["末位兜底", "request.tier"], "conditional 必须显示 when 与兜底");
 });
 
 check("PublicModelPageView：成员 chip 流新命名、末位兜底与成员脏标记", async () => {
@@ -960,11 +953,11 @@ check("接线：成员 chip 流替换 MemberBoard，创建弹窗同样用「上�
   const flow = read("src/components/models/member-chip-flow.tsx");
   includesAll(
     flow,
-    ['data-slot="member-chip"', 'data-slot="member-candidates"', 'data-slot="member-candidate-add"', 'data-slot="member-chip-editor"', "搜索上游渠道或模型", "末位兜底"],
-    "chip 流结构契约",
+    ['data-slot="member-row"', 'data-slot="member-candidates"', 'data-slot="member-candidate-group"', 'data-slot="member-candidate-chip"', "搜索上游渠道或模型", "末位兜底"],
+    "行内编辑流结构契约",
   );
-  includesAll(flow, ["@/components/ui/button", "@/components/ui/combobox"], "chip 流必须复用 Button/Combobox 原语");
-  expect(!flow.includes("<button"), "chip 流不得再手写 <button>（chip、移除、候选都走原语）");
+  includesAll(flow, ["@/components/ui/button"], "行内编辑流必须复用 Button 原语");
+  expect(!flow.includes("<button"), "行内编辑流不得手写 <button>（成员行、移除、候选 chip 都走原语）");
   const chip = read("src/components/models/member-chip.ts");
   includesAll(chip, ["memberChipLabel", "memberLayers", "conditionalFallback", "candidateGroups", "filterCandidateGroups"], "纯函数契约");
 });

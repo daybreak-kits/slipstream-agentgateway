@@ -933,11 +933,15 @@ async def playground_stream(
             "messages": [m.model_dump() for m in payload.messages],
         }
         # Optional sampling knobs: omitted from the body when the caller left them unset.
+        # reasoning_effort "default" means 不传 (ticket 18): it never reaches upstream.
         for field, value in (
             ("temperature", payload.temperature),
             ("top_p", payload.top_p),
             ("max_tokens", payload.max_tokens),
-            ("reasoning_effort", payload.reasoning_effort),
+            (
+                "reasoning_effort",
+                None if payload.reasoning_effort == "default" else payload.reasoning_effort,
+            ),
         ):
             if value is not None:
                 body[field] = value

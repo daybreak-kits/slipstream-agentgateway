@@ -1035,8 +1035,8 @@ async function main() {
     const save = admin.page.getByRole("button", { name: "保存", exact: true });
     assert((await save.count()) === 1, "整页应有且只有一个「保存」按钮，实际 " + (await save.count()));
     for (const old of ["保存整页", "保存成员"]) assert(!visited.text.includes(old), "仍有旧保存文案：" + old);
-    const chips = admin.page.locator('[data-slot="member-chip"]');
-    assert((await chips.count()) > 0, "成员编排没有渲染成员 chip");
+    const chips = admin.page.locator('[data-slot="member-row"]');
+    assert((await chips.count()) > 0, "成员编排没有渲染成员行");
     assert((await admin.page.locator('[data-slot="dirty-count"]').count()) === 0, "首次载入不应有脏标记");
     const note = admin.page.getByLabel("备注").first();
     assert((await note.count()) > 0, "找不到「备注」字段");
@@ -1049,7 +1049,7 @@ async function main() {
     assert((await admin.page.locator('[data-slot="dirty-count"]').count()) === 0, "恢复全部后脏标记未清零");
     admin.assertNoNewErrors(from, "公开模型单页");
     await admin.shot("models-public-page");
-    return "单页三段 + 唯一保存 + 成员 chip " + (await chips.count()) + " 个 + 脏标记/恢复";
+    return "单页三段 + 唯一保存 + 成员行 " + (await chips.count()) + " 行 + 脏标记/恢复";
   });
 
   await test("logs.attempts", "日志模型列两行 + 尝试列（N 次尝试 popover / 无链路记录）+ 费用两行", async () => {
