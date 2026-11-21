@@ -18,8 +18,6 @@ from l01_core.errors import AppError, ErrorCode
 WidgetKind = Literal["text", "number", "select"]
 ValueType = Literal["text", "int", "currency", "url"]
 
-CONNECTION_DEFAULT_PORT = 3600
-
 
 @dataclass(frozen=True, slots=True)
 class SettingOption:

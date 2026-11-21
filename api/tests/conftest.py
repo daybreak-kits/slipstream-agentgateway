@@ -17,6 +17,7 @@ from sqlalchemy.pool import StaticPool
 
 from l01_core.crypto import AesGcmBox, SecretBox
 from l01_core.settings import reset_settings_cache
+from l03_adapters.agentgateway.deployment import reset_deployment_cache
 from l04_repo.base import init_db
 from l04_repo.orm import (
     ModelTargetORM,
@@ -70,19 +71,15 @@ _TEST_TMP_PATTERNS = (
 _LOCK_NAME = ".ag-dir.lock"
 
 
-@contextmanager
-def _hold_dir_lock(path: Path):
-    """Hold an exclusive lock on <path>/<lock> so other pytest processes skip
-    sweeping this dir (W6: parallel pytest race — one session's cleanup must
-    not delete another process's live AG_CONFIG_DIR).
+def _open_live_lock(path: Path):
+    """Acquire the exclusive live-lock on <path>/<lock>; the fh is returned.
 
     Windows uses msvcrt byte-range locks, POSIX fcntl.flock; both are released
     by the OS when the owning process dies, so a stale dir from a crashed run
     is sweepable again. The lock file lives inside the dir, so it must be
     closed before the dir is removed.
     """
-    lock_path = path / _LOCK_NAME
-    fh = open(lock_path, "a+b")
+    fh = open(path / _LOCK_NAME, "a+b")
     try:
         if os.name == "nt":
             import msvcrt
@@ -99,6 +96,16 @@ def _hold_dir_lock(path: Path):
     except OSError:
         fh.close()
         raise
+    return fh
+
+
+@contextmanager
+def _hold_dir_lock(path: Path):
+    """Hold an exclusive lock on <path>/<lock> so other pytest processes skip
+    sweeping this dir (W6: parallel pytest race — one session's cleanup must
+    not delete another process's live AG_CONFIG_DIR).
+    """
+    fh = _open_live_lock(path)
     try:
         yield
     finally:
@@ -169,6 +176,10 @@ class _RepoPathFactory:
     def __init__(self) -> None:
         self.root = TEST_TMP_ROOT / (".tmp-pytest-repo-" + uuid4().hex[:8])
         self.root.mkdir()
+        # Parallel pytest sessions sweep each other's .tmp-* leftovers (the W6
+        # race the engine dirs already guard against); hold the same live-lock
+        # so a sibling session's sweep never deletes THIS session's live root.
+        self._lock_fh = _open_live_lock(self.root)
 
     def mktemp(self, basename: str = "tmp", *, numbered: bool = True) -> Path:
         del numbered
@@ -180,6 +191,20 @@ class _RepoPathFactory:
         return self.root
 
     def cleanup(self) -> None:
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                self._lock_fh.seek(0)
+                msvcrt.locking(self._lock_fh.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(self._lock_fh.fileno(), fcntl.LOCK_UN)
+        except OSError:
+            pass
+        # Close before removal: the lock file lives inside the dir.
+        self._lock_fh.close()
         _rmtree_retry(str(self.root))
 
 
@@ -211,6 +236,9 @@ def engine_and_sessionmaker():
     # layer; the real --validate-only path has its own opt-in test.
     os.environ["SLIPSTREAM_AG_BINARY"] = ""
     reset_settings_cache()
+    # The adapter deployment namespace caches its own env read (ADR-029 t04);
+    # keep it in step with the settings cache so each test sees its env.
+    reset_deployment_cache()
     # Shared in-memory DB across threads: TestClient runs sync endpoints in a
     # threadpool, so the pool must hand back the ONE :memory: connection.
     engine = create_engine(
@@ -229,6 +257,7 @@ def engine_and_sessionmaker():
         yield engine, factory
     _rmtree_retry(ag_dir)
     reset_settings_cache()
+    reset_deployment_cache()
 
 
 def make_admin(

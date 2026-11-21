@@ -139,7 +139,7 @@ def test_cleanup_job_default_path_prunes_through_the_adapter(
         ],
     )
 
-    counts = cleanup_job(factory, Settings(ag_config_dir=str(ag_dir)))
+    counts = cleanup_job(factory, Settings(data_plane_config_dir=str(ag_dir)))
 
     assert counts == {
         "request_logs": 1,

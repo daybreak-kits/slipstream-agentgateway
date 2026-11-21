@@ -20,19 +20,16 @@ from sqlalchemy.orm import Session
 
 from l01_core.errors import AppError, ErrorCode
 from l01_core.timeutil import ms_to_iso, now_ms
+from l03_adapters.spi import DataPlaneAdapter
 from l04_repo.orm import AppSettingORM, AuditLogORM, ConfigRevisionORM
 from l04_repo.repository import get_setting, put_setting
 from l05_service import auth, settings_schema
-from l06_api.deps import current_principal, require, session_of
+from l06_api.deps import current_principal, get_adapter, require, session_of
 from l06_api.routers_config import _body as revision_body
 from l06_api.routers_reports import overview as reports_overview
 from l06_api.schemas import ConfigRevisionOut, SettingsSchemaOut
 
 router = APIRouter(tags=["meta"])
-
-# Editable settings are declared once in l05_service.settings_schema; this router
-# only adapts HTTP (read stored values, forward PUT to the shared validator).
-CONNECTION_DEFAULT_PORT = settings_schema.CONNECTION_DEFAULT_PORT
 
 
 def _read_value(session: Session, key: str) -> tuple[str, int]:
@@ -125,11 +122,14 @@ def put_settings(
 def connection_info(
     session: Session = Depends(session_of),
     principal: auth.Principal = Depends(current_principal),
+    adapter: DataPlaneAdapter = Depends(get_adapter),
 ) -> dict[str, Any]:
     """统一连接地址：所有登录用户可读，运营设置里可改（ticket 16）。
 
-    空字符串 = 未配置，前端回退到浏览器当前 host + 3600 端口；控制面只存显式
-    配置的公网地址，读取侧不需要 settings:read，避免客户看不到接入信息。
+    空字符串 = 未配置，前端回退到浏览器当前 host 与适配器默认端口；控制面只
+    存显式配置的公网地址，读取侧不需要 settings:read，避免客户看不到接入信息。
+    端点清单与默认端口由适配器 client contract 提供（ADR-029 ticket 04），系统
+    层不再硬编码数据面路径。
     """
     raw = get_setting(session, "gateway_base_url")
     configured = ""
@@ -141,13 +141,14 @@ def connection_info(
         if isinstance(value, str):
             configured = value
     row = session.get(AppSettingORM, "gateway_base_url")
+    # Connection facts are contract facts: the endpoint list is only what the
+    # adapter declares it actually serves, in its declaration order.
+    contract = adapter.client_contract()
     return {
         "base_url": configured,
         "configured": bool(configured),
-        "default_port": CONNECTION_DEFAULT_PORT,
-        # Only the three paths verified against the real data plane (E14);
-        # anything else would be guesswork, so the list stays server-owned.
-        "endpoints": ["/v1/chat/completions", "/v1/models", "/v1/embeddings"],
+        "default_port": contract.default_port,
+        "endpoints": list(contract.endpoint_paths()),
         "updated_at": ms_to_iso(row.updated_at_ms) if row is not None and row.updated_at_ms else "",
         "editable": "settings:write" in principal.permissions,
     }

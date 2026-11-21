@@ -54,6 +54,7 @@ from l02_domain.ir import (
     sort_targets,
 )
 from l03_adapters.agentgateway import telemetry
+from l03_adapters.agentgateway.deployment import get_deployment
 from l03_adapters.agentgateway.transforms import compile_transforms
 from l03_adapters.spi import Artifact, make_artifact
 from l03_adapters.yaml_dumps import to_yaml
@@ -493,12 +494,18 @@ def _render_access_log(ir: GatewayIR) -> tuple[dict, dict]:
     selects `metadata` (no prompt/completion bodies in the payload table) or
     `full`. llm is emitted explicitly in both modes because AG's omitted-field
     legacy behavior would keep storing captured content. Nothing is rendered
-    when unset.
+    when unset. The database URL is adapter-owned (ADR-029 ticket 04): the
+    system leaves it empty and this renderer falls back to the deployment
+    namespace's log DB location, keeping the bootstrap guarantee (an unset
+    switch still renders a log DB source).
     """
     access_log = ir.policies.access_log
-    if access_log is None or not access_log.database_url:
+    if access_log is None:
         return {}, {}
-    config_block: dict = {"logging": {"database": {"url": access_log.database_url}}}
+    url = access_log.database_url or get_deployment().render_log_db_url
+    if not url:
+        return {}, {}
+    config_block: dict = {"logging": {"database": {"url": url}}}
     frontend: dict = {"accessLog": {"database": {"llm": access_log.llm}}}
     return config_block, frontend
 
@@ -635,13 +642,13 @@ def render_config(ir: GatewayIR, llm_port: int) -> dict:
     return config
 
 
-def render_artifact(ir: GatewayIR, llm_port: int | None = None) -> Artifact:
-    """Render -> deterministic YAML artifact with constraint header comments."""
-    from l01_core.settings import get_settings
+def render_artifact(ir: GatewayIR, llm_port: int) -> Artifact:
+    """Render -> deterministic YAML artifact with constraint header comments.
 
-    settings = get_settings()
-    port = llm_port if llm_port is not None else settings.ag_llm_port
-    content = to_yaml(render_config(ir, port), header_comments=render_comments(ir))
+    The listen port is a deployment fact of the driver (ADR-029 ticket 04): the
+    adapter passes its own ``llm_port``, so system layers never supply it.
+    """
+    content = to_yaml(render_config(ir, llm_port), header_comments=render_comments(ir))
     return make_artifact(content, revision=ir.revision)
 
 

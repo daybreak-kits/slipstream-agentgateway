@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session
 
 from l01_core.crypto import SecretBox
 from l01_core.errors import AppError, ErrorCode
-from l01_core.settings import DEFAULT_AG_DB_FILENAME, get_settings
+from l01_core.settings import get_settings
 from l01_core.timeutil import now_ms
 from l02_domain.ir import (
     AccessLogSpec,
@@ -121,7 +121,7 @@ def build_render_plan(
             )
         seqs: list[int] = []
         for seq, row in enumerate(key_rows, start=1):
-            key_file = _key_file_name(settings.ag_config_dir, upstream.id, seq)
+            key_file = _key_file_name(settings.data_plane_config_dir, upstream.id, seq)
             key_files[key_file] = secret_box.decrypt(row.key_enc)
             seqs.append(seq)
             upstream_specs.append(
@@ -228,7 +228,7 @@ def build_render_plan(
     policies_block, guardrails_block, mcp_block, limits_block = stored_policy_blocks(
         session, adapter
     )
-    access_log = _access_log_spec(session, settings)
+    access_log = _access_log_spec(session)
     if access_log is not None:
         policies_block = replace(policies_block, access_log=access_log)
     ir = GatewayIR(
@@ -282,14 +282,15 @@ def _key_file_name(config_dir: str, upstream_id: str, seq: int) -> str:
     return os.path.join(config_dir, "keys", f"{upstream_id}#{seq}.key")
 
 
-def _access_log_spec(session: Session, settings) -> AccessLogSpec:
-    """ADR-021: resolve the payload-logging switch; always renders a log DB source.
+def _access_log_spec(session: Session) -> AccessLogSpec:
+    """ADR-021: resolve the payload-logging switch; always render a log DB source.
 
     The data-plane log DB is a bootstrap dependency: usage ingestion, the
     request-log pages and retention all read it, so an unset switch must not
-    leave a fresh install without a data source. Defaults are safe (metadata =
-    no bodies); explicit ag_access_log_llm / ag_db_path win, and bodies are only
-    ever stored when the operator selects full.
+    leave a fresh install without a data source. The switch is a neutral system
+    fact (metadata = no bodies, full = bodies stored); WHERE the log DB lives
+    is adapter-owned (ADR-029 ticket 04), so database_url stays empty and the
+    adapter renders its own deployment default.
     """
     raw = get_setting(session, ACCESS_LOG_LLM_KEY)
     mode = "metadata"
@@ -300,8 +301,7 @@ def _access_log_spec(session: Session, settings) -> AccessLogSpec:
             value = raw
         if isinstance(value, str) and value.strip() in ACCESS_LOG_LLM_MODES:
             mode = value.strip()
-    database_url = settings.ag_db_path or DEFAULT_AG_DB_FILENAME
-    return AccessLogSpec(database_url=database_url, llm=mode)
+    return AccessLogSpec(database_url="", llm=mode)
 
 
 def write_key_files(key_files: dict[str, str]) -> list[str]:
@@ -338,7 +338,7 @@ def prune_key_files(
     """Delete stale managed key files so a new apply leaves no dead credentials.
 
     Managed surface = regular ``*.key`` files directly inside
-    ``<ag_config_dir>/keys``. The whitelist is this render's ``key_files`` (the
+    ``<data_plane_config_dir>/keys``. The whitelist is this render's ``key_files`` (the
     files the new configuration references), so the previous revision's files
     and pre-multikey ``{upstream_id}.key`` leftovers become stale. Everything
     else is out of scope by construction: non-key files, subdirectories,
@@ -347,7 +347,7 @@ def prune_key_files(
     failures are collected instead of raised (the rollout logs and continues).
     """
     settings = get_settings()
-    keys_dir = Path(settings.ag_config_dir) / "keys"
+    keys_dir = Path(settings.data_plane_config_dir) / "keys"
     whitelist = {_path_identity(path) for path in key_files}
     stale: list[str] = []
     if keys_dir.is_dir():

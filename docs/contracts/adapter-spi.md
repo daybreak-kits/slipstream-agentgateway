@@ -136,3 +136,21 @@ class DataPlaneAdapter(Protocol):
 - 回滚重放走同一条校验门：`test_apply_validate_gate.py::test_rollback_replays_through_the_validation_gate`
 - 真实二进制端到端（存在则跑，缺失则 skip）：`api/tests/integration/test_apply_binary_gate_real.py`
 - 旧 priority 语义迁移：`api/tests/unit/test_priority_migration.py`、`api/tests/integration/test_priority_migration_demo.py`
+## 6. ClientContract（W6 ticket 04）
+
+`client_contract()` 返回 `ClientContract`：connection、health、playground 所需的**客户端事实**全部来自这里，系统层不再硬编码数据面端口与路径，也不拼数据面地址。
+
+| 成员 | 语义 |
+|---|---|
+| `default_port` / `scheme` | 数据面客户端端口与协议；`0` 表示无可达端口（如 fake） |
+| `base_url_hint` | 数据面不与控制面同机时的客户端地址；空则 `base_url()` 回退同机默认 |
+| `endpoints` | 适配器声明实际服务的端点清单（`path` + `methods` + 中性 `purpose` 键），按声明顺序下发 |
+| `endpoint_for(purpose)` | 按中性目的键取端点（如 `chat.completions`）；无则 None |
+| `base_url()` | 客户端可调用的数据面根地址；系统层不自行拼接 |
+| `health_fields()` | 旧 `/admin/health` wire 字段（`data_plane_port`），键与值都归适配器边界所有，保证控制台字节稳定 |
+
+约定：
+
+- `purpose` 使用中性词表（OpenAI 语义操作名），数据面具体路径只出现在适配器返回值里；
+- 新增数据面时只要实现同一契约，connection/health/playground 零改动（换数据面检查清单第 4 条）；
+- 契约测试：`api/tests/contract/test_spi_ports.py::test_client_contract_serves_connection_health_and_playground_facts`、系统侧 `api/tests/integration/test_dataplane_contract.py`（fake 驱动 HTTP seam）。

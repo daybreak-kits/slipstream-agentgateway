@@ -362,7 +362,8 @@ class AgentgatewayAdapter:
         return validate_agentgateway_ir(ir)
 
     def render(self, ir: GatewayIR) -> Artifact:
-        return render_artifact(ir)
+        # The listen port is this driver's deployment fact (ADR-029 ticket 04).
+        return render_artifact(ir, llm_port=self._llm_port)
 
     def apply(self, artifact: Artifact) -> ApplyResult:
         return self._applier.apply(artifact)
