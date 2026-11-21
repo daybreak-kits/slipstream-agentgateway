@@ -56,6 +56,15 @@ def test_reseller_creates_subordinates_and_reads_subtree_spend() -> None:
     assert "users:delete" not in reseller.permissions
 
 
+def test_customer_and_reseller_hold_apikeys_self_service_permissions() -> None:
+    # W7 C10 / B 方案：自助密钥要求 customer/reseller 拥有 apikeys:read/write；
+    # reseller 从 customer 继承，两者的密钥操作都只受 user scope 限制。
+    customer = rbac.role_definition("customer")
+    reseller = rbac.role_definition("reseller")
+    assert {"apikeys:read", "apikeys:write"} <= customer.permissions
+    assert {"apikeys:read", "apikeys:write"} <= reseller.permissions
+
+
 def test_retired_role_names_are_not_aliases() -> None:
     # W6/21: no compatibility layer - old keys must fail closed and be migrated
     # in the database, never silently mapped to a built-in role.

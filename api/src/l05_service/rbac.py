@@ -135,6 +135,10 @@ _CUSTOMER_PERMISSIONS: frozenset[str] = frozenset(
         # 自己的花费与试验台
         "billing:spend",
         "playground:use",
+        # 自助连接密钥（W7 B 方案）：customer 只读/签发自己的密钥；
+        # 行级维护同样只作用于自己的密钥（routers_apikeys 的 user scope 兜底）。
+        "apikeys:read",
+        "apikeys:write",
     }
 )
 

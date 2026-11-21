@@ -868,15 +868,15 @@ check("member-chip：conditional 顺序/末位兜底与候选按上游渠道分�
   expect(chip.conditionalMultiKeyHint([{ upstream_model_id: "um_01" }], chipUpstreamModels, [{ id: "up_01", name: "zai-01", key_count: 1 }]) === null, "单密钥不提示 E20");
 });
 
-check("MemberChipFlow：每成员一行行内编辑、候选按上游分组 chip 搜索（SSR，票15）", async () => {
+check("MemberChipFlow：已选成员表格化、候选全量原位灰显（SSR，W7 票05）", async () => {
   const flowView = await load("/src/components/models/member-chip-flow.tsx");
   const html = render(createElement(flowView.MemberChipFlow, {
     members: chipMembers, upstreamModels: chipUpstreamModels, fallbackNames: new Map(), mode: "failover", onChange: () => {},
   }));
   includesAll(
     html,
-    ['data-slot="member-chip-flow"', 'data-slot="member-layer"', 'data-slot="member-row"', 'data-slot="member-board-left"', 'data-slot="member-board-right"', "第 1 层", "第 2 层", "同层 P2C 平权", "zai-01/glm-5.3", "zai-01/glm-5.3-flash", "nebula-01/nebula-chat-1"],
-    "成员行内编辑流",
+    ['data-slot="member-chip-flow"', 'data-slot="member-table"', 'data-slot="member-table-head"', 'data-slot="member-row"', 'data-slot="member-board-left"', 'data-slot="member-board-right"', "优先级", "成员 / 上游", "同层 P2C 平权", "zai-01/glm-5.3", "zai-01/glm-5.3-flash", "nebula-01/nebula-chat-1"],
+    "成员表格与行内编辑流",
   );
   expect(!html.includes("glm-5.3 · zai-01") && !html.includes("zai-01 · glm-5.3"), "成员命名不能再用「模型名 · 上游名」");
   expect((html.match(/data-slot="member-row"/g) ?? []).length === 3, "每个成员一行");
@@ -885,16 +885,19 @@ check("MemberChipFlow：每成员一行行内编辑、候选按上游分组 chip
   expect(!html.includes('aria-label="weight"'), "failover 行不得渲染 weight 输入");
   expect(!html.includes('aria-label="when"'), "failover 行不得渲染 when 输入");
   expect((html.match(/data-slot="member-row-remove"/g) ?? []).length === 3, "每行一个移除按钮");
-  includesAll(html, ["移除 zai-01/glm-5.3", "移除 nebula-01/nebula-chat-1"], "移除按钮必须点名成员");
-  // 候选：按上游渠道分组 chip，点击 chip 即加入；搜索框固定在滚动区外（member-scroll 之前）。
+  expect((html.match(/data-slot="member-row-expand"/g) ?? []).length === 3, "每行一个显式展开 chevron");
+  includesAll(html, ["移除 zai-01/glm-5.3", "移除 nebula-01/nebula-chat-1", "展开更多配置 zai-01/glm-5.3"], "移除/展开按钮必须点名成员");
+  // 候选：按上游渠道分组 chip；W7 票05 起候选全量原位渲染，已选灰显（+ 变 ×），再点取消。
   expect(!html.includes('role="combobox"'), "候选区不得再用 Combobox 单控件");
   const rightAt = html.indexOf('data-slot="member-board-right"');
   const searchAt = html.indexOf('aria-label="搜索上游渠道或模型"');
   const scrollAt = html.indexOf('data-slot="member-scroll"', rightAt);
   expect(searchAt > rightAt && scrollAt > searchAt, "候选搜索框必须固定在滚动区外（列头内、member-scroll 之前）");
   const chips = html.match(/data-slot="member-candidate-chip"/g) ?? [];
-  expect(chips.length === 1, "只渲染未加入的候选 chip（chipMembers 已占 um_01/02/03），实际 " + chips.length);
-  includesAll(html, ["加入成员 nebula-01/nebula-embed-1", 'data-slot="member-candidate-group"', "nebula-01"], "候选 chip 点击加入");
+  expect(chips.length === 4, "候选必须全量原位渲染（已选灰显不消失、不重排），实际 " + chips.length);
+  const selected = html.match(/data-slot="member-candidate-chip"[^>]*data-selected="true"/g) ?? [];
+  expect(selected.length === 3, "已选成员的候选 chip 必须原地灰显，实际 " + selected.length);
+  includesAll(html, ["加入成员 nebula-01/nebula-embed-1", "取消选择成员 zai-01/glm-5.3", 'data-slot="member-candidate-group"', "nebula-01", 'aria-pressed="true"'], "候选 chip 加入/取消双态");
   expect(html.includes('data-upstream-model-id="um_04"'), "候选 chip 必须带上游模型 id");
 
   const weighted = render(createElement(flowView.MemberChipFlow, {
@@ -908,7 +911,8 @@ check("MemberChipFlow：每成员一行行内编辑、候选按上游分组 chip
   expect(weightInputs.length === 2, "weighted 每行必须可编辑 weight");
   expect(weightInputs.some((tag) => tag.includes('value="60"')), "weight 输入必须回显草稿值");
   expect(!weighted.includes('aria-label="when"'), "weighted 行不得渲染 when 输入");
-  expect((weighted.match(/data-slot="member-layer"/g) ?? []).length === 1, "同 priority 的 weighted 成员同层");
+  includesAll(weighted, ["权重"], "weighted 表头出现中文「权重」");
+  expect(!weighted.includes("表达式"), "weighted 表头不得出现「表达式」");
 
   const conditional = render(createElement(flowView.MemberChipFlow, {
     members: conditionalMembers, upstreamModels: chipUpstreamModels, fallbackNames: new Map(), mode: "conditional", onChange: () => {},
@@ -918,13 +922,13 @@ check("MemberChipFlow：每成员一行行内编辑、候选按上游分组 chip
   expect(inputTags(conditional, "when").length === 3, "conditional 每行可编辑 when");
   expect(inputTags(conditional, "when").some((tag) => tag.includes('value="request.tier')), "when 输入必须回显 CEL 谓词");
   expect(!conditional.includes('aria-label="weight"'), "conditional 行不得渲染 weight 输入");
-  includesAll(conditional, ["末位兜底", "request.tier"], "conditional 必须显示 when 与兜底");
+  includesAll(conditional, ["末位兜底", "request.tier", "表达式"], "conditional 必须显示 when 与兜底，表头为中文「表达式」");
 });
 
-check("PublicModelPageView：成员 chip 流新命名、末位兜底与成员脏标记", async () => {
+check("PublicModelPageView：成员表格新命名、末位兜底与成员脏标记", async () => {
   const { PublicModelPageView } = await load("/src/components/models/public-model-page.tsx");
   const html = render(createElement(PublicModelPageView, pageProps({ upstreamModels: chipUpstreamModels })));
-  includesAll(html, ['data-slot="member-chip-flow"', "第 1 层", "第 2 层", "zai-01/glm-5.3", "搜索上游渠道或模型"], "单页成员 chip 流");
+  includesAll(html, ['data-slot="member-chip-flow"', 'data-slot="member-table"', "优先级", "zai-01/glm-5.3", "搜索上游渠道或模型"], "单页成员表格");
   expect(!html.includes("glm-5.3 · zai-01") && !html.includes("zai-01 · glm-5.3"), "成员名不能再是「模型名 · 上游名」");
   const dirtyMembers = render(createElement(PublicModelPageView, pageProps({ upstreamModels: chipUpstreamModels, dirty: dirtyStateOf(["members"]) })));
   const memberSection = dirtyMembers.slice(dirtyMembers.indexOf("成员编排"), dirtyMembers.indexOf("只读摘要"));

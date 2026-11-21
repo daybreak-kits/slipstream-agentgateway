@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { ChevronDown } from "lucide-react";
 
 import {
   type CandidateGroup,
@@ -10,11 +11,13 @@ import {
   memberLayers,
 } from "@/components/models/member-chip";
 import { type MemberDraft, nextPriority } from "@/components/models/member-drafts";
+import { MODEL_TYPES } from "@/components/models/model-vocab";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ACTION_ICONS } from "@/lib/icons";
 import { useUpstreams } from "@/lib/use-upstreams";
+import { cn } from "@/lib/utils";
 import type { RoutingMode, UpstreamModel } from "@/types";
 
 /** 分层提示：同层语义随渲染策略变化（failover 平权 / weighted 比例 / conditional 顺序）。 */
@@ -27,6 +30,7 @@ const LAYER_NOTES: Record<RoutingMode, string> = {
 /**
  * 行内字段提示：行内编辑只渲染当前策略适用的字段（票15）——priority 永远在；
  * weight 仅 weighted、when 仅 conditional，其余模式完全不渲染（不是 disabled 摆着）。
+ * W7 票05：提示不再挂在输入框 title 上，收进行内展开区（「更多配置」）。
  */
 const FIELD_HINTS = {
   priority: "数值小优先；同值即同层",
@@ -35,9 +39,20 @@ const FIELD_HINTS = {
 } as const;
 
 /**
+ * 桌面表格列模板（输入前置：优先级/权重/表达式在成员信息之前）；窄屏同一套 DOM
+ * 退化为卡片堆叠，模板只在 lg 以上生效。列：展开 | 优先级 | 权重或表达式 | 成员/上游 | 移除。
+ */
+const ROW_GRID: Record<RoutingMode, string> = {
+  failover: "lg:grid-cols-[2.25rem_5.5rem_minmax(0,1fr)_2.25rem]",
+  weighted: "lg:grid-cols-[2.25rem_5.5rem_5.5rem_minmax(0,1fr)_2.25rem]",
+  conditional: "lg:grid-cols-[2.25rem_5.5rem_minmax(9rem,1.1fr)_minmax(0,1fr)_2.25rem]",
+};
+
+/**
  * 候选 chip 渲染预算：几百上游、上千模型时两栏高度由 max-height 兜底，但 DOM 仍会
  * 随候选线性膨胀；未搜索时先只渲染前 120 个并提供「展开全部」（搜索本身在缩小集合，
- * 截断反而藏结果，故搜索时全量渲染）。
+ * 截断反而藏结果，故搜索时全量渲染）。W7 票05：已选成员不再从候选中过滤，
+ * 原地灰显也计入预算。
  */
 const CANDIDATE_CHIP_BUDGET = 120;
 
@@ -50,110 +65,178 @@ export interface MemberChipFlowProps {
   onChange: (next: MemberDraft[]) => void;
 }
 
+/** 窄屏卡片模式下的行内字段标签（桌面由表头提供，lg 起隐藏）。 */
+function CellLabel({ children }: { children: ReactNode }) {
+  return <span className="mb-1 block text-2xs text-faint lg:hidden">{children}</span>;
+}
+
+/** 单元格的窄屏卡片定位：首行放 chevron/成员/移除，输入整行铺开；lg 起回归表格列。 */
+const CELL_CARD = "col-span-3 col-start-1 lg:col-auto lg:row-auto";
+const CELL_CARD_ROW1 = "lg:col-auto lg:row-auto";
+
 interface MemberRowProps {
   chip: MemberChip;
   mode: RoutingMode;
+  expanded: boolean;
+  onToggle: () => void;
   onPatch: (patch: Partial<MemberDraft>) => void;
   onRemove: () => void;
 }
 
-/** 已选成员行：每模型一行，行内直接编辑当前策略字段；脏态走页头体系（整页单 PATCH）。 */
-function MemberRow({ chip, mode, onPatch, onRemove }: MemberRowProps) {
+/** 已选成员表格行：输入前置（优先级 → 权重/表达式 → 成员/上游），chevron 展开更多配置；脏态走页头体系（整页单 PATCH）。 */
+function MemberRow({ chip, mode, expanded, onToggle, onPatch, onRemove }: MemberRowProps) {
   const { member } = chip;
   return (
     <div
+      role="row"
       data-slot="member-row"
       data-upstream-model-id={member.upstream_model_id}
+      data-index={chip.index}
       data-fallback={chip.fallback ? "true" : "false"}
-      className="flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-md border border-border bg-surface px-2 py-1.5"
+      className={cn(
+        "mb-2 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-2 rounded-md border border-border bg-surface p-2.5 last:mb-0",
+        "lg:mb-0 lg:items-center lg:gap-2 lg:rounded-none lg:bg-transparent lg:p-0 lg:px-2 lg:py-1.5",
+        "lg:border-x-0 lg:border-t-0 lg:border-b lg:border-border",
+        ROW_GRID[mode],
+        expanded ? "lg:border-b-0" : null,
+      )}
     >
-      <div className="flex min-w-0 items-center gap-1.5">
-        {mode === "conditional" ? (
-          <span
-            data-slot="chip-order"
-            title={"顺序 " + chip.order}
-            className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-surface-2 px-1 text-2xs text-faint tnum"
-          >
-            {chip.order}
-          </span>
-        ) : null}
-        <span
-          data-slot="member-row-label"
-          title={chip.label}
-          className="min-w-0 max-w-[14rem] truncate font-mono text-2sm text-body"
+      <div role="cell" className={cn("flex items-center", CELL_CARD_ROW1)}>
+        <Button
+          variant="ghost"
+          size="dense"
+          data-slot="member-row-expand"
+          aria-expanded={expanded}
+          aria-label={(expanded ? "收起更多配置 " : "展开更多配置 ") + chip.label}
+          title={expanded ? "收起更多配置" : "展开更多配置"}
+          className="px-1.5 text-faint hover:text-body"
+          onClick={onToggle}
         >
-          {chip.label}
-        </span>
-        {chip.fallback ? (
-          <Badge tone="info" data-slot="chip-fallback">
-            末位兜底
-          </Badge>
-        ) : null}
+          <ChevronDown aria-hidden="true" className={cn("h-3.5 w-3.5 transition-transform", expanded && "rotate-180")} />
+        </Button>
       </div>
-      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
-        <span className="flex items-center gap-1">
-          <span className="shrink-0 text-2xs text-faint">priority</span>
+      <div role="cell" className={cn("min-w-0", CELL_CARD, "row-start-2")}>
+        <CellLabel>优先级</CellLabel>
+        <Input
+          aria-label="priority"
+          inputMode="numeric"
+          placeholder="1"
+          className="w-full tnum"
+          value={member.priority}
+          onChange={(event) => onPatch({ priority: event.target.value })}
+        />
+      </div>
+      {mode === "weighted" ? (
+        <div role="cell" className={cn("min-w-0", CELL_CARD, "row-start-3")}>
+          <CellLabel>权重</CellLabel>
           <Input
-            aria-label="priority"
+            aria-label="weight"
             inputMode="numeric"
-            placeholder="1"
-            title={FIELD_HINTS.priority}
-            className="w-14 tnum"
-            value={member.priority}
-            onChange={(event) => onPatch({ priority: event.target.value })}
+            placeholder="0"
+            className="w-full tnum"
+            value={member.weight}
+            onChange={(event) => onPatch({ weight: event.target.value })}
           />
-        </span>
-        {mode === "weighted" ? (
-          <span className="flex items-center gap-1">
-            <span className="shrink-0 text-2xs text-faint">weight</span>
-            <Input
-              aria-label="weight"
-              inputMode="numeric"
-              placeholder="0"
-              title={FIELD_HINTS.weight}
-              className="w-14 tnum"
-              value={member.weight}
-              onChange={(event) => onPatch({ weight: event.target.value })}
-            />
+        </div>
+      ) : null}
+      {mode === "conditional" ? (
+        <div role="cell" className={cn("min-w-0", CELL_CARD, "row-start-3")}>
+          <CellLabel>表达式</CellLabel>
+          <Input
+            aria-label="when"
+            placeholder={'request.tier == "pro"'}
+            className="w-full"
+            value={member.when}
+            onChange={(event) => onPatch({ when: event.target.value })}
+          />
+        </div>
+      ) : null}
+      <div role="cell" className={cn("min-w-0", CELL_CARD_ROW1)}>
+        <div className="flex min-w-0 items-center gap-1.5">
+          {mode === "conditional" ? (
+            <span
+              data-slot="chip-order"
+              title={"顺序 " + chip.order}
+              className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-surface-2 px-1 text-2xs text-faint tnum"
+            >
+              {chip.order}
+            </span>
+          ) : null}
+          <span
+            data-slot="member-row-label"
+            title={chip.label}
+            className="min-w-0 truncate font-mono text-2sm text-body"
+          >
+            {chip.label}
           </span>
-        ) : null}
-        {mode === "conditional" ? (
-          <span className="flex min-w-[12rem] flex-1 items-center gap-1">
-            <span className="shrink-0 text-2xs text-faint">when</span>
-            <Input
-              aria-label="when"
-              placeholder={'request.tier == "pro"'}
-              title={FIELD_HINTS.when}
-              className="min-w-0 flex-1"
-              value={member.when}
-              onChange={(event) => onPatch({ when: event.target.value })}
-            />
-          </span>
-        ) : null}
+          {chip.fallback ? (
+            <Badge tone="info" data-slot="chip-fallback">
+              末位兜底
+            </Badge>
+          ) : null}
+        </div>
       </div>
-      <Button
-        variant="ghost"
-        size="dense"
-        data-slot="member-row-remove"
-        className="shrink-0 text-faint hover:bg-danger-soft hover:text-danger-text"
-        title="移除成员"
-        aria-label={"移除 " + chip.label}
-        onClick={onRemove}
-      >
-        <ACTION_ICONS.clear aria-hidden="true" className="h-3.5 w-3.5" />
-      </Button>
+      <div role="cell" className={cn("flex items-center justify-end", CELL_CARD_ROW1)}>
+        <Button
+          variant="ghost"
+          size="dense"
+          data-slot="member-row-remove"
+          className="shrink-0 text-faint hover:bg-danger-soft hover:text-danger-text"
+          title="移除成员"
+          aria-label={"移除 " + chip.label}
+          onClick={onRemove}
+        >
+          <ACTION_ICONS.clear aria-hidden="true" className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+interface MemberRowDetailProps {
+  chip: MemberChip;
+  upstreamName: string;
+  typeLabel: string;
+  hint: string;
+}
+
+/** 行展开区（更多配置）：承接未来扩展字段；当前放上游渠道/模型类型/成员 ID 与当前策略字段说明。 */
+function MemberRowDetail({ chip, upstreamName, typeLabel, hint }: MemberRowDetailProps) {
+  return (
+    <div
+      role="row"
+      data-slot="member-row-detail"
+      className={cn(
+        "mb-2 rounded-md border border-dashed border-border bg-surface-2/40 p-2.5 last:mb-0",
+        "lg:mb-0 lg:rounded-none lg:border-x-0 lg:border-t-0 lg:border-b lg:border-solid lg:border-border lg:bg-transparent lg:p-0 lg:px-2 lg:pb-2",
+      )}
+    >
+      <div role="cell">
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-2xs">
+          <dt className="shrink-0 text-faint">上游渠道</dt>
+          <dd className="min-w-0 truncate text-body">{upstreamName}</dd>
+          <dt className="shrink-0 text-faint">模型类型</dt>
+          <dd className="min-w-0 text-body">{typeLabel}</dd>
+          <dt className="shrink-0 text-faint">成员 ID</dt>
+          <dd className="min-w-0 break-all font-mono text-body">{chip.member.upstream_model_id}</dd>
+          <dt className="shrink-0 text-faint">字段说明</dt>
+          <dd className="min-w-0 text-body">{hint}</dd>
+        </dl>
+      </div>
     </div>
   );
 }
 
 /**
- * 成员编排左 6 右 6（W6 ticket 15 行内编辑落地）：左栏已选成员按 priority 升序
- * 分层展示为「第 N 层」区块，每个模型一行，行内只渲染并允许编辑当前策略字段
- * （failover 只 priority、weighted 加 weight、conditional 加 when，非当前策略字段
- * 完全不渲染）；右栏候选按上游渠道分组为 chip，搜索框固定在滚动区外，点 chip 即
- * 加入。改 priority 即换层，conditional 末位兜底由排序 + 末位校验保证（见
- * member-drafts.validateMembers），不引入拖拽库。保存语义不变：草稿 members 与
- * 整页一起走单 PATCH，脏态由页头 DirtyCount 呈现。
+ * 成员编排左 6 右 6（W7 ticket 05 表格化）：左栏已选成员是输入前置的表格
+ * （优先级/权重/表达式在前，成员信息靠后），按 priority 升序逐行展示，行内只渲染
+ * 并允许编辑当前策略字段（failover 只 priority、weighted 加 weight、conditional
+ * 加 when，非当前策略字段完全不渲染）；每行有显式 chevron 展开区承接更多配置。
+ * 右栏候选按上游渠道分组 chip，候选始终保留原位——点击加入原地灰显、+ 变 ×，
+ * 再点灰态候选取消选择；左侧已选只能点行内 × 移除。窄屏（<lg）同一套 DOM 退化为
+ * 卡片堆叠，不引入横向滚动。改 priority 即换层，conditional 末位兜底由排序 +
+ * 末位校验保证（见 member-drafts.validateMembers），不引入拖拽库。保存语义不变：
+ * 草稿 members 与整页一起走单 PATCH，脏态由页头 DirtyCount 呈现。
  */
 export function MemberChipFlow({
   members,
@@ -164,26 +247,33 @@ export function MemberChipFlow({
 }: MemberChipFlowProps) {
   const upstreams = useUpstreams();
   const [needle, setNeedle] = useState("");
-  const [expanded, setExpanded] = useState(false);
+  const [expandedAll, setExpandedAll] = useState(false);
+  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
 
   const labelOf = useMemo(() => memberLabeler(upstreamModels, fallbackNames), [upstreamModels, fallbackNames]);
   const layers = useMemo(() => memberLayers(members, labelOf, mode), [members, labelOf, mode]);
+  const chips = useMemo(() => layers.flatMap((layer) => layer.chips), [layers]);
+  const modelById = useMemo(() => new Map(upstreamModels.map((model) => [model.id, model])), [upstreamModels]);
+  const typeLabelOf = useMemo(() => {
+    const labels = new Map(MODEL_TYPES.map((item) => [item.value, item.label]));
+    return (upstreamModelId: string) => {
+      const model = modelById.get(upstreamModelId);
+      return model ? labels.get(model.model_type) ?? model.model_type : "未记录";
+    };
+  }, [modelById]);
+  const hint = mode === "weighted" ? FIELD_HINTS.weight : mode === "conditional" ? FIELD_HINTS.when : FIELD_HINTS.priority;
   const e20Hint = useMemo(
     () => (mode === "conditional" ? conditionalMultiKeyHint(members, upstreamModels, upstreams) : null),
     [mode, members, upstreamModels, upstreams],
   );
   const joinedIds = useMemo(() => new Set(members.map((member) => member.upstream_model_id)), [members]);
   const groups = useMemo(
-    () =>
-      filterCandidateGroups(
-        candidateGroups(upstreamModels.filter((model) => !joinedIds.has(model.id))),
-        needle,
-      ),
-    [upstreamModels, joinedIds, needle],
+    () => filterCandidateGroups(candidateGroups(upstreamModels), needle),
+    [upstreamModels, needle],
   );
   const totalCandidates = useMemo(() => groups.reduce((sum, group) => sum + group.models.length, 0), [groups]);
   const searching = needle.trim() !== "";
-  const budget = searching || expanded ? Number.POSITIVE_INFINITY : CANDIDATE_CHIP_BUDGET;
+  const budget = searching || expandedAll ? Number.POSITIVE_INFINITY : CANDIDATE_CHIP_BUDGET;
   const truncated = !searching && totalCandidates > CANDIDATE_CHIP_BUDGET;
   const visibleGroups = useMemo(() => {
     let remaining = budget;
@@ -209,20 +299,24 @@ export function MemberChipFlow({
       { upstream_model_id: upstreamModelId, priority: String(nextPriority(members)), weight: "", when: "" },
     ]);
   };
+  const removeModel = (upstreamModelId: string) => {
+    onChange(members.filter((member) => member.upstream_model_id !== upstreamModelId));
+  };
 
   return (
     <div className="space-y-3" data-slot="member-chip-flow">
-      {/* 票14 容器骨架：桌面左 6 右 6（左=已选成员行，右=候选分组），窄屏上下堆叠；
-       * 两栏各自 max-h min(60vh,560px) 内部滚动，列头与候选搜索固定在滚动区外。 */}
+      {/* W7 票05 容器骨架（沿用 W5/W6）：桌面左 6 右 6（左=已选成员表格，右=候选分组），
+       * 窄屏上下堆叠；两栏各自 max-h min(60vh,560px) 内部滚动，列头/表头与候选搜索
+       * 固定在滚动区外，左右列头行等高、表头同一水平线。 */}
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-12" data-slot="member-board-grid">
         <section data-slot="member-board-left" className="min-w-0 lg:col-span-6">
           <div
             data-slot="member-column-head"
             data-column="left"
-            className="mb-1.5 flex flex-wrap items-center justify-between gap-x-2 gap-y-1"
+            className="mb-1.5 flex h-9 items-center justify-between gap-x-2 gap-y-1 overflow-hidden"
           >
-            <h4 className="text-2sm font-medium text-title">已选成员</h4>
-            <span className="text-2xs text-faint">
+            <h4 className="shrink-0 text-2sm font-medium text-title">已选成员</h4>
+            <span className="min-w-0 truncate text-2xs text-faint">
               共 {members.length} 个成员，{layers.length} 层；{LAYER_NOTES[mode]}
             </span>
           </div>
@@ -231,36 +325,49 @@ export function MemberChipFlow({
               <p className="rounded-md border border-dashed border-border p-3 text-2xs text-faint" data-slot="member-empty">
                 暂无成员；从右侧候选区点击 chip 加入。
               </p>
-            ) : null}
-            <div className="space-y-2">
-              {layers.map((layer) => (
-                <section
-                  key={layer.priority}
-                  data-slot="member-layer"
-                  data-priority={layer.priority}
-                  className="rounded-md border border-border bg-surface-2/40 p-2"
+            ) : (
+              <div role="table" aria-label="已选成员" data-slot="member-table" className="w-full">
+                <div
+                  role="row"
+                  data-slot="member-table-head"
+                  className={cn(
+                    "hidden h-9 items-center gap-2 border-border bg-surface-2/60 px-2 lg:grid lg:border-y",
+                    ROW_GRID[mode],
+                  )}
                 >
-                  <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
-                    <h4 className="text-2sm font-medium text-title">{layer.title}</h4>
-                    <Badge tone="neutral" className="tnum">
-                      priority {layer.priority}
-                    </Badge>
-                    <span className="text-2xs text-faint">{layer.chips.length} 个成员</span>
-                  </div>
-                  <div className="space-y-1.5">
-                    {layer.chips.map((chip) => (
-                      <MemberRow
-                        key={chip.index}
+                  <span role="columnheader" className="text-2xs font-medium text-faint">展开</span>
+                  <span role="columnheader" className="text-2xs font-medium text-faint">优先级</span>
+                  {mode === "weighted" ? (
+                    <span role="columnheader" className="text-2xs font-medium text-faint">权重</span>
+                  ) : null}
+                  {mode === "conditional" ? (
+                    <span role="columnheader" className="text-2xs font-medium text-faint">表达式</span>
+                  ) : null}
+                  <span role="columnheader" className="text-2xs font-medium text-faint">成员 / 上游</span>
+                  <span role="columnheader" className="sr-only">移除</span>
+                </div>
+                {chips.map((chip) => (
+                  <Fragment key={chip.index}>
+                    <MemberRow
+                      chip={chip}
+                      mode={mode}
+                      expanded={expandedIndex === chip.index}
+                      onToggle={() => setExpandedIndex((current) => (current === chip.index ? null : chip.index))}
+                      onPatch={(patch) => updateByIndex(chip.index, patch)}
+                      onRemove={() => removeByIndex(chip.index)}
+                    />
+                    {expandedIndex === chip.index ? (
+                      <MemberRowDetail
                         chip={chip}
-                        mode={mode}
-                        onPatch={(patch) => updateByIndex(chip.index, patch)}
-                        onRemove={() => removeByIndex(chip.index)}
+                        upstreamName={modelById.get(chip.member.upstream_model_id)?.upstream_name ?? "未记录"}
+                        typeLabel={typeLabelOf(chip.member.upstream_model_id)}
+                        hint={hint}
                       />
-                    ))}
-                  </div>
-                </section>
-              ))}
-            </div>
+                    ) : null}
+                  </Fragment>
+                ))}
+              </div>
+            )}
 
             {e20Hint !== null ? (
               <p className="mt-2 text-2xs text-warning-text" data-slot="e20-hint">
@@ -274,18 +381,25 @@ export function MemberChipFlow({
           <div
             data-slot="member-column-head"
             data-column="right"
-            className="mb-1.5 flex flex-wrap items-center justify-between gap-x-2 gap-y-1"
+            className="mb-1.5 flex h-9 items-center justify-between gap-x-2 gap-y-1 overflow-hidden"
           >
-            <h4 className="text-2sm font-medium text-title">候选成员</h4>
+            <h4 className="shrink-0 text-2sm font-medium text-title">候选成员</h4>
             <Input
               aria-label="搜索上游渠道或模型"
               placeholder="搜索上游渠道或模型"
               title="按上游渠道或模型名过滤候选"
-              className="w-44"
+              className="w-44 shrink-0"
               value={needle}
               onChange={(event) => setNeedle(event.target.value)}
             />
-            <span className="text-2xs text-faint">已加入 {members.length} 个成员</span>
+            <span className="hidden min-w-0 truncate text-2xs text-faint sm:inline">已加入 {members.length} 个成员</span>
+          </div>
+          <div
+            data-slot="member-candidate-head"
+            className="mb-1.5 hidden h-9 items-center justify-between gap-2 border-b border-border px-2 text-2xs font-medium text-faint lg:flex"
+          >
+            <span>上游 / 模型</span>
+            <span>加入 / 已选</span>
           </div>
           <div data-slot="member-scroll" className="max-h-[min(60vh,560px)] overflow-y-auto pr-0.5">
             <div data-slot="member-candidates" className="space-y-2 rounded-md border border-border bg-surface p-2">
@@ -293,7 +407,7 @@ export function MemberChipFlow({
                 <p className="rounded-md border border-dashed border-border p-3 text-2xs text-faint" data-slot="candidate-empty">
                   {searching
                     ? "没有匹配的候选；换个关键词试试。"
-                    : "没有可加入的候选：全部上游模型都已加入成员，或先在上游渠道登记模型。"}
+                    : "没有可加入的候选：先在上游渠道登记模型。"}
                 </p>
               ) : null}
               {visibleGroups.map((group) => (
@@ -305,18 +419,30 @@ export function MemberChipFlow({
                   <div className="flex flex-wrap gap-1.5">
                     {group.models.map((model) => {
                       const label = labelOf(model.id);
+                      const joined = joinedIds.has(model.id);
                       return (
                         <Button
                           key={model.id}
                           variant="ghost"
                           data-slot="member-candidate-chip"
                           data-upstream-model-id={model.id}
-                          className="inline-flex h-auto max-w-full min-w-0 items-center justify-start gap-1 overflow-hidden rounded-full border border-dashed border-border px-2 py-1 text-left text-2sm font-normal text-body hover:border-primary hover:bg-primary-soft hover:text-primary-text"
-                          title={"加入成员 " + label}
-                          aria-label={"加入成员 " + label}
-                          onClick={() => addModel(model.id)}
+                          data-selected={joined ? "true" : "false"}
+                          aria-pressed={joined}
+                          className={cn(
+                            "inline-flex h-auto max-w-full min-w-0 items-center justify-start gap-1 overflow-hidden rounded-full border px-2 py-1 text-left text-2sm font-normal",
+                            joined
+                              ? "border-solid border-border bg-surface-2 text-faint hover:border-danger hover:bg-danger-soft hover:text-danger-text"
+                              : "border-dashed border-border text-body hover:border-primary hover:bg-primary-soft hover:text-primary-text",
+                          )}
+                          title={(joined ? "取消选择成员 " : "加入成员 ") + label}
+                          aria-label={(joined ? "取消选择成员 " : "加入成员 ") + label}
+                          onClick={() => (joined ? removeModel(model.id) : addModel(model.id))}
                         >
-                          <ACTION_ICONS.add aria-hidden="true" className="h-3 w-3 shrink-0" />
+                          {joined ? (
+                            <ACTION_ICONS.clear aria-hidden="true" className="h-3 w-3 shrink-0" />
+                          ) : (
+                            <ACTION_ICONS.add aria-hidden="true" className="h-3 w-3 shrink-0" />
+                          )}
                           <span className="min-w-0 truncate font-mono">{label}</span>
                         </Button>
                       );
@@ -326,8 +452,8 @@ export function MemberChipFlow({
               ))}
               {truncated ? (
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button variant="outline" size="dense" onClick={() => setExpanded((value) => !value)}>
-                    {expanded ? "收起，仅显示前 " + CANDIDATE_CHIP_BUDGET + " 个" : "展开全部 " + totalCandidates + " 个候选"}
+                  <Button variant="outline" size="dense" onClick={() => setExpandedAll((value) => !value)}>
+                    {expandedAll ? "收起，仅显示前 " + CANDIDATE_CHIP_BUDGET + " 个" : "展开全部 " + totalCandidates + " 个候选"}
                   </Button>
                   <span className="text-2xs text-faint">候选较多，先渲染前 {CANDIDATE_CHIP_BUDGET} 个。</span>
                 </div>

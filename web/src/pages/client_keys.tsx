@@ -40,8 +40,10 @@ function keyClosedLast(key: ApiKey): boolean {
  */
 export function ClientKeysPage() {
   const queryClient = useQueryClient();
-  const { can } = usePermissions();
+  const { can, me } = usePermissions();
   const canWrite = can("apikeys:write");
+  /** B 方案：管理员/分销商（users:read）可在可见子树内代签；customer 固定为自己。 */
+  const canPickUser = canWrite && can("users:read");
 
   const qKeys = useQuery({
     queryKey: KEYS_QUERY_KEY,
@@ -62,7 +64,8 @@ export function ClientKeysPage() {
   const usersQ = useQuery({
     queryKey: ["admin-users-lite"],
     queryFn: () => api.get<Array<{ id: string; name: string; status: string }>>(ENDPOINTS.users + "?page_size=200&offset=0"),
-    enabled: canWrite,
+    // customer 没有 users:read，代签用户列表不请求（B 方案固定为自己）。
+    enabled: canPickUser,
   });
 
   const invalidate = () => {
@@ -85,6 +88,9 @@ export function ClientKeysPage() {
     },
     onError: (error: Error) => toast.error("签发密钥失败", { description: error.message }),
   });
+
+  /** 签发目标：管理员/分销商取下拉选择；customer 固定为当前登录用户。 */
+  const issueTargetId = canPickUser ? issueUserId : (me?.id ?? "");
 
   const setStatus = useMutation({
     mutationFn: (vars: { keyId: string; status: "active" | "disabled" }) =>
@@ -233,25 +239,39 @@ export function ClientKeysPage() {
           <DialogHeader>
             <DialogTitle>新建连接密钥</DialogTitle>
             <DialogDescription>
-              为所选用户签发一把 sk- 连接密钥；明文只在创建后展示一次，请立即复制保存。
+              {canPickUser
+                ? "为所选用户签发一把 sk- 连接密钥；明文只在创建后展示一次，请立即复制保存。"
+                : "为自己签发一把 sk- 连接密钥；明文只在创建后展示一次，请立即复制保存。"}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
-            <div className="space-y-1.5">
-              <label className="text-2sm text-title" htmlFor="issue-user">用户</label>
-              <Select value={issueUserId} onValueChange={setIssueUserId}>
-                <SelectTrigger id="issue-user" className="w-full">
-                  <SelectValue placeholder="选择用户" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(usersQ.data ?? []).map((user) => (
-                    <SelectItem key={user.id} value={user.id}>
-                      {user.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {canPickUser ? (
+              <div className="space-y-1.5">
+                <label className="text-2sm text-title" htmlFor="issue-user">用户</label>
+                <Select value={issueUserId} onValueChange={setIssueUserId}>
+                  <SelectTrigger id="issue-user" className="w-full">
+                    <SelectValue placeholder="选择用户" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(usersQ.data ?? []).map((user) => (
+                      <SelectItem key={user.id} value={user.id}>
+                        {user.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <label className="text-2sm text-title" htmlFor="issue-user-fixed">归属用户</label>
+                <div
+                  id="issue-user-fixed"
+                  className="rounded-md border border-border bg-surface-2 px-3 py-2 text-2sm text-title"
+                >
+                  {me?.name || me?.username || "当前用户"}（自己）
+                </div>
+              </div>
+            )}
             <div className="space-y-1.5">
               <label className="text-2sm text-title" htmlFor="issue-name">名称（可选）</label>
               <Input
@@ -268,8 +288,8 @@ export function ClientKeysPage() {
               取消
             </Button>
             <Button
-              onClick={() => issue.mutate({ userId: issueUserId, name: issueName })}
-              disabled={issue.isPending || !issueUserId}
+              onClick={() => issue.mutate({ userId: issueTargetId, name: issueName })}
+              disabled={issue.isPending || !issueTargetId}
             >
               <ACTION_ICONS.issueKey className="h-3.5 w-3.5" />
               {issue.isPending ? "签发中…" : "签发密钥"}

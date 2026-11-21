@@ -1475,13 +1475,13 @@ check("成员编排：展示名统一「上游渠道/模型」，术语不单用
   expect(memberChipLabel("zai-01", "glm-5.3") === "zai-01/glm-5.3", "成员展示名必须是「上游渠道/模型」");
   expect(memberChipLabel(undefined, "glm-5.3") === "glm-5.3", "上游渠道缺失时只显示模型名");
   const page = read("src/components/models/public-model-page.tsx");
-  includesAll(page, ["MemberChipFlow"], "公开模型单页成员段必须用分层 chip 流");
+  includesAll(page, ["MemberChipFlow"], "公开模型单页成员段必须用成员表格（MemberChipFlow）");
   expect(!page.includes("MemberBoard"), "成员段必须替换掉一行一模型的 MemberBoard（ticket 13 遗留）");
   const flow = read("src/components/models/member-chip-flow.tsx");
   includesAll(
     flow,
-    ["第 ", "搜索上游渠道或模型", 'data-slot="member-layer"', 'data-slot="member-row"', 'data-slot="member-candidate-chip"', "@/components/ui/button", "末位兜底"],
-    "成员 chip 流结构",
+    ["优先级", "搜索上游渠道或模型", 'data-slot="member-table"', 'data-slot="member-table-head"', 'data-slot="member-row"', 'data-slot="member-candidate-chip"', "@/components/ui/button", "末位兜底"],
+    "成员表格结构",
   );
   for (const file of [
     "src/components/models/member-chip.ts",
@@ -1950,6 +1950,40 @@ check("成员编排行内编辑：行内字段按策略收敛、候选按上游�
   expect(searchAt >= 0 && scrollAt > searchAt, "候选搜索框必须渲染在 member-scroll 之前（固定在滚动区外）");
   // 大列表：候选超预算截断渲染并提供「展开全部」，避免上千模型把页面拉到无限长。
   includesAll(flow, ["CANDIDATE_CHIP_BUDGET", "展开全部"], "大列表预算截断");
+});
+
+// ---------- W7 ticket 05：已选成员表格化（输入前置 + chevron 展开 + 候选原位 + 列头对齐）----------
+check("成员表格（W7 票05）：输入前置表头按策略收敛、行内 chevron、候选原位双态、列头对齐槽位", async () => {
+  const flowView = await load("/src/components/models/member-chip-flow.tsx");
+  const upstreamModels = [
+    { id: "um_01", upstream_id: "up_01", name: "glm-5.3", upstream_name: "zai-01", model_type: "chat", enabled: true, created_at_ms: 0 },
+    { id: "um_02", upstream_id: "up_01", name: "glm-5.3-flash", upstream_name: "zai-01", model_type: "chat", enabled: true, created_at_ms: 0 },
+    { id: "um_03", upstream_id: "up_01", name: "glm-4.6", upstream_name: "zai-01", model_type: "chat", enabled: true, created_at_ms: 0 },
+  ];
+  const members = [
+    { upstream_model_id: "um_01", priority: "1", weight: "2", when: "" },
+    { upstream_model_id: "um_02", priority: "2", weight: "1", when: "" },
+  ];
+  const renderMode = (mode) =>
+    render(createElement(flowView.MemberChipFlow, { members, upstreamModels, fallbackNames: new Map(), mode, onChange: () => {} }));
+  const failover = renderMode("failover");
+  const weighted = renderMode("weighted");
+  const conditional = renderMode("conditional");
+  // 表头按策略收敛且输入前置：展开/优先级在最左，成员信息靠后；字段按当前策略出现。
+  includesAll(failover, ["展开", "优先级", "成员 / 上游"], "failover 表头");
+  expect(!failover.includes("权重") && !failover.includes("表达式"), "failover 不得出现权重/表达式表头");
+  includesAll(weighted, ["权重"], "weighted 表头出现中文「权重」");
+  includesAll(conditional, ["表达式"], "conditional 表头出现中文「表达式」");
+  // 每行显式展开控件（chevron），展开态由 aria-expanded 表达。
+  expect((failover.match(/data-slot="member-row-expand"/g) ?? []).length === 2, "每行一个展开 chevron");
+  expect(failover.includes('aria-expanded="false"'), "chevron 必须 aria-expanded 标记展开态");
+  expect(failover.includes('data-slot="member-row-detail"') === false, "收起态不得渲染展开区");
+  // 候选原位双态：全量渲染，已选灰显（data-selected）+ ×（aria-label 变取消选择）。
+  expect((failover.match(/data-slot="member-candidate-chip"/g) ?? []).length === 3, "候选全量原位渲染");
+  expect((failover.match(/data-selected="true"/g) ?? []).length === 2, "已选候选必须灰显标记");
+  includesAll(failover, ["取消选择成员 zai-01/glm-5.3", "加入成员 zai-01/glm-4.6", 'aria-pressed="true"', 'aria-pressed="false"'], "候选灰显双态");
+  // 左右两栏对齐槽位：左表格表头与右候选表头都固定在列头行（h-9）之后，y 对齐由浏览器验收断言。
+  includesAll(failover, ['data-slot="member-column-head"', 'data-slot="member-table-head"', 'data-slot="member-candidate-head"'], "列头对齐槽位");
 });
 
 // ---------- 十一、通知中心紧凑布局与密钥弹窗二元按钮（W6 ticket 13）----------
