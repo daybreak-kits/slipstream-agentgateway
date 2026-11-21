@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PriceTable, type PriceColumn } from "@/components/pricing/table";
 import { UNIT_HINT, priceMicro } from "@/components/pricing/money";
-import { invalidatePricing, pricingKeys, useUpstreamModels, useUpstreams, useVendors } from "@/components/pricing/queries";
+import { invalidatePricing, pricingKeys, useUpstreamModels } from "@/components/pricing/queries";
 import { api, apiList, ENDPOINTS } from "@/lib/api";
 import { fmtUnitPriceMicro } from "@/lib/format";
 import { formatDateTime, useTimezone } from "@/lib/time";
@@ -18,40 +18,32 @@ import { usePermissions } from "@/lib/permissions";
 import type { UpstreamModel } from "@/types";
 
 /**
- * /admin/prices/upstream 的行形状（l06_api/routers_billing.py）：vendor_id + 模型名字符串
- * + item 枚举 + 整数微单位单价，版本化追加。兼容旧 mock 的 vendor_name / effective_from。
+ * /admin/prices/upstream 的行形状（l06_api/routers_billing.py，ADR-030）：挂 upstream_model_id
+ * + item 枚举 + 整数微单位单价，版本化追加。
  */
 interface UpstreamPriceRow {
   id: string;
-  vendor_id?: string;
-  vendor_name?: string;
-  upstream_model: string;
+  upstream_model_id: string;
   item: string;
   unit_price_micro: number;
   currency: string;
   effective_from_ms?: number;
-  effective_from?: string;
   version: number;
 }
 
-/** 一行展示：同一（上游渠道厂商, 模型）下缓存读/写的最新版本。 */
+/** 一行展示：同一上游模型行（upstream_model_id）下缓存读/写的最新版本。 */
 interface CachePair {
-  vendorId: string;
-  vendorName: string;
-  model: string;
+  modelId: string;
+  modelName: string;
+  upstreamName: string;
   read: UpstreamPriceRow | null;
   write: UpstreamPriceRow | null;
   effectiveMs: number | null;
 }
 
 function effectiveMs(row: UpstreamPriceRow | null | undefined): number | null {
-  if (!row) return null;
-  if (typeof row.effective_from_ms === "number") return row.effective_from_ms;
-  if (row.effective_from) {
-    const parsed = Date.parse(row.effective_from);
-    return Number.isNaN(parsed) ? null : parsed;
-  }
-  return null;
+  if (!row || typeof row.effective_from_ms !== "number") return null;
+  return row.effective_from_ms;
 }
 
 /** page_size 档位限制 25/50/100/200：取 200 尽量覆盖全部版本行。 */
@@ -68,56 +60,47 @@ export function CachePricesSection() {
   const { can, isPending: permissionsPending } = usePermissions();
   const canReadPrices = can("prices:read");
   const canReadModels = can("upstream_models:read");
-  const canReadUpstreams = can("upstreams:read");
-  const canReadVendors = can("vendors:read");
   const canWrite = can("prices:write");
-  // 新建入口依赖 vendor 定位数据（模型→上游→厂商），三者任一不可读就不提供
-  const canCreate = canWrite && canReadModels && canReadUpstreams;
+  // 新建入口依赖模型行清单（upstream_model_id 是价目归属键，ADR-030）
+  const canCreate = canWrite && canReadModels;
 
   const pricesQuery = useCachePrices(!permissionsPending && canReadPrices);
   const modelsQuery = useUpstreamModels(!permissionsPending && canReadModels);
-  const upstreamsQuery = useUpstreams(!permissionsPending && canReadUpstreams);
-  const vendorsQuery = useVendors(!permissionsPending && canReadVendors);
 
   const [searchText, setSearchText] = useState("");
   const [editing, setEditing] = useState<CachePair | null>(null);
   const [creating, setCreating] = useState(false);
 
-  const vendorNames = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const vendor of vendorsQuery.data?.items ?? []) map.set(vendor.id, vendor.name);
-    return map;
-  }, [vendorsQuery.data]);
-
-  const upstreamVendor = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const upstream of upstreamsQuery.data?.items ?? []) {
-      map.set(upstream.id, upstream.vendor_id);
+  // 模型行 id → 展示名（模型名 + 所属上游名）：upstream_model_id 是价目归属键（ADR-030）
+  const modelLabels = useMemo(() => {
+    const map = new Map<string, { name: string; upstream: string }>();
+    for (const model of modelsQuery.data?.items ?? []) {
+      map.set(model.id, { name: model.name, upstream: model.upstream_name ?? "" });
     }
     return map;
-  }, [upstreamsQuery.data]);
+  }, [modelsQuery.data]);
 
   const pairs = useMemo<CachePair[]>(() => {
     const rows = [...(pricesQuery.data?.items ?? [])];
-    // 每个范围（厂商, 模型, item）版本号最大者为现行价：先按版本倒序，折叠时首见即最新
+    // 每个范围（模型行, item）版本号最大者为现行价：先按版本倒序，折叠时首见即最新
     rows.sort(
       (a, b) => b.version - a.version || (effectiveMs(b) ?? 0) - (effectiveMs(a) ?? 0),
     );
-    const map = new Map<string, { vendorId: string; vendorName: string; model: string; read: UpstreamPriceRow | null; write: UpstreamPriceRow | null }>();
+    const map = new Map<string, { modelId: string; modelName: string; upstreamName: string; read: UpstreamPriceRow | null; write: UpstreamPriceRow | null }>();
     for (const row of rows) {
       if (row.item !== "cache_read" && row.item !== "cache_write") continue;
-      const vendorId = row.vendor_id ?? "";
-      const key = vendorId + "\u0000" + row.upstream_model;
-      let entry = map.get(key);
+      const modelId = row.upstream_model_id;
+      let entry = map.get(modelId);
       if (!entry) {
+        const label = modelLabels.get(modelId);
         entry = {
-          vendorId,
-          vendorName: vendorNames.get(vendorId) ?? row.vendor_name ?? (vendorId || "-"),
-          model: row.upstream_model,
+          modelId,
+          modelName: label?.name ?? "(未知模型)",
+          upstreamName: label?.upstream ?? "",
           read: null,
           write: null,
         };
-        map.set(key, entry);
+        map.set(modelId, entry);
       }
       if (row.item === "cache_read" && !entry.read) entry.read = row;
       if (row.item === "cache_write" && !entry.write) entry.write = row;
@@ -127,15 +110,15 @@ export function CachePricesSection() {
       effectiveMs: Math.max(effectiveMs(entry.read) ?? 0, effectiveMs(entry.write) ?? 0) || null,
     })).sort(
       (a, b) =>
-        a.vendorName.localeCompare(b.vendorName, "zh") || a.model.localeCompare(b.model, "zh"),
+        a.modelName.localeCompare(b.modelName, "zh") || a.upstreamName.localeCompare(b.upstreamName, "zh"),
     );
-  }, [pricesQuery.data, vendorNames]);
+  }, [pricesQuery.data, modelLabels]);
 
   const filtered = useMemo(() => {
     const query = searchText.trim().toLowerCase();
     if (!query) return pairs;
     return pairs.filter((pair) =>
-      (pair.model + " " + pair.vendorName).toLowerCase().includes(query),
+      (pair.modelName + " " + pair.upstreamName).toLowerCase().includes(query),
     );
   }, [pairs, searchText]);
 
@@ -150,11 +133,11 @@ export function CachePricesSection() {
       key: "model",
       label: "模型",
       sortable: true,
-      sortValue: (pair) => pair.model,
+      sortValue: (pair) => pair.modelName,
       cell: (pair) => (
         <div>
-          <div className="font-medium text-title">{pair.model}</div>
-          <div className="text-2xs text-faint">{pair.vendorName}</div>
+          <div className="font-medium text-title">{pair.modelName}</div>
+          <div className="text-2xs text-faint">{pair.upstreamName || "-"}</div>
         </div>
       ),
     },
@@ -250,7 +233,7 @@ export function CachePricesSection() {
         sectionKey="cache"
         searchText={searchText}
         onSearchChange={setSearchText}
-        searchPlaceholder="筛选模型 / 厂商"
+        searchPlaceholder="筛选模型 / 上游"
         emptyText="还没有缓存价（cache_read / cache_write）"
         emptyAction={
           canCreate ? (
@@ -260,15 +243,14 @@ export function CachePricesSection() {
           ) : undefined
         }
         onClearFilters={() => setSearchText("")}
-        rowKey={(pair) => pair.vendorId + "\u0000" + pair.model}
+        rowKey={(pair) => pair.modelId}
       />
 
       {editing ? (
         <CachePriceDialog
           mode="edit"
-          vendorId={editing.vendorId}
-          vendorName={editing.vendorName}
-          modelName={editing.model}
+          modelId={editing.modelId}
+          modelName={editing.modelName}
           currency={(editing.read ?? editing.write)?.currency ?? "CNY"}
           currentRead={editing.read?.unit_price_micro ?? null}
           currentWrite={editing.write?.unit_price_micro ?? null}
@@ -279,7 +261,6 @@ export function CachePricesSection() {
         <CachePriceDialog
           mode="create"
           models={modelsQuery.data?.items ?? []}
-          upstreamVendor={upstreamVendor}
           onClose={() => setCreating(false)}
         />
       ) : null}
@@ -287,40 +268,35 @@ export function CachePricesSection() {
   );
 }
 
-/** 新建 / 编辑缓存价：写现有 POST /admin/prices/upstream（版本化追加，按厂商 + 模型名 + item 定位）。 */
+/** 新建 / 编辑缓存价：写现有 POST /admin/prices/upstream（版本化追加，按模型行 + item 定位）。 */
 function CachePriceDialog({
   mode,
-  vendorId = "",
-  vendorName = "",
+  modelId = "",
   modelName = "",
   currency = "CNY",
   currentRead = null,
   currentWrite = null,
   models = [],
-  upstreamVendor,
   onClose,
 }: {
   mode: "create" | "edit";
-  vendorId?: string;
-  vendorName?: string;
+  modelId?: string;
   modelName?: string;
   currency?: string;
   currentRead?: number | null;
   currentWrite?: number | null;
   models?: UpstreamModel[];
-  upstreamVendor?: Map<string, string>;
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
-  const [modelId, setModelId] = useState("");
+  const [selectedModelId, setSelectedModelId] = useState("");
   const [read, setRead] = useState("");
   const [write, setWrite] = useState("");
   // W4-G 弹窗草稿守卫：填了内容/选了模型后 Esc、遮罩、取消不放行，先确认「放弃修改？」。
   const [confirmDiscard, setConfirmDiscard] = useState(false);
 
-  const selectedModel = models.find((model) => model.id === modelId) ?? null;
-  const targetVendorId = mode === "edit" ? vendorId : selectedModel ? (upstreamVendor?.get(selectedModel.upstream_id) ?? "") : "";
-  const targetModel = mode === "edit" ? modelName : (selectedModel?.name ?? "");
+  const selectedModel = models.find((model) => model.id === selectedModelId) ?? null;
+  const targetModelId = mode === "edit" ? modelId : (selectedModel?.id ?? "");
 
   const readMicro = priceMicro(read);
   const writeMicro = priceMicro(write);
@@ -329,7 +305,7 @@ function CachePriceDialog({
     (write.trim() !== "" && writeMicro === null);
   const nothingFilled = read.trim() === "" && write.trim() === "";
   const canSubmit =
-    !invalid && !nothingFilled && (mode === "edit" || (selectedModel && targetVendorId));
+    !invalid && !nothingFilled && (mode === "edit" || selectedModel);
 
   const dirty = !nothingFilled || (mode === "create" && modelId !== "");
   const requestClose = () => {
@@ -349,8 +325,7 @@ function CachePriceDialog({
           .filter((entry): entry is { item: "cache_read" | "cache_write"; micro: number } => entry.micro !== null)
           .map((entry) =>
             api.post(ENDPOINTS.pricesUpstream, {
-              vendor_id: targetVendorId,
-              upstream_model: targetModel,
+              upstream_model_id: targetModelId,
               item: entry.item,
               unit_price_micro: entry.micro,
               currency,
@@ -384,13 +359,13 @@ function CachePriceDialog({
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>
-            {mode === "edit" ? "编辑缓存价 · " + vendorName + " / " + modelName : "新建缓存价"}
+            {mode === "edit" ? "编辑缓存价 · " + modelName : "新建缓存价"}
           </DialogTitle>
         </DialogHeader>
         {mode === "create" ? (
           <label className="space-y-1">
-            <span className="text-2xs text-faint">上游模型（厂商随模型所属上游）</span>
-            <Select value={modelId} onValueChange={setModelId}>
+            <span className="text-2xs text-faint">上游模型</span>
+            <Select value={selectedModelId} onValueChange={setSelectedModelId}>
               <SelectTrigger aria-label="选择上游模型" className="w-full">
                 <SelectValue placeholder="选择上游模型" />
               </SelectTrigger>

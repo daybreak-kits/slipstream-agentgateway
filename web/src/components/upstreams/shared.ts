@@ -4,10 +4,9 @@
 import { ApiError } from "@/lib/api";
 import type { Upstream, UpstreamProbe } from "@/types";
 
-/** 后端 D：vendor_id 可空；详情带 api_style_source。ADR-026 后 has_api_key 由
- *  密钥行数量派生（`key_count > 0`，不再读退役的 api_key_enc 镜像列），前端不再读取。 */
-export type UpstreamRow = Omit<Upstream, "vendor_id"> & {
-  vendor_id?: string | null;
+/** 详情带 api_style_source。ADR-026 后 has_api_key 由密钥行数量派生
+ *  （`key_count > 0`，不再读退役的 api_key_enc 镜像列），前端不再读取。 */
+export type UpstreamRow = Upstream & {
   has_api_key?: boolean;
   api_style_source?: string;
 };
@@ -55,11 +54,9 @@ export interface ProbeResultView {
   probe_steps?: ProbeStep[];
 }
 
-/** 新建上游时的草稿（名称已解锁随 PATCH 提交；厂商仍只读，见 api-contract §3.2）。 */
+/** 新建上游时的草稿（名称可随提交一起写，见 api-contract §3.2 / ADR-023 #6）。 */
 export interface UpstreamDraft {
   name: string;
-  /** "" = 未分组（不传 vendor_id） */
-  vendorId: string;
   baseUrl: string;
   /** "auto" 或四个具体风格 */
   apiStyle: string;

@@ -33,7 +33,7 @@ export interface RolePatchInput {
 }
 
 const MOCK_GROUPS: Array<[string, string[]]> = [
-  ["主数据", ["vendors:read", "vendors:write", "upstreams:read", "upstreams:write", "upstream_models:read", "upstream_models:write", "public_models:read", "public_models:write", "model_targets:read", "model_targets:write"]],
+  ["主数据", ["upstreams:read", "upstreams:write", "upstream_models:read", "upstream_models:write", "public_models:read", "public_models:write", "model_targets:read", "model_targets:write"]],
   ["流量治理", ["availability:read", "availability:write", "transforms:read", "transforms:write"]],
   ["治理", ["config:read", "config:write", "settings:read", "settings:write", "audits:read", "policies:read", "policies:write"]],
   ["计费", ["prices:read", "prices:write", "billing:cost", "billing:spend", "billing:subtree", "ledger:read"]],

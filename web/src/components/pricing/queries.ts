@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 
 import { apiList, ENDPOINTS } from "@/lib/api";
-import type { PublicModel, PublicModelPrice, Upstream, UpstreamModel, Vendor } from "@/types";
+import type { PublicModel, PublicModelPrice, Upstream, UpstreamModel } from "@/types";
 
 /**
  * 价目页共享 query key：改价/导入后统一失效。key 与模型管理、日志等页面保持同源，
@@ -11,7 +11,6 @@ import type { PublicModel, PublicModelPrice, Upstream, UpstreamModel, Vendor } f
 export const pricingKeys = {
   upstreamModels: ["upstream-models"] as const,
   upstreams: ["upstreams"] as const,
-  vendors: ["vendors"] as const,
   cachePrices: ["prices-upstream"] as const,
   publicPrices: ["public-model-prices"] as const,
   publicModels: ["public-models"] as const,
@@ -36,14 +35,6 @@ export function useUpstreams(enabled: boolean) {
   return useQuery({
     queryKey: pricingKeys.upstreams,
     queryFn: () => apiList<Upstream>(ENDPOINTS.upstreams),
-    enabled,
-  });
-}
-
-export function useVendors(enabled: boolean) {
-  return useQuery({
-    queryKey: pricingKeys.vendors,
-    queryFn: () => apiList<Vendor>(ENDPOINTS.vendors),
     enabled,
   });
 }

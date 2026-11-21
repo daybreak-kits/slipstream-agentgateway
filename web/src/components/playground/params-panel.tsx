@@ -529,7 +529,7 @@ export function ParamsPanel({
               <Textarea
                 id="playground-extra"
                 rows={3}
-                placeholder={'{"vendor_field": "value"}'}
+                placeholder={'{"extra_field": "value"}'}
                 value={value.extraFields}
                 disabled={disabled}
                 onChange={(event) => patch({ extraFields: event.target.value })}

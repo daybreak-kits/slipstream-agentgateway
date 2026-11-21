@@ -98,7 +98,7 @@ export function LogDetailDrawer({ open, row, timezone, onOpenChange }: LogDetail
     ["请求模型", view.requested_model || "-"],
     ["上游模型", view.upstream_model || "-"],
     ["目标层级", view.target_priority === null ? "-" : "P" + view.target_priority],
-    ["厂商", view.provider || "-"],
+    ["上游", view.provider || "-"],
     ["请求 ID", <span className="font-mono text-2xs">{view.event_id}</span>],
   ];
 

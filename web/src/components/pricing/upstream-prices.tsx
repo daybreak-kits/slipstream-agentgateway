@@ -86,7 +86,7 @@ export function UpstreamPricesSection() {
     const rows = [...(modelsQuery.data?.items ?? [])];
     rows.sort(
       (a, b) =>
-        (a.vendor_name ?? "").localeCompare(b.vendor_name ?? "", "zh") ||
+        (a.upstream_name ?? "").localeCompare(b.upstream_name ?? "", "zh") ||
         a.name.localeCompare(b.name, "zh"),
     );
     return rows;
@@ -103,7 +103,7 @@ export function UpstreamPricesSection() {
     return models.filter((model) => {
       if (unpricedOnly && missingItems(model).length === 0) return false;
       if (!query) return true;
-      return [model.name, model.upstream_name, model.vendor_name, model.model_type]
+      return [model.name, model.upstream_name, model.model_type]
         .filter(Boolean)
         .join(" ")
         .toLowerCase()
@@ -248,7 +248,7 @@ export function UpstreamPricesSection() {
       sortable: true,
       sortValue: (model) => model.upstream_name ?? "",
       cell: (model) => (
-        <span className="text-body">{model.upstream_name ?? model.vendor_name ?? "-"}</span>
+        <span className="text-body">{model.upstream_name ?? "-"}</span>
       ),
     },
     {

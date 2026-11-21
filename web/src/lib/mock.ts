@@ -2,7 +2,7 @@ import type {
   AdminAccount, ApiKey, AuditLog, AvailabilityRule, ChargePrice, ChargeEntry, ConfigRevision,
   CostEntry, ModelTarget, MyModelOut, OverviewStats,
   PublicModel, PublicModelPrice, SettingItem, TransformPreviewResult, UnpricedList, Upstream,
-  UpstreamModel, UpstreamPrice, UpstreamTransforms, UserPreferences, UserTreeNode, Vendor,
+  UpstreamModel, UpstreamPrice, UpstreamTransforms, UserPreferences, UserTreeNode,
 } from "../types";
 // 页面契约类型（gateway-policies 三 Tab / 角色管理）：只做类型引用不产生运行时依赖
 import type {
@@ -24,7 +24,7 @@ const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 let mockLoggedIn = false;
 /** 与后端管理用户角色一致：mock 会话默认拥有全部权限，前端只做显隐不做安全边界。 */
 const MOCK_ALL_PERMISSIONS = [
-  "vendors:read", "vendors:write", "upstreams:read", "upstreams:write",
+  "upstreams:read", "upstreams:write",
   "upstream_models:read", "upstream_models:write", "public_models:read", "public_models:write",
   "model_targets:read", "model_targets:write", "availability:read", "availability:write",
   "transforms:read", "transforms:write", "config:read", "config:write", "settings:read",
@@ -45,7 +45,7 @@ const MOCK_ADMIN = {
 };
 /** 客户镜像（l05_service/rbac.py _CUSTOMER_PERMISSIONS）：只读 + 己方花费 + 模型试验。 */
 const MOCK_CUSTOMER_PERMISSIONS = [
-  "vendors:read", "upstreams:read", "upstream_models:read", "public_models:read",
+  "upstreams:read", "upstream_models:read", "public_models:read",
   "model_targets:read", "availability:read", "transforms:read", "config:read",
   "settings:read", "audits:read", "policies:read", "prices:read",
   "billing:spend", "reports:read", "users:read", "apikeys:read", "admins:read",
@@ -64,27 +64,38 @@ const MOCK_CUSTOMER = {
 /** 当前 mock 会话身份：登录时按账号切换。 */
 let mockSession: typeof MOCK_ADMIN | typeof MOCK_CUSTOMER = MOCK_ADMIN;
 
-const vendors: Vendor[] = [
-  { id: "vd_zai", name: "智谱 AI", slug: "zai", note: "智谱开放平台，旗舰 GLM 系列", upstream_seq: 3, created_at_ms: Date.parse("2026-11-01T09:00:00") },
-  { id: "vd_or", name: "OpenRouter", slug: "or", note: "海外聚合路由", upstream_seq: 2, created_at_ms: Date.parse("2026-11-01T09:00:00") },
-  { id: "vd_nebula", name: "青岚云", slug: "nebula", note: "云厂商大模型服务，合规通道", upstream_seq: 1, created_at_ms: Date.parse("2026-11-01T09:00:00") },
-  { id: "vd_doubao", name: "字节火山方舟", slug: "doubao", note: "豆包系列，待补上游价目", upstream_seq: 0, created_at_ms: Date.parse("2026-11-01T09:00:00") },
-];
-let vendorSeq = 3;
+/** ADR-023 #6：名称由连接地址生成（host:port 折叠 [a-z0-9-]，默认端口去掉），重名加 -N。 */
+function upstreamNameFromBaseUrl(baseUrl: string, existing: Upstream[]): string {
+  let host = baseUrl.replace(/^\w+:\/\//, "").split("/")[0] ?? "";
+  try {
+    const url = new URL(baseUrl);
+    host = url.hostname;
+    const drop = (url.protocol === "http:" && url.port === "80") || (url.protocol === "https:" && url.port === "443");
+    if (url.port !== "" && !drop) host += ":" + url.port;
+  } catch { /* 保留原样折叠 */ }
+  const stem = host.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "upstream";
+  let name = stem;
+  let suffix = 2;
+  while (existing.some((row) => row.name === name)) {
+    name = stem + "-" + String(suffix);
+    suffix += 1;
+  }
+  return name;
+}
 
-/** 实测 /admin/upstreams 形状：名称形如 {vendor_slug}-NN，无 vendor_name/has_api_key/model_count */
+/** 实测 /admin/upstreams 形状：名称由 base_url 生成（ADR-023 #6）；alias 为 t04 展示名 */
 const upstreams: Upstream[] = [
-  { id: "up_01", name: "zai-01", vendor_id: "vd_zai", base_url: "https://open.bigmodel.cn/api/paas/v4", api_style: "openai_chat", transforms: null, max_buffer_bytes: 2097152, enabled: true, created_at_ms: Date.parse("2026-11-01T09:00:00") },
-  { id: "up_02", name: "or-01", vendor_id: "vd_or", base_url: "https://openrouter.ai/api/v1", api_style: "openai_chat", transforms: null, max_buffer_bytes: 2097152, enabled: true, created_at_ms: Date.parse("2026-11-01T09:01:00") },
-  { id: "up_03", name: "nebula-01", vendor_id: "vd_nebula", base_url: "https://api.nebula.example/v1", api_style: "anthropic_messages", transforms: null, max_buffer_bytes: 2097152, enabled: false, created_at_ms: Date.parse("2026-11-01T09:02:00") },
+  { id: "up_01", name: "zai-01", alias: "", base_url: "https://open.bigmodel.cn/api/paas/v4", api_style: "openai_chat", transforms: null, max_buffer_bytes: 2097152, enabled: true, created_at_ms: Date.parse("2026-11-01T09:00:00") },
+  { id: "up_02", name: "or-01", alias: "", base_url: "https://openrouter.ai/api/v1", api_style: "openai_chat", transforms: null, max_buffer_bytes: 2097152, enabled: true, created_at_ms: Date.parse("2026-11-01T09:01:00") },
+  { id: "up_03", name: "nebula-01", alias: "", base_url: "https://api.nebula.example/v1", api_style: "anthropic_messages", transforms: null, max_buffer_bytes: 2097152, enabled: false, created_at_ms: Date.parse("2026-11-01T09:02:00") },
 ];
 
 const upstreamModels: UpstreamModel[] = [
-  { id: "um_01", upstream_id: "up_01", name: "glm-5.3", model_type: "chat", enabled: true, created_at_ms: Date.parse("2026-11-01T09:00:00"), upstream_name: "zai-01", vendor_name: "智谱 AI", cost_input_per_1m: "2.500000", cost_output_per_1m: "10.000000", markup: "1.2000" },
-  { id: "um_02", upstream_id: "up_01", name: "glm-5.3-flash", model_type: "chat", enabled: true, created_at_ms: Date.parse("2026-11-01T09:00:00"), upstream_name: "zai-01", vendor_name: "智谱 AI", cost_input_per_1m: "0.300000", cost_output_per_1m: "1.200000", markup: "1.5000" },
-  { id: "um_03", upstream_id: "up_01", name: "embedding-4", model_type: "embedding", enabled: true, created_at_ms: Date.parse("2026-11-01T09:00:00"), upstream_name: "zai-01", vendor_name: "智谱 AI", cost_input_per_1m: "0.050000", cost_output_per_1m: "0.000000", markup: "1.0000" },
-  { id: "um_04", upstream_id: "up_02", name: "deepseek/v5-chat", model_type: "chat", enabled: true, created_at_ms: Date.parse("2026-11-02T09:00:00"), upstream_name: "or-01", vendor_name: "OpenRouter", cost_input_per_1m: null, cost_output_per_1m: null, markup: "1.0000" },
-  { id: "um_05", upstream_id: "up_02", name: "qwen/max-next", model_type: "chat", enabled: false, created_at_ms: Date.parse("2026-11-02T09:00:00"), upstream_name: "or-01", vendor_name: "OpenRouter", cost_input_per_1m: "1.200000", cost_output_per_1m: "4.800000", markup: "1.1000" },
+  { id: "um_01", upstream_id: "up_01", name: "glm-5.3", model_type: "chat", enabled: true, created_at_ms: Date.parse("2026-11-01T09:00:00"), upstream_name: "zai-01", cost_input_per_1m: "2.500000", cost_output_per_1m: "10.000000", markup: "1.2000" },
+  { id: "um_02", upstream_id: "up_01", name: "glm-5.3-flash", model_type: "chat", enabled: true, created_at_ms: Date.parse("2026-11-01T09:00:00"), upstream_name: "zai-01", cost_input_per_1m: "0.300000", cost_output_per_1m: "1.200000", markup: "1.5000" },
+  { id: "um_03", upstream_id: "up_01", name: "embedding-4", model_type: "embedding", enabled: true, created_at_ms: Date.parse("2026-11-01T09:00:00"), upstream_name: "zai-01", cost_input_per_1m: "0.050000", cost_output_per_1m: "0.000000", markup: "1.0000" },
+  { id: "um_04", upstream_id: "up_02", name: "deepseek/v5-chat", model_type: "chat", enabled: true, created_at_ms: Date.parse("2026-11-02T09:00:00"), upstream_name: "or-01", cost_input_per_1m: null, cost_output_per_1m: null, markup: "1.0000" },
+  { id: "um_05", upstream_id: "up_02", name: "qwen/max-next", model_type: "chat", enabled: false, created_at_ms: Date.parse("2026-11-02T09:00:00"), upstream_name: "or-01", cost_input_per_1m: "1.200000", cost_output_per_1m: "4.800000", markup: "1.1000" },
 ];
 
 const publicModels: PublicModel[] = [
@@ -492,15 +503,14 @@ const availabilityRules: AvailabilityRule[] = [
 ];
 
 const billingRequests: CostEntry[] = Array.from({ length: 12 }, (_, i) => {
-  const vendors = [["vd_zai", "um_01"], ["vd_zai", "um_02"], ["vd_or", "um_04"]];
-  const v = vendors[i % 3]!;
+  const modelIds = ["um_01", "um_02", "um_04"];
+  const modelId = modelIds[i % 3]!;
   const unpriced = i === 3;
   const free = i === 7;
   return {
     id: "ce_" + String(5000 + i),
     gateway_event_id: "gev_" + String(9000 + i),
-    vendor_id: v[0]!,
-    upstream_model_id: v[1]!,
+    upstream_model_id: modelId,
     input_tokens: 380 + i * 41,
     output_tokens: 74 + i * 13,
     amount_micro: unpriced ? 0 : 6200 + i * 1450,
@@ -530,13 +540,13 @@ const revenueRows: ChargeEntry[] = Array.from({ length: 14 }, (_, i) => {
 });
 
 const upstreamPrices: UpstreamPrice[] = [
-  { id: "up_01", vendor_name: "智谱直连", upstream_model: "glm-5.3", item: "input", unit_price_micro: 2000000, currency: "CNY", effective_from: "2026-11-01T00:00:00", version: 3 },
-  { id: "up_02", vendor_name: "智谱直连", upstream_model: "glm-5.3", item: "output", unit_price_micro: 8000000, currency: "CNY", effective_from: "2026-11-01T00:00:00", version: 3 },
-  { id: "up_03", vendor_name: "智谱直连", upstream_model: "glm-flash", item: "input", unit_price_micro: 300000, currency: "CNY", effective_from: "2026-11-01T00:00:00", version: 1 },
-  { id: "up_04", vendor_name: "智谱直连", upstream_model: "glm-flash", item: "output", unit_price_micro: 1200000, currency: "CNY", effective_from: "2026-11-01T00:00:00", version: 1 },
-  { id: "up_05", vendor_name: "OpenRouter 聚合", upstream_model: "deepseek/v5-chat", item: "input", unit_price_micro: 270000, currency: "USD", effective_from: "2026-10-15T00:00:00", version: 2 },
-  { id: "up_06", vendor_name: "OpenRouter 聚合", upstream_model: "deepseek/v5-chat", item: "output", unit_price_micro: 1090000, currency: "USD", effective_from: "2026-10-15T00:00:00", version: 2 },
-  { id: "up_07", vendor_name: "OpenRouter 聚合", upstream_model: "embedding-4", item: "request", unit_price_micro: 1000, currency: "USD", effective_from: "2026-10-15T00:00:00", version: 1 },
+  { id: "upr_01", upstream_model_id: "um_01", item: "input", unit_price_micro: 2000000, currency: "CNY", effective_from_ms: Date.parse("2026-11-01T00:00:00"), version: 3 },
+  { id: "upr_02", upstream_model_id: "um_01", item: "output", unit_price_micro: 8000000, currency: "CNY", effective_from_ms: Date.parse("2026-11-01T00:00:00"), version: 3 },
+  { id: "upr_03", upstream_model_id: "um_02", item: "input", unit_price_micro: 300000, currency: "CNY", effective_from_ms: Date.parse("2026-11-01T00:00:00"), version: 1 },
+  { id: "upr_04", upstream_model_id: "um_02", item: "output", unit_price_micro: 1200000, currency: "CNY", effective_from_ms: Date.parse("2026-11-01T00:00:00"), version: 1 },
+  { id: "upr_05", upstream_model_id: "um_04", item: "input", unit_price_micro: 270000, currency: "USD", effective_from_ms: Date.parse("2026-10-15T00:00:00"), version: 2 },
+  { id: "upr_06", upstream_model_id: "um_04", item: "output", unit_price_micro: 1090000, currency: "USD", effective_from_ms: Date.parse("2026-10-15T00:00:00"), version: 2 },
+  { id: "upr_07", upstream_model_id: "um_03", item: "request", unit_price_micro: 1000, currency: "USD", effective_from_ms: Date.parse("2026-10-15T00:00:00"), version: 1 },
 ];
 
 const chargePrices: ChargePrice[] = [
@@ -548,7 +558,7 @@ const chargePrices: ChargePrice[] = [
 
 const unpricedRows: UnpricedList = {
   cost: [
-    { id: "ce_5020", gateway_event_id: "gev_9020", vendor_id: "vd_doubao", upstream_model_id: "um_90", input_tokens: 912, output_tokens: 233, amount_micro: 0, currency: "CNY", price_version_id: null, status: "unpriced" },
+    { id: "ce_5020", gateway_event_id: "gev_9020", upstream_model_id: "um_90", input_tokens: 912, output_tokens: 233, amount_micro: 0, currency: "CNY", price_version_id: null, status: "unpriced" },
   ],
   charge: [
     { id: "ch_7015", gateway_event_id: "gev_9015", user_id: "eu_02", public_model_id: "pm_90", input_tokens: 22100, output_tokens: 1902, amount_micro: 0, currency: "CNY", price_version_id: null, status: "unpriced" },
@@ -1093,7 +1103,6 @@ const routes: Array<[RegExp, unknown]> = [
   [/^\/admin\/reports\/trend/, { metric: "requests", range: "today", points: [], estimate_note: "近似值：按价目快照折算" }],
   [/^\/admin\/reports\/flow/, { nodes: [], links: [], estimate_note: "近似值：按价目快照折算" }],
   [/^\/admin\/health/, { status: "ok", ir_version: "ir-7", adapter: "openai-chat", now_ms: Date.now(), data_plane_port: 3600 }],
-  [/^\/admin\/vendors$/, vendors],
   [/^\/admin\/upstreams$/, upstreams],
   [/^\/admin\/upstream-models$/, upstreamModels],
   [/^\/admin\/public-models$/, publicModels],
@@ -1440,15 +1449,13 @@ export async function mockRequest<T>(path: string, init?: RequestInit): Promise<
   if (init?.method === "GET" && /^\/admin\/upstreams\/[^/?]+\/keys$/.test(path.split("?")[0] ?? "")) {
     return { items: [], limit: 100 } as T;
   }
-  // 契约 3.2：POST body {vendor_id, base_url, api_style, api_key}；name 由 {vendor_slug}-NN 自动生成
+  // 契约 3.2：POST body {name?, base_url, api_style, api_key}；name 缺省由 base_url 生成（ADR-023 #6）
   if (init?.method === "POST" && (path.split("?")[0] ?? "") === "/admin/upstreams") {
-    const body = JSON.parse(String(init.body ?? "{}")) as { vendor_id?: string; base_url?: string; api_style?: string; api_key?: string };
-    const vendor = vendors.find((x) => x.id === (body.vendor_id ?? ""));
-    vendorSeq += 1;
+    const body = JSON.parse(String(init.body ?? "{}")) as { name?: string; base_url?: string; api_style?: string; api_key?: string };
     const created: Upstream = {
       id: "up_" + String(upstreams.length + 1).padStart(2, "0"),
-      name: (vendor ? vendor.slug : "new") + "-" + String(vendorSeq).padStart(2, "0"),
-      vendor_id: body.vendor_id ?? "",
+      name: body.name?.trim() || upstreamNameFromBaseUrl(body.base_url ?? "", upstreams),
+      alias: "",
       base_url: body.base_url ?? "",
       api_style: body.api_style ?? "openai_chat",
       transforms: null,

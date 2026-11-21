@@ -22,13 +22,12 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { TabBar } from "@/components/ui/tabs";
-import { api, apiList, ENDPOINTS } from "@/lib/api";
+import { api, ENDPOINTS } from "@/lib/api";
 import { ACTION_ICONS } from "@/lib/icons";
 import { useDirtyGuard } from "@/lib/use-dirty-guard";
 import { formatDateTime, useTimezone } from "@/lib/time";
 import { METRIC_ICONS } from "@/lib/metric-icons";
 import { usePermissions } from "@/lib/permissions";
-import type { Vendor } from "@/types";
 
 /** 新建走同一条路由（/upstreams/new）；保存成功后 replace 成真实 id。 */
 const NEW_UPSTREAM_ID = "new";
@@ -36,7 +35,6 @@ const NEW_UPSTREAM_ID = "new";
 function draftOf(row: UpstreamRow | null): UpstreamDraft {
   return {
     name: row?.name ?? "",
-    vendorId: row?.vendor_id ?? "",
     baseUrl: row?.base_url ?? "",
     apiStyle: row?.api_style ?? "auto",
     enabled: row?.enabled ?? true,
@@ -46,7 +44,6 @@ function draftOf(row: UpstreamRow | null): UpstreamDraft {
 function draftEquals(a: UpstreamDraft, b: UpstreamDraft): boolean {
   return (
     a.name === b.name &&
-    a.vendorId === b.vendorId &&
     a.baseUrl === b.baseUrl &&
     a.apiStyle === b.apiStyle &&
     a.enabled === b.enabled
@@ -78,7 +75,6 @@ export function UpstreamDetailPage() {
     queryFn: () => api.get<UpstreamRow>(ENDPOINTS.upstreamDetail(id)),
     enabled: id !== "",
   });
-  const vendorsQ = useQuery({ queryKey: ["vendors"], queryFn: () => apiList<Vendor>(ENDPOINTS.vendors) });
 
   const [draft, setDraft] = useState<UpstreamDraft>(() => draftOf(null));
   const [baseline, setBaseline] = useState<UpstreamDraft | null>(isNew ? draftOf(null) : null);
@@ -158,7 +154,6 @@ export function UpstreamDetailPage() {
       if (isNew) {
         const created = await api.post<UpstreamRow>(ENDPOINTS.upstreamCreate, {
           ...(draft.name.trim() !== "" ? { name: draft.name.trim() } : {}),
-          ...(draft.vendorId !== "" ? { vendor_id: draft.vendorId } : {}),
           base_url: draft.baseUrl.trim(),
           api_style: draft.apiStyle,
           api_key: pendingKeys[0]?.apiKey.trim() ?? "",
@@ -363,7 +358,6 @@ export function UpstreamDetailPage() {
           upstream={upstream}
           draft={draft}
           onDraftChange={onDraftChange}
-          vendors={vendorsQ.data?.items ?? []}
           pendingKeys={pendingKeys}
           onPendingKeysChange={setPendingKeys}
           probe={probe}

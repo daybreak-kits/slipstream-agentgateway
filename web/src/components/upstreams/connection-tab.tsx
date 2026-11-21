@@ -1,5 +1,3 @@
-import type { ReactNode } from "react";
-
 import { PendingKeysPanel, UpstreamKeysPanel } from "./keys-panel";
 import { UpstreamStatusPanel } from "./status-panel";
 import {
@@ -11,11 +9,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import type { Vendor } from "@/types";
-
-function ReadOnlyValue({ children }: { children: ReactNode }) {
-  return <div className="min-h-9 px-3 py-2 text-2sm text-body">{children}</div>;
-}
 
 /** Tab1 连接与模型：左卡「连接信息」（宽）+ 右列「连接状态」与「模型」（窄）。 */
 export function ConnectionTab({
@@ -23,7 +16,6 @@ export function ConnectionTab({
   upstream,
   draft,
   onDraftChange,
-  vendors,
   pendingKeys,
   onPendingKeysChange,
   probe,
@@ -35,7 +27,6 @@ export function ConnectionTab({
   upstream: UpstreamRow | null;
   draft: UpstreamDraft;
   onDraftChange: (patch: Partial<UpstreamDraft>) => void;
-  vendors: Vendor[];
   pendingKeys: PendingKey[];
   onPendingKeysChange: (keys: PendingKey[]) => void;
   probe: ProbeResultView | null;
@@ -44,7 +35,6 @@ export function ConnectionTab({
   onGoModels: () => void;
 }) {
   const styleOption = API_STYLE_OPTIONS.find((option) => option.value === draft.apiStyle);
-  const vendorName = vendors.find((vendor) => vendor.id === draft.vendorId)?.name ?? "未分组";
   const baseUrl = draft.baseUrl.trim();
 
   return (
@@ -64,7 +54,7 @@ export function ConnectionTab({
             />
             <FieldDescription>
               {isNew
-                ? "可自由填写或留空：无厂商时按 host:port 生成，指定厂商时按 {厂商代号}-NN 编号。"
+                ? "可自由填写或留空：留空时名称按连接地址（host:port）自动生成。"
                 : "名称可修改，保存时随配置一起提交；与其他上游重名会被 422 拒绝。"}
             </FieldDescription>
           </Field>
@@ -98,28 +88,6 @@ export function ConnectionTab({
               </div>
             </div>
             <FieldDescription>由连接地址与协议风格推导的预览；实际拼接以服务端探测为准。</FieldDescription>
-          </Field>
-
-          <Field>
-            <FieldLabel>厂商</FieldLabel>
-            {isNew ? (
-              <Select value={draft.vendorId} onValueChange={(value) => onDraftChange({ vendorId: value })}>
-                <SelectTrigger aria-label="厂商">
-                  <SelectValue placeholder="选择厂商" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">未分组</SelectItem>
-                  {vendors.map((vendor) => (
-                    <SelectItem key={vendor.id} value={vendor.id}>{vendor.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : (
-              <ReadOnlyValue>{vendorName}</ReadOnlyValue>
-            )}
-            <FieldDescription>
-              厂商仅作展示分组；{isNew ? "可选，未分组时名称按连接地址生成。" : "创建后不支持修改。"}
-            </FieldDescription>
           </Field>
 
           <Field>
