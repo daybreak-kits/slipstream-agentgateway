@@ -48,7 +48,7 @@ def _add_model(factory, model_id: str, name: str) -> None:
         session.commit()
 
 
-def _as_user(factory, role: str = "user"):
+def _as_customer(factory, role: str = "customer"):
     browser = _app_client(factory)
     admin_id = make_admin(factory, username="pricing-io-" + role, role=role)
     browser.cookies.set(SESSION_COOKIE, new_session_token(factory, admin_id))
@@ -288,7 +288,7 @@ def test_export_filters_cost_fields_without_billing_cost_and_import_denied(
         json={"cost_input_per_1m": "2.5", "cost_output_per_1m": "10", "markup": "1.2"},
     )
     # 普通用户有 upstream_models:read 但没有 billing:cost：导出可读，成本键整体缺席（§0.5）。
-    browser = _as_user(factory, "user")
+    browser = _as_customer(factory, "customer")
     data = browser.get(EXPORT_URL).json()
     assert data["schema_version"] == 1
     row = data["upstream_models"][0]

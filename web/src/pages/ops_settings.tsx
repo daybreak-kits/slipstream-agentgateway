@@ -210,7 +210,7 @@ function ConnectionSection({ canWrite }: { canWrite: boolean }) {
   return (
     <>
     <SettingsGrid>
-      <SettingsTile title="当前生效地址" hint="普通用户只能读，不能改。" className="md:col-span-3 xl:col-span-2">
+      <SettingsTile title="当前生效地址" hint="客户只能读，不能改。" className="md:col-span-3 xl:col-span-2">
         <p className="break-all font-mono text-2sm text-title">{address}</p>
         <p className="text-2xs text-faint">
           {connection.data?.configured ? "来源：运营设置显式配置" : "来源：浏览器当前 host + " + (connection.data?.default_port ?? 3600) + " 端口"}

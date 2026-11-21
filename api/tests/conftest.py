@@ -64,6 +64,7 @@ _TEST_TMP_PATTERNS = (
     ".tmp-ag-contract-*",
     ".tmp-status-*",
     ".tmp-ag-config-check",
+    ".tmp-pytest-*",
 )
 
 _LOCK_NAME = ".ag-dir.lock"
@@ -160,6 +161,44 @@ def _cleanup_repo_local_test_dirs():
     _sweep_repo_local_test_dirs()
 
 
+class _RepoPathFactory:
+    """pytest's tmp dirs use mode=0700, which the Windows file sandbox makes
+    unreadable after creation. Keep test temp trees inside the repo with the
+    default ACL instead; the conftest sweep pattern removes leftovers."""
+
+    def __init__(self) -> None:
+        self.root = TEST_TMP_ROOT / (".tmp-pytest-repo-" + uuid4().hex[:8])
+        self.root.mkdir()
+
+    def mktemp(self, basename: str = "tmp", *, numbered: bool = True) -> Path:
+        del numbered
+        path = self.root / (basename + "-" + uuid4().hex[:8])
+        path.mkdir()
+        return path
+
+    def getbasetemp(self) -> Path:
+        return self.root
+
+    def cleanup(self) -> None:
+        _rmtree_retry(str(self.root))
+
+
+@pytest.fixture(scope="session")
+def tmp_path_factory():
+    """Sandbox-safe replacement for pytest's mode=0700 temp root."""
+    factory = _RepoPathFactory()
+    try:
+        yield factory
+    finally:
+        factory.cleanup()
+
+
+@pytest.fixture()
+def tmp_path(tmp_path_factory) -> Path:
+    """Per-test repo-local temp dir (same contract as pytest's tmp_path)."""
+    return tmp_path_factory.mktemp("test")
+
+
 @pytest.fixture()
 def engine_and_sessionmaker():
     os.environ["SLIPSTREAM_SECRET_KEY"] = "test-secret"
@@ -197,7 +236,7 @@ def make_admin(
     *,
     username: str,
     password: str = DEMO_PASSWORD,
-    role: str = "owner",
+    role: str = "admin",
     status: str = "active",
     display_name: str = "",
     user_id: str = "",
@@ -263,9 +302,9 @@ def _fresh_login_limiter():
 
 @pytest.fixture()
 def client(engine_and_sessionmaker):
-    """Authenticated as a default owner; RBAC tests switch roles via login_cookies."""
+    """Authenticated as a default admin; RBAC tests switch roles via login_cookies."""
     _, factory = engine_and_sessionmaker
-    return _authenticated_client(factory, "owner")
+    return _authenticated_client(factory, "admin")
 
 
 @pytest.fixture()
@@ -281,7 +320,7 @@ def login_cookies(engine_and_sessionmaker):
 
     _, factory = engine_and_sessionmaker
 
-    def _login(role: str = "owner") -> dict[str, str]:
+    def _login(role: str = "admin") -> dict[str, str]:
         admin_id = make_admin(
             factory, username="test-" + role + "-" + uuid4().hex[:6], role=role
         )

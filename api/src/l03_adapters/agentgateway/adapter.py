@@ -2,20 +2,40 @@
 
 from __future__ import annotations
 
-from l02_domain.ir import GatewayIR
+from collections.abc import Sequence
+from typing import Any
+
+from l02_domain.ir import GatewayIR, TransformsSpec
 from l02_domain.validation import ValidationResult, validate_gateway_ir
+from l03_adapters.agentgateway import credentials
 from l03_adapters.agentgateway.apply import ConfigApplier
 from l03_adapters.agentgateway.binary_validate import build_validator
 from l03_adapters.agentgateway.render import render_artifact
-from l03_adapters.agentgateway.transforms import compile_transforms
-from l03_adapters.agentgateway.usage import fetch_events, open_readonly
+from l03_adapters.agentgateway.transforms import (
+    compile_transforms,
+    compile_warnings,
+)
+from l03_adapters.agentgateway.usage import (
+    cleanup_expired_logs,
+    fetch_events,
+    fetch_request_payload,
+    open_readonly,
+)
 from l03_adapters.spi import (
     AdapterInfo,
     ApplyResult,
     Artifact,
+    AttemptSink,
     Capability,
+    ClientContract,
+    ClientEndpoint,
+    CredentialFile,
     DataPlaneStatus,
     HealthSnapshot,
+    LogPayload,
+    MaterializationResult,
+    TelemetryHandle,
+    TransformPreview,
     UsageCursor,
     UsagePage,
 )
@@ -118,6 +138,7 @@ class AgentgatewayAdapter:
         filename: str = "config.yaml",
         ag_db_path: str | None = None,
         ag_binary: str | None = None,
+        llm_port: int = 3600,
     ) -> None:
         # None auto-detects the pinned binary; "" disables the gate explicitly
         # (tests and hosts without the gateway install); a path pins one binary.
@@ -125,6 +146,8 @@ class AgentgatewayAdapter:
             config_dir, filename, validator=build_validator(ag_binary)
         )
         self._ag_db_path = ag_db_path
+        self._config_dir = config_dir
+        self._llm_port = int(llm_port)
 
     def describe(self) -> AdapterInfo:
         return AdapterInfo(
@@ -368,3 +391,60 @@ class AgentgatewayAdapter:
 
     def rollback(self, revision_id: str) -> ApplyResult:
         return self._applier.rollback(revision_id)
+
+    # --- W6 ticket 01 ports ------------------------------------------------
+
+    def read_log_payload(self, event_id: str) -> LogPayload | None:
+        if not self._ag_db_path:
+            return None
+        conn = open_readonly(self._ag_db_path)
+        try:
+            payload = fetch_request_payload(conn, event_id)
+        finally:
+            conn.close()
+        if payload is None:
+            return None
+        return LogPayload(
+            event_id=str(payload.get("event_id", event_id)),
+            request_prompt_json=str(payload.get("request_prompt_json", "")),
+            response_completion_json=str(payload.get("response_completion_json", "")),
+        )
+
+    def prune_logs(self, retention_days: int) -> dict[str, int]:
+        return cleanup_expired_logs(self._ag_db_path or "", retention_days)
+
+    def preview_transforms(self, spec: TransformsSpec) -> TransformPreview:
+        return TransformPreview(
+            after=compile_transforms(spec),
+            notes=tuple(compile_warnings(spec)),
+        )
+
+    def materialize_credentials(
+        self, files: Sequence[CredentialFile], *, dry_run: bool = False
+    ) -> MaterializationResult:
+        return credentials.materialize(self._config_dir, files, dry_run=dry_run)
+
+    def client_contract(self) -> ClientContract:
+        return ClientContract(
+            default_port=self._llm_port,
+            endpoints=(
+                ClientEndpoint("/v1/chat/completions", ("POST",), "chat.completions"),
+                ClientEndpoint("/v1/models", ("GET",), "models.list"),
+                ClientEndpoint("/v1/embeddings", ("POST",), "embeddings.create"),
+            ),
+        )
+
+    def capability_note(self, key: str) -> str:
+        for capability in self.describe().capabilities:
+            if capability.key == key:
+                return capability.note
+        return ""
+
+    def start_telemetry(self, app: Any, sink: AttemptSink) -> TelemetryHandle | None:
+        from l03_adapters.agentgateway.telemetry import wire_telemetry
+
+        return wire_telemetry(app, sink)
+
+    def stop_telemetry(self, handle: TelemetryHandle | None) -> None:
+        if handle is not None:
+            handle.stop()

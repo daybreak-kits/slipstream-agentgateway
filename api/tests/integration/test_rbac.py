@@ -24,35 +24,35 @@ def _client_for(factory, role: str, username: str = "") -> tuple[object, str]:
 
 def test_me_returns_permission_list_for_admin(client):
     body = client.get("/admin/auth/me").json()
-    assert body["role"] == "owner"
+    assert body["role"] == "admin"
     permissions = body["permissions"]
     assert isinstance(permissions, list) and permissions == sorted(permissions)
     assert {"users:read", "billing:cost", "roles:write", "playground:use"} <= set(permissions)
 
 
-def test_ordinary_user_me_has_spend_but_no_cost(engine_and_sessionmaker):
+def test_customer_me_has_spend_but_no_cost(engine_and_sessionmaker):
     _, factory = engine_and_sessionmaker
-    client, _ = _client_for(factory, "user")
+    client, _ = _client_for(factory, "customer")
     me = client.get("/admin/auth/me").json()
-    assert me["role"] == "user"
+    assert me["role"] == "customer"
     assert "billing:spend" in me["permissions"]
     assert "billing:cost" not in me["permissions"]
     assert "users:create" not in me["permissions"]
 
 
-def test_viewer_write_is_forbidden_with_403(client, login_cookies):
+def test_customer_write_is_forbidden_with_403(client, login_cookies):
     response = client.post(
         "/admin/vendors",
         json={"name": "V", "slug": "v"},
-        cookies=login_cookies("viewer"),
+        cookies=login_cookies("customer"),
     )
     assert response.status_code == 403
     assert response.json()["code"] == "FORBIDDEN"
 
 
-def test_agent_creates_client_users_but_not_admins(engine_and_sessionmaker):
+def test_reseller_creates_client_users_but_not_admins(engine_and_sessionmaker):
     _, factory = engine_and_sessionmaker
-    client, _ = _client_for(factory, "agent")
+    client, _ = _client_for(factory, "reseller")
     assert client.get("/admin/users").status_code == 200
     created = client.post("/admin/users", json={"name": "sub-user", "balance_micro": 0})
     assert created.status_code == 201
@@ -68,12 +68,14 @@ def test_builtin_roles_are_listed_and_protected(client):
     assert listed.status_code == 200
     rows = listed.json()["items"]
     by_key = {row["key"]: row for row in rows}
-    assert {"admin", "user", "agent"} <= set(by_key)
+    assert {"admin", "customer", "reseller"} <= set(by_key)
     assert by_key["admin"]["name"] == "管理用户"
+    assert by_key["customer"]["name"] == "客户"
+    assert by_key["reseller"]["name"] == "分销商"
     assert by_key["admin"]["builtin"] is True
     assert by_key["admin"]["permissions"] == sorted(by_key["admin"]["permissions"])
     assert "billing:cost" in by_key["admin"]["permissions"]
-    assert "billing:cost" not in by_key["user"]["permissions"]
+    assert "billing:cost" not in by_key["customer"]["permissions"]
 
     deleted = client.delete("/admin/roles/" + by_key["admin"]["id"])
     assert deleted.status_code == 409
@@ -136,29 +138,33 @@ def test_role_assignment_persists_on_users(client, engine_and_sessionmaker):
         "/admin/users",
         json={
             "name": "代理一号",
-            "username": "agent-one",
+            "username": "reseller-one",
             "password": "Adm1n-pw-2026",
-            "role": "agent",
+            "role": "reseller",
         },
     )
     assert created.status_code == 201, created.text
     user = created.json()
-    assert user["username"] == "agent-one"
-    assert user["role"] == "agent"
+    assert user["username"] == "reseller-one"
+    assert user["role"] == "reseller"
     assert user["initial_password"] == "Adm1n-pw-2026"
 
     rows = [row for row in client.get("/admin/users").json() if row["id"] == user["id"]]
-    assert rows and rows[0]["role"] == "agent"
+    assert rows and rows[0]["role"] == "reseller"
 
-    patched = client.patch("/admin/users/" + user["id"], json={"role": "user"})
+    patched = client.patch("/admin/users/" + user["id"], json={"role": "customer"})
     assert patched.status_code == 200
-    assert patched.json()["role"] == "user"
+    assert patched.json()["role"] == "customer"
     assert next(
         row for row in client.get("/admin/users").json() if row["id"] == user["id"]
-    )["role"] == "user"
+    )["role"] == "customer"
 
     rejected = client.patch("/admin/users/" + user["id"], json={"role": "wizard"})
     assert rejected.status_code == 422
+    # Retired keys are not aliases: assignment must fail closed with 422.
+    for old in ("user", "agent", "owner", "operator", "viewer"):
+        retired = client.patch("/admin/users/" + user["id"], json={"role": old})
+        assert retired.status_code == 422, (old, retired.text)
     # username 是登录名，一经设定不可修改（ADR-019）。
     renamed = client.patch(
         "/admin/users/" + user["id"], json={"username": "agent-two"}

@@ -55,7 +55,7 @@ def test_self_and_subtree_scope_include_only_visible_users(client, engine_and_se
     _, factory = engine_and_sessionmaker
     root_id = client.get("/admin/users/tree").json()["root_id"]
     now = now_ms()
-    agent_admin = make_admin(factory, username="bill-agent", role="agent", user_id="u_agent")
+    agent_admin = make_admin(factory, username="bill-agent", role="reseller", user_id="u_agent")
     with factory() as session:
         session.add(PublicModelORM(id="pmdl_test", name="flagship", created_at_ms=now))
         session.add_all(
@@ -63,14 +63,14 @@ def test_self_and_subtree_scope_include_only_visible_users(client, engine_and_se
                 UserORM(
                     id="u_child",
                     name="下级乙",
-                    role="user",
+                    role="customer",
                     parent_user_id="u_agent",
                     created_at_ms=now,
                 ),
                 UserORM(
                     id="u_sibling",
                     name="兄弟丙",
-                    role="user",
+                    role="customer",
                     parent_user_id=root_id,
                     created_at_ms=now,
                 ),
@@ -134,14 +134,14 @@ def test_plain_user_sees_own_spend_without_cost_fields(client, engine_and_sessio
     _, factory = engine_and_sessionmaker
     root_id = client.get("/admin/users/tree").json()["root_id"]
     now = now_ms()
-    plain_admin = make_admin(factory, username="bill-plain", role="user", user_id="u_plain")
+    plain_admin = make_admin(factory, username="bill-plain", role="customer", user_id="u_plain")
     with factory() as session:
         session.add_all(
             [
                 UserORM(
                     id="u_other",
                     name="别家用户",
-                    role="user",
+                    role="customer",
                     parent_user_id=root_id,
                     created_at_ms=now,
                 ),
@@ -222,7 +222,7 @@ def test_charge_entries_pair_cost_and_hide_it_without_billing_cost(
     assert rows[0]["amount_micro"] == 120
     assert rows[0]["cost_micro"] == 60
 
-    plain_admin = make_admin(factory, username="bill-charge-plain", role="user")
+    plain_admin = make_admin(factory, username="bill-charge-plain", role="customer")
     plain = _app_client(factory)
     plain.cookies.set(SESSION_COOKIE, new_session_token(factory, plain_admin))
     plain_rows = plain.get("/admin/charge/entries").json()

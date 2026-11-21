@@ -43,8 +43,8 @@ users rows (username + password + role), so no migration pass is involved:
 
     default password: admin12345
     override:         SLIPSTREAM_DEMO_ADMIN_PASSWORD=... python scripts/seed_demo.py
-    accounts:         admin(管理用户, 内部平台) / lisi(代理用户, 数据分析组) /
-                      wangwu(普通用户, 试用-临时)
+    accounts:         admin(管理用户, 内部平台) / lisi(分销商, 数据分析组) /
+                      wangwu(客户, 试用-临时)
 
 Change the password after the first login (用户管理 or PUT /admin/users/{id}/password).
 """
@@ -162,13 +162,13 @@ PUBLIC_MODELS = [
 ]
 
 # (name, initial micro, topup history micro, parent name, role)
-# 根用户 D 由 user_tree.ensure_root_user 创建；其余账号演示两层代理结构。
+# 根用户 D 由 user_tree.ensure_root_user 创建；其余账号演示两层分销结构。
 USERS = [
     ("内部平台", 200_000_000, [150_000_000, 50_000_000], "D", "admin"),
-    ("数据分析组", 120_000_000, [80_000_000, 40_000_000], "D", "agent"),
-    ("试用-临时", 30_000_000, [30_000_000], "数据分析组", "user"),
-    ("财务对账", 80_000_000, [80_000_000], "内部平台", "user"),
-    ("压测环境", 50_000_000, [50_000_000], "D", "user"),
+    ("数据分析组", 120_000_000, [80_000_000, 40_000_000], "D", "reseller"),
+    ("试用-临时", 30_000_000, [30_000_000], "数据分析组", "customer"),
+    ("财务对账", 80_000_000, [80_000_000], "内部平台", "customer"),
+    ("压测环境", 50_000_000, [50_000_000], "D", "customer"),
 ]
 
 # Cache items are the one price still held by the book (ADR-020): 0.5 CNY / 1M
@@ -388,12 +388,12 @@ def seed(session, rng: random.Random) -> dict[str, object]:
         first = topups[0]
         balances.record_topup(
             session, user_id=user.id, amount_micro=first, currency=CNY,
-            created_by="owner", note="开户充值",
+            created_by="admin", note="开户充值",
         )
         if len(topups) > 1:
             balances.record_topup(
                 session, user_id=user.id, amount_micro=initial_micro - first,
-                currency=CNY, created_by="owner", note="追加充值",
+                currency=CNY, created_by="admin", note="追加充值",
             )
         else:
             assert first == initial_micro
@@ -519,7 +519,7 @@ def seed(session, rng: random.Random) -> dict[str, object]:
         scope="model_target",
         scope_id=targets[("qwen-max", "local-02", "qwen2.5-32b")].id,
         note="连续超时，人工封禁待查",
-        actor="owner",
+        actor="admin",
     )
     crud.create_availability_rule(
         session,
@@ -649,12 +649,12 @@ def seed(session, rng: random.Random) -> dict[str, object]:
 
     # ---------------- 管理员（RBAC 三角色；默认密码仅用于演示，首次登录后修改） ----------------
     # ADR-019：控制台账号直接写在统一的 users 行上（username 不可改，控制台
-    # 访问 = 有角色且有密码）；代理用户只能看自己的子树（ticket 04）。
+    # 访问 = 有角色且有密码）；分销商只能看自己的子树（ticket 04）。
     demo_password = os.environ.get("SLIPSTREAM_DEMO_ADMIN_PASSWORD", "admin12345")
     console_accounts = (
         ("admin", "admin", "内部平台"),
-        ("lisi", "agent", "数据分析组"),
-        ("wangwu", "user", "试用-临时"),
+        ("lisi", "reseller", "数据分析组"),
+        ("wangwu", "customer", "试用-临时"),
     )
     for username, role, consumer_name in console_accounts:
         row = users[consumer_name]
@@ -740,7 +740,7 @@ def main() -> int:
         print("登录账号: admin / (来自 SLIPSTREAM_DEMO_ADMIN_PASSWORD；其余账号同密码)")
     else:
         print("登录账号: admin / admin12345  ← 默认演示密码，首次登录后请立即修改")
-    print("角色演示: lisi(代理用户) / wangwu(普通用户)，共用同一密码")
+    print("角色演示: lisi(分销商) / wangwu(客户)，共用同一密码")
     print()
     print("现在可以: cd slipstream/api && uvicorn l06_api.app:create_app --factory --port 3700")
     return 0

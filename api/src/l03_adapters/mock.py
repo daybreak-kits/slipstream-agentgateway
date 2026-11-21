@@ -4,18 +4,26 @@ from __future__ import annotations
 
 import os
 import tempfile
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from l02_domain.ir import GatewayIR
+from l02_domain.ir import GatewayIR, TransformsSpec
 from l02_domain.models import UsageEvent
 from l02_domain.validation import validate_gateway_ir
 from l03_adapters.spi import (
     AdapterInfo,
     ApplyResult,
     Artifact,
+    AttemptSink,
+    ClientContract,
+    CredentialFile,
     DataPlaneStatus,
     HealthSnapshot,
+    LogPayload,
+    MaterializationResult,
+    TelemetryHandle,
+    TransformPreview,
     UsageCursor,
     UsagePage,
     ValidationResult,
@@ -108,3 +116,35 @@ class MockAdapter:
             return ApplyResult(ok=False, message=f"unknown revision: {revision_id}")
         self._current = target
         return ApplyResult(ok=True, applied_hash=target.hash, revision_id=revision_id)
+
+    # --- W6 ticket 01 ports (inert reference driver) -----------------------
+
+    def read_log_payload(self, event_id: str) -> LogPayload | None:
+        return None
+
+    def prune_logs(self, retention_days: int) -> dict[str, int]:
+        return {"request_logs": 0, "request_log_payloads": 0}
+
+    def preview_transforms(self, spec: TransformsSpec) -> TransformPreview:
+        return TransformPreview(after={})
+
+    def materialize_credentials(
+        self, files: Sequence[CredentialFile], *, dry_run: bool = False
+    ) -> MaterializationResult:
+        written = tuple(file.ref for file in files)
+        return MaterializationResult(dry_run=dry_run, written=written if not dry_run else ())
+
+    def client_contract(self) -> ClientContract:
+        return ClientContract()
+
+    def capability_note(self, key: str) -> str:
+        for capability in self.describe().capabilities:
+            if capability.key == key:
+                return capability.note
+        return ""
+
+    def start_telemetry(self, app: Any, sink: AttemptSink) -> TelemetryHandle | None:
+        return None
+
+    def stop_telemetry(self, handle: TelemetryHandle | None) -> None:
+        return None

@@ -49,7 +49,7 @@ with Session() as s:
         ))
     s.add(AdminUserORM(
         id=new_id("adm"), username="edge-owner", display_name="edge",
-        password_hash=auth.hash_password("edge-pass-123"), role="owner",
+        password_hash=auth.hash_password("edge-pass-123"), role="admin",
         status="active", created_at_ms=now_ms(), updated_at_ms=now_ms(),
     ))
     s.commit()

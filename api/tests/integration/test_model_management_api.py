@@ -186,11 +186,11 @@ def test_cost_fields_hidden_without_billing_cost(
     assert "cost_input_per_1m" in owner_row
     assert "markup" in owner_row
 
-    viewer = client.get(
-        "/admin/upstream-models?page_size=200", cookies=login_cookies("user")
+    customer = client.get(
+        "/admin/upstream-models?page_size=200", cookies=login_cookies("customer")
     )
-    assert viewer.status_code == 200, viewer.text
-    viewer_row = _find(viewer.json(), created["id"])
+    assert customer.status_code == 200, customer.text
+    viewer_row = _find(customer.json(), created["id"])
     # Field-level filtering: the keys are absent, never null.
     assert "cost_input_per_1m" not in viewer_row
     assert "cost_output_per_1m" not in viewer_row

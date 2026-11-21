@@ -191,7 +191,7 @@ export function PlaygroundPage() {
   const canSeeCost =
     permissions.length > 0
       ? permissions.includes("billing:cost")
-      : meQuery.data?.role === "owner" || meQuery.data?.role === "admin";
+      : meQuery.data?.role === "admin";
 
   useEffect(() => {
     const list = modelsQuery.data;

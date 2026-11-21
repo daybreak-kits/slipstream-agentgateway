@@ -104,7 +104,6 @@ def plan_multikey_migration(session: Session) -> MigrationPlan:
 
 def apply_multikey_migration(session: Session, plan: MigrationPlan) -> None:
     """Write the planned rows, clear the mirror, record the v2 marker."""
-    secret_box = SecretBox(get_settings().secret_key)
     for entry in plan.materialize:
         upstream = session.get(UpstreamORM, entry["upstream_id"])
         if upstream is None:  # pragma: no cover - plan and apply share the session

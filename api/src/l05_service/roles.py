@@ -56,24 +56,23 @@ def ensure_builtin_roles(session: Session) -> None:
 
 def permissions_for(session: Session, role_key: str) -> frozenset[str]:
     """Grant set for a stored role key; falls back to built-in definitions."""
-    key = rbac.normalize_role_key(role_key)
-    row = session.scalars(select(AdminRoleORM).where(AdminRoleORM.key == key)).first()
+    row = session.scalars(
+        select(AdminRoleORM).where(AdminRoleORM.key == role_key)
+    ).first()
     if row is None:
-        return rbac.permissions_for_role_key(key)
+        return rbac.permissions_for_role_key(role_key)
     if row.all_permissions:
         return rbac.PERMISSION_KEYS
     return rbac.parse_permissions_json(row.permissions_json)
 
 
 def member_count(session: Session, role_key: str) -> int:
-    """Users whose stored role string maps to this canonical key (ADR-019)."""
-    key = rbac.normalize_role_key(role_key)
-    legacy = rbac.LEGACY_ALIASES_BY_KEY.get(key, ())
+    """Users whose stored role string is exactly this key (ADR-019)."""
     return int(
         session.scalar(
             select(func.count())
             .select_from(UserORM)
-            .where(UserORM.role.in_((key, *legacy)))
+            .where(UserORM.role == role_key)
         )
         or 0
     )
@@ -117,25 +116,25 @@ def list_roles(session: Session) -> list[dict]:
 
 
 def role_exists(session: Session, role_key: str) -> bool:
-    key = rbac.normalize_role_key(role_key)
-    if key in rbac.BUILTIN_ROLE_KEYS:
+    if role_key in rbac.BUILTIN_ROLE_KEYS:
         return True
     return (
-        session.scalars(select(AdminRoleORM).where(AdminRoleORM.key == key)).first()
+        session.scalars(
+            select(AdminRoleORM).where(AdminRoleORM.key == role_key)
+        ).first()
         is not None
     )
 
 
 def require_role(session: Session, role_key: str) -> str:
-    """Validate an assignment target and return its canonical key."""
-    key = rbac.normalize_role_key(role_key)
-    if not role_exists(session, key):
+    """Validate an assignment target and return its stored key."""
+    if not role_exists(session, role_key):
         raise AppError(
             ErrorCode.VALIDATION_ERROR,
             f"角色不存在: {role_key}",
             details={"role": role_key},
         )
-    return key
+    return role_key
 
 
 def _unique_name(session: Session, name: str, *, exclude_id: str | None = None) -> str:

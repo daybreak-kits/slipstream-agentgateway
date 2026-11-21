@@ -21,6 +21,7 @@ from sqlalchemy.orm import sessionmaker
 from l01_core.settings import get_settings
 from l03_adapters.registry import start_telemetry
 from l05_service.attempts import build_attempt_sink
+from l06_api.adapter_factory import make_adapter
 from l06_api.app import create_app as build_api_app
 from l07_jobs.wiring import start_runner
 
@@ -37,8 +38,10 @@ def create_app(
     if jobs is not None:
         settings = settings.model_copy(update={"jobs_enabled": jobs})
     start_runner(app, app.state.session_factory, settings)
-    # ADR-028: the selected adapter owns its telemetry intake; the composition
-    # root only supplies the normalized-attempt sink. A bind failure degrades to
-    # a warning and never stops the control plane.
-    start_telemetry(app, build_attempt_sink(app.state.session_factory), settings)
+    # ADR-028/ADR-029: the selected adapter owns its telemetry intake; the
+    # composition root only supplies the normalized-attempt sink. The registry
+    # delegates the lifecycle without branching on an adapter name, and a bind
+    # failure degrades to a warning and never stops the control plane.
+    adapter = make_adapter(settings)
+    start_telemetry(app, build_attempt_sink(app.state.session_factory), adapter)
     return app

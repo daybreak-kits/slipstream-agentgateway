@@ -22,8 +22,8 @@ def test_connection_defaults_to_browser_host_contract(client):
 
 
 def test_connection_is_shared_and_readable_without_settings_permission(anon_client, login_cookies):
-    """普通用户（viewer）能读统一连接地址，但不能改设置。"""
-    cookies = login_cookies("viewer")
+    """客户能读统一连接地址，但不能改设置。"""
+    cookies = login_cookies("customer")
     got = anon_client.get("/admin/connection", cookies=cookies)
     assert got.status_code == 200
     assert got.json()["default_port"] == 3600
