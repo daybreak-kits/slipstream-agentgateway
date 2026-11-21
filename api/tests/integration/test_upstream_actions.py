@@ -240,7 +240,7 @@ def test_pre_migration_inline_key_is_not_surfaced_as_a_synthetic_row(
     )
     assert added.status_code == 201, added.text
     after = _keys(client, upstream.id)["items"]
-    assert [key["label"] for key in after] == ["默认密钥", "backup"]
+    assert [key["label"] for key in after] == ["密钥 1", "backup"]
     assert "is_primary" not in after[0]
 
 

@@ -375,3 +375,48 @@ def test_fresh_db_never_grows_a_vendors_table_or_vendor_column(tmp_path) -> None
         assert "vendor_id" not in {c["name"] for c in inspector.get_columns(table)}
     engine.dispose()
 
+
+def test_init_db_tolerates_legacy_fk_on_retired_vendor_column(tmp_path) -> None:
+    """A pre-ADR-030 SQLite file may have upstreams.vendor_id named by a FK.
+
+    SQLite refuses ALTER TABLE ... DROP COLUMN while a table-level foreign key
+    still references the column; the retired column is inert after the ORM
+    stopped mapping it, so startup must keep the file readable instead of
+    failing with "unknown column vendor_id in foreign key definition".
+    """
+    db_path = tmp_path / "old-fk-vendor.db"
+    engine = create_engine("sqlite:///" + db_path.as_posix(), future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            text("CREATE TABLE vendors (id VARCHAR(64) PRIMARY KEY, name VARCHAR(255))")
+        )
+        connection.execute(
+            text(
+                "CREATE TABLE upstreams ("
+                "id VARCHAR(64) PRIMARY KEY, vendor_id VARCHAR(64) REFERENCES vendors(id), "
+                "name VARCHAR(255), base_url VARCHAR(512), api_style VARCHAR(64), "
+                "created_at_ms BIGINT)"
+            )
+        )
+        connection.execute(
+            text("INSERT INTO vendors (id, name) VALUES ('vend_old', '旧厂商')")
+        )
+        connection.execute(
+            text(
+                "INSERT INTO upstreams (id, vendor_id, name, base_url, api_style, created_at_ms) "
+                "VALUES ('ups_old', 'vend_old', 'old-01', 'https://old.example/v1', "
+                "'openai_chat', 1)"
+            )
+        )
+
+    init_db(engine)
+    init_db(engine)
+
+    columns = {column["name"] for column in inspect(engine).get_columns("upstreams")}
+    assert "vendor_id" in columns
+    with engine.connect() as connection:
+        row = connection.execute(
+            text("SELECT id, name, base_url FROM upstreams WHERE id='ups_old'")
+        ).one()
+    assert tuple(row) == ("ups_old", "old-01", "https://old.example/v1")
+    engine.dispose()

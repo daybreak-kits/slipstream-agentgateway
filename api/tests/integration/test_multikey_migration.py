@@ -88,7 +88,7 @@ def _make_db(db_path: Path) -> dict[str, str]:
             UpstreamKeyORM(
                 id="upk_modern",
                 upstream_id=modern.id,
-                label="默认密钥",
+                label="密钥 1",
                 key_enc=box.encrypt("sk-modern-1111"),
                 key_suffix="1111",
                 created_at_ms=1700000000001,
@@ -150,7 +150,7 @@ def test_apply_materializes_then_clears_and_marks_v2(tmp_path: Path) -> None:
     # the mirror is retired everywhere, including the modern upstream
     assert by_id["ups_legacy"] == "" and by_id["ups_modern"] == ""
     # the legacy credential was materialized into a real key row, ciphertext intact
-    assert [row[1] for row in keys if row[0] == "ups_legacy"] == ["默认密钥"]
+    assert [row[1] for row in keys if row[0] == "ups_legacy"] == ["密钥 1"]
     assert [row[2] for row in keys if row[0] == "ups_legacy"] == ["9999"]
     # app_settings stores JSON-encoded values (put_setting)
     assert json.loads(marker) == "v2"

@@ -121,8 +121,8 @@ UPSTREAMS = [
     ("http://127.0.0.1:8001/v1", "openai_chat", ["sk-local-demo-02"]),
 ]
 
-# labels for the 2nd..Nth key row; the first one is create_upstream's 默认密钥
-EXTRA_KEY_LABELS = ("备用密钥", "低成本备用")
+# labels for the 2nd..Nth key row; the first one is create_upstream's 密钥 1
+EXTRA_KEY_LABELS = ("密钥 2", "密钥 3")
 
 # upstream index -> [(model name, model type, priced?)]
 # The three old zai channels merged into one channel: their model rows are the

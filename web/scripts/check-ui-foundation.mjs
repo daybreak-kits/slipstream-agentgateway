@@ -1238,7 +1238,7 @@ check("日志：费用列两行（金额 + 明细），金额两位、毛利一�
 // ---------- 日志：请求尝试路由链（ticket 04） ----------
 const ATTEMPT_LONG_ERROR = "upstream connection reset by peer while reading the response stream";
 
-check("日志路由链：每行上游/模型/状态/耗时/错误摘要，展开可看上游地址与错误全文", async () => {
+check("日志路由链：每轮状态/上游/模型/耗时，失败箭头在行首，成功奖杯在行首", async () => {
   const { RequestAttemptChain } = await load("/src/components/logs/request-attempt-chain.tsx");
   const html = render(
     createElement(RequestAttemptChain, {
@@ -1293,6 +1293,10 @@ check("日志路由链：每行上游/模型/状态/耗时/错误摘要，展开
     "路由链行",
   );
   expect(html.includes("<details"), "失败轮必须能展开错误详情（details）");
+  expect(html.includes("lucide-chevron-down"), "失败轮行首使用下箭头");
+  expect(html.includes("lucide-trophy"), "成功轮行首使用奖杯图标");
+  expect(html.includes("text-danger"), "失败轮行首箭头为红色");
+  expect(html.includes("text-success"), "成功轮行首奖杯为绿色");
   expect(
     html.split("<details").length - 1 === 1,
     "成功轮不得渲染可展开控件，只有失败轮可展开",

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.engine import make_url
-from sqlalchemy.exc import ArgumentError
+from sqlalchemy.exc import ArgumentError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from l04_repo.orm import Base
@@ -100,10 +100,27 @@ def _drop_retired_columns(engine: Engine) -> None:
         existing = {column["name"] for column in inspector.get_columns(table_name)}
         if column_name not in existing:
             continue
-        with engine.begin() as connection:
-            connection.execute(
-                text(f"ALTER TABLE {table_name} DROP COLUMN {column_name}")
-            )
+        # SQLite cannot DROP a column still named by a table-level FOREIGN KEY.
+        # Legacy files created before ADR-030 carry e.g. upstreams.vendor_id ->
+        # vendors(id); the column is inert after the ORM retired it, so keep it
+        # rather than making the whole control plane fail to boot.
+        if engine.dialect.name == "sqlite":
+            constrained = {
+                column
+                for fk in inspector.get_foreign_keys(table_name)
+                for column in fk.get("constrained_columns", ())
+            }
+            if column_name in constrained:
+                continue
+        try:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(f"ALTER TABLE {table_name} DROP COLUMN {column_name}")
+                )
+        except OperationalError:
+            # Indexes/triggers/CHECK constraints can also pin a legacy column;
+            # a best-effort cosmetic drop must never block startup.
+            continue
 
 
 #: Whole tables that left the ORM mapping (W7 t03, ADR-030). ``cost_daily`` is a
@@ -131,8 +148,11 @@ def _drop_retired_tables(engine: Engine) -> None:
             existing = {column["name"] for column in inspector.get_columns(table_name)}
             if "vendor_id" not in existing:
                 continue
-        with engine.begin() as connection:
-            connection.execute(text(f"DROP TABLE {table_name}"))
+        try:
+            with engine.begin() as connection:
+                connection.execute(text(f"DROP TABLE {table_name}"))
+        except OperationalError:
+            continue
 
 
 def _backfill_usage_correlation_key(engine: Engine) -> None:

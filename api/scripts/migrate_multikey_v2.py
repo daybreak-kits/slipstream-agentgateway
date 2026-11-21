@@ -112,7 +112,7 @@ def apply_multikey_migration(session: Session, plan: MigrationPlan) -> None:
             UpstreamKeyORM(
                 id=new_id("upk"),
                 upstream_id=upstream.id,
-                label="默认密钥",
+                label="密钥 1",
                 key_enc=upstream.api_key_enc,
                 key_suffix=entry["suffix"],
                 created_at_ms=upstream.created_at_ms or now_ms(),

@@ -164,7 +164,7 @@ def _ensure_rows(
     row = UpstreamKeyORM(
         id=new_id("upk"),
         upstream_id=upstream.id,
-        label="默认密钥",
+        label="密钥 1",
         key_enc=upstream.api_key_enc,
         key_suffix=_suffix(_decrypt(secret_box, upstream.api_key_enc)),
         created_at_ms=upstream.created_at_ms or now_ms(),
@@ -185,7 +185,7 @@ def create_initial_key(
     row = UpstreamKeyORM(
         id=new_id("upk"),
         upstream_id=upstream.id,
-        label="默认密钥",
+        label="密钥 1",
         key_enc=secret_box.encrypt(api_key),
         key_suffix=_suffix(api_key),
         created_at_ms=now_ms(),

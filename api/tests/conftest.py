@@ -382,7 +382,7 @@ def seed_channel(engine, session_factory, *, transforms=None) -> dict:
             UpstreamKeyORM(
                 id="upk_test",
                 upstream_id=upstream.id,
-                label="默认密钥",
+                label="密钥 1",
                 key_enc=secret_box.encrypt("raw-upstream-key"),
                 key_suffix="-key",
                 created_at_ms=now_ms(),

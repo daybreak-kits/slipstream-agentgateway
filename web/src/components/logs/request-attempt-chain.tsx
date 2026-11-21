@@ -1,4 +1,4 @@
-import { ChevronDown, GitBranch } from "lucide-react";
+import { ChevronDown, Circle, GitBranch, Trophy } from "lucide-react";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -7,7 +7,6 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Spinner } from "@/components/ui/spinner";
 import type { LogAttemptOut } from "@/generated/contract";
 import { fmtSeconds } from "@/lib/format";
-import { cn } from "@/lib/utils";
 
 import { attemptFailureSummary } from "./error-summary";
 import { statusTone } from "./format";
@@ -18,14 +17,6 @@ const NO_CHAIN_RECORD_TEXT = "无链路记录";
 
 function attemptTone(status: number | null | undefined): ReturnType<typeof statusTone> {
   return status === null || status === undefined ? "neutral" : statusTone(status);
-}
-
-function attemptDotClass(status: number | null | undefined): string {
-  const tone = attemptTone(status);
-  if (tone === "success") return "bg-success";
-  if (tone === "warning") return "bg-warning";
-  if (tone === "danger") return "bg-danger";
-  return "bg-border-strong";
 }
 
 function attemptFailed(attempt: LogAttemptOut): boolean {
@@ -55,7 +46,7 @@ export function NoChainRecord() {
 /**
  * 请求尝试链展示（ticket 04 / ADR-028；W7-D6 收进模型格）：列表 popover 与日志详情
  * 抽屉共用本组件，两处数据都来自 GET /admin/logs/{id}/attempts，不各自拼一份。
- * 折叠行给「轮次 · 上游渠道 · 实际模型 · 状态码 · 耗时 · 错误摘要」，整行可点/可键盘
+ * 折叠行给「轮次 · 上游渠道 · 实际模型 · 状态码 · 耗时」；失败轮行首箭头、成功轮行首奖杯，
  * 展开——详情（上游地址、错误类型、开始时间与错误全文）收在展开区，长错误不塞折叠行。
  */
 export function RequestAttemptChain({
@@ -83,13 +74,6 @@ export function RequestAttemptChain({
           const upstreamLabel = attemptUpstreamLabel(attempt);
           const row = (
             <>
-              <span
-                aria-hidden="true"
-                className={cn(
-                  "absolute -left-[3px] top-2 h-1.5 w-1.5 rounded-full",
-                  attemptDotClass(attempt.status_code),
-                )}
-              />
               <span className="font-medium text-title">第 {attempt.attempt} 轮：</span>
               <Badge tone={attemptTone(attempt.status_code)}>
                 {attempt.status_code === null || attempt.status_code === undefined
@@ -107,12 +91,6 @@ export function RequestAttemptChain({
                 </>
               ) : null}
               <span className="ml-auto tnum text-body">{fmtSeconds(attempt.duration_ms ?? 0)}</span>
-              {failed ? (
-                <ChevronDown
-                  className="h-3 w-3 shrink-0 text-faint transition-transform group-open:rotate-180"
-                  aria-hidden="true"
-                />
-              ) : null}
             </>
           );
           return (
@@ -125,6 +103,10 @@ export function RequestAttemptChain({
               {failed ? (
                 <details data-slot="attempt-detail" data-attempt-no={attempt.attempt} className="group">
                   <summary className="flex w-full cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 rounded text-2xs marker:hidden hover:bg-surface-2/60">
+                    <ChevronDown
+                      className="absolute -left-[6px] top-1.5 h-3 w-3 bg-surface text-danger transition-transform group-open:rotate-180"
+                      aria-hidden="true"
+                    />
                     {row}
                   </summary>
                   <div
@@ -141,6 +123,17 @@ export function RequestAttemptChain({
                 </details>
               ) : (
                 <div className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 rounded text-2xs">
+                  {attemptTone(attempt.status_code) === "success" ? (
+                    <Trophy
+                      className="absolute -left-[6px] top-1.5 h-3 w-3 bg-surface text-success"
+                      aria-hidden="true"
+                    />
+                  ) : (
+                    <Circle
+                      className="absolute -left-[6px] top-1.5 h-3 w-3 bg-surface text-faint"
+                      aria-hidden="true"
+                    />
+                  )}
                   {row}
                 </div>
               )}
