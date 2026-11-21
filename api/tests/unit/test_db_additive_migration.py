@@ -163,6 +163,52 @@ def test_init_db_drops_the_retired_upstream_keys_is_primary_column(tmp_path) -> 
     engine.dispose()
 
 
+def test_init_db_drops_the_retired_usage_trace_id_column(tmp_path) -> None:
+    """Ticket 06: ticket 05 backfilled the wire-era join key; the column retires.
+
+    The value move must stay zero-loss: correlation_key keeps every copied value,
+    and the legacy wire-named column is gone from both the schema and the mapping.
+    """
+    db_path = tmp_path / "old-usage-retired.db"
+    engine = create_engine("sqlite:///" + db_path.as_posix(), future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE gateway_usage_events ("
+                "event_id VARCHAR(128) PRIMARY KEY, started_at_ms BIGINT, "
+                "trace_id VARCHAR(64) DEFAULT '')"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO gateway_usage_events (event_id, started_at_ms, trace_id) "
+                "VALUES ('evt_keyed', 1, '8f2a1b'), ('evt_blank', 2, '')"
+            )
+        )
+
+    init_db(engine)
+    # Startup runs init_db again on the already-migrated shape; both passes are
+    # guarded and must not fail or resurrect the retired column.
+    init_db(engine)
+
+    columns = {column["name"] for column in inspect(engine).get_columns("gateway_usage_events")}
+    assert "trace_id" not in columns
+    assert "correlation_key" in columns
+    with engine.connect() as connection:
+        keyed, blank = [
+            row[0]
+            for row in connection.execute(
+                text(
+                    "SELECT correlation_key FROM gateway_usage_events "
+                    "WHERE event_id IN ('evt_keyed', 'evt_blank') ORDER BY started_at_ms"
+                )
+            ).all()
+        ]
+    assert keyed == "8f2a1b"
+    assert blank == ""
+    engine.dispose()
+
+
 def test_fresh_db_has_no_is_primary_column_and_accepts_key_rows(tmp_path) -> None:
     """Ticket 16: the ORM mapping must not carry the retired column at all."""
     db_path = tmp_path / "fresh-keys.db"

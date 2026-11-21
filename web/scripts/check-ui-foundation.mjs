@@ -1682,6 +1682,58 @@ check("上游模型编辑器：思考档位集合与默认档声明控件就位"
   expect(src.includes('placeholder="留空 = 不声明"') === false, "推理档位自由文本输入必须移除（改为声明档位集合）");
 });
 
+// ---------- 九、公开模型编辑页紧凑布局与脏标记（W6 ticket 14）----------
+check("公开模型紧凑布局：基本信息三列、策略三张横向卡片", () => {
+  const page = read("src/components/models/public-model-page.tsx");
+  // 基本信息三列（名称/备注/启用）：桌面 md 三列，窄屏单列堆叠；策略不再混进基本信息。
+  includesAll(
+    page,
+    ['data-slot="basic-fields-grid"', "grid grid-cols-1", "md:grid-cols-3", 'data-slot="field-name"', 'data-slot="field-note"', 'data-slot="field-enabled"'],
+    "基本信息三列",
+  );
+  // 策略三张横向卡片：三种模式一排可比较，窄屏堆叠。
+  includesAll(page, ['data-slot="strategy-cards"', "md:grid-cols-3", 'data-slot="strategy-card"'], "策略三横卡");
+  const dirty = read("src/components/ui/dirty-field.tsx");
+  expect(!dirty.includes("pl-2.5"), "脏字段不得再加左 padding（pl-2.5 会改变字段宽度）");
+});
+
+check("公开模型页头保存：保存/状态/未保存数量固定页头、只读摘要折叠、脏标记绝对定位", () => {
+  const page = read("src/components/models/public-model-page.tsx");
+  includesAll(
+    page,
+    ["sticky top-0", 'data-slot="header-save"', "DirtySummary", "DirtyCountBadge", "DirtySaveButton", 'data-slot="readonly-summary"', "<details"],
+    "页头保存与只读摘要折叠",
+  );
+  expect(!page.includes("DirtyFooter"), "保存动作条已上移页头，公开模型页不得再渲染底部 DirtyFooter");
+  // DirtyField：变脏只换背景色，标记槽绝对定位不占布局（不插下方行、不加左 padding）。
+  const dirty = read("src/components/ui/dirty-field.tsx");
+  includesAll(
+    dirty,
+    ['data-slot="dirty-marker"', "absolute", "inset-y-0 left-0 w-0.5", "bg-warning-soft"],
+    "绝对定位标记槽",
+  );
+  expect(!/\bmt-0\.5\b/.test(dirty), "标记槽不得用文档流 margin（插行会推挤布局）");
+});
+
+check("成员编排容器：桌面左6右6栅格、两栏 min(60vh,560px) 内部滚动、列头固定", () => {
+  const flow = read("src/components/models/member-chip-flow.tsx");
+  includesAll(
+    flow,
+    [
+      'data-slot="member-board-grid"',
+      "lg:grid-cols-12",
+      'data-slot="member-board-left"',
+      'data-slot="member-board-right"',
+      "lg:col-span-6",
+      'data-slot="member-column-head"',
+      'data-slot="member-scroll"',
+      "max-h-[min(60vh,560px)]",
+      "overflow-y-auto",
+    ],
+    "成员编排两栏容器",
+  );
+});
+
 // ---------- run ----------
 const failures = [];
 server = await createServer({

@@ -30,12 +30,14 @@ class GatewayIR:
 ```python
 class UpstreamSpec:
     # ADR-026 多密钥平权（E18 形态）：build_render_plan 把每把 upstream_keys 行
-    # 展开为一个 IR 上游——id={upstream_id}#{seq}、key_file=keys/{upstream_id}#{seq}.key；
+    # 展开为一个 IR 上游——id={upstream_id}#{seq}、key_file={upstream_id}#{seq}
+    # （中性凭据 ref，与 CredentialFile.ref 同值；磁盘路径 keys/<ref>.key 由适配器
+    # 自管并经 materialize_credentials 物化，W6 ticket 03/06）；
     # 上游模型条目为 {model_id}#k{seq} 并逐条进 virtualModel 同层 targets。
     # E20 例外：conditional 公开模型的 targets 不展开密钥维度，每个 target 只
     # 引用第一把密钥（{model}#k1）——AG conditional targets first-match 首条独占。
     id; base_url; api_style        # openai_chat / openai_responses / anthropic_messages / gemini
-    key_file                       # 密钥文件路径，绝不内联
+    key_file                       # 中性凭据 ref（{upstream_id}#{seq}），绝不内联明文；磁盘格式归适配器
     transforms: TransformsSpec | None
     max_buffer_bytes: int = 2097152  # 1.7 无配置面：非默认值只 warning
     extra_headers: tuple[tuple[str, str], ...] = ()
@@ -109,7 +111,7 @@ class PoliciesSpec:
 
 | IR | agentgateway 1.7 配置 | 说明 |
 |---|---|---|
-| `UpstreamSpec` | `llm.providers[]` | **数组**，每项 `{name, provider, params}`；`provider` 由 `api_style` 映射，未映射直接 `ValueError`。ADR-026：每把密钥一行（name=`{upstream_id}#{seq}`，各自 key_file），`llm.models[]` 禁同名由渲染层自检（E18：validate 静默塌缩，违反即 `ValueError`） |
+| `UpstreamSpec` | `llm.providers[]` | **数组**，每项 `{name, provider, params}`；`provider` 由 `api_style` 映射，未映射直接 `ValueError`。ADR-026：每把密钥一行（name=`{upstream_id}#{seq}`，各自中性凭据 ref，适配器渲染为自家管理的 `keys/<ref>.key`），`llm.models[]` 禁同名由渲染层自检（E18：validate 静默塌缩，违反即 `ValueError`） |
 | `extra_headers` | `providers[].defaults.requestHeaders.set` | 1.7 的 provider 没有 `params.headers` |
 | `max_buffer_bytes` | 不输出 | 1.7 无该字段；非默认值在 validate 里 warning，不伪造 |
 | `UpstreamModelSpec` | `llm.models[]` | **数组**，`name=model.id`、`provider.reference=upstream_id`、`params.model=upstream_model_name`、`visibility`（默认 internal）。多密钥时 builder 产出 `{model_id}#k{seq}` 条目，公开模型 targets 逐条同层引用（E18 裁决形态）；**conditional 公开模型例外**——targets 每目标只引用第一把 `{model}#k1`（E20） |

@@ -470,6 +470,7 @@ async function ensureModelsSeeded(page, fixtures) {
   fixtures.upstreamModelName = wide;
   fixtures.closedUpstreamModelName = closedModel.name;
   fixtures.publicModelName = publicJson.name;
+  fixtures.publicModelId = publicJson.id;
 }
 
 async function openOverflow(page) {
@@ -923,6 +924,197 @@ async function assertDrawer(page, width, height) {
   return "抽屉 " + Math.round(box.width) + "px（视口 " + width + "），内容区 overflow-y-auto（" + scroll.scrollHeight + "/" + scroll.clientHeight + "）";
 }
 
+/* W6 ticket 14：公开模型编辑页专项——紧凑布局（基本信息三列/策略三横卡/页头保存）、
+ * 只读摘要折叠不占主编辑区、成员编排左6右6容器与内部滚动、脏标记变脏布局零位移、
+ * 窄屏（375/768）堆叠且保存入口可见。
+ * 变脏断言改备注字段：页头 h1 随名称变化，改名称会引入与脏标记无关的布局噪声。 */
+async function assertPublicModelEdit(page, width, fixtures) {
+  await ensureModelsSeeded(page, fixtures);
+  assert(fixtures.publicModelId, "矩阵公开模型缺 id（publicModelId 未播种）");
+  await goto(page, "/models/public/" + fixtures.publicModelId);
+  await page.locator('[data-slot="public-model-page"]').waitFor({ state: "visible", timeout: 8000 });
+
+  // 1. 保存/状态/未保存数量固定页头：不滚动即可见（sticky 页头挂在 main 滚动上下文）。
+  const headerSave = page.locator('[data-slot="header-save"]');
+  assert(await visible(headerSave), width + " 下页头保存区（header-save）不可见");
+  const saveBtn = headerSave.getByRole("button", { name: "保存" }).first();
+  assert(await visible(saveBtn), width + " 下页头保存按钮不可见");
+  const saveBox = await boxOf(saveBtn);
+  const height = (VIEWPORTS.find((item) => item.width === width) || { height: 900 }).height;
+  assertInViewport(saveBox, width, height, "页头保存按钮");
+
+  // 2. 基本信息三列（≥md 同排；375 单列堆叠）与策略三张横向卡片。
+  const nameBox = await boxOf(page.locator('[data-slot="field-name"]'));
+  const noteBox = await boxOf(page.locator('[data-slot="field-note"]'));
+  const enabledBox = await boxOf(page.locator('[data-slot="field-enabled"]'));
+  const cards = page.locator('[data-slot="strategy-card"]');
+  assert((await cards.count()) === 3, "策略卡必须恰好三张，实际 " + (await cards.count()));
+  const cardBoxes = [await boxOf(cards.nth(0)), await boxOf(cards.nth(1)), await boxOf(cards.nth(2))];
+  if (width >= 768) {
+    assert(
+      Math.abs(nameBox.y - noteBox.y) < 2 && Math.abs(nameBox.y - enabledBox.y) < 2,
+      width + " 下基本信息不是三列（名称/备注/启用不同排）",
+    );
+    assert(
+      Math.abs(cardBoxes[0].y - cardBoxes[1].y) < 2 && Math.abs(cardBoxes[0].y - cardBoxes[2].y) < 2,
+      width + " 下策略不是三张横向卡片",
+    );
+  } else {
+    assert(enabledBox.y > nameBox.y + 8, width + " 下基本信息未堆叠成单列");
+    assert(cardBoxes[1].y > cardBoxes[0].y + 8, width + " 下策略卡未堆叠");
+  }
+
+  // 3. 成员编排容器：桌面左6右6，窄屏上下堆叠；两栏各自内部滚动且列头固定在滚动区外。
+  const boardLeft = page.locator('[data-slot="member-board-left"]');
+  const boardRight = page.locator('[data-slot="member-board-right"]');
+  const leftBox = await boxOf(boardLeft);
+  const rightBox = await boxOf(boardRight);
+  if (width >= 1024) {
+    assert(
+      Math.abs(leftBox.y - rightBox.y) < 2 && rightBox.x >= leftBox.x + leftBox.width - 2,
+      width + " 下成员编排不是左右两栏（左6右6）",
+    );
+  } else {
+    assert(rightBox.y >= leftBox.y + leftBox.height - 2, width + " 下成员编排两栏未上下堆叠");
+  }
+  const columns = await page.evaluate(() => {
+    const measure = (slot) => {
+      const head = document.querySelector('[data-slot="member-column-head"][data-column="' + slot + '"]');
+      const scroll = head && head.parentElement ? head.parentElement.querySelector('[data-slot="member-scroll"]') : null;
+      if (!head || !scroll) return null;
+      const headBox = head.getBoundingClientRect();
+      const scrollBox = scroll.getBoundingClientRect();
+      const style = getComputedStyle(scroll);
+      return {
+        headBottom: headBox.bottom,
+        scrollTop: scrollBox.top,
+        scrollHeight: scrollBox.height,
+        overflowY: style.overflowY,
+        maxHeightRaw: style.maxHeight,
+        viewportH: window.innerHeight,
+      };
+    };
+    return { left: measure("left"), right: measure("right") };
+  });
+  for (const key of ["left", "right"]) {
+    const column = columns[key];
+    assert(column !== null, key + " 栏缺少列头或滚动容器（member-column-head/member-scroll）");
+    assert(column.overflowY === "auto" || column.overflowY === "scroll", key + " 栏不是内部滚动容器");
+    const cap = Math.min(column.viewportH * 0.6, 560);
+    assert(column.scrollHeight <= cap + 1, key + " 栏滚动区高 " + Math.round(column.scrollHeight) + "px 超过 min(60vh,560px)=" + Math.round(cap) + "px");
+    assert(column.headBottom <= column.scrollTop + 2, key + " 栏列头未固定在滚动区上方（滚动会带走列头）");
+  }
+
+  // 4. 只读摘要折叠：默认收起不占主编辑区，展开后内容可见。
+  const summary = page.locator('[data-slot="readonly-summary"]');
+  assert(await visible(summary), width + " 下只读摘要折叠容器不可见");
+  assert(!(await summary.evaluate((node) => node.hasAttribute("open"))), "只读摘要默认应折叠（不占主编辑区）");
+  await summary.locator("summary").click();
+  await page.waitForTimeout(150);
+  assert(await summary.locator('[data-slot="public-model-summary"]').isVisible(), "只读摘要展开后内容不可见");
+  await summary.locator("summary").click();
+  await page.waitForTimeout(150);
+
+  // 5. 硬验收：变脏前后字段位置/尺寸逐像素不变。滚动容器是 main（window.scrollY 恒 0），
+  //    量测前后都把 main.scrollTop 归零，让视口坐标可直接比较（排除 fill 自动滚动的噪声）。
+  //    量三组：变脏字段自身（宽度/高度/位置）、其后策略卡区、更后的成员编排区。
+  const rectsOf = () =>
+    page.evaluate(() => {
+      const rect = (slot) => {
+        const node = document.querySelector('[data-slot="' + slot + '"]');
+        const box = node.getBoundingClientRect();
+        return { x: box.x, y: box.y, w: box.width, h: box.height };
+      };
+      return { note: rect("field-note"), strategy: rect("strategy-cards"), board: rect("member-board-grid") };
+    });
+  const scrollMainTop = () =>
+    page.evaluate(() => {
+      const main = document.querySelector("main");
+      if (main) main.scrollTop = 0;
+    });
+  await scrollMainTop();
+  await page.waitForTimeout(150);
+  const before = await rectsOf();
+  await page.getByLabel("备注", { exact: true }).fill("矩阵脏标记断言");
+  await page.waitForTimeout(300);
+  await scrollMainTop();
+  await page.waitForTimeout(150);
+  const after = await rectsOf();
+  const slotAbsolute = await page.evaluate(() => {
+    const marker = document.querySelector('[data-slot="dirty-marker"]');
+    return marker ? getComputedStyle(marker).position : "missing";
+  });
+  assert(slotAbsolute === "absolute", "脏标记槽不是绝对定位（position=" + slotAbsolute + "，会参与布局推挤）");
+  const diff = (label, left, right) =>
+    JSON.stringify(left) === JSON.stringify(right) ? "" : label + " " + JSON.stringify(left) + " → " + JSON.stringify(right) + "；";
+  const shifts = diff("备注字段", before.note, after.note) + diff("策略卡区", before.strategy, after.strategy) + diff("成员编排区", before.board, after.board);
+  assert(shifts === "", width + " 变脏后布局位移：" + shifts.trim());
+  await shot(page, width + "-public-edit-dirty");
+
+  // 6. 恢复按钮在字段固定操作槽：点击恢复备注原值且标记消失（data-dirty 在内层 dirty-field 上）。
+  const reset = page.getByRole("button", { name: "恢复备注" });
+  assert(await visible(reset), width + " 下备注字段缺少恢复按钮");
+  await reset.click();
+  await page.waitForTimeout(250);
+  assert((await page.getByLabel("备注", { exact: true }).inputValue()) === "", "恢复备注后输入值未复原");
+  const noteDirtyField = page.locator('[data-slot="field-note"] [data-slot="dirty-field"]');
+  assert((await noteDirtyField.getAttribute("data-dirty")) === "false", "恢复后脏标记未清除");
+  await shot(page, width + "-public-edit");
+  return "保存入口可见 " + Math.round(saveBox.y) + "px，变脏零位移（字段/策略区/成员区逐像素一致），恢复入口可用";
+}
+
+/* W6 ticket 14：公开模型保存与错误回滚回归（1536 一次）——
+ * 先拦截 PATCH 返回 500：表单值与脏标记必须保留、内联错误可见；
+ * 解除拦截后走一次真保存：脏标记清零、服务端名称更新（ticket 12 单 PATCH 契约）。 */
+async function assertPublicModelSaveRollback(page, fixtures) {
+  await ensureModelsSeeded(page, fixtures);
+  await goto(page, "/models/public/" + fixtures.publicModelId);
+  await page.locator('[data-slot="public-model-page"]').waitFor({ state: "visible", timeout: 8000 });
+  const saveBtn = page.locator('[data-slot="header-save"]').getByRole("button", { name: "保存" }).first();
+
+  await page.route(/\/admin\/public-models\/[^/]+$/, (route) => {
+    if (route.request().method() === "PATCH") {
+      void route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ code: "INTERNAL_ERROR", message: "矩阵模拟保存失败", request_id: "matrix" }),
+      });
+    } else {
+      void route.continue();
+    }
+  });
+  await page.getByLabel("备注", { exact: true }).fill("矩阵回滚回归");
+  await saveBtn.click();
+  await page.locator('[data-slot="save-error"]').waitFor({ state: "visible", timeout: 8000 });
+  assert((await page.getByLabel("备注", { exact: true }).inputValue()) === "矩阵回滚回归", "保存失败后备注输入被清空（回滚契约破坏）");
+  const noteDirtyField = page.locator('[data-slot="field-note"] [data-slot="dirty-field"]');
+  assert((await noteDirtyField.getAttribute("data-dirty")) === "true", "保存失败后脏标记丢失");
+  await page.unroute(/\/admin\/public-models\/[^/]+$/);
+
+  await page.getByRole("button", { name: "恢复备注" }).click();
+  const unique = "矩阵公开模型改名" + Date.now().toString(36);
+  await page.getByLabel("名称", { exact: true }).fill(unique);
+  await saveBtn.click();
+  const nameDirtyField = page.locator('[data-slot="field-name"] [data-slot="dirty-field"]');
+  await page.waitForFunction(
+    () => document.querySelector('[data-slot="field-name"] [data-slot="dirty-field"]')?.getAttribute("data-dirty") === "false",
+    { timeout: 10_000 },
+  ).catch(() => {});
+  assert(
+    (await nameDirtyField.getAttribute("data-dirty")) === "false",
+    "保存成功后脏标记未清零（保存失败或响应未回填 baseline）",
+  );
+  const listed = await (await page.request.get(baseUrl() + "/admin/public-models")).json();
+  // 列表端点返回裸数组（routers_models.list_public_models -> list[dict]），兼容 {items} 形状。
+  const savedNames = (Array.isArray(listed) ? listed : listed.items ?? []).map((item) => item.name);
+  assert(
+    savedNames.includes(unique),
+    "保存后服务端名称未更新（单 PATCH 未生效）",
+  );
+  await shot(page, "1536-public-edit-saved");
+  return "500 拦截：错误内联+值/脏标记保留；解除后真保存：脏清零+服务端已更新";
+}
+
 async function assertCoarsePointer(page) {
   // 复用已登录 cookies，在独立的移动+触摸上下文里测，避免影响主矩阵的桌面指针环境。
   const storageState = await page.context().storageState();
@@ -1061,6 +1253,9 @@ async function main() {
     const text = message.text();
     if (text.includes("Download the React DevTools") || text.includes("ResizeObserver loop")) return;
     if (text.includes("401") || text.includes("Unauthorized")) return;
+    // 网络层资源消息不算 console 回归：错误治理（ticket 07）把 5xx 呈现为页面内联
+    // 错误/通知中心，public-edit.regression 会真实触发一次模拟 500（与上方 401 排除同因）。
+    if (/Failed to load resource/.test(text) && /status of 5\d\d/.test(text)) return;
     consoleErrors.push(text);
   });
   page.on("pageerror", (error) => consoleErrors.push("pageerror: " + String(error)));
@@ -1137,6 +1332,16 @@ async function main() {
             // 版本行内容窄：只要求容器可横滚；有行时验冻结/贴边，空表只验容器。
             expectOverflow: false,
           }));
+      }
+      // W6 ticket 14：公开模型编辑页专项（375/768 堆叠 + 保存入口可见；1536 桌面紧凑布局
+      // + 变脏零位移）；保存/错误回滚回归只在 1536 跑一次（改名不回滚 fixtures，视口档末尾）。
+      if (width === 375 || width === 768 || width === 1536) {
+        await test("public-edit." + label, label + " 公开模型编辑页紧凑布局与脏标记零位移", () =>
+          assertPublicModelEdit(page, width, fixtures));
+        if (width === 1536) {
+          await test("public-edit.regression", "公开模型保存与错误回滚回归（页头保存）", () =>
+            assertPublicModelSaveRollback(page, fixtures));
+        }
       }
     }
     await test("runtime.console", "五档交互无新增 console error / 未捕获异常", () => {
