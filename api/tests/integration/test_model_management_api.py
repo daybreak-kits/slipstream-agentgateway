@@ -173,6 +173,100 @@ def test_parameters_validation(client, engine_and_sessionmaker):
     assert bad_source.status_code == 422
 
 
+# ---------------------------------------------------- reasoning level declaration (t18)
+
+
+def test_reasoning_level_declaration_roundtrip(client, engine_and_sessionmaker):
+    """Ticket 18: a model declares its supported levels plus the default level."""
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+
+    created = _create_upstream_model(
+        client,
+        ids["upstream_id"],
+        parameters={
+            **PARAMETERS,
+            "reasoning_levels": ["default", "low", "medium", "high", "xhigh", "max"],
+            "default_reasoning_level": "medium",
+        },
+    )
+    assert created["parameters"]["reasoning_levels"] == [
+        "default",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+    ]
+    assert created["parameters"]["default_reasoning_level"] == "medium"
+
+    # 未声明 = 空集合与空串；读取端始终拿到完整形状。
+    listed = client.get("/admin/upstream-models?page_size=200").json()
+    seeded = _find(listed, ids["upstream_model_id"])
+    assert seeded["parameters"]["reasoning_levels"] == []
+    assert seeded["parameters"]["default_reasoning_level"] == ""
+
+
+def test_reasoning_level_declaration_validation(client, engine_and_sessionmaker):
+    """未知档位、非列表、默认档不在声明集合内都拒绝。"""
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    url = "/admin/upstream-models"
+
+    unknown_level = client.post(
+        url,
+        json={
+            "upstream_id": ids["upstream_id"],
+            "name": "bad",
+            "parameters": {"reasoning_levels": ["low", "ultra"]},
+        },
+    )
+    assert unknown_level.status_code == 422
+    assert "ultra" in unknown_level.json()["message"]
+
+    not_a_list = client.post(
+        url,
+        json={
+            "upstream_id": ids["upstream_id"],
+            "name": "bad",
+            "parameters": {"reasoning_levels": "low"},
+        },
+    )
+    assert not_a_list.status_code == 422
+
+    default_outside_set = client.post(
+        url,
+        json={
+            "upstream_id": ids["upstream_id"],
+            "name": "bad",
+            "parameters": {"reasoning_levels": ["low", "high"], "default_reasoning_level": "max"},
+        },
+    )
+    assert default_outside_set.status_code == 422
+
+    default_unknown = client.post(
+        url,
+        json={
+            "upstream_id": ids["upstream_id"],
+            "name": "bad",
+            "parameters": {"default_reasoning_level": "ultra"},
+        },
+    )
+    assert default_unknown.status_code == 422
+
+
+def test_reasoning_level_declaration_dedupes_preserving_order(client, engine_and_sessionmaker):
+    """与 modalities 同一语义：保序去重。"""
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    created = _create_upstream_model(
+        client,
+        ids["upstream_id"],
+        parameters={"reasoning_levels": ["high", "low", "high", "none"]},
+    )
+    assert created["parameters"]["reasoning_levels"] == ["high", "low", "none"]
+
+
 def test_cost_fields_hidden_without_billing_cost(
     client, login_cookies, engine_and_sessionmaker
 ):

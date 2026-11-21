@@ -28,29 +28,20 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
+  isChatModel,
   maxOutputTokensFor,
   paramHintText,
+  reasoningLevelOptions,
+  REASONING_LEVEL_LABELS,
   summarizeChatParams,
-  THINKING_MODE_LABELS,
   validateChatParams,
   type ParamHintKey,
-  type ThinkingMode,
+  type ReasoningLevel,
 } from "@/lib/playground";
 import { fmtInt } from "@/lib/format";
 import type { PlaygroundParamsState } from "@/lib/playground-params";
 import { cn } from "@/lib/utils";
 import type { MyModelOut } from "@/types";
-
-const THINKING_OPTIONS: ThinkingMode[] = [
-  "off",
-  "none",
-  "low",
-  "medium",
-  "high",
-  "max",
-  "thinking",
-  "enable_thinking",
-];
 
 export interface ParamsPanelProps {
   value: PlaygroundParamsState;
@@ -175,6 +166,12 @@ function ModelInfoBlock({ modelInfo }: { modelInfo: MyModelOut }) {
             </>
           ) : null}
         </div>
+        {p.reasoning_levels && p.reasoning_levels.length > 0 ? (
+          <div>
+            思考档位 {p.reasoning_levels.join(" / ")}
+            {p.default_reasoning_level ? `（默认 ${p.default_reasoning_level}）` : ""}
+          </div>
+        ) : null}
         {capabilities.length > 0 ? (
           <div className="flex flex-wrap gap-1">
             {capabilities.map((label) => (
@@ -206,7 +203,9 @@ export function ParamsPanel({
   const patch = (next: Partial<PlaygroundParamsState>) => onChange({ ...value, ...next });
   const limit = maxOutputTokensFor(null);
   const validation = validateChatParams(value, { maxOutputTokens: limit });
-  const unsupportedThinking = !["off", "low", "medium", "high"].includes(value.thinkingMode);
+  // 票18：思考档位控件只给 chat 类模型；档位选项按模型声明收敛，未声明回退全集。
+  const showThinking = isChatModel(modelInfo);
+  const thinkingOptions = reasoningLevelOptions(modelInfo?.parameters.reasoning_levels);
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -264,25 +263,27 @@ export function ParamsPanel({
               </ParamField>
             </div>
 
-            <div className="flex items-center gap-2 py-0.5">
-              <div className="min-w-0 flex-1">
-                <ParamLabel htmlFor="playground-reasoning-level" hintKey="reasoningLevel">
-                  思考等级（只读）
-                </ParamLabel>
-                <p id="playground-reasoning-level" className="truncate text-2xs text-faint">
-                  {THINKING_MODE_LABELS[value.thinkingMode]}
-                </p>
+            {showThinking ? (
+              <div className="flex items-center gap-2 py-0.5">
+                <div className="min-w-0 flex-1">
+                  <ParamLabel htmlFor="playground-reasoning-level" hintKey="reasoningLevel">
+                    思考等级（只读）
+                  </ParamLabel>
+                  <p id="playground-reasoning-level" className="truncate text-2xs text-faint">
+                    {REASONING_LEVEL_LABELS[value.thinkingMode]}
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2 text-2xs"
+                  onClick={onOpenModels}
+                  disabled={disabled}
+                >
+                  调整
+                </Button>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 px-2 text-2xs"
-                onClick={onOpenModels}
-                disabled={disabled}
-              >
-                调整
-              </Button>
-            </div>
+            ) : null}
           </ParamGroup>
 
           <ParamGroup title="采样" count={6}>
@@ -493,28 +494,32 @@ export function ParamsPanel({
               </ParamField>
             </div>
 
-            <ParamField id="playground-thinking" label="思考档位" hintKey="thinkingMode">
-              <Select
-                value={value.thinkingMode}
-                onValueChange={(next) => patch({ thinkingMode: next as ThinkingMode })}
-                disabled={disabled}
-              >
-                <SelectTrigger id="playground-thinking" className="h-7 px-1.5 text-2xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {THINKING_OPTIONS.map((mode) => (
-                    <SelectItem key={mode} value={mode}>
-                      {THINKING_MODE_LABELS[mode]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </ParamField>
-            {unsupportedThinking ? (
-              <p className="rounded-md border border-warning/40 bg-warning-soft px-2 py-1 text-2xs text-warning-text">
-                当前控制面只透传 low / medium / high，这一档会保留在表单里但不会发送。
-              </p>
+            {showThinking ? (
+              <>
+                <ParamField id="playground-thinking" label="思考档位" hintKey="thinkingMode">
+                  <Select
+                    value={value.thinkingMode}
+                    onValueChange={(next) => patch({ thinkingMode: next as ReasoningLevel })}
+                    disabled={disabled}
+                  >
+                    <SelectTrigger id="playground-thinking" className="h-7 px-1.5 text-2xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {thinkingOptions.map((mode) => (
+                        <SelectItem key={mode} value={mode}>
+                          {REASONING_LEVEL_LABELS[mode]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </ParamField>
+                {value.thinkingMode === "default" ? (
+                  <p className="text-2xs leading-relaxed text-faint">
+                    默认档不发送 reasoning_effort，由上游按自身默认行为决定是否思考。
+                  </p>
+                ) : null}
+              </>
             ) : null}
 
             <ParamField id="playground-extra" label="额外请求字段（JSON）" hintKey="extraFields">
@@ -544,7 +549,8 @@ export function ParamsPanel({
             )}
             <p className="rounded-md bg-surface-2 px-2 py-1.5 text-2xs leading-relaxed text-faint">
               控制面当前透传 temperature · top_p · max_tokens ·
-              reasoning_effort(low/medium/high)；其余字段按 OpenAI 形状发送，待数据面支持后生效。
+              reasoning_effort（档位按值转发，default 不发送）；其余字段按 OpenAI
+              形状发送，待数据面支持后生效。
             </p>
           </div>
         </CardContent>

@@ -176,6 +176,8 @@ def test_my_models_shape_and_no_money_keys(client, seeded_ids):
         "max_input_tokens",
         "max_output_tokens",
         "reasoning_level",
+        "reasoning_levels",
+        "default_reasoning_level",
         "input_types",
         "output_types",
         "tool_call",
@@ -208,6 +210,40 @@ def test_my_models_merges_members_fill_blanks(client, seeded_ids):
     assert flagship["sources"] == ["glm-5.3", "claude-sonnet-4-5"]
     assert flagship["parameters"]["max_input_tokens"] == 200_000
     assert flagship["parameters"]["tool_call"] is True
+
+
+def test_my_models_carries_reasoning_declaration_and_merge_fills_blanks(
+    client, seeded_ids
+):
+    """Ticket 18: 声明集合与默认档进 /admin/my/models；成员合并沿用只填空语义。"""
+    undeclared = _create_model(client, "glm-4.6")
+    client.post(
+        "/admin/model-targets",
+        json={"public_model_id": "pmdl_test", "upstream_model_id": undeclared["id"], "priority": 2},
+    )
+    items = client.get("/admin/my/models").json()
+    flagship = next(item for item in items if item["name"] == "flagship")
+    # glm-5.3（priority 1）没有声明 → 空集合与空串原样透出。
+    assert flagship["parameters"]["reasoning_levels"] == []
+    assert flagship["parameters"]["default_reasoning_level"] == ""
+
+    declared = _create_model(
+        client,
+        "reasoning-rich",
+        parameters={
+            "reasoning_levels": ["default", "none", "high", "xhigh"],
+            "default_reasoning_level": "high",
+        },
+    )
+    client.post(
+        "/admin/model-targets",
+        json={"public_model_id": "pmdl_test", "upstream_model_id": declared["id"], "priority": 3},
+    )
+    items = client.get("/admin/my/models").json()
+    flagship = next(item for item in items if item["name"] == "flagship")
+    # 后位成员只填空：空声明被补齐，非空声明不被覆盖。
+    assert flagship["parameters"]["reasoning_levels"] == ["default", "none", "high", "xhigh"]
+    assert flagship["parameters"]["default_reasoning_level"] == "high"
 
 
 def test_my_models_excludes_disabled(client, seeded_ids):

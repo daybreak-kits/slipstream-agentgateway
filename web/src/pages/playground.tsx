@@ -39,9 +39,10 @@ import {
   describeThinking,
   isAbortError,
   listPlaygroundModels,
+  normalizeDeclaredDefault,
+  REASONING_LEVEL_LABELS,
   sendChatStream,
   summarizeChatParams,
-  THINKING_MODE_LABELS,
   toRequestMessages,
   validateChatParams,
   type PlaygroundAttachment,
@@ -186,6 +187,13 @@ export function PlaygroundPage() {
     () => myModelsQuery.data?.find((item) => item.name === params.model) ?? null,
     [myModelsQuery.data, params.model],
   );
+  // 票18：切换模型后思考档位回到该模型声明的默认档；未声明回退 default（不发送）。
+  // 依赖只用原始值：my/models 重新拉取产生新对象时不会重置用户手选的档位。
+  const modelInfoName = activeModelInfo?.name;
+  const declaredDefault = activeModelInfo?.parameters.default_reasoning_level;
+  useEffect(() => {
+    setParams((prev) => ({ ...prev, thinkingMode: normalizeDeclaredDefault(declaredDefault) }));
+  }, [modelInfoName, declaredDefault]);
 
   const permissions = meQuery.data?.permissions ?? [];
   const canSeeCost =
@@ -650,7 +658,7 @@ export function PlaygroundPage() {
 
   const models = modelsQuery.data;
   const modelReady = Boolean(params.model);
-  const thinkingLabel = THINKING_MODE_LABELS[params.thinkingMode];
+  const thinkingLabel = REASONING_LEVEL_LABELS[params.thinkingMode];
 
   return (
     <div className="space-y-3">
@@ -743,6 +751,7 @@ export function PlaygroundPage() {
         onSelect={(name) => setParams((prev) => ({ ...prev, model: name }))}
         thinkingMode={params.thinkingMode}
         onThinkingModeChange={(mode) => setParams((prev) => ({ ...prev, thinkingMode: mode }))}
+        modelInfo={activeModelInfo}
       />
       </div>
     </div>

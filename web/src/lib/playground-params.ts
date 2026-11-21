@@ -1,4 +1,4 @@
-import type { ChatParamInput, ResponseFormatType, ThinkingMode } from "@/lib/playground";
+import type { ChatParamInput, ReasoningLevel, ResponseFormatType } from "@/lib/playground";
 
 /** 参数面板的状态：数字一律以字符串保存，空串表示「不发送、用上游默认」。 */
 export interface PlaygroundParamsState
@@ -10,7 +10,8 @@ export interface PlaygroundParamsState
   apiKey: string;
   responseFormat: ResponseFormatType;
   logprobs: boolean;
-  thinkingMode: ThinkingMode;
+  /** 思考档位；default = 不发送 reasoning_effort（票18）。 */
+  thinkingMode: ReasoningLevel;
 }
 
 export const EMPTY_PLAYGROUND_PARAMS: PlaygroundParamsState = {
@@ -32,6 +33,6 @@ export const EMPTY_PLAYGROUND_PARAMS: PlaygroundParamsState = {
   logprobs: false,
   topLogprobs: "",
   user: "",
-  thinkingMode: "off",
+  thinkingMode: "default",
   extraFields: "",
 };
