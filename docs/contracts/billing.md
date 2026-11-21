@@ -41,6 +41,7 @@ gateway_usage_events（不可变事实，event_id 唯一）
 `upstream_prices(vendor_id, upstream_model, item, unit_price_micro, currency, effective_from, version)`
 - `item` ∈ `input` / `output` / `cache_read` / `cache_write` / `request`
 - 单价单位：**每 1M tokens 的百万分之一币**（整数），或 `per_request` 按次
+- 归属键（W7 t02 expand）：缓存价按 `upstream_model_id` 归属；旧 `vendor_id + upstream_model` 键暂时保留（厂商域删除时随 `vendor_id` 一起退场），一行只带其中一种键。
 
 `charge_prices(public_model_id, item, mode, value, currency, effective_from, version)`（v1 默认 `mode=markup`、`value=10000` 即 1.0 倍，管理员可改）
 - `mode = markup`：`value` 是倍率（如 12000 = 1.2 倍，万分数避免浮点）
