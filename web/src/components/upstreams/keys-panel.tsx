@@ -149,6 +149,8 @@ function AddKeyDialog({
 
 interface KeyRowModel {
   id: string;
+  /** 1-based ordinal in the same (created_at_ms, id) order AG uses for provider #N. */
+  seq: number;
   label: string;
   masked: string;
   createdText: string;
@@ -212,6 +214,7 @@ function KeysTable({
                 />
               </TH>
             ) : null}
+            <TH className="w-10">编号</TH>
             <TH>备注</TH>
             <TH>密钥</TH>
             <TH>测试结果</TH>
@@ -233,6 +236,9 @@ function KeysTable({
                   />
                 </TD>
               ) : null}
+              <TD>
+                <span className="tnum text-2xs text-faint">#{row.seq}</span>
+              </TD>
               <TD>
                 <span className="font-medium text-title">{row.label || "未命名"}</span>
                 {row.pending ? <Badge tone="warning">待保存</Badge> : null}
@@ -439,8 +445,9 @@ export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
     });
   };
 
-  const rows: KeyRowModel[] = keys.map((key) => ({
+  const rows: KeyRowModel[] = keys.map((key, index) => ({
     id: key.id,
+    seq: index + 1,
     label: key.label,
     masked: key.masked,
     createdText: formatDateTime(key.created_at_ms, timezone),
@@ -609,8 +616,9 @@ export function PendingKeysPanel({
         </p>
       ) : (
         <KeysTable
-          rows={keys.map((key) => ({
+          rows={keys.map((key, index) => ({
             id: key.localId,
+            seq: index + 1,
             label: key.label,
             masked: maskPreview(key.apiKey),
             createdText: "保存后生成",

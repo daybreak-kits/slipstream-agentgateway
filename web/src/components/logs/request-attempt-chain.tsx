@@ -6,8 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
 import type { LogAttemptOut } from "@/generated/contract";
-import { fmtInt, fmtSeconds } from "@/lib/format";
-import { formatDateTime, useTimezone } from "@/lib/time";
+import { fmtSeconds } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 import { attemptFailureSummary } from "./error-summary";
@@ -38,10 +37,14 @@ function attemptErrorSummary(attempt: LogAttemptOut): string {
   return attemptFailureSummary(attempt.status_code, attempt.error_type, attempt.error_message);
 }
 
-function outcomeLabel(outcome: string | undefined): string {
-  if (outcome === "ok") return "成功";
-  if (outcome === "error") return "失败";
-  return "";
+/** 上游密钥序号来自 provider ref 的 #N 后缀；显示为「上游标志#N」，与源密钥编号一致。 */
+function attemptUpstreamLabel(attempt: LogAttemptOut): string {
+  const ref = attempt.upstream_ref || "";
+  const hash = ref.lastIndexOf("#");
+  const seq = hash >= 0 ? ref.slice(hash + 1) : "";
+  const name = attempt.upstream_name || ref || "-";
+  if (!seq) return name;
+  return name.endsWith("#" + seq) ? name : name + "#" + seq;
 }
 
 /** 无尝试记录：明确告诉运营者这是数据缺失，不是「没有重试」。 */
@@ -63,16 +66,13 @@ export function RequestAttemptChain({
   /** 行总耗时；缺省时用各次尝试耗时之和。 */
   totalDurationMs?: number;
 }) {
-  const { mode } = useTimezone();
   if (attempts.length === 0) return <NoChainRecord />;
   const totalMs =
     totalDurationMs ?? attempts.reduce((sum, attempt) => sum + (attempt.duration_ms ?? 0), 0);
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-        <p className="text-2xs font-medium text-title">
-          {"路由链 · " + fmtInt(attempts.length) + " 次尝试"}
-        </p>
+        <p className="text-2xs font-medium text-title">路由链</p>
         <p className="text-2xs text-faint">
           总耗时 <span className="tnum text-body">{fmtSeconds(totalMs)}</span>
         </p>
@@ -80,13 +80,9 @@ export function RequestAttemptChain({
       <ol className="space-y-1">
         {attempts.map((attempt) => {
           const failed = attemptFailed(attempt);
-          return (
-            <li
-              key={attempt.attempt + "-" + (attempt.started_at_ms ?? 0)}
-              data-slot="attempt-row"
-              data-attempt-no={attempt.attempt}
-              className="relative border-l border-border pl-3"
-            >
+          const upstreamLabel = attemptUpstreamLabel(attempt);
+          const row = (
+            <>
               <span
                 aria-hidden="true"
                 className={cn(
@@ -94,91 +90,60 @@ export function RequestAttemptChain({
                   attemptDotClass(attempt.status_code),
                 )}
               />
-              {/* 整行进 summary：点击/键盘 Enter 都能展开详情（W7 US 31/32）。 */}
-              <details data-slot="attempt-detail" data-attempt-no={attempt.attempt} className="group">
-                <summary className="flex w-full cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 rounded text-2xs marker:hidden hover:bg-surface-2/60">
-                  <span className="font-medium text-title">第 {attempt.attempt} 轮</span>
-                  <span className="text-faint">→</span>
-                  <span className="text-body" title={attempt.upstream_ref || undefined}>
-                    {attempt.upstream_name || attempt.upstream_ref || "-"}
-                  </span>
-                  {attempt.model ? (
-                    <>
-                      <span className="text-faint">·</span>
-                      <span className="font-mono text-body">{attempt.model}</span>
-                    </>
-                  ) : null}
-                  <span className="text-faint">·</span>
-                  <Badge tone={attemptTone(attempt.status_code)}>
-                    {attempt.status_code === null || attempt.status_code === undefined
-                      ? "无状态"
-                      : attempt.status_code}
-                  </Badge>
-                  <span className="text-faint">·</span>
-                  <span className="tnum text-body">{fmtSeconds(attempt.duration_ms ?? 0)}</span>
-                  {failed ? (
-                    <>
-                      <span className="text-faint">·</span>
-                      <span
-                        className="max-w-[18rem] truncate text-danger-text"
-                        title={attempt.error_message || attempt.error_type || attemptErrorSummary(attempt)}
-                      >
-                        {attemptErrorSummary(attempt)}
-                      </span>
-                    </>
-                  ) : null}
-                  <ChevronDown
-                    className="ml-auto h-3 w-3 shrink-0 text-faint transition-transform group-open:rotate-180"
-                    aria-hidden="true"
-                  />
-                </summary>
-                <div
-                  data-slot="attempt-detail-body"
-                  className="mt-1 rounded-md border border-border bg-surface-2/60 px-2 py-1.5"
-                >
-                  <dl className="grid grid-cols-1 gap-x-4 gap-y-1 text-2xs sm:grid-cols-2">
-                    <div className="min-w-0">
-                      <dt className="text-faint">状态码</dt>
-                      <dd className="text-body">
-                        {attempt.status_code === null || attempt.status_code === undefined
-                          ? "无状态"
-                          : attempt.status_code}
-                      </dd>
-                    </div>
-                    <div className="min-w-0">
-                      <dt className="text-faint">耗时</dt>
-                      <dd className="tnum text-body">{fmtSeconds(attempt.duration_ms ?? 0)}</dd>
-                    </div>
-                    <div className="min-w-0">
-                      <dt className="text-faint">上游地址</dt>
-                      <dd className="break-all font-mono text-body">
-                        {attempt.upstream_ref || "-"}
-                      </dd>
-                    </div>
-                    <div className="min-w-0">
-                      <dt className="text-faint">错误类型</dt>
-                      <dd className="break-all font-mono text-body">
-                        {attempt.error_type || "-"}
-                      </dd>
-                    </div>
-                    <div className="min-w-0">
-                      <dt className="text-faint">开始时间</dt>
-                      <dd className="tnum text-body">
-                        {formatDateTime(attempt.started_at_ms, mode)}
-                      </dd>
-                    </div>
-                    <div className="min-w-0">
-                      <dt className="text-faint">结果</dt>
-                      <dd className="text-body">{outcomeLabel(attempt.outcome) || "-"}</dd>
-                    </div>
-                  </dl>
-                  {attempt.error_message ? (
-                    <p className="mt-1 whitespace-pre-wrap break-all text-2xs text-danger-text">
-                      {"错误全文：" + attempt.error_message}
+              <span className="font-medium text-title">第 {attempt.attempt} 轮：</span>
+              <Badge tone={attemptTone(attempt.status_code)}>
+                {attempt.status_code === null || attempt.status_code === undefined
+                  ? "无状态"
+                  : attempt.status_code}
+              </Badge>
+              <span className="text-faint">·</span>
+              <span className="text-body" title={attempt.upstream_ref || undefined}>
+                {upstreamLabel}
+              </span>
+              {attempt.model ? (
+                <>
+                  <span className="text-faint">/</span>
+                  <span className="font-mono text-body">{attempt.model}</span>
+                </>
+              ) : null}
+              <span className="ml-auto tnum text-body">{fmtSeconds(attempt.duration_ms ?? 0)}</span>
+              {failed ? (
+                <ChevronDown
+                  className="h-3 w-3 shrink-0 text-faint transition-transform group-open:rotate-180"
+                  aria-hidden="true"
+                />
+              ) : null}
+            </>
+          );
+          return (
+            <li
+              key={attempt.attempt + "-" + (attempt.started_at_ms ?? 0)}
+              data-slot="attempt-row"
+              data-attempt-no={attempt.attempt}
+              className="relative border-l border-border pl-3"
+            >
+              {failed ? (
+                <details data-slot="attempt-detail" data-attempt-no={attempt.attempt} className="group">
+                  <summary className="flex w-full cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 rounded text-2xs marker:hidden hover:bg-surface-2/60">
+                    {row}
+                  </summary>
+                  <div
+                    data-slot="attempt-detail-body"
+                    className="mt-1 rounded-md border border-border bg-surface-2/60 px-2 py-1.5"
+                  >
+                    <p className="whitespace-pre-wrap break-all text-2xs text-danger-text">
+                      {"错误：" + (attempt.error_message || attemptErrorSummary(attempt) || "未记录错误详情")}
                     </p>
-                  ) : null}
+                    <p className="mt-1 break-all font-mono text-2xs text-faint">
+                      {"上游地址：" + (attempt.upstream_ref || "-")}
+                    </p>
+                  </div>
+                </details>
+              ) : (
+                <div className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 rounded text-2xs">
+                  {row}
                 </div>
-              </details>
+              )}
             </li>
           );
         })}
@@ -210,13 +175,14 @@ export function RequestAttemptChainPopover({
         <Button
           variant="ghost"
           size="dense"
-          className="h-6 w-6 shrink-0 px-0 text-info-text"
+          className="h-6 w-auto shrink-0 gap-1 px-1.5 text-info-text"
           data-slot="log-attempts-trigger"
           data-event-id={eventId}
           aria-label={label}
           title={label}
         >
           <GitBranch className="h-3.5 w-3.5" aria-hidden="true" />
+          <span className="text-2xs">尝试 {attemptsCount} 次</span>
         </Button>
       </PopoverTrigger>
       {/* 展开错误全文会把内容撑高：限高在可用空间内滚动，长错误不被裁掉（W7 US 32）。 */}

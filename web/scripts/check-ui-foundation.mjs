@@ -1245,7 +1245,7 @@ check("日志路由链：每行上游/模型/状态/耗时/错误摘要，展开
       attempts: [
         {
           attempt: 1,
-          upstream_ref: "ups_zai",
+          upstream_ref: "ups_zai#1",
           upstream_name: "zai-01",
           model: "glm-5.3",
           status_code: 500,
@@ -1257,7 +1257,7 @@ check("日志路由链：每行上游/模型/状态/耗时/错误摘要，展开
         },
         {
           attempt: 2,
-          upstream_ref: "ups_or",
+          upstream_ref: "ups_or#1",
           upstream_name: "or-01",
           model: "glm-5.3",
           status_code: 200,
@@ -1274,30 +1274,30 @@ check("日志路由链：每行上游/模型/状态/耗时/错误摘要，展开
   includesAll(
     html,
     [
-      "路由链 · 2 次尝试",
+      "路由链",
       "总耗时",
       "0.15s",
-      "第 1 轮",
-      "第 2 轮",
-      "zai-01",
-      "or-01",
+      "第 1 轮：",
+      "第 2 轮：",
+      "zai-01#1",
+      "or-01#1",
       "glm-5.3",
       "0.06s",
       "0.09s",
-      "upstream 500: upstream connection reset",
-      "ups_zai",
-      "ups_or",
+      "ups_zai#1",
+      "ups_or#1",
       "上游地址",
-      "错误全文",
+      "错误：",
       ATTEMPT_LONG_ERROR,
     ],
     "路由链行",
   );
-  expect(html.includes("<details"), "每次尝试必须能展开详情行（details）");
+  expect(html.includes("<details"), "失败轮必须能展开错误详情（details）");
   expect(
-    !html.includes("upstream 500: " + ATTEMPT_LONG_ERROR),
-    "折叠行的错误摘要必须截断，不能整段铺开",
+    html.split("<details").length - 1 === 1,
+    "成功轮不得渲染可展开控件，只有失败轮可展开",
   );
+  expect(!html.includes("路由链 ·"), "标题只写「路由链」，尝试次数放到模型旁触发器");
 });
 
 check("日志路由链：无 attempts 显示「无链路记录」，不伪造链路", async () => {
@@ -1317,7 +1317,7 @@ check("日志页：模型格 attempts>0 分叉图标开 popover，独立尝试�
       totalDurationMs: 180,
     }),
   );
-  includesAll(trigger, ['data-slot="log-attempts-trigger"', "查看 3 次尝试的路由链", "aria-label"], "分叉图标按钮");
+  includesAll(trigger, ['data-slot="log-attempts-trigger"', "查看 3 次尝试的路由链", "尝试 3 次", "aria-label"], "分叉图标按钮");
   const page = read("src/pages/logs.tsx");
   includesAll(page, ["RequestAttemptChainPopover", "has_attempts"], "日志页模型格分叉图标接线");
   expect(!page.includes('id: "attempts"'), "独立尝试列必须删除");
