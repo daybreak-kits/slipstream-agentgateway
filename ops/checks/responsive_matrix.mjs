@@ -14,6 +14,9 @@
  *   4. 表格页横向滚动 + 冻结操作列在滚动前后都可达；
  *   4b. （W6 ticket 10）模型管理上游/公开两张表：375/768 横滚、操作列贴边 ≤16px、
  *       冻结操作列滚动前后可点、关闭模型行默认置尾；
+ *   4b+. （W6 ticket 15）成员编排专项（375/1536）：左6右6/堆叠、行内字段随策略收敛、
+ *       行内编辑变脏页头计数联动、候选按上游分组 chip 加入、搜索固定滚动区外、
+ *       大列表（300 候选）高度有界；
  *   4c. （W6 ticket 11）其余数据表（连接密钥/上游渠道/用户/日志/审计/角色/价目/配置版本）：
  *       375/768 横滚、冻结操作列贴边可点、关闭行默认置尾、连接密钥显式排序尊重排序、
  *       日志排序列三态图标（未排序 ArrowUpDown 常驻）；
@@ -1115,6 +1118,149 @@ async function assertPublicModelSaveRollback(page, fixtures) {
   return "500 拦截：错误内联+值/脏标记保留；解除后真保存：脏清零+服务端已更新";
 }
 
+/* W6 ticket 15：成员编排专项——左6右6行内编辑（行内字段随策略收敛）、行内编辑变脏
+ * 页头计数联动、候选按上游分组 chip 搜索固定滚动区外、加入成员走 chip。
+ * 375 只验堆叠 + chip 加入 + 搜索；1536 全量并含大列表预算（300 候选时页面高度有界）。
+ * 跑在 public-edit / regression 之后；结束恢复全部，保证页面零脏态不影响后续测试。 */
+const MEMBER_CHIP_BUDGET = 120;
+async function assertMemberBoard(page, width, fixtures) {
+  await ensureModelsSeeded(page, fixtures);
+  await goto(page, "/models/public/" + fixtures.publicModelId);
+  await page.locator('[data-slot="public-model-page"]').waitFor({ state: "visible", timeout: 8000 });
+  const boardLeft = page.locator('[data-slot="member-board-left"]');
+  const boardRight = page.locator('[data-slot="member-board-right"]');
+  const leftBox = await boxOf(boardLeft);
+  const rightBox = await boxOf(boardRight);
+  if (width >= 1024) {
+    assert(
+      Math.abs(leftBox.y - rightBox.y) < 2 && rightBox.x >= leftBox.x + leftBox.width - 2,
+      width + " 下成员编排不是左右两栏（左6右6）",
+    );
+  } else {
+    assert(rightBox.y >= leftBox.y + leftBox.height - 2, width + " 下成员编排两栏未上下堆叠");
+  }
+
+  // 搜索框固定滚动区外：DOM 上不得是 member-scroll 的后代（列头槽位）。
+  const searchOutside = await page.evaluate(() => {
+    const input = document.querySelector('[data-slot="member-board-right"] input[aria-label="搜索上游渠道或模型"]');
+    const scroll = document.querySelector('[data-slot="member-board-right"] [data-slot="member-scroll"]');
+    return Boolean(input && scroll && !scroll.contains(input));
+  });
+  assert(searchOutside, "候选搜索框必须在 member-scroll 之外（固定列头）");
+
+  const rows = page.locator('[data-slot="member-board-left"] [data-slot="member-row"]');
+  const hasInput = async (label) =>
+    (await page.locator('[data-slot="member-board-left"] [data-slot="member-row"] input[aria-label="' + label + '"]').count()) > 0;
+  assert((await rows.count()) === 1, "播种场景应恰好一行成员，实际 " + (await rows.count()));
+  assert(await hasInput("priority"), "failover 行内必须有 priority 输入");
+  assert(!(await hasInput("weight")) && !(await hasInput("when")), "failover 行不得渲染 weight/when 输入");
+
+  // 行内字段随策略收敛（1536 桌面）：切策略卡后字段集合跟着变，非当前策略字段完全不渲染。
+  if (width >= 1024) {
+    await page.locator('[data-slot="strategy-card"]', { hasText: "weighted" }).first().click();
+    await page.waitForTimeout(200);
+    assert(await hasInput("weight"), "weighted 行内必须有 weight 输入");
+    assert(!(await hasInput("when")), "weighted 行不得渲染 when 输入");
+    await page.locator('[data-slot="strategy-card"]', { hasText: "conditional" }).first().click();
+    await page.waitForTimeout(200);
+    assert(await hasInput("when"), "conditional 行内必须有 when 输入");
+    assert(!(await hasInput("weight")), "conditional 行不得渲染 weight 输入");
+    assert(await visible(page.locator('[data-slot="chip-order"]').first()), "conditional 行应有顺序徽标");
+    await page.locator('[data-slot="strategy-card"]', { hasText: "failover" }).first().click();
+    await page.waitForTimeout(200);
+  }
+
+  // 行内编辑变脏 → 页头未保存计数联动；恢复成员编排后计数清零、值回基线。
+  const dirtyCount = page.locator('[data-slot="dirty-count"]');
+  assert((await dirtyCount.count()) === 0, "行内编辑前不应有未保存计数徽章");
+  const priorityInput = rows.first().locator('input[aria-label="priority"]');
+  await priorityInput.fill("3");
+  await page.waitForTimeout(250);
+  assert(await dirtyCount.isVisible(), "行内编辑后页头应出现未保存计数");
+  const countText = (await dirtyCount.textContent()) ?? "";
+  assert(countText.includes("1 项未保存"), "未保存计数应显示 1 项，实际「" + countText.trim() + "」");
+  await page.getByRole("button", { name: "恢复成员编排" }).click();
+  await page.waitForTimeout(250);
+  assert((await dirtyCount.count()) === 0, "恢复成员编排后计数徽章应消失");
+  assert((await priorityInput.inputValue()) === "1", "恢复后 priority 应回基线值");
+
+  // 加入成员走 chip：点候选 chip → 左栏新增一行 + 计数联动；chip 从候选消失。
+  const candidateChip = page.locator('[data-slot="member-candidate-chip"]').first();
+  assert(await visible(candidateChip), "候选区应有未加入成员的 chip");
+  const joinedId = await candidateChip.getAttribute("data-upstream-model-id");
+  const beforeRows = await rows.count();
+  await candidateChip.click();
+  await page.waitForTimeout(250);
+  assert((await rows.count()) === beforeRows + 1, "点候选 chip 后左栏应新增一行成员");
+  assert(await dirtyCount.isVisible(), "加入成员后应有未保存计数");
+
+  // 搜索过滤：无命中时候选清空，命中时只留匹配 chip；搜索框始终在滚动区外。
+  const search = page.locator('[data-slot="member-board-right"] input[aria-label="搜索上游渠道或模型"]');
+  await search.fill("matrix-no-such-model");
+  await page.waitForTimeout(200);
+  assert((await page.locator('[data-slot="member-candidate-chip"]').count()) === 0, "搜索无命中时候选 chip 应清空");
+  await search.fill("closed");
+  await page.waitForTimeout(200);
+  assert((await page.locator('[data-slot="member-candidate-chip"]').count()) === 1, "按模型名搜索应只留命中 chip");
+  assert(
+    await page.evaluate(() => {
+      const input = document.querySelector('[data-slot="member-board-right"] input[aria-label="搜索上游渠道或模型"]');
+      const scroll = document.querySelector('[data-slot="member-board-right"] [data-slot="member-scroll"]');
+      return Boolean(input && scroll && !scroll.contains(input));
+    }),
+    "搜索后候选搜索框必须仍固定在滚动区外",
+  );
+  await search.fill("");
+
+  // 清理加入的成员：按上游模型 id 精确移除，回到基线（后续测试依赖零脏态）。
+  await page.locator('[data-slot="member-row"][data-upstream-model-id="' + joinedId + '"] [data-slot="member-row-remove"]').click();
+  await page.waitForTimeout(250);
+  assert((await rows.count()) === beforeRows, "移除新成员后应回到基线行数");
+
+  // 大列表预算（1536 一次）：临时播种 300 个候选模型，页面不被无限拉长、chip 有预算截断与展开。
+  if (width >= 1024) {
+    for (let index = 0; index < 300; index += 1) {
+      const response = await page.request.post(baseUrl() + "/admin/upstream-models", {
+        data: { upstream_id: fixtures.upstreamId, name: "matrixbulk" + String(index).padStart(3, "0") + "-bulk", model_type: "chat", enabled: true },
+      });
+      if (!response.ok()) throw new MatrixError("批量播种候选失败 HTTP " + response.status());
+    }
+    await goto(page, "/models/public/" + fixtures.publicModelId);
+    await page.locator('[data-slot="member-board-left"]').waitFor({ state: "visible", timeout: 8000 });
+    const heights = await page.evaluate(() => {
+      const scroll = document.querySelector('[data-slot="member-board-right"] [data-slot="member-scroll"]');
+      return {
+        doc: document.documentElement.scrollHeight,
+        scrollH: scroll ? scroll.getBoundingClientRect().height : 0,
+        scrollCap: scroll ? Math.min(window.innerHeight * 0.6, 560) : 0,
+      };
+    });
+    assert(heights.scrollCap > 0 && heights.scrollH <= heights.scrollCap + 2, "候选滚动区高度必须被 min(60vh,560px) 约束，实际 " + Math.round(heights.scrollH) + "px > " + Math.round(heights.scrollCap) + "px");
+    assert(heights.doc < 8000, "大列表下页面不得被无限拉长，scrollHeight=" + heights.doc);
+    const chipCount = await page.locator('[data-slot="member-candidate-chip"]').count();
+    assert(chipCount === MEMBER_CHIP_BUDGET, "候选 chip 必须按预算 " + MEMBER_CHIP_BUDGET + " 截断渲染，实际 " + chipCount);
+    const expand = page.getByRole("button", { name: /展开全部/ });
+    assert(await visible(expand), "截断时必须提供「展开全部」入口");
+    await expand.click();
+    await page.waitForTimeout(300);
+    const afterExpand = await page.evaluate(() => ({
+      chips: document.querySelectorAll('[data-slot="member-candidate-chip"]').length,
+      scrollH: document.querySelector('[data-slot="member-board-right"] [data-slot="member-scroll"]')?.getBoundingClientRect().height ?? 0,
+    }));
+    assert(afterExpand.chips > MEMBER_CHIP_BUDGET, "展开全部后应渲染预算外候选，实际 " + afterExpand.chips);
+    assert(afterExpand.scrollH <= heights.scrollCap + 2, "展开全部后候选滚动区仍受最大高度约束，实际 " + Math.round(afterExpand.scrollH) + "px");
+  }
+
+  // 收尾：恢复成员编排（若仍有脏态），保证零脏态离开页面。
+  if ((await dirtyCount.count()) > 0) {
+    await page.getByRole("button", { name: "恢复全部" }).click();
+    await page.waitForTimeout(200);
+  }
+  assert((await dirtyCount.count()) === 0, "成员编排专项结束必须回到零脏态");
+  await shot(page, width + "-member-board");
+  return "行内字段随策略收敛、脏计数联动、chip 加入/移除往返、搜索固定" + (width >= 1024 ? "、大列表高度有界" : "");
+}
+
 async function assertCoarsePointer(page) {
   // 复用已登录 cookies，在独立的移动+触摸上下文里测，避免影响主矩阵的桌面指针环境。
   const storageState = await page.context().storageState();
@@ -1341,6 +1487,11 @@ async function main() {
         if (width === 1536) {
           await test("public-edit.regression", "公开模型保存与错误回滚回归（页头保存）", () =>
             assertPublicModelSaveRollback(page, fixtures));
+        }
+        // W6 ticket 15：成员编排专项——1536 全量行内编辑 + 大列表预算；375 堆叠 + chip 加入。
+        if (width === 375 || width === 1536) {
+          await test("member-board." + label, label + " 成员编排行内编辑与分组候选", () =>
+            assertMemberBoard(page, width, fixtures));
         }
       }
     }
