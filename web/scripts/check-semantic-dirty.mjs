@@ -962,6 +962,28 @@ check("接线：成员 chip 流替换 MemberBoard，创建弹窗同样用「上�
   includesAll(chip, ["memberChipLabel", "memberLayers", "conditionalFallback", "candidateGroups", "filterCandidateGroups"], "纯函数契约");
 });
 
+// ---------- 10. 统一悬浮详情 HoverInfo（W7 ticket 08）：语义色与稳定态 ----------
+check("HoverInfo 浮层：底色与前景走语义 token，不写死颜色（浅深主题自适应）", () => {
+  const src = read("src/components/ui/hover-info.tsx");
+  includesAll(src, ["bg-popover", "text-popover-foreground"], "浮层底色与前景色");
+  const magic = src.match(/#[0-9a-fA-F]{3,8}\b|rgba?\(/g);
+  expect(!magic, "浮层不得出现魔法色值：" + (magic ?? []).join("、"));
+});
+
+check("HoverInfo：禁用与空内容是稳定态——不浮层、不新增焦点落点、禁用标记 aria-disabled", async () => {
+  const { HoverInfo } = await load("/src/components/ui/hover-info.tsx");
+  const disabled = render(
+    createElement(HoverInfo, { content: "详情", disabled: true }, createElement("span", null, "关闭")),
+  );
+  expect(disabled.includes('aria-disabled="true"'), "禁用态必须标记 aria-disabled");
+  expect(!disabled.includes('tabindex="0"'), "禁用态不得新增焦点落点");
+  const empty = render(
+    createElement(HoverInfo, { content: "" }, createElement("span", null, "关闭")),
+  );
+  expect(!empty.includes('tabindex="0"'), "空内容不得新增焦点落点（没有详情可读）");
+  expect(!empty.includes('aria-disabled="true"'), "空内容不是禁用，只是没有详情可展示");
+});
+
 // ---------- run ----------
 server = await createServer({
   configFile: join(webRoot, "vite.config.ts"),
