@@ -227,14 +227,10 @@ def _touch_api_keys_last_used(session: Session, stamps: dict[str, int]) -> None:
     """
     if not stamps:
         return
+    from sqlalchemy import inspect
+
     existing = {
-        row[0]
-        for row in session.execute(
-            text(
-                "SELECT name FROM pragma_table_info('api_keys') "
-                "WHERE name IN ('last_used_at_ms', 'last_used_at')"
-            )
-        ).all()
+        column["name"] for column in inspect(session.get_bind()).get_columns("api_keys")
     }
     column = "last_used_at_ms" if "last_used_at_ms" in existing else None
     if column is None and existing:
