@@ -1,0 +1,14 @@
+.git
+.gitignore
+.scratch
+**/.scratch
+**/node_modules
+**/.venv
+**/__pycache__
+**/*.pyc
+web/dist
+api/.data_store
+api/pytest-of-*
+api/tf.txt
+*.md
+!README.md

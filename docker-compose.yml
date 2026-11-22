@@ -1,0 +1,70 @@
+name: slipstream
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-slipstream}
+      POSTGRES_USER: ${POSTGRES_USER:-slipstream}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-slipstream_demo_change_me}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-slipstream} -d ${POSTGRES_DB:-slipstream}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build:
+      context: .
+      args:
+        AG_VERSION: ${AG_VERSION:-1.7.0}
+    image: slipstream-agentgateway:local
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SLIPSTREAM_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-slipstream}:${POSTGRES_PASSWORD:-slipstream_demo_change_me}@db:5432/${POSTGRES_DB:-slipstream}
+      SLIPSTREAM_WEB_DIST_DIR: /app/web/dist
+      SLIPSTREAM_DATA_PLANE_CONFIG_DIR: /data/ag-config
+      SLIPSTREAM_DATA_PLANE_ADAPTER: agentgateway
+      SLIPSTREAM_AG_BINARY: /usr/local/bin/agentgateway
+      SLIPSTREAM_AG_LLM_PORT: "3600"
+      SLIPSTREAM_ADMIN_USERNAME: ${SLIPSTREAM_ADMIN_USERNAME:-admin}
+      SLIPSTREAM_ADMIN_PASSWORD: ${SLIPSTREAM_ADMIN_PASSWORD:-admin12345}
+      SLIPSTREAM_SEED_DEMO: ${SLIPSTREAM_SEED_DEMO:-1}
+      SLIPSTREAM_DEMO_ADMIN_PASSWORD: ${SLIPSTREAM_DEMO_ADMIN_PASSWORD:-admin12345}
+    volumes:
+      - appdata:/data
+    ports:
+      - "${SLIPSTREAM_PORT:-3700}:3700"
+
+  gateway:
+    image: slipstream-agentgateway:local
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    entrypoint: []
+    healthcheck:
+      disable: true
+    command:
+      - /bin/sh
+      - -c
+      - |
+        while [ ! -f /data/ag-config/config.yaml ]; do
+          echo "waiting for /data/ag-config/config.yaml (apply a gateway configuration first)"
+          sleep 2
+        done
+        exec /usr/local/bin/agentgateway -f /data/ag-config/config.yaml
+    volumes:
+      - appdata:/data
+    ports:
+      - "${AG_PORT:-3600}:3600"
+
+volumes:
+  pgdata:
+  appdata:
