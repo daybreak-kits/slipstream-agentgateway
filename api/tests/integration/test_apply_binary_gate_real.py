@@ -23,10 +23,10 @@ from l02_domain.ir import (
     UpstreamSpec,
 )
 from l03_adapters.agentgateway.adapter import AgentgatewayAdapter
-from l03_adapters.agentgateway.binary_validate import DEFAULT_BINARY
+from l03_adapters.agentgateway.binary_validate import find_binary
 from l03_adapters.spi import make_artifact
 
-BINARY = os.environ.get("AG_BINARY") or DEFAULT_BINARY
+BINARY = find_binary(os.environ.get("AG_BINARY")) or ""
 
 
 def _require_binary() -> str:

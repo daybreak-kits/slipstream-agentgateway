@@ -6,7 +6,7 @@
 - PostgreSQL 16：控制面主数据、账本、日志查询全部走 Postgres。
 - agentgateway 1.7.0 Linux 二进制：构建进运行镜像，供 `--validate-only` 与数据面容器使用。
 - 数据面容器默认等待 `/data/ag-config/config.yaml` 出现后启动；首次需要先在控制台保存并下发配置。
-- 首次启动若数据库为空且 `SLIPSTREAM_SEED_DEMO=1`，会自动写入演示数据（6 个用户、上游、模型、价目、日志）。
+- 默认 `SLIPSTREAM_SEED_DEMO=0`：空库只初始化管理员账号，不写演示数据；需要演示数据时显式设为 `1`。
 
 ## 启动
 
@@ -14,12 +14,12 @@
 git clone <repo-url> slipstream-agentgateway
 cd slipstream-agentgateway
 cp .env.docker.example .env
-# 至少改 POSTGRES_PASSWORD、SLIPSTREAM_ADMIN_PASSWORD、SLIPSTREAM_DEMO_ADMIN_PASSWORD
+# 默认登录 admin / admin（本地演示）；生产部署必须改 POSTGRES_PASSWORD 和 SLIPSTREAM_ADMIN_PASSWORD
 docker compose up -d --build
 curl http://127.0.0.1:3700/admin/health
 ```
 
-打开 `http://localhost:3700`。WSL2 下从 Windows 浏览器访问用 `localhost`，不要用 `127.0.0.1`；容器/Ubuntu 内仍可用 `127.0.0.1`。演示 seed 的登录密码取 `.env` 的 `SLIPSTREAM_DEMO_ADMIN_PASSWORD`（示例值 `change-this-demo-password`），不是 `admin12345`；空库初始化使用 `SLIPSTREAM_ADMIN_PASSWORD`。生产环境必须改掉所有默认密码。
+打开 `http://localhost:3700`，默认登录 **admin / admin**。WSL2 下从 Windows 浏览器访问用 `localhost`，不要用 `127.0.0.1`；容器/Ubuntu 内仍可用 `127.0.0.1`。该密码来自 `.env` 的 `SLIPSTREAM_ADMIN_PASSWORD`（空库初始化）；生产环境必须改掉。若把 `SLIPSTREAM_SEED_DEMO` 设为 `1`，演示数据账号密码另取 `SLIPSTREAM_DEMO_ADMIN_PASSWORD`（默认同为 `admin`）。
 
 构建网络受限时，可把 agentgateway 下载指向可访问的镜像，避免构建卡在 GitHub：
 
@@ -34,7 +34,7 @@ AGENTGATEWAY_DOWNLOAD_URL=https://gh-proxy.com/https://github.com/agentgateway/a
 
 ```bash
 curl -sS -c /tmp/slipstream.cookies -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"<demo password>"}' \
+  -d '{"username":"admin","password":"admin"}' \
   http://127.0.0.1:3700/admin/auth/login
 
 curl -sS -b /tmp/slipstream.cookies -H 'Content-Type: application/json' \
@@ -72,7 +72,7 @@ docker compose logs -f app
 docker compose logs -f gateway
 docker compose ps
 docker compose down          # 保留数据卷
-docker compose down -v       # 删除 Postgres 与配置数据，重新 seed
+docker compose down -v       # 删除 Postgres 与配置数据，重新初始化
 ```
 
 默认 Compose 项目名由文件内的 `name: slipstream` 决定，直接 `docker compose up -d` 即可；不要额外传 `-p`，否则会创建第二套网络与数据卷。
@@ -80,8 +80,8 @@ docker compose down -v       # 删除 Postgres 与配置数据，重新 seed
 ## 注意
 
 - `.env` 不应提交；示例文件只包含占位值。
-- 生产环境应设置 `SLIPSTREAM_SEED_DEMO=0`，避免写入演示账号、演示客户端密钥与日志。
-- 生产环境应更换所有默认密码，并给 `appdata`、Postgres 卷做备份。
+- `SLIPSTREAM_SEED_DEMO` 默认已为 `0`；只有需要演示数据时才设为 `1`，演示数据不要用于生产。
+- 生产环境必须更换默认的 admin/admin 和 Postgres 密码，并给 `appdata`、Postgres 卷做备份。
 - 真实上游需要可访问的公网/内网地址；数据面容器与上游之间的 TLS 证书由控制台配置的 `tls.root` 提供。
 - 若只验证控制面，可先不配置数据面；`gateway` 会保持等待状态，不影响管理台。
 - 已知限制：`/admin/config/status` 的 `listening` 字段对真实 agentgateway 适配器目前恒为 false（SPI 的 status 未设置 listening）；配置是否生效应以 `config_hash` 与 `active_revision` 为准，不影响数据面。

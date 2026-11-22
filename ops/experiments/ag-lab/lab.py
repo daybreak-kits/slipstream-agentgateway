@@ -14,6 +14,7 @@ import copy
 import hashlib
 import json
 import os
+import shutil
 import socket
 import sqlite3
 import subprocess
@@ -29,16 +30,18 @@ EVID = LAB / "evidence"
 
 
 def _resolve_ag() -> Path:
-    """E14: the legacy C:/Users/microsoft/agentgateway/ directory no longer exists.
-    Resolve the binary from $AG_EXE, else the lab-local bin-e14 download
-    (v1.7.0, sha256-verified), else the legacy path."""
+    """Resolve the binary from $AG_EXE, else the lab-local bin-e14 download
+    (v1.7.0, sha256-verified), else PATH."""
     env = os.environ.get("AG_EXE")
     if env:
         return Path(env)
     local = LAB / "bin-e14" / "agentgateway.exe"
     if local.exists():
         return local
-    return Path("C:/Users/microsoft/agentgateway/agentgateway.exe")
+    resolved = shutil.which("agentgateway")
+    if resolved:
+        return Path(resolved)
+    raise SystemExit("agentgateway binary not found; set AG_EXE or install it on PATH")
 
 
 AG = _resolve_ag()

@@ -2,7 +2,7 @@
 
 Skipped (with a message) when the pinned binary is not installed; the CI gate
 still exercises the renderer and golden fixture. Set AG_BINARY to override the
-default C:/Users/microsoft/agentgateway/agentgateway.exe path.
+default install path; set AG_BINARY to override.
 """
 
 from __future__ import annotations
@@ -17,15 +17,12 @@ import pytest
 from l03_adapters.agentgateway.ca_bundle import ensure_ca_bundle
 
 FIXTURE = Path(__file__).parents[1] / "contract" / "fixtures" / "ag_1_7_full_config.yaml"
-DEFAULT_BINARY = Path("C:/Users/microsoft/agentgateway/agentgateway.exe")
 
 
 def _find_binary() -> str | None:
     override = os.environ.get("AG_BINARY")
     if override:
         return override if Path(override).exists() else None
-    if DEFAULT_BINARY.exists():
-        return str(DEFAULT_BINARY)
     return shutil.which("agentgateway")
 
 

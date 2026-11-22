@@ -53,18 +53,18 @@ const outIdx = argv.indexOf("--out");
 const OUT = path.resolve(outIdx >= 0 ? argv[outIdx + 1] : path.join(ROOT, "ops", "checks", ".logs", "acceptance", "m4-retry-" + stamp()));
 fs.mkdirSync(OUT, { recursive: true });
 
-const PY = ["C:/Program Files/Python313/python.exe", "python"].find((p) => p === "python" || fs.existsSync(p));
+const PY = process.env.PYTHON || "python";
 const TMP = path.join(ROOT, ".scratch", "vite-tmp");
 fs.mkdirSync(TMP, { recursive: true });
 const BASE_ENV = {
-  PATH: "C:/Program Files/nodejs;C:/Program Files/Git/cmd;C:/Windows/System32;C:/Windows",
-  SystemRoot: "C:\\Windows",
+  PATH: process.env.PATH || "",
+  SystemRoot: process.env.SystemRoot || "",
   TEMP: TMP,
   TMP: TMP,
-  APPDATA: "C:/Users/microsoft/AppData/Roaming",
-  LOCALAPPDATA: "C:/Users/microsoft/AppData/Local",
-  HOME: "C:/Users/microsoft",
-  USERPROFILE: "C:/Users/microsoft",
+  APPDATA: process.env.APPDATA || "",
+  LOCALAPPDATA: process.env.LOCALAPPDATA || "",
+  HOME: process.env.HOME || process.env.USERPROFILE || "",
+  USERPROFILE: process.env.USERPROFILE || process.env.HOME || "",
   PYTHONPATH: path.join(API_DIR, "src"),
   PYTHONUTF8: "1",
   PYTHONIOENCODING: "utf-8",
@@ -225,7 +225,8 @@ function writeReport(err) {
 async function loadPlaywright() {
   const requireWeb = createRequire(path.join(WEB_DIR, "package.json"));
   const pw = requireWeb("playwright-core");
-  const root = "C:/Users/microsoft/AppData/Local/ms-playwright";
+  const localAppData = process.env.LOCALAPPDATA || "";
+  const root = path.join(localAppData, "ms-playwright");
   let exe = null;
   if (fs.existsSync(root)) {
     for (const name of fs.readdirSync(root)) {

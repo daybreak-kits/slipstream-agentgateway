@@ -20,7 +20,7 @@
  *      docs/ACCEPTANCE.md/§0.1 人工核对（ticket 17）。
  *   5. 严重级按旧词存量分两档，避免新词表把既有文案一巴掌打死（有存量时精确调规则，
  *      不改业务代码）：
- *      error —— 已废且存量已清零（W6 清零后提升）的旧词：tokens/Tokens/收费/qax/qianxin/
+ *      error —— 已废且存量已清零（W6 清零后提升）的旧词：tokens/Tokens/收费/
  *               调用模型/调用名/调用串/计划窗口/游乐场/裸「渠道」（含「上游」前缀的
  *               「上游渠道」除外）/封禁/对外模型/客户端密钥/令牌。出现即失败。
  *      warn  —— 仍有启发式存量的旧词：单数 token（指代查询条件时应为「关键词/查询项」，
@@ -237,13 +237,6 @@ const RULES = [
     pattern: /收费/g,
     allow: () => true,
     suggestion: "改用「花费」（用户实付）或「成本」（上游成本），按语义选择",
-  },
-  {
-    id: "vendor-name",
-    severity: "error",
-    pattern: /\bqax\b|qianxin/gi,
-    allow: () => true,
-    suggestion: "旧厂商名不得出现在 UI；使用中性上游名",
   },
   {
     id: "token-plural",
@@ -809,7 +802,7 @@ if (asJson) {
   console.log("");
   const webErrors = errors.filter((f) => !f.rule.startsWith("docs-"));
   if (webErrors.length === 0) {
-    console.log("✓ 未发现禁用旧词（error 级：tokens/收费/qax/裸渠道/代理用户/普通用户/调用模型/调用名/调用串/计划窗口/游乐场/封禁/对外模型/客户端密钥/令牌/旧产品名/AG 版本语句/em dash/en dash 区间）");
+    console.log("✓ 未发现禁用旧词（error 级：tokens/收费/裸渠道/代理用户/普通用户/调用模型/调用名/调用串/计划窗口/游乐场/封禁/对外模型/客户端密钥/令牌/旧产品名/AG 版本语句/em dash/en dash 区间）");
   } else {
     console.log("✗ 禁用旧词/UI 文案违规 " + webErrors.length + " 处（error，必须修）：");
     for (const v of webErrors) {

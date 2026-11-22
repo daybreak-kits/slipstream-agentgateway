@@ -35,7 +35,7 @@ COPY api/src /app/api/src
 COPY api/scripts /app/api/scripts
 RUN pip install --no-cache-dir -e /app/api
 COPY --from=web-builder /workspace/web/dist /app/web/dist
-COPY docker/entrypoint.sh /usr/local/bin/slipstream-entrypoint
+COPY entrypoint.sh /usr/local/bin/slipstream-entrypoint
 RUN chmod 0755 /usr/local/bin/slipstream-entrypoint \
     && useradd --create-home --uid 10001 slipstream \
     && mkdir -p /data/ag-config \

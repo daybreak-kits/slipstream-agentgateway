@@ -41,7 +41,6 @@ def test_find_binary_returns_none_when_nothing_installed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv(bv.ENV_BINARY, str(tmp_path / "missing-env"))
-    monkeypatch.setattr(bv, "DEFAULT_BINARY", str(tmp_path / "missing-default"))
     monkeypatch.setattr(shutil, "which", lambda _name: None)
     assert bv.find_binary() is None
 
@@ -51,7 +50,6 @@ def test_find_binary_falls_back_to_env_then_path(
 ) -> None:
     env_binary = _install_fake_binary(tmp_path / "env-agentgateway.exe")
     monkeypatch.setenv(bv.ENV_BINARY, env_binary)
-    monkeypatch.setattr(bv, "DEFAULT_BINARY", str(tmp_path / "missing-default"))
     assert bv.find_binary() == env_binary
 
     monkeypatch.delenv(bv.ENV_BINARY)
@@ -63,7 +61,6 @@ def test_build_validator_skips_and_records_when_binary_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv(bv.ENV_BINARY, str(tmp_path / "missing"))
-    monkeypatch.setattr(bv, "DEFAULT_BINARY", str(tmp_path / "missing2"))
     monkeypatch.setattr(shutil, "which", lambda _name: None)
     validator = bv.build_validator()
     result = validator(str(tmp_path / "config.yaml"))

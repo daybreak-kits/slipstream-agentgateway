@@ -7,7 +7,7 @@ So every apply validates a *candidate* file with `--validate-only` before the
 atomic replace; a failed validation leaves the previous config serving.
 
 The binary is resolved in this order: explicit argument -> AG_BINARY env ->
-the pinned Windows path -> PATH lookup. When none exists the gate is skipped
+PATH lookup. When none exists the gate is skipped
 and the skip is recorded on the ApplyResult; nothing is silently assumed valid.
 AG reads provider key files (relative to the config file) during validation, so
 the candidate must live in the real config directory.
@@ -21,7 +21,6 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 
-DEFAULT_BINARY = "C:/Users/microsoft/agentgateway/agentgateway.exe"
 ENV_BINARY = "AG_BINARY"
 DEFAULT_TIMEOUT_SECONDS = 30.0
 MAX_ERRORS = 10
@@ -48,8 +47,6 @@ def find_binary(explicit: str | None = None) -> str | None:
     env_value = os.environ.get(ENV_BINARY, "").strip()
     if env_value and os.path.exists(env_value):
         return env_value
-    if os.path.exists(DEFAULT_BINARY):
-        return DEFAULT_BINARY
     return shutil.which("agentgateway")
 
 

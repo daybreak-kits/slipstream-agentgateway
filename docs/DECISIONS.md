@@ -363,7 +363,7 @@
 - 术语：词元（token）、花费（spend）、连接密钥（原客户端密钥）、公开模型（原对外模型）、模型试验（原游乐场）；价目管理归「系统」组。
 - 表格少分列：成本与花费合列、公开模型只读价合列，避免横向溢出。
 - 可用性并入模型管理行内操作（关闭/启用/一次性冷却/解除）；**UI 提供紧凑的周期冷却编辑（重复方式+时间窗），不做完整排期日历；后端周期冷却（daily/weekly/monthly）完整保留**。旧 `/admin/availability-rules` 提供 POST/GET/PATCH/DELETE，周期规则由 API/规则层与模型页「周期」按钮管理，以 ADR-004 为准（2026-11-18 评审 #8 修正）。
-- 登录默认 `admin / admin`（`.env` 的 `SLIPSTREAM_ADMIN_USERNAME` / `SLIPSTREAM_ADMIN_PASSWORD` 引导，ADR-019；2026-11-20 起加 `SLIPSTREAM_` 前缀）；演示数据禁用 qax/qianxin（用青岚云/nebula）。
+- 登录默认 `admin / admin`（`.env` 的 `SLIPSTREAM_ADMIN_USERNAME` / `SLIPSTREAM_ADMIN_PASSWORD` 引导，ADR-019；2026-11-20 起加 `SLIPSTREAM_` 前缀）；演示数据使用中性厂商名（青岚云/nebula）。
 - 看板三标签（柱形/面积/分流）+ 右侧成员详情 + 底部 7D/30D/365D 热力图。
 
 ## ADR-019 统一用户表：admin_users 并入 users

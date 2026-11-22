@@ -2,7 +2,7 @@
 
 状态：**方案已按 W1–W6 决策复核并调整，14 张 tickets 已发布；等待实施启动。** 与 spec 冲突处以 `.scratch/w7/spec.md` 的 Conflict Review 为准。
 日期：2026-11-21
-依据：用户 m06570 / m06684 / m06721；旧系统参考 C:/Users/microsoft/.zcode/workspace/webdev/slipstream-python（pages/login.tsx、docs/screenshots/login.jpg）；当前 HEAD 5c13b6b（w6/preview）。
+依据：用户 m06570 / m06684 / m06721；旧系统参考（本地只读快照，路径脱敏）；当前 HEAD 5c13b6b（w6/preview）。
 
 ## 0. 完成定义（DoD）
 

@@ -1,7 +1,7 @@
 # 旧仓（llmapi）看板 / 日志 / 设置 / 角色 / 用户层级 现状调研
 
-- 调研对象：`C:/Users/microsoft/workspace/webdev/llmapi`（只读，未做任何改动）
-- 对照对象：`C:/Users/microsoft/workspace/webdev/slipstream`
+- 调研对象：旧控制台代码库（只读，未做任何改动）
+- 对照对象：当前仓库
 - 性质：读代码 + 读 ADR/SSOT/GLOSSARY 的事实记录；不含建议实现，只在与新仓对照时给差异结论
 - 方法：全部结论以 `file:line` 为锚；推断一律标注「推断」，代码里没有的一律写「没有」
 

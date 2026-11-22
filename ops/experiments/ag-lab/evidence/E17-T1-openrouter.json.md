@@ -28,7 +28,7 @@
   ],
   "impact_on_T3": "if 429 daily free quota exhausted, OR cannot be the real backup today; T3 substitutes a second real NVIDIA provider",
   "binary": {
-    "binary": "C:\\Users\\microsoft\\worksapce\\webdev\\slipstream-agentgateway\\ops\\experiments\\ag-lab\\bin-e14\\agentgateway.exe",
+    "binary": "<local-home>\\worksapce\\webdev\\slipstream-agentgateway\\ops\\experiments\\ag-lab\\bin-e14\\agentgateway.exe",
     "version": "v1.7.0 (upstream --version prints true)",
     "git_revision": "26f5aebe99a36a037fe54f8080a608aca5547e15",
     "sha256": "909b93dc8fb5486cc0418a818b4a28fa60046cbd619013e33d1e4b20b889ed3c",

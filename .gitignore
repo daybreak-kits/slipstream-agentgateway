@@ -378,4 +378,7 @@ ops/experiments/ag-lab/.e20-tmp/
 /.playwright-mcp/
 /api/.scratch/
 /web/.scratch/
-/api/pytest-of-microsoft/
+/api/pytest-of-*/
+
+# Agent instructions are local-only, not part of the product tree
+/AGENTS.md

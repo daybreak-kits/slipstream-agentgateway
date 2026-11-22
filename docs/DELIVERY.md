@@ -24,7 +24,7 @@
 
 ```powershell
 # 1) 演示数据（幂等；已有数据时加 --keep 会主动拒绝覆盖）
-cd C:\Users\microsoft\workspace\webdev\slipstream\api
+cd api
 $env:PYTHONPATH="src"; python scripts/seed_demo.py
 # 旧库 priority 语义迁移：默认 dry-run，--apply 写入并记录 priority_semantics=v2；已迁移则 no-op
 python scripts/migrate_priority_v2.py --database-url sqlite:///./.data_store/slipstream.db
@@ -37,7 +37,7 @@ python scripts/migrate_multikey_v2.py --database-url sqlite:///./.data_store/sli
 $env:PYTHONPATH="src"; python -m uvicorn l06_api.app:create_app --factory --host 127.0.0.1 --port 3700
 
 # 3) 管理台（单端口：构建产物由控制面 3700 同源托管）
-cd C:\Users\microsoft\workspace\webdev\slipstream\web
+cd web
 npm run build          # 产物 web/dist；控制面启动时自动挂载（先构建再启动）
 # 打开 http://localhost:3700
 ```
@@ -80,7 +80,7 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 1. **接真实数据面**：把 `agentgateway` 渲染产物下发到 3600 实例（`l03_adapters/agentgateway/apply.py` 原子替换 + 回滚），保持 3691 生产实例不动。
 2. **旧库迁移**：旧库按新模型（upstreams/upstream_keys/upstream_models/public_models/model_targets/api_keys/users）用脚本录入；priority 语义用 `migrate_priority_v2.py` 一次性翻转。（W7 后已无厂商表；旧 mock 库由 seed 重置，ADR-030 不写迁移脚本。）
 3. **趋势窗口化**：补 24h/小时桶与看板时间窗联动。
-4. **（可选）** 把控制面迁到 `\\wsl.localhost\Ubuntu-26.04\home\microsoft\slipstream` 运行，Windows 侧只留数据面。
+4. **（可选）** 把控制面迁到 WSL 中的项目目录运行，Windows 侧只留数据面。
 
 ## 6. 三期交付段（2026-11-19，重构收口）
 

@@ -1,11 +1,11 @@
 # ssag(agentgateway) vs sspy(旧 Python 网关) 流量实测对比
 
 - 生成时间：2026-11-17 11:40（Asia/Shanghai）
-- 数据源：`C:/Users/microsoft/agentgateway/agentgateway.db`（ssag，表 request_logs，**345 行**）
-  与 `C:/Users/microsoft/workspace/webdev/llmapi/api/data/app.db`（sspy，表 request_logs，全库 **23,420 行**）
+- 数据源：agentgateway 与旧控制面的 `request_logs` 本地只读快照（分别为 345 行 / 23,420 行）。
+  两条链路均来自本地只读快照；不上传原始数据。
 - 对比窗口：**2026-11-17 00:23 – 11:02（北京）**，10.64h，两个库的重叠区间
 - 属性：**观察式对比，不是受控 A/B**。两个网关同时独立服务不同客户端（旧：127.0.0.1 的 agent 客户端；新：deepseek-harness），
-  上游同一家（Qianxin `codegen.qianxin-inc.cn`，模型 deepseek-flash）。输出 token 分布不同，只在"特征相近"的桶里做结论。
+  上游同一家（厂商与域名隐去，模型 deepseek-flash）。输出 token 分布不同，只在"特征相近"的桶里做结论。
 
 ## 1. 总体（同窗口）
 
@@ -59,7 +59,7 @@ sspy（窗口内 129 次失败）：
 
 ssag（窗口内 38 次失败）：
 - `backends required DNS resolution which failed` **34 次** —— 全部集中在 19:48Z（北京 03:48）那一批，
-  attributes 显示 endpoint `codegen.qianxin-inc.cn:443`，10ms 内返回 503 `NoHealthyBackend`。
+  attributes 显示上游 endpoint（域名隐去），10ms 内返回 503 `NoHealthyBackend`。
   **属于我们自己配置/网络路径的自伤**（旧网关走的是 hosts/relay 固定路径，不依赖 DNS），不是数据面缺陷。
 - `Connect: deadline has elapsed` 2 次、无 API Key 401 1 次、空错误 1 次。
 

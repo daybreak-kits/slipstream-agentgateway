@@ -69,12 +69,12 @@ for s in hover_info model_params member_table upstream_identity status_columns d
 
 ```bash
 # 1) 管理台构建产物（单端口交付；先构建，控制面启动时挂载 web/dist）
-cd C:/Users/microsoft/workspace/webdev/slipstream/web
+cd web
 npm install        # 首次
 npm run build      # tsc --noEmit + vite build → web/dist
 
 # 2) 控制面（3700，同时托管管理台）
-cd C:/Users/microsoft/workspace/webdev/slipstream/api
+cd api
 PYTHONPATH=src python scripts/seed_demo.py   # 幂等重建演示数据（W7 t14 实测）：无厂商域 / 4 上游（open-bigmodel-cn 一渠道三密钥，name 由连接地址生成）/ 16 上游模型 / 8 公开模型 / 6 用户（全部有登录凭证）/ 30 条缓存价挂上游模型 / 252 条用量 / 策略·护栏·MCP 样例
 PYTHONPATH=src python -m uvicorn l06_api.app:create_app --factory --host 127.0.0.1 --port 3700
 #   PowerShell: $env:PYTHONPATH="src"; python -m uvicorn l06_api.app:create_app --factory --host 127.0.0.1 --port 3700

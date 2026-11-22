@@ -135,7 +135,7 @@
 - 导航「账单」按 `billing:spend` 显隐。
 
 ### 19 演示数据与 priority 迁移（964e954）
-- seed：3 厂商/6 上游/20 上游模型（19 带成本+1.2 倍率）/8 公开模型/16 目标/6 用户（根 D + 两层树）/5 sk-/252 用量/245 计费/2 配置版本/68 审计/12 app_settings/2 可用性（ban+cooldown）；策略、护栏、MCP 各一份样例；幂等，`--keep` 拒覆盖；演示数据禁 qax/qianxin。
+- seed：3 厂商/6 上游/20 上游模型（19 带成本+1.2 倍率）/8 公开模型/16 目标/6 用户（根 D + 两层树）/5 sk-/252 用量/245 计费/2 配置版本/68 审计/12 app_settings/2 可用性（ban+cooldown）；策略、护栏、MCP 各一份样例；幂等，`--keep` 拒覆盖；演示数据使用中性厂商名。
 - `scripts/migrate_priority_v2.py`：默认 dry-run，`--apply` 翻转并写 `priority_semantics=v2`，已迁移 no-op；seed 直接写 v2 标记。
 
 ### 20 浏览器验收基建（ece3b31 + e83ea3a）

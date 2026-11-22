@@ -2,7 +2,7 @@
 
 状态：已完成 E1–E16（E9–E11 为第二轮追加；E12 额度/localRateLimit、E13 retry、E9 追加 CEL 字符串函数为第三轮；E14 状态码矩阵/route 层 retry/非 chat 透传为第四轮；E15 真实上游复验请求内重试/故障转移/流式中杀为第五轮；E16 完整形态 gateways/routes/backends[].ai 请求内 retry/组 failover 判定为第六轮）。实验脚本与原始日志见 slipstream/ops/experiments/ag-lab/ 与 evidence/。
 
-执行环境：Windows 单机、agentgateway v1.7.0 官方二进制（git 26f5aebe99a36a037fe54f8080a608aca5547e15、rust 1.99.0、x86_64-pc-windows-msvc；该构建 --version 打印 "True"，版本号以 release/schema 为准）。E1–E13 期间复用 C:/Users/microsoft/agentgateway/ 内的二进制（只读）；该目录已不存在，E14 起改用从 GitHub releases 重新下载的同一构建（sha256 909b93dc…ed3c 与官方 .sha256 一致），存放于 ops/experiments/ag-lab/bin-e14/，lab.py 按 $AG_EXE → bin-e14 → 旧路径 的顺序解析。隔离端口：llm 3692 / admin 3921 / stats 3922 / readiness 3923；E14 另用纯 HTTP 网关端口 3694；自建 mock 上游 8099。全程未访问生产端口 3691 / 19004–19006。
+执行环境：Windows 单机、agentgateway v1.7.0 官方二进制（git 26f5aebe99a36a037fe54f8080a608aca5547e15、rust 1.99.0、x86_64-pc-windows-msvc；该构建 --version 打印 "True"，版本号以 release/schema 为准）。E1–E13 期间复用本地只读二进制；该目录已不存在，E14 起改用从 GitHub releases 重新下载的同一构建（sha256 909b93dc…ed3c 与官方 .sha256 一致），存放于 ops/experiments/ag-lab/bin-e14/，lab.py 按 $AG_EXE → bin-e14 → 旧路径 的顺序解析。隔离端口：llm 3692 / admin 3921 / stats 3922 / readiness 3923；E14 另用纯 HTTP 网关端口 3694；自建 mock 上游 8099。全程使用隔离端口，未访问生产环境。
 
 可复现：
 

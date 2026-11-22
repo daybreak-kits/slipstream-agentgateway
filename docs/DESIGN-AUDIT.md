@@ -119,7 +119,7 @@ grep -rn "bg-gradient\|text-gradient\|drop-shadow\|blur-\|hover:scale\|animate-p
 
 ### 7. 术语门禁
 
-- `ops/checks/terminology_audit.mjs` 为唯一术语门禁（W6 ticket 20 起现行 12 条规则）：`收费`、厂商名 `qax|qianxin`、`Tokens`、单数 `Token`（warn）、裸「渠道」（`上游渠道` 复合词放行）、`调用模型|调用名|调用串|计划窗口|游乐场`、`封禁|对外模型|客户端密钥`、`令牌`、旧英文产品名（`LLM API 网关/LLM API GATEWAY` 等，正名「模型接口网关」）、数据面版本语句（`AG 1.7`/`pinned AG`，能力文案走适配器 capability_note）、em dash（缺值「-」/区间「至」/正文改标点）、en dash 区间（统一「至」）；扫描范围是 `web/src` + `index.html` + `public`，并新增现行 docs 扫描（README + 现行规范/契约文档；DECISIONS 等 ADR 原文与历史归档不在清单内）。em/en dash 规则带 baseline 棘轮（`ops/checks/terminology_baseline.json`）：baseline 内残留只提示，新增违规 EXIT=1。允许「上游渠道」「关闭/启用」「快速上手」「代理用户」；UI 禁裸「渠道」、禁「封禁」。
+- `ops/checks/terminology_audit.mjs` 为唯一术语门禁（W6 ticket 20 起现行 11 条规则）：`收费`、`Tokens`、单数 `Token`（warn）、裸「渠道」（`上游渠道` 复合词放行）、`调用模型|调用名|调用串|计划窗口|游乐场`、`封禁|对外模型|客户端密钥`、`令牌`、旧英文产品名（`LLM API 网关/LLM API GATEWAY` 等，正名「模型接口网关」）、数据面版本语句（`AG 1.7`/`pinned AG`，能力文案走适配器 capability_note）、em dash（缺值「-」/区间「至」/正文改标点）、en dash 区间（统一「至」）；扫描范围是 `web/src` + `index.html` + `public`，并新增现行 docs 扫描（README + 现行规范/契约文档；DECISIONS 等 ADR 原文与历史归档不在清单内）。em/en dash 规则带 baseline 棘轮（`ops/checks/terminology_baseline.json`）：baseline 内残留只提示，新增违规 EXIT=1。允许「上游渠道」「关闭/启用」「快速上手」「代理用户」；UI 禁裸「渠道」、禁「封禁」。
 
 
 ## 四期·表格与分页规范（2026-11-19 用户定案）

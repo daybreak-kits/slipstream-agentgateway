@@ -283,7 +283,7 @@ failover 里 0 先于 1；weighted 把 `priority` 换成 `weight`，conditional 
 证据命令：
 
 ```bash
-C:/Users/microsoft/agentgateway/agentgateway.exe --validate-only -f config.yaml
+agentgateway --validate-only -f config.yaml
 # apiKey.file 相对进程 cwd 解析，文件必须存在
 ```
 
