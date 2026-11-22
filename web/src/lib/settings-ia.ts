@@ -7,8 +7,6 @@ import type { ConnectionInfo, UserPreferences } from "@/types";
 
 /** ticket 16：用户设置 / 运营设置的数据层，读写既有控制面接口。 */
 
-export const CONNECTION_DEFAULT_PORT = 3600;
-
 export const CONNECTION_QUERY_KEY = ["settings", "connection"] as const;
 export const PREFERENCES_QUERY_KEY = ["auth", "preferences"] as const;
 
@@ -19,23 +17,6 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
   notify_weekly: true,
   bio: "",
 };
-
-/** 浏览器当前 host；没有 window 时回退 localhost。 */
-export function browserHost(): string {
-  if (typeof window === "undefined") return "localhost";
-  return window.location.hostname || "localhost";
-}
-
-/** 默认连接地址：浏览器当前 host + 3600 端口（本地开发即 http://<host>:3600）。 */
-export function defaultBaseUrl(port = CONNECTION_DEFAULT_PORT): string {
-  return "http://" + browserHost() + ":" + port;
-}
-
-/** 运营设置里配了公网地址就用它，否则回退默认地址。 */
-export function effectiveBaseUrl(info: ConnectionInfo | undefined): string {
-  const configured = info?.base_url?.trim();
-  return configured ? configured.replace(/\/+$/, "") : defaultBaseUrl(info?.default_port ?? CONNECTION_DEFAULT_PORT);
-}
 
 /** URL 校验：http(s) + 主机名，不允许账号密码/query/hash；空串 = 自动。 */
 export function validateBaseUrl(input: string): string | null {
