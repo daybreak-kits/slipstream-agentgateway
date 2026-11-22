@@ -40,7 +40,7 @@ import {
 } from "@/components/logs/query";
 import { QuerySyntaxHelp } from "@/components/logs/query-syntax-help";
 import type { LogRow } from "@/components/logs/types";
-import { TimeRangePicker, timeWindowUsable, timeWindowKey } from "@/components/time-range-picker";
+import { TimeRangePicker, timeWindowEquals, timeWindowUsable } from "@/components/time-range-picker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
@@ -263,8 +263,7 @@ export function LogsPage() {
           <TimeRangePicker
             value={draft.window}
             onChange={(window) => updateDraft({ window })}
-            highlighted={timeWindowKey(draft.window) !== timeWindowKey(applied.draft.window)}
-            className="w-56"
+            highlighted={!timeWindowEquals(draft.window, applied.draft.window)}
           />
           <Combobox
             options={modelOptions}

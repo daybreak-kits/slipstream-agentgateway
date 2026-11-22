@@ -18,7 +18,8 @@ import { Tabs } from "@/components/ui/tabs";
 import { controlPlane } from "@/lib/control-plane";
 import { revisionStatusMeta } from "@/lib/revision-status";
 import { usePermissions } from "@/lib/permissions";
-import { effectiveBaseUrl, useConnection } from "@/lib/settings-ia";
+import { useConnection } from "@/lib/settings-ia";
+import { PORT_DISABLED_LABEL, effectiveBaseUrl, formatPort, isDataPlaneEnabled, isPortEnabled } from "@/lib/url";
 import { useTimezone } from "@/lib/time";
 import { formatIntervalDateTime } from "@/lib/time-range";
 import { cn } from "@/lib/utils";
@@ -100,7 +101,10 @@ function HealthBand() {
           <span className="text-faint">健康状态未知</span>
         ) : (
           <span className="tnum text-body">
-            {health.data?.adapter ?? "-"} · 端口 {health.data?.data_plane_port ?? "-"}
+            {health.data?.adapter ?? "-"} ·{" "}
+            {isPortEnabled(health.data?.data_plane_port)
+              ? "端口 " + formatPort(health.data?.data_plane_port)
+              : formatPort(health.data?.data_plane_port)}
           </span>
         )}
       </div>
@@ -195,6 +199,9 @@ function ConnectionInfoCard({ canSettings }: { canSettings: boolean }) {
     ? normalizeSettings(settings.data).find((row) => row.key === "gateway_base_url")?.value?.trim() || "-"
     : "-";
   const address = effectiveBaseUrl(connection.data);
+  // 端口 0/缺失 = 数据面未启用（外部数据面）：不能再拼 /v1 或复制出 host:0。
+  const dataPlaneEnabled = isDataPlaneEnabled(connection.data);
+  const dataPlaneBase = dataPlaneEnabled ? address + "/v1" : address;
 
   return (
     <Card>
@@ -206,13 +213,17 @@ function ConnectionInfoCard({ canSettings }: { canSettings: boolean }) {
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="text-2xs text-faint">数据面地址（客户端调用的 base）</div>
-              <div className="tnum break-all font-mono text-2sm text-title">{address}/v1</div>
+              <div className="tnum break-all font-mono text-2sm text-title">
+                {connection.isPending ? "读取中…" : dataPlaneBase}
+              </div>
               <div className="text-2xs text-faint">
                 {connection.isPending
                   ? "读取中"
                   : connection.data?.configured
                     ? "来自运营设置"
-                    : "未配置，默认浏览器 host + " + (connection.data?.default_port ?? 3600) + " 端口"}
+                    : dataPlaneEnabled
+                      ? "未配置，浏览器当前 host + 适配器契约端口"
+                      : "未配置，数据面端口由适配器契约提供（当前未启用）"}
               </div>
             </div>
             <Button
@@ -221,7 +232,8 @@ function ConnectionInfoCard({ canSettings }: { canSettings: boolean }) {
               aria-label="复制数据面地址"
               title="复制数据面地址"
               className="h-7 w-7 shrink-0"
-              onClick={() => void copyText(address + "/v1")}
+              disabled={connection.isPending || !dataPlaneEnabled}
+              onClick={() => void copyText(dataPlaneBase)}
             >
               <Copy className="h-3.5 w-3.5" />
             </Button>
@@ -265,7 +277,9 @@ export function OverviewPage() {
   const canModels = can("upstream_models:read");
   const canPlayground = can("playground:use");
   const connection = useConnection();
-  const address = effectiveBaseUrl(connection.data) + "/v1";
+  const dataPlaneEnabled = isDataPlaneEnabled(connection.data);
+  // 只有数据面可用时才生成示例地址；否则示例会拼出「未启用（外部数据面）/v1」。
+  const address = dataPlaneEnabled ? effectiveBaseUrl(connection.data) + "/v1" : "";
 
   const curlSample = [
     "curl " + address + "/chat/completions \\",
@@ -345,12 +359,20 @@ export function OverviewPage() {
             criteria="示例请求返回 2xx"
             actions={canPlayground ? <StepLink to="/playground" label="在模型试验里试一把" /> : undefined}
           >
-            <Tabs
-              items={[
-                { key: "curl", label: "curl", content: <CodeBlock code={curlSample} label="curl 示例" /> },
-                { key: "python", label: "Python", content: <CodeBlock code={pythonSample} label="Python 示例" /> },
-              ]}
-            />
+            {connection.isPending ? (
+              <Skeleton className="h-24 w-full" />
+            ) : dataPlaneEnabled ? (
+              <Tabs
+                items={[
+                  { key: "curl", label: "curl", content: <CodeBlock code={curlSample} label="curl 示例" /> },
+                  { key: "python", label: "Python", content: <CodeBlock code={pythonSample} label="Python 示例" /> },
+                ]}
+              />
+            ) : (
+              <p className="text-2xs text-faint">
+                {PORT_DISABLED_LABEL}：数据面端口由适配器契约提供，配置公网连接地址后可复制完整示例。
+              </p>
+            )}
           </StepCard>
         </div>
       </section>
