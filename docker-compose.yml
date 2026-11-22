@@ -22,6 +22,7 @@ services:
       args:
         AG_VERSION: ${AG_VERSION:-1.7.0}
     image: slipstream-agentgateway:local
+    pull_policy: build
     restart: unless-stopped
     depends_on:
       db:
@@ -44,6 +45,7 @@ services:
 
   gateway:
     image: slipstream-agentgateway:local
+    pull_policy: never
     restart: unless-stopped
     depends_on:
       app:

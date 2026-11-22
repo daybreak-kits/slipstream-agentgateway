@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.7
 # Slipstream control plane + web console. The agentgateway binary is pinned to
 # 1.7.0 so apply --validate-only and the optional data-plane service use the
 # same release the adapter renders for.
