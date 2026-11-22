@@ -78,7 +78,7 @@ describe("timeWindowLabel：完整区间与预设名", () => {
       toMs: at(2026, 11, 22, 20, 1, 5),
     });
     expect(label).toBe("2026/11/22 19:51:50 至 2026/11/22 20:01:05");
-    expect(label).not.toContain("—");
+    expect(label).not.toContain("\u2014");
   });
 
   it("跨年时两端都带完整年份与秒", () => {
