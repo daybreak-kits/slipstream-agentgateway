@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { fmtFileSize } from "@/lib/format";
-import type { PlaygroundAttachment } from "@/lib/playground";
+import type { PlaygroundAttachment } from "@/lib/chat";
 
 const ACCEPT =
   ".txt,.md,.markdown,.json,.jsonl,.csv,.tsv,.log,.yaml,.yml,.xml,.html,.css,.js,.jsx,.ts,.tsx,.py,.go,.rs,.sh,.sql,.toml,.ini,text/*";

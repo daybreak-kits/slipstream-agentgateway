@@ -24,7 +24,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import type { UpstreamModelCreate } from "@/generated/contract";
 import { controlPlane } from "@/lib/control-plane";
 import { sameJson } from "@/lib/dirty-fields";
-import { REASONING_LEVELS, REASONING_LEVEL_LABELS } from "@/lib/playground";
+import { REASONING_LEVELS, REASONING_LEVEL_LABELS } from "@/lib/chat";
 import { formatDateTime, useTimezone } from "@/lib/time";
 import { useDirtyFields } from "@/lib/use-dirty-fields";
 import { usePermissions } from "@/lib/permissions";

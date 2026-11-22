@@ -1689,7 +1689,7 @@ const t18EmbeddingInfo = () => ({
 });
 
 check("思考档位全集与标签：default..max 七档，default 的语义是「不发送」", async () => {
-  const lib = await load("/src/lib/playground.ts");
+  const lib = await load("/src/lib/chat/params.ts");
   expect(
     JSON.stringify(lib.REASONING_LEVELS) ===
       JSON.stringify(["default", "none", "low", "medium", "high", "xhigh", "max"]),
@@ -1709,7 +1709,7 @@ check("思考档位全集与标签：default..max 七档，default 的语义是�
 });
 
 check("档位收敛：有声明按声明保序，未声明回退全部档位，非法值不产生空选择器", async () => {
-  const { reasoningLevelOptions, normalizeDeclaredDefault } = await load("/src/lib/playground.ts");
+  const { reasoningLevelOptions, normalizeDeclaredDefault } = await load("/src/lib/chat/params.ts");
   expect(
     JSON.stringify(reasoningLevelOptions(["low", "default"])) === JSON.stringify(["low", "default"]),
     "有声明时按声明保序收敛",
@@ -1726,7 +1726,7 @@ check("档位收敛：有声明按声明保序，未声明回退全部档位，�
 });
 
 check("chat 判定：model_type === chat 才显示思考档位", async () => {
-  const { isChatModel } = await load("/src/lib/playground.ts");
+  const { isChatModel } = await load("/src/lib/chat/params.ts");
   expect(isChatModel(t18ChatInfo()) === true, "chat 模型必须判定为 chat");
   expect(isChatModel(t18EmbeddingInfo()) === false, "embedding 模型不得判定为 chat");
   expect(isChatModel(null) === false && isChatModel(undefined) === false, "无模型数据不得判定为 chat");
@@ -1757,13 +1757,20 @@ check("模型对话框：底部档位随模型能力收敛（Radix Dialog 走 Po
   const src = read("src/components/playground/model-dialog.tsx");
   includesAll(
     src,
-    ["reasoningLevelOptions(modelInfo?.parameters.reasoning_levels)", "isChatModel(modelInfo)"],
+    [
+      "chatParams.thinkingOptions(modelInfo?.parameters.reasoning_levels)",
+      "chatParams.isChatModel(modelInfo)",
+    ],
     "对话框档位行必须按模型声明收敛且仅 chat 模型显示",
   );
   expect(!src.includes('"不指定"') && !src.includes("thinking 开关"), "旧的不指定/厂商开关档位必须移除");
   expect(src.includes("默认档不发送 reasoning_effort"), "default 档位语义要有提示文案");
   const page = read("src/pages/playground.tsx");
-  includesAll(page, ["normalizeDeclaredDefault", "modelInfo={activeModelInfo}"], "页面必须把模型能力传给对话框并按声明默认档初始化");
+  includesAll(
+    page,
+    ["chatParams.normalizeThinking", "modelInfo={activeModelInfo}"],
+    "页面必须把模型能力传给对话框并按声明默认档初始化",
+  );
 });
 
 check("上游模型编辑器：思考档位集合与默认档声明控件就位", () => {
@@ -1782,7 +1789,7 @@ check("上游模型编辑器：思考档位集合与默认档声明控件就位"
 // 这里钉前端发送面，两边期望列表都来自票 19 的契约。
 
 check("stop 解析：逗号拆分保序去空，旧换行输入折算成同一语义（一次性迁移）", async () => {
-  const { parseStopSequences } = await load("/src/lib/playground.ts");
+  const { parseStopSequences } = await load("/src/lib/chat/params.ts");
   expect(
     JSON.stringify(parseStopSequences("a, b , c")) === JSON.stringify(["a", "b", "c"]),
     "逗号拆分、逐项 trim、保序",
@@ -1806,7 +1813,7 @@ check("stop 解析：逗号拆分保序去空，旧换行输入折算成同一�
 });
 
 check("stop 行内校验：超 4 条与空条目各自有提示，正常输入放行", async () => {
-  const { validateChatParams } = await load("/src/lib/playground.ts");
+  const { validateChatParams } = await load("/src/lib/chat/params.ts");
   const { EMPTY_PLAYGROUND_PARAMS } = await load("/src/lib/playground-params.ts");
   const base = { ...EMPTY_PLAYGROUND_PARAMS };
   const over = validateChatParams({ ...base, stop: "a,b,c,d,e" });
@@ -1829,7 +1836,7 @@ check("stop 行内校验：超 4 条与空条目各自有提示，正常输入�
 
 check("输出上限：登记值优先，未登记回退安全默认 32768", async () => {
   const { maxOutputTokensFor, validateChatParams, DEFAULT_MAX_OUTPUT_TOKENS } = await load(
-    "/src/lib/playground.ts",
+    "/src/lib/chat/params.ts",
   );
   const { EMPTY_PLAYGROUND_PARAMS } = await load("/src/lib/playground-params.ts");
   expect(maxOutputTokensFor(128000) === 128000, "登记值直接采用");
@@ -1889,7 +1896,7 @@ check("参数面板：stop 单行 input、上限回退如实标注（SSR 渲染�
   const registeredHtml = render(createElement(ParamsPanel, props(t18ChatInfo())));
   expect(!registeredHtml.includes("未登记"), "已登记上限时不显示回退标注");
   expect(
-    src.includes("maxOutputTokensFor(modelInfo?.parameters.max_output_tokens)"),
+    src.includes("chatParams.maxOutputTokens(modelInfo?.parameters.max_output_tokens)"),
     "面板上限必须取所选模型登记值（不得再传 null）",
   );
 });
@@ -1907,12 +1914,14 @@ check("发送路径：页面校验用所选模型登记值，面板说明与控�
     panel.includes("控制面透传") && !panel.includes("待数据面支持后生效"),
     "面板说明必须反映票19 之后控制面已透传全部参数的现状",
   );
-  const lib = read("src/lib/playground.ts");
+  const lib = read("src/lib/chat/params.ts");
   includesAll(
     lib,
-    ["body.extra_fields = params.extraFields"],
-    "额外字段必须整包随 extra_fields 上行，由控制面合并（拍平进顶层会被 schema 丢弃）",
+    ['wireKey: "extra_fields"'],
+    "额外字段必须作为 extra_fields 字段上行，由控制面合并（拍平进顶层会被 schema 丢弃）",
   );
+  const sendTurn = read("src/lib/chat/send-turn.ts");
+  includesAll(sendTurn, ["...params"], "参数表结果必须整包进请求体");
   expect(!lib.includes("RESERVED_BODY_KEYS"), "保留键裁决已收敛到后端 relay，前端不得再有一份平行名单");
   includesAll(
     lib,

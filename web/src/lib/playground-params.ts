@@ -1,4 +1,4 @@
-import type { ChatParamInput, ReasoningLevel, ResponseFormatType } from "@/lib/playground";
+import type { ChatParamInput, ReasoningLevel, ResponseFormatType } from "@/lib/chat";
 
 /** 参数面板的状态：数字一律以字符串保存，空串表示「不发送、用上游默认」。 */
 export interface PlaygroundParamsState

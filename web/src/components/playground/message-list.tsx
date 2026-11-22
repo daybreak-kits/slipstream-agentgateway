@@ -5,7 +5,8 @@ import { toast } from "@/lib/notify";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { fmtCny, fmtInt, fmtMoneyAvg, fmtSeconds, fmtThroughput } from "@/lib/format";
-import type { PlaygroundMessage, PlaygroundUsage } from "@/lib/playground";
+import type { PlaygroundUsage } from "@/lib/chat";
+import type { PlaygroundMessage } from "@/lib/playground";
 import { cn } from "@/lib/utils";
 
 const INLINE_PATTERN = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\))/g;

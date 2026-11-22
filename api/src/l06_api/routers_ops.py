@@ -36,20 +36,19 @@ from l05_service.attempts import (
 )
 from l05_service.models_dev import user_model_parameters
 from l06_api.deps import get_adapter, page_params, require, session_of
+from l06_api.playground import (
+    REGISTERED_OUTPUT_CAP_FIELDS,
+    PlaygroundRequest,
+    relay_body,
+)
 from l06_api.schemas import (
     LogAttemptOut,
     LogAttemptsOut,
     LogQuerySyntaxOut,
     LogQueryTokenOut,
-    PlaygroundRequest,
 )
 
 router = APIRouter(tags=["ops"])
-
-#: Keys the relay builds itself; the vendor passthrough box (extra_fields) can
-#: never override them — this is the single reserved-key ruling for the
-#: playground body (the client sends extras nested, no client-side copy).
-_RELAY_OWNED_KEYS = frozenset({"model", "messages", "stream", "stream_options"})
 
 
 # ---------------------------------------------------------------- logs
@@ -560,7 +559,7 @@ async def playground_stream(
     # the output token cap; the frontend inline hint is the first layer.
     registered = _registered_max_output_tokens(session, payload.model)
     if registered is not None:
-        for field in ("max_tokens", "max_completion_tokens"):
+        for field in REGISTERED_OUTPUT_CAP_FIELDS:
             value = getattr(payload, field)
             if value is not None and value > registered:
                 raise AppError(
@@ -582,43 +581,9 @@ async def playground_stream(
     base_url = contract.base_url()
 
     def relay():
-        body = {
-            "model": payload.model,
-            "stream": True,
-            "messages": [m.model_dump() for m in payload.messages],
-        }
-        # Ticket 19: the vendor passthrough box goes in first — a standard param
-        # always wins, and the relay-owned keys can never be overridden.
-        for key, value in (payload.extra_fields or {}).items():
-            if key not in _RELAY_OWNED_KEYS:
-                body[key] = value
-        # Optional sampling knobs: omitted from the body when the caller left them unset.
-        # reasoning_effort "default" means 不传 (ticket 18): it never reaches upstream.
-        for field, value in (
-            ("temperature", payload.temperature),
-            ("top_p", payload.top_p),
-            ("top_k", payload.top_k),
-            ("frequency_penalty", payload.frequency_penalty),
-            ("presence_penalty", payload.presence_penalty),
-            ("seed", payload.seed),
-            ("max_tokens", payload.max_tokens),
-            ("max_completion_tokens", payload.max_completion_tokens),
-            ("stop", payload.stop),
-            ("n", payload.n),
-            (
-                "response_format",
-                payload.response_format.model_dump() if payload.response_format else None,
-            ),
-            ("logprobs", payload.logprobs),
-            ("top_logprobs", payload.top_logprobs),
-            ("user", payload.user),
-            (
-                "reasoning_effort",
-                None if payload.reasoning_effort == "default" else payload.reasoning_effort,
-            ),
-        ):
-            if value is not None:
-                body[field] = value
+        # One table drives both the request schema and this body (ticket 05):
+        # no per-field hand wiring and no second whitelist here.
+        body = relay_body(payload)
         headers = {"Authorization": "Bearer " + plaintext, "Content-Type": "application/json"}
         with httpx.Client(timeout=300) as client:
             with client.stream(

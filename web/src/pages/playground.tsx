@@ -31,23 +31,15 @@ import { controlPlane, isMockMode } from "@/lib/control-plane";
 import { formatDuration } from "@/lib/format";
 import { AUTH_ME_QUERY_KEY, fetchMe } from "@/lib/auth";
 import {
-  buildUsage,
-  buildUserContent,
-  chatParamsFromInput,
-  describeChatError,
-  describeThinking,
-  isAbortError,
-  listPlaygroundModels,
-  normalizeDeclaredDefault,
-  REASONING_LEVEL_LABELS,
-  sendChatStream,
-  summarizeChatParams,
-  toRequestMessages,
-  validateChatParams,
+  chatMessages,
+  chatParams,
+  listChatModels,
+  sendTurn,
+  type ChatTurnOutcome,
   type PlaygroundAttachment,
-  type PlaygroundMessage,
   type PlaygroundUsage,
-} from "@/lib/playground";
+} from "@/lib/chat";
+import type { PlaygroundMessage } from "@/lib/playground";
 import { PageHeader } from "@/components/layout/page-header";
 
 /** 后端 /admin/logs 只接受 25/50/100/200 四档 page_size（api deps.page_params）。 */
@@ -61,11 +53,6 @@ const TEXT_FILE_PATTERN =
 
 function newMessageId(): string {
   return "pg-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
-}
-
-/** 上游没回 usage 时的兜底估算：中文约 1.5 字/token，英文约 4 字符/token。 */
-function estimateTokens(text: string): number {
-  return Math.max(1, Math.round(text.length / 4));
 }
 
 const SAMPLE_PROMPTS = [
@@ -143,7 +130,7 @@ export function PlaygroundPage() {
 
   const modelsQuery = useQuery({
     queryKey: ["playground", "models"],
-    queryFn: listPlaygroundModels,
+    queryFn: listChatModels,
     staleTime: 60_000,
   });
 
@@ -169,7 +156,7 @@ export function PlaygroundPage() {
   const modelInfoName = activeModelInfo?.name;
   const declaredDefault = activeModelInfo?.parameters.default_reasoning_level;
   useEffect(() => {
-    setParams((prev) => ({ ...prev, thinkingMode: normalizeDeclaredDefault(declaredDefault) }));
+    setParams((prev) => ({ ...prev, thinkingMode: chatParams.normalizeThinking(declaredDefault) }));
   }, [modelInfoName, declaredDefault]);
 
   const permissions = meQuery.data?.permissions ?? [];
@@ -253,14 +240,13 @@ export function PlaygroundPage() {
       }
       // 票19：上限用所选模型登记的 max_output_tokens；无登记数据时校验层回退
       // 安全默认（与面板口径一致），后端还有按登记值的兜底 422。
-      const validation = validateChatParams(params, {
+      const validation = chatParams.validate(params, {
         maxOutputTokens: activeModelInfo?.parameters.max_output_tokens,
       });
       if (!validation.valid) {
         toast.error("参数不合法", { description: validation.message });
         return;
       }
-      const chatParams = chatParamsFromInput(params);
       const base = userMessage ? [...history, userMessage] : history;
       if (!base.some((message) => message.role === "user")) {
         toast.error("没有可发送的用户消息");
@@ -288,91 +274,67 @@ export function PlaygroundPage() {
       const controller = new AbortController();
       abortRef.current = controller;
       const startedAt = Date.now();
-      let liveContent = "";
-      let liveReasoning = "";
 
+      let outcome: ChatTurnOutcome;
       try {
-        const stats = await sendChatStream(model, toRequestMessages(base, params.systemPrompt), {
-          signal: controller.signal,
-          params: chatParams,
+        outcome = await sendTurn({
+          model,
+          messages: base,
+          systemPrompt: params.systemPrompt,
+          params,
+          maxOutputTokens: activeModelInfo?.parameters.max_output_tokens,
           apiKey: params.apiKey,
           stream: params.streaming,
+          signal: controller.signal,
           onDelta: (text) => {
-            liveContent = text;
             if (params.streaming) {
               patchMessage(sessionId, assistantId, (message) => ({ ...message, content: text }));
             }
           },
           onReasoning: (text) => {
-            liveReasoning = text;
             if (params.streaming) {
               patchMessage(sessionId, assistantId, (message) => ({ ...message, reasoning: text }));
             }
           },
         });
+      } finally {
+        setStreamingId(null);
+        abortRef.current = null;
+      }
 
-        const usage: PlaygroundUsage = stats.usage
-          ? buildUsage({
-              promptTokens: stats.usage.prompt_tokens ?? 0,
-              completionTokens: stats.usage.completion_tokens ?? 0,
-              totalTokens: stats.usage.total_tokens ?? 0,
-              ttftMs: stats.ttftMs,
-              elapsedMs: stats.elapsedMs,
-              throughput:
-                stats.elapsedMs > 0
-                  ? (stats.usage.completion_tokens ?? 0) / (stats.elapsedMs / 1000)
-                  : null,
-              estimated: false,
-            })
-          : buildUsage({
-              promptTokens: toRequestMessages(base, params.systemPrompt).reduce(
-                (sum, message) => sum + estimateTokens(message.content),
-                0,
-              ),
-              completionTokens: estimateTokens(stats.content),
-              ttftMs: stats.ttftMs,
-              elapsedMs: stats.elapsedMs,
-              throughput:
-                stats.elapsedMs > 0 ? estimateTokens(stats.content) / (stats.elapsedMs / 1000) : null,
-              estimated: true,
-            });
-
+      if (outcome.status === "done" && outcome.usage) {
+        const usage = outcome.usage;
         patchMessage(sessionId, assistantId, (message) => ({
           ...message,
-          content: stats.content,
-          reasoning: stats.reasoning,
-          thinkingLabel: describeThinking(chatParams, stats.reasoning, stats.carrier)?.label,
-          requestId: stats.requestId,
+          content: outcome.content,
+          reasoning: outcome.reasoning,
+          thinkingLabel: outcome.thinkingLabel ?? undefined,
+          requestId: outcome.requestId,
           usage,
           streaming: false,
         }));
         toast.success("回复完成", {
-          description: usage.totalTokens + " 词元 · " + formatDuration(stats.elapsedMs),
+          description: usage.totalTokens + " 词元 · " + formatDuration(outcome.elapsedMs),
         });
         void enrichUsage(sessionId, assistantId, model, startedAt, usage);
-      } catch (error) {
-        if (isAbortError(error)) {
-          patchMessage(sessionId, assistantId, (message) => ({
-            ...message,
-            content: liveContent || message.content,
-            reasoning: liveReasoning || message.reasoning,
-            streaming: false,
-            stopped: true,
-          }));
-          toast("已停止生成");
-        } else {
-          const reason = describeChatError(error);
-          patchMessage(sessionId, assistantId, (message) => ({
-            ...message,
-            content: liveContent || message.content,
-            streaming: false,
-            error: reason,
-          }));
-          toast.error("生成失败", { description: reason });
-        }
-      } finally {
-        setStreamingId(null);
-        abortRef.current = null;
+      } else if (outcome.status === "aborted") {
+        patchMessage(sessionId, assistantId, (message) => ({
+          ...message,
+          content: outcome.content || message.content,
+          reasoning: outcome.reasoning || message.reasoning,
+          streaming: false,
+          stopped: true,
+        }));
+        toast("已停止生成");
+      } else {
+        const reason = outcome.error ?? "请求失败，请稍后重试";
+        patchMessage(sessionId, assistantId, (message) => ({
+          ...message,
+          content: outcome.content || message.content,
+          streaming: false,
+          error: reason,
+        }));
+        toast.error("生成失败", { description: reason });
       }
     },
     [enrichUsage, params, patchMessage, patchSession, activeModelInfo],
@@ -389,14 +351,14 @@ export function PlaygroundPage() {
       toast.error("先选择公开模型");
       return;
     }
-    const validation = validateChatParams(params, {
+    const validation = chatParams.validate(params, {
       maxOutputTokens: activeModelInfo?.parameters.max_output_tokens,
     });
     if (!validation.valid) {
       toast.error("参数不合法", { description: validation.message });
       return;
     }
-    const content = buildUserContent(text, attachments);
+    const content = chatMessages.buildUserContent(text, attachments);
     if (!content.trim()) {
       toast.error("消息内容为空");
       return;
@@ -645,7 +607,7 @@ export function PlaygroundPage() {
 
   const models = modelsQuery.data;
   const modelReady = Boolean(params.model);
-  const thinkingLabel = REASONING_LEVEL_LABELS[params.thinkingMode];
+  const thinkingLabel = chatParams.thinkingLabel(params.thinkingMode);
 
   return (
     <div className="space-y-3">
@@ -711,7 +673,7 @@ export function PlaygroundPage() {
           modelReady={modelReady}
           model={params.model}
           thinkingLabel={thinkingLabel}
-          summary={summarizeChatParams(params)}
+          summary={chatParams.summarize(params)}
           onOpenModels={() => setModelDialogOpen(true)}
         />
       </section>

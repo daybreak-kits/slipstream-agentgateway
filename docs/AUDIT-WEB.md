@@ -71,7 +71,7 @@
 | 裸 fetch | 仅统一请求层（W4 票04 后为 lib/control-plane/http-adapter.ts；此前 lib/api.ts:43），页面 0 命中 ✓ |
 | 3691 / 1900x 端口、localhost | 仅统一请求层默认 `http://127.0.0.1:3700`（W4 票04 后为 lib/control-plane/http-adapter.ts；此前 lib/api.ts:5，合规），违禁端口 0 命中 ✓ |
 | console.log / `: any` / as any / TODO | 全 0 ✓ |
-| mock 硬编码进页面 | 0；mock 集中在组合根 lib/control-plane/index.ts + 内存适配器 + lib/playground.ts（W1 进行中），页面无 useMock ✓（W4 票04 后） |
+| mock 硬编码进页面 | 0；mock 集中在组合根 lib/control-plane/index.ts + 内存适配器（W5 票05 后 chat 流式 mock 在 lib/chat/mock.ts，经 playground typed operation 注入），页面无 useMock ✓（W4 票04 后） |
 | .tnum 等宽数字 | 58 处 ✓ |
 | tsc --noEmit | **1 error**：pages/admins.tsx:133 TS6133 openEdit 未使用（t4 收尾可清零） |
 | eslint src | **1 error**（同上 admins.tsx:132）+ 1 warning（user-dialogs.tsx:312 react-refresh） |

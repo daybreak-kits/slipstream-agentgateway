@@ -243,19 +243,24 @@ Playground chat module 放在 04 之后，复用 typed operation / transport sea
 
 ### 实施步骤
 
-- [ ] 定义参数表与请求 schema；生成类型。
-- [ ] 后端 relay 改单一映射；保留 stop/top_k 等现有转发。
-- [ ] 实现 chat module + SSE/thinking/usage；页面接入。
-- [ ] mock adapter 实现流式事件；补 vitest 假 transport 测试。
-- [ ] 全量门禁 + Playground 对话冒烟。
+- [x] 定义参数表与请求 schema；生成类型。
+- [x] 后端 relay 改单一映射；保留 stop/top_k 等现有转发。
+- [x] 实现 chat module + SSE/thinking/usage；页面接入。
+- [x] mock adapter 实现流式事件；补 vitest 假 transport 测试。
+- [x] 全量门禁 + Playground 对话冒烟。
 
 ### 验收
 
-- [ ] 页面/params-panel 不再 import 18/10 个底层 helper。
-- [ ] 参数白名单/default 只有一张表；新增字段只改一处。
-- [ ] 流式、思考等级、usage、stop 行为不回归。
-- [ ] 离线 mock 与真实后端事件形状一致。
-- [ ] 全量门禁通过。
+- [x] 页面/params-panel 不再 import 18/10 个底层 helper。
+- [x] 参数白名单/default 只有一张表；新增字段只改一处。
+- [x] 流式、思考等级、usage、stop 行为不回归。
+- [x] 离线 mock 与真实后端事件形状一致。
+- [x] 全量门禁通过。
+
+### 完成记录
+
+- W5 票 05：前端 web/src/lib/chat/（params 单表、SSE/thinking/usage 解析、sendTurn、mock 流）、control-plane `playground.streamChat`；后端 api/src/l06_api/playground.py 由一张参数表生成 PlaygroundRequest 与 relay body（contract schema 未变）。页面/params-panel 只依赖 chat module。
+- 证据：vitest 15 文件 112 用例（chat 新增 29）；pytest 新增 api/tests/unit/test_playground_params.py；浏览器验收 `playground.params/actions/model-dialog` 3/3 PASS。git hash 见 `.scratch/architecture-deepening/issues/05-playground-chat.md`。
 
 ### Out of scope
 

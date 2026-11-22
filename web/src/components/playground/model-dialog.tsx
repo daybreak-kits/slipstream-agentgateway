@@ -21,15 +21,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
-import {
-  isChatModel,
-  loadRecentPlaygroundModels,
-  reasoningLevelOptions,
-  rememberPlaygroundModel,
-  REASONING_LEVEL_LABELS,
-  type PlaygroundModel,
-  type ReasoningLevel,
-} from "@/lib/playground";
+import { chatParams } from "@/lib/chat";
+import type { PlaygroundModel, ReasoningLevel } from "@/lib/chat";
+import { loadRecentPlaygroundModels, rememberPlaygroundModel } from "@/lib/playground";
 import type { MyModelOut } from "@/types";
 import { cn } from "@/lib/utils";
 
@@ -81,9 +75,9 @@ export function ModelDialog({
   }, [open]);
 
   const selected = list.find((model) => model.name === value);
-  const showThinking = isChatModel(modelInfo);
-  const thinkingLevels = reasoningLevelOptions(modelInfo?.parameters.reasoning_levels);
-  const thinkingLabel = REASONING_LEVEL_LABELS[thinkingMode];
+  const showThinking = chatParams.isChatModel(modelInfo);
+  const thinkingLevels = chatParams.thinkingOptions(modelInfo?.parameters.reasoning_levels);
+  const thinkingLabel = chatParams.thinkingLabel(thinkingMode);
 
   const recentModels = useMemo(
     () =>
@@ -203,7 +197,7 @@ export function ModelDialog({
                   className="h-7 px-2 text-2xs"
                   onClick={() => onThinkingModeChange(level)}
                 >
-                  {REASONING_LEVEL_LABELS[level]}
+                  {chatParams.thinkingLabel(level)}
                 </Button>
               ))}
             </div>

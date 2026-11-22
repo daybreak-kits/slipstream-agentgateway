@@ -27,18 +27,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import {
-  DEFAULT_MAX_OUTPUT_TOKENS,
-  isChatModel,
-  maxOutputTokensFor,
-  paramHintText,
-  reasoningLevelOptions,
-  REASONING_LEVEL_LABELS,
-  summarizeChatParams,
-  validateChatParams,
-  type ParamHintKey,
-  type ReasoningLevel,
-} from "@/lib/playground";
+import { chatParams } from "@/lib/chat";
+import type { ParamHintKey, ReasoningLevel } from "@/lib/chat";
 import { fmtInt } from "@/lib/format";
 import type { PlaygroundParamsState } from "@/lib/playground-params";
 import { cn } from "@/lib/utils";
@@ -76,7 +66,7 @@ function ParamLabel({
         </Label>
       </TooltipTrigger>
       <TooltipContent side="left" className="max-w-64">
-        {paramHintText(hintKey, range)}
+        {chatParams.hint(hintKey, range)}
       </TooltipContent>
     </Tooltip>
   );
@@ -204,12 +194,12 @@ export function ParamsPanel({
   const patch = (next: Partial<PlaygroundParamsState>) => onChange({ ...value, ...next });
   // 票19：上限取所选模型登记的 max_output_tokens；0 = 未声明，与无能力数据一样
   // 回退安全默认，并在下方如实标注，不冒充登记值。
-  const limit = maxOutputTokensFor(modelInfo?.parameters.max_output_tokens);
+  const limit = chatParams.maxOutputTokens(modelInfo?.parameters.max_output_tokens);
   const limitRegistered = (modelInfo?.parameters.max_output_tokens ?? 0) > 0;
-  const validation = validateChatParams(value, { maxOutputTokens: limit });
+  const validation = chatParams.validate(value, { maxOutputTokens: limit });
   // 票18：思考档位控件只给 chat 类模型；档位选项按模型声明收敛，未声明回退全集。
-  const showThinking = isChatModel(modelInfo);
-  const thinkingOptions = reasoningLevelOptions(modelInfo?.parameters.reasoning_levels);
+  const showThinking = chatParams.isChatModel(modelInfo);
+  const thinkingOptions = chatParams.thinkingOptions(modelInfo?.parameters.reasoning_levels);
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -274,7 +264,7 @@ export function ParamsPanel({
                     思考等级（只读）
                   </ParamLabel>
                   <p id="playground-reasoning-level" className="truncate text-2xs text-faint">
-                    {REASONING_LEVEL_LABELS[value.thinkingMode]}
+                    {chatParams.thinkingLabel(value.thinkingMode)}
                   </p>
                 </div>
                 <Button
@@ -511,7 +501,7 @@ export function ParamsPanel({
                     <SelectContent>
                       {thinkingOptions.map((mode) => (
                         <SelectItem key={mode} value={mode}>
-                          {REASONING_LEVEL_LABELS[mode]}
+                          {chatParams.thinkingLabel(mode)}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -541,7 +531,7 @@ export function ParamsPanel({
           <div className="space-y-1.5">
             <p className="text-2xs text-faint">请求摘要</p>
             <p className="break-words text-2xs leading-relaxed text-body">
-              {summarizeChatParams(value)}
+              {chatParams.summarize(value)}
             </p>
             {validation.valid ? (
               <p className="text-2xs text-success-text">参数校验通过</p>
@@ -553,7 +543,7 @@ export function ParamsPanel({
             {!limitRegistered ? (
               <p className="text-2xs leading-relaxed text-faint">
                 当前模型未登记最大输出词元，输出上限按安全默认{" "}
-                {fmtInt(DEFAULT_MAX_OUTPUT_TOKENS)} 校验；可在控制面模型登记里声明。
+                {fmtInt(chatParams.defaultMaxOutputTokens)} 校验；可在控制面模型登记里声明。
               </p>
             ) : null}
             <p className="rounded-md bg-surface-2 px-2 py-1.5 text-2xs leading-relaxed text-faint">

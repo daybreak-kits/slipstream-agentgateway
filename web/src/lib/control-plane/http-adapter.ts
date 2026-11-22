@@ -54,7 +54,11 @@ import type { LogListQuery, LogsOperations } from "./operations/logs";
 import type { BalanceResult, CreatedUser, DeleteUserResult, PasswordResetResult, UsersOperations } from "./operations/users";
 import type { AdminIdentity, AuthOperations, LoginOutcome } from "./operations/auth";
 import type { AuditsOperations } from "./operations/audits";
-import type { PlaygroundOperations } from "./operations/playground";
+import type {
+  ChatStreamOptions,
+  PlaygroundChatRequest,
+  PlaygroundOperations,
+} from "./operations/playground";
 import type { SystemOperations, SystemStatus } from "./operations/system";
 import type { ClientKeysOperations, IssuedApiKey } from "./operations/client-keys";
 import type { ApplyRevision, ConfigOperations } from "./operations/config";
@@ -103,10 +107,19 @@ export interface HttpRequest {
   path: string;
   body?: unknown;
   options?: OperationOptions;
+  /** 额外请求头（W5 票05：Playground 的浏览器端调用密钥只走 Authorization）。 */
+  headers?: Record<string, string>;
 }
 
-/** 传输层接口：测试注入捕获实现，验证操作拼出的 method/path/body。 */
-export type HttpRequester = <T>(request: HttpRequest) => Promise<T>;
+/**
+ * 传输层接口：测试注入捕获实现，验证操作拼出的 method/path/body。
+ * stream 是流式通道（W5 票05）：返回原始 Response 交给调用方读 SSE；
+ * 只测 JSON 操作的测试替身可以不实现它。
+ */
+export interface HttpRequester {
+  <T>(request: HttpRequest): Promise<T>;
+  stream?: (request: HttpRequest) => Promise<Response>;
+}
 
 /**
  * 失败反馈（W6 票07）：查询（GET）失败不再逐查询弹 toast——同因（code+message）
@@ -151,7 +164,15 @@ function redirectToLogin(): void {
 /** 真实 fetch 管道：AbortController 透传 + 超时 + 错误归一 + 失败反馈。 */
 export function createHttpRequester(options: { baseUrl?: string } = {}): HttpRequester {
   const baseUrl = options.baseUrl ?? API_BASE;
-  return async function request<T>({ method, path, body, options: opts }: HttpRequest): Promise<T> {
+
+  /**
+   * 发请求并归一错误。feedback=false（流式调用）时失败反馈留给调用方：
+   * Playground 页面自己提示「生成失败」，transport 不再重复 toast/跳登录。
+   */
+  async function send(
+    { method, path, body, options: opts, headers }: HttpRequest,
+    feedback: boolean,
+  ): Promise<Response> {
     const { timeoutMs = DEFAULT_TIMEOUT_MS, signal: external } = opts ?? {};
     const isQuery = method === "GET";
     const controller = new AbortController();
@@ -169,37 +190,46 @@ export function createHttpRequester(options: { baseUrl?: string } = {}): HttpReq
         signal: controller.signal,
         // httpOnly 会话 cookie 是唯一凭据；跨端口 Vite 源需要 include。
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...headers },
       });
     } catch (error) {
       if (external?.aborted) throw error; // 外部取消（切区间/换页）：静默，由调用方处理
       if (controller.signal.aborted && controller.signal.reason instanceof DOMException) {
         const timeout = timeoutError(path, timeoutMs);
-        reportNetworkFailure("请求超时", timeout.message, isQuery);
+        if (feedback) reportNetworkFailure("请求超时", timeout.message, isQuery);
         throw timeout;
       }
-      reportNetworkFailure(
-        "无法连接控制面 API",
-        String(baseUrl) + "（" + (error instanceof Error ? error.message : String(error)) + "）",
-        isQuery,
-      );
+      if (feedback) {
+        reportNetworkFailure(
+          "无法连接控制面 API",
+          String(baseUrl) + "（" + (error instanceof Error ? error.message : String(error)) + "）",
+          isQuery,
+        );
+      }
       throw networkError("无法连接控制面 API：" + String(baseUrl));
     } finally {
       if (timer) clearTimeout(timer);
     }
     if (res.status === 401) {
       const err = await apiErrorFromResponse(res);
-      redirectToLogin();
+      if (feedback) redirectToLogin();
       throw err;
     }
     if (!res.ok) {
       const err = await apiErrorFromResponse(res);
-      reportFailure(err, isQuery);
+      if (feedback) reportFailure(err, isQuery);
       throw err;
     }
+    return res;
+  }
+
+  const requester: HttpRequester = async <T,>(req: HttpRequest): Promise<T> => {
+    const res = await send(req, true);
     if (res.status === 204) return undefined as T;
     return (await res.json()) as T;
   };
+  requester.stream = (req) => send(req, false);
+  return requester;
 }
 
 /** 上游渠道领域的 HTTP 实现。 */
@@ -605,10 +635,46 @@ export function createHttpAudits(request: HttpRequester): AuditsOperations {
   };
 }
 
-/** Playground 非 chat 操作的 HTTP 实现（chat 流式请求留待 W5 票05）。 */
+/** 把 fetch 响应体解成文本分片：SSE 解析器只管文本，不关心字节边界。 */
+async function* responseTextChunks(response: Response): AsyncGenerator<string> {
+  if (!response.body) {
+    throw new ApiError(0, "stream_unsupported", "当前浏览器不支持流式读取响应", "");
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) yield decoder.decode(value, { stream: true });
+    }
+    const tail = decoder.decode();
+    if (tail) yield tail;
+  } finally {
+    void reader.cancel().catch(() => undefined);
+  }
+}
+
+/** Playground 操作的 HTTP 实现：页面级读取 + chat SSE 文本流（解析在 lib/chat）。 */
 export function createHttpPlayground(request: HttpRequester): PlaygroundOperations {
   return {
     myModels: (options) => request<MyModelOut[]>({ method: "GET", path: "/admin/my/models", options }),
+    streamChat: async (chatRequest: PlaygroundChatRequest, options?: ChatStreamOptions) => {
+      if (!request.stream) {
+        throw new ApiError(0, "stream_unsupported", "当前传输层不支持流式响应", "");
+      }
+      const response = await request.stream({
+        method: "POST",
+        path: "/admin/playground/stream",
+        body: chatRequest,
+        // 流式请求不设总超时（模型可能思考很久），取消由调用方 signal 控制。
+        options: { signal: options?.signal, timeoutMs: options?.timeoutMs ?? 0 },
+        headers: options?.apiKey?.trim()
+          ? { Authorization: "Bearer " + options.apiKey.trim() }
+          : undefined,
+      });
+      return responseTextChunks(response);
+    },
   };
 }
 

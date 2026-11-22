@@ -1,5 +1,5 @@
 import { fmtInt } from "@/lib/format";
-import { REASONING_LEVEL_LABELS } from "@/lib/playground";
+import { REASONING_LEVEL_LABELS } from "@/lib/chat";
 import type { ModelParameters, ModelTypeSource, RoutingMode } from "@/types";
 
 /** 路由策略词表：标签 + 说明（列表策略列、编辑弹窗与整页编辑器共用）。 */
