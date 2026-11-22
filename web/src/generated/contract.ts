@@ -189,8 +189,9 @@ export interface LocalRateLimitConfig {
 
 export interface LogAttemptOut {
   attempt: number;
-  upstream_ref: string;
+  upstream_id: string;
   upstream_name?: string;
+  upstream_key_seq?: number | null;
   model?: string;
   status_code?: number | null;
   error_type?: string;

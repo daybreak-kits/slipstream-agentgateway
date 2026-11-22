@@ -627,7 +627,7 @@ AES-GCM 密文 + sk-...abcd 掩码。
 | GET | /admin/logs?query=&from_ms=&to_ms=&page_size=&offset=&sort=&order=&has_error= | 请求日志检索 → {total, items, next_offset}；query 支持 `model:x` / `upstream:x` / `user:x` / `key:x` / `status:200`（三位码）/ `status:4xx\|5xx\|2xx…`（区间）/ `latency>ms` / `latency<ms` / `ttft>ms` / `cache>pct` / `stream:true\|false` + 关键词；`user:` 匹配 **user_id 或用户名**（`key:` 已含 user_id），坏 token 一律 422；sort ∈ started_at（默认）/duration_ms/**total_tokens**/cost_micro/charge_micro（按钱排序需对应金额权限），order ∈ asc/desc（默认 desc），has_error=bool 过滤失败请求 |
 | GET | /admin/logs/{event_id} | 单条详情（与列表行同形；正文走 `/payload` 端口，原始 wire 行不出参）；出参带 `correlation_key`（跨日志与尝试链的中性关联键，ADR-028/029） |
 | GET | /admin/logs/{event_id}/payload | ADR-021 正文读取：设置键 `ag_access_log_llm=full` 时 AG 把 prompt/补全正文落到 `request_log_payloads`，本端点只读取回（AG SQLite 只读连接 + schema 校验）；无该行或正文未存档 → 404；响应过 §0.5 金额脱敏 |
-| GET | /admin/logs/{event_id}/attempts | 权限 `logs:read`。路由链（ADR-028）：`{event_id, correlation_key, attempts:[{attempt, upstream_ref, upstream_name, model, status_code, error_type, error_message, duration_ms, outcome, started_at_ms}]}`，attempts 按 attempt 升序（1 起）；无尝试记录或日志无关联键 → 200 空列表；event 不存在 → 404 `NOT_FOUND`。数据来源：适配器遥测归一化的 `request_attempts` 表（AG 适配器内部 OTLP 采集，AttemptSink 写入），系统层不接触 OTel |
+| GET | /admin/logs/{event_id}/attempts | 权限 `logs:read`。路由链（ADR-028）：`{event_id, correlation_key, attempts:[{attempt, upstream_id, upstream_name, upstream_key_seq, model, status_code, error_type, error_message, duration_ms, outcome, started_at_ms}]}`，attempts 按 attempt 升序（1 起）；无尝试记录或日志无关联键 → 200 空列表；event 不存在 → 404 `NOT_FOUND`。数据来源：适配器遥测归一化的 `request_attempts` 表（AG 适配器内部 OTLP 采集，AttemptSink 写入），系统层不接触 OTel |
 
 列表/详情共用的行字段（**主键名是 `event_id`，不是 `id`**）：
 

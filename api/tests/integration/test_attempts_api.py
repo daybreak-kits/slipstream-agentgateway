@@ -101,7 +101,7 @@ def test_attempt_endpoint_returns_attempts_and_resolves_upstream_name(
                 RequestAttempt(
                     correlation_key=TRACE_ID,
                     attempt_no=1,
-                    upstream_ref="ups_test",
+                    upstream_ref="ups_test#2",
                     model="glm-5.3",
                     status_code=500,
                     error_type="500",
@@ -113,7 +113,7 @@ def test_attempt_endpoint_returns_attempts_and_resolves_upstream_name(
                 RequestAttempt(
                     correlation_key=TRACE_ID,
                     attempt_no=2,
-                    upstream_ref="ups_test",
+                    upstream_ref="upstream-example#1",
                     model="glm-5.3",
                     status_code=200,
                     started_at_ms=1_800_000_000_005,
@@ -131,10 +131,11 @@ def test_attempt_endpoint_returns_attempts_and_resolves_upstream_name(
     assert body["event_id"] == "evt_trace_join"
     assert body["correlation_key"] == TRACE_ID
     assert [attempt["attempt"] for attempt in body["attempts"]] == [1, 2]
-    assert [attempt["upstream_ref"] for attempt in body["attempts"]] == [
+    assert [attempt["upstream_id"] for attempt in body["attempts"]] == [
         "ups_test",
         "ups_test",
     ]
+    assert [attempt["upstream_key_seq"] for attempt in body["attempts"]] == [2, 1]
     assert [attempt["upstream_name"] for attempt in body["attempts"]] == [
         "upstream-example",
         "upstream-example",

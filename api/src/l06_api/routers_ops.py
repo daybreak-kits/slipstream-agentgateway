@@ -24,12 +24,16 @@ from l04_repo.orm import (
     ModelTargetORM,
     PublicModelORM,
     UpstreamModelORM,
-    UpstreamORM,
     UserORM,
 )
 from l04_repo.repository import get_setting, put_setting
 from l05_service import auth, client_keys, log_facts, log_query
-from l05_service.attempts import AttemptChainSummary, attempt_summaries, attempts_for_event
+from l05_service.attempts import (
+    AttemptChainSummary,
+    attempt_summaries,
+    attempts_for_event,
+    resolve_attempt_upstream_facts,
+)
 from l05_service.models_dev import user_model_parameters
 from l06_api.deps import get_adapter, page_params, require, session_of
 from l06_api.schemas import (
@@ -414,25 +418,16 @@ def log_attempts(
     if resolved is None:
         raise AppError(ErrorCode.NOT_FOUND, f"log entry not found: {event_id}")
     correlation_key, rows = resolved
-    upstream_ids = {row.upstream_ref for row in rows if row.upstream_ref}
-    names = (
-        {
-            upstream.id: upstream.name
-            for upstream in session.scalars(
-                select(UpstreamORM).where(UpstreamORM.id.in_(upstream_ids))
-            )
-        }
-        if upstream_ids
-        else {}
-    )
+    facts = resolve_attempt_upstream_facts(session, [row.upstream_ref for row in rows])
     return LogAttemptsOut(
         event_id=event_id,
         correlation_key=correlation_key,
         attempts=[
             LogAttemptOut(
                 attempt=row.attempt_no,
-                upstream_ref=row.upstream_ref or "",
-                upstream_name=names.get(row.upstream_ref, ""),
+                upstream_id=facts[row.upstream_ref or ""].upstream_id,
+                upstream_name=facts[row.upstream_ref or ""].upstream_name,
+                upstream_key_seq=facts[row.upstream_ref or ""].upstream_key_seq,
                 model=row.model or "",
                 status_code=row.status_code,
                 error_type=row.error_type or "",

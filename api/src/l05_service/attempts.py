@@ -18,12 +18,12 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from l01_core.timeutil import now_ms
 from l02_domain.models import AttemptSink, RequestAttempt
-from l04_repo.orm import GatewayUsageEventORM, RequestAttemptORM
+from l04_repo.orm import GatewayUsageEventORM, RequestAttemptORM, UpstreamORM
 
 _DAY_MS = 86_400_000
 
@@ -173,6 +173,60 @@ def attempt_summaries(
         key: AttemptChainSummary(count=count, last_failure=failures.get(key))
         for key, count in counts.items()
     }
+
+
+
+@dataclass(frozen=True, slots=True)
+class AttemptUpstreamFacts:
+    """Display facts for one attempt's upstream, normalized at the service seam.
+
+    Adapters register a provider ref of the form upstream-id + '#' + key sequence;
+    the UI must not know that convention. For historical or demo rows the ref may
+    carry the upstream name instead of the id, so resolution tries both.
+    """
+
+    upstream_id: str
+    upstream_name: str
+    upstream_key_seq: int | None
+
+
+def split_attempt_ref(ref: str) -> tuple[str, int | None]:
+    """Split a provider ref into its base and optional positive key sequence."""
+    base, separator, tail = (ref or "").rpartition("#")
+    if separator and tail.isdigit() and int(tail) > 0:
+        return base, int(tail)
+    return ref or "", None
+
+
+def resolve_attempt_upstream_facts(
+    session: Session, refs: Sequence[str]
+) -> dict[str, AttemptUpstreamFacts]:
+    """Resolve provider refs to neutral ids/names/key sequences in one query.
+
+    Unknown refs keep their base as both id and name, with no sequence; this is
+    the historical-row fallback and never invents an upstream row.
+    """
+    parsed = {ref: split_attempt_ref(ref) for ref in refs}
+    bases = list(dict.fromkeys(base for base, _ in parsed.values() if base))
+    by_id: dict[str, UpstreamORM] = {}
+    by_name: dict[str, UpstreamORM] = {}
+    if bases:
+        rows = session.scalars(
+            select(UpstreamORM).where(
+                or_(UpstreamORM.id.in_(bases), UpstreamORM.name.in_(bases))
+            )
+        ).all()
+        by_id = {row.id: row for row in rows}
+        by_name = {row.name: row for row in rows}
+    resolved: dict[str, AttemptUpstreamFacts] = {}
+    for ref, (base, key_seq) in parsed.items():
+        upstream = by_id.get(base) or by_name.get(base)
+        resolved[ref] = AttemptUpstreamFacts(
+            upstream_id=upstream.id if upstream is not None else base,
+            upstream_name=upstream.name if upstream is not None else base,
+            upstream_key_seq=key_seq,
+        )
+    return resolved
 
 
 def attempts_for_event(

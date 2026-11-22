@@ -385,8 +385,9 @@ const mockAttempts: Record<string, LogAttemptsOut> = {
     attempts: [
       {
         attempt: 1,
-        upstream_ref: "ups_zai",
+        upstream_id: "ups_zai",
         upstream_name: "zai-01",
+        upstream_key_seq: 1,
         model: "glm-5.3",
         status_code: 500,
         error_type: "500",
@@ -397,8 +398,9 @@ const mockAttempts: Record<string, LogAttemptsOut> = {
       },
       {
         attempt: 2,
-        upstream_ref: "ups_or",
+        upstream_id: "ups_or",
         upstream_name: "or-01",
+        upstream_key_seq: 1,
         model: "glm-5.3",
         status_code: 200,
         error_type: "",
@@ -415,8 +417,9 @@ const mockAttempts: Record<string, LogAttemptsOut> = {
     attempts: [
       {
         attempt: 1,
-        upstream_ref: "ups_zai",
+        upstream_id: "ups_zai",
         upstream_name: "zai-01",
+        upstream_key_seq: 1,
         model: "glm-flash",
         status_code: 503,
         error_type: "503",
@@ -427,8 +430,9 @@ const mockAttempts: Record<string, LogAttemptsOut> = {
       },
       {
         attempt: 2,
-        upstream_ref: "ups_zai",
+        upstream_id: "ups_zai",
         upstream_name: "zai-01",
+        upstream_key_seq: 1,
         model: "glm-flash",
         status_code: 500,
         error_type: "500",
@@ -439,8 +443,9 @@ const mockAttempts: Record<string, LogAttemptsOut> = {
       },
       {
         attempt: 3,
-        upstream_ref: "ups_or",
+        upstream_id: "ups_or",
         upstream_name: "or-01",
+        upstream_key_seq: 1,
         model: "glm-flash",
         status_code: 200,
         error_type: "",
@@ -458,8 +463,9 @@ const mockAttempts: Record<string, LogAttemptsOut> = {
     attempts: [
       {
         attempt: 1,
-        upstream_ref: "ups_zai",
+        upstream_id: "ups_zai",
         upstream_name: "zai-01",
+        upstream_key_seq: 1,
         model: "glm-5.3",
         status_code: 500,
         error_type: "500",
@@ -470,8 +476,9 @@ const mockAttempts: Record<string, LogAttemptsOut> = {
       },
       {
         attempt: 2,
-        upstream_ref: "ups_zai",
+        upstream_id: "ups_zai",
         upstream_name: "zai-01",
+        upstream_key_seq: 1,
         model: "glm-5.3",
         status_code: 503,
         error_type: "503",
@@ -482,8 +489,9 @@ const mockAttempts: Record<string, LogAttemptsOut> = {
       },
       {
         attempt: 3,
-        upstream_ref: "ups_or",
+        upstream_id: "ups_or",
         upstream_name: "or-01",
+        upstream_key_seq: null,
         model: "glm-5.3",
         status_code: 502,
         error_type: "502",

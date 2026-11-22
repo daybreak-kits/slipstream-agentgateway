@@ -608,8 +608,9 @@ class LogAttemptOut(BaseModel):
     """One normalized upstream attempt for a request log (ADR-028)."""
 
     attempt: int
-    upstream_ref: str
+    upstream_id: str
     upstream_name: str = ""
+    upstream_key_seq: int | None = None
     model: str = ""
     status_code: int | None = None
     error_type: str = ""

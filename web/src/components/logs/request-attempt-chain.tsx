@@ -28,14 +28,11 @@ function attemptErrorSummary(attempt: LogAttemptOut): string {
   return attemptFailureSummary(attempt.status_code, attempt.error_type, attempt.error_message);
 }
 
-/** 上游密钥序号来自 provider ref 的 #N 后缀；显示为「上游标志#N」，与源密钥编号一致。 */
+/** 显示「上游标志#密钥序号」；序号由服务端归一化，组件不解析 provider ref。 */
 function attemptUpstreamLabel(attempt: LogAttemptOut): string {
-  const ref = attempt.upstream_ref || "";
-  const hash = ref.lastIndexOf("#");
-  const seq = hash >= 0 ? ref.slice(hash + 1) : "";
-  const name = attempt.upstream_name || ref || "-";
-  if (!seq) return name;
-  return name.endsWith("#" + seq) ? name : name + "#" + seq;
+  const name = attempt.upstream_name || attempt.upstream_id || "-";
+  const seq = attempt.upstream_key_seq;
+  return seq === null || seq === undefined ? name : name + "#" + seq;
 }
 
 /** 无尝试记录：明确告诉运营者这是数据缺失，不是「没有重试」。 */
@@ -81,7 +78,7 @@ export function RequestAttemptChain({
                   : attempt.status_code}
               </Badge>
               <span className="text-faint">·</span>
-              <span className="text-body" title={attempt.upstream_ref || undefined}>
+              <span className="text-body" title={attempt.upstream_id || undefined}>
                 {upstreamLabel}
               </span>
               {attempt.model ? (
@@ -117,7 +114,7 @@ export function RequestAttemptChain({
                       {"错误：" + (attempt.error_message || attemptErrorSummary(attempt) || "未记录错误详情")}
                     </p>
                     <p className="mt-1 break-all font-mono text-2xs text-faint">
-                      {"上游地址：" + (attempt.upstream_ref || "-")}
+                      {"上游 ID：" + (attempt.upstream_id || "-")}
                     </p>
                   </div>
                 </details>
