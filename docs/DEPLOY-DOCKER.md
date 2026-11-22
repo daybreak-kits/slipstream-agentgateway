@@ -19,7 +19,7 @@ docker compose up -d --build
 curl http://127.0.0.1:3700/admin/health
 ```
 
-打开 `http://127.0.0.1:3700`。演示 seed 的登录密码取 `.env` 的 `SLIPSTREAM_DEMO_ADMIN_PASSWORD`（示例值 `change-this-demo-password`），不是 `admin12345`；空库初始化使用 `SLIPSTREAM_ADMIN_PASSWORD`。生产环境必须改掉所有默认密码。
+打开 `http://localhost:3700`。WSL2 下从 Windows 浏览器访问用 `localhost`，不要用 `127.0.0.1`；容器/Ubuntu 内仍可用 `127.0.0.1`。演示 seed 的登录密码取 `.env` 的 `SLIPSTREAM_DEMO_ADMIN_PASSWORD`（示例值 `change-this-demo-password`），不是 `admin12345`；空库初始化使用 `SLIPSTREAM_ADMIN_PASSWORD`。生产环境必须改掉所有默认密码。
 
 构建网络受限时，可把 agentgateway 下载指向可访问的镜像，避免构建卡在 GitHub：
 
@@ -56,7 +56,7 @@ docker compose exec app python -c "import psycopg; print(psycopg.__version__)"
 
 ## 数据面
 
-下发配置后，`gateway` 容器读取 `appdata` 卷里的 `config.yaml` 并启动 3600 数据面。真实客户端请求打到 `http://<host>:3600`：
+下发配置后，`gateway` 容器读取 `appdata` 卷里的 `config.yaml` 并启动 3600 数据面。真实客户端请求打到 `http://<host>:3600`；Windows 侧同样用 `localhost:3600`：
 
 ```bash
 curl http://127.0.0.1:3600/v1/models \
