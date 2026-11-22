@@ -18,6 +18,7 @@ from l03_adapters.agentgateway.transforms import (
     compile_transforms,
     compile_warnings,
 )
+from l03_adapters.sample_replay import replay_transform_sample
 from l03_adapters.agentgateway.usage import (
     cleanup_expired_logs,
     fetch_events,
@@ -39,6 +40,7 @@ from l03_adapters.spi import (
     MaterializationResult,
     TelemetryHandle,
     TransformPreview,
+    TransformSampleResult,
     UsageCursor,
     UsagePage,
 )
@@ -436,6 +438,15 @@ class AgentgatewayAdapter:
             after=compile_transforms(spec),
             notes=tuple(compile_warnings(spec)),
         )
+
+    def replay_transform_sample(
+        self,
+        spec: TransformsSpec,
+        *,
+        request: dict[str, Any] | None = None,
+        response: dict[str, Any] | None = None,
+    ) -> TransformSampleResult:
+        return replay_transform_sample(spec, request=request, response=response)
 
     def materialize_credentials(
         self,

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   PORT_DISABLED_LABEL,
+  dataPlanePortCopy,
   defaultBaseUrl,
   effectiveBaseUrl,
   formatPort,
@@ -96,8 +97,8 @@ describe("连接地址解析（运营设置 / 连接密钥 / 快速上手共用�
     ).toBe("http://gw.example.com:8080/v1");
   });
 
-  it("未配置时用浏览器当前 host + 适配器契约端口", () => {
-    // 纯 node 单测没有 window：browserHost 回退 localhost。
+  it("未配置时用浏览器当前 host + 当前部署提供的端口", () => {
+    // 纯 node 单测没有 window：browserHost 回退 localhost，scheme 回退 http。
     expect(defaultBaseUrl(3600)).toBe("http://localhost:3600");
     expect(defaultBaseUrl(8080)).toBe("http://localhost:8080");
     expect(effectiveBaseUrl({ base_url: "", default_port: 3600 })).toBe("http://localhost:3600");
@@ -114,6 +115,24 @@ describe("连接地址解析（运营设置 / 连接密钥 / 快速上手共用�
     }
   });
 
+  it("https 页面沿用 https，不写死 http", () => {
+    const scope = globalThis as unknown as {
+      window?: { location: { hostname: string; protocol: string } };
+    };
+    scope.window = { location: { hostname: "console.example.com", protocol: "https:" } };
+    try {
+      expect(defaultBaseUrl(8443)).toBe("https://console.example.com:8443");
+    } finally {
+      delete scope.window;
+    }
+  });
+
+  it("scheme 可显式传入，纯函数不依赖 window", () => {
+    expect(defaultBaseUrl(8443, "https")).toBe("https://localhost:8443");
+    expect(defaultBaseUrl(8443, "http")).toBe("http://localhost:8443");
+    expect(defaultBaseUrl(8443, "https")).not.toContain("http://");
+  });
+
   it("契约端口为 0/缺失时显示未启用，绝不生成 host:0", () => {
     const address = effectiveBaseUrl({ base_url: "", default_port: 0 });
     expect(address).toBe(PORT_DISABLED_LABEL);
@@ -125,5 +144,37 @@ describe("连接地址解析（运营设置 / 连接密钥 / 快速上手共用�
     expect(isDataPlaneEnabled({ base_url: "", default_port: 3600 })).toBe(true);
     expect(isDataPlaneEnabled({ base_url: "", default_port: 0 })).toBe(false);
     expect(isDataPlaneEnabled(undefined)).toBe(false);
+  });
+});
+
+describe("连接地址文案集中出口（产品语言，不暴露内部架构词）", () => {
+  const kinds = [
+    "source-default",
+    "source-disabled",
+    "address-default",
+    "address-disabled",
+    "base-url-hint",
+    "port-hint",
+    "reset-note",
+    "example-disabled",
+  ] as const;
+
+  it("所有文案都非空且不含内部架构词", () => {
+    for (const kind of kinds) {
+      const copy = dataPlanePortCopy(kind, 3600);
+      expect(copy.length).toBeGreaterThan(0);
+      expect(copy).not.toContain("适配器契约");
+    }
+  });
+
+  it("默认来源用 formatPort 渲染端口，未启用时与统一标签一致", () => {
+    expect(dataPlanePortCopy("source-default", 3600)).toContain("3600");
+    expect(dataPlanePortCopy("source-default", 0)).toContain(PORT_DISABLED_LABEL);
+  });
+
+  it("未启用示例带统一未启用标签与后续指引", () => {
+    expect(dataPlanePortCopy("example-disabled")).toBe(
+      PORT_DISABLED_LABEL + "：当前部署未提供数据面端口，配置公网连接地址后可复制完整示例。",
+    );
   });
 });

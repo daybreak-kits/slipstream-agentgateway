@@ -21,10 +21,13 @@ import { ApiError } from "@/lib/control-plane/errors";
 import { fmtPriceAmount, fmtUnitPriceMicro } from "@/lib/format";
 import { ACTION_ICONS } from "@/lib/icons";
 import {
+  draftsAfterPriceImport,
   draftsFromPriceDocument,
   formatPriceDocument,
   normalizePriceImportErrors,
   parsePriceDocumentJson,
+  priceDocumentHasChanges,
+  priceImportConfirmDescription,
   type PriceDocument,
   type PriceDocumentIssue,
   type PriceImportErrorRow,
@@ -191,7 +194,8 @@ export function UpstreamPricesSection() {
           "已更新 " + result.changed + " 项" +
           (result.skipped ? "；跳过 " + result.skipped + " 项（无字段变更）" : ""),
       });
-      setDrafts({});
+      // 只丢弃文档已覆盖的行草稿：JSON 未映射的表格草稿保留，避免保存后静默丢稿（W8 复审 B3）。
+      setDrafts((prev) => draftsAfterPriceImport(body, models, prev));
       setImportError(null);
       setImportRowErrors(null);
       setJsonDocument(body);
@@ -569,7 +573,9 @@ export function UpstreamPricesSection() {
           ? "表格视图有 " + pendingClears + " 行待清空价格；JSON 导入不能清空价格，请先切回表格保存"
           : invalidDraftRows > 0
             ? "表格视图有 " + invalidDraftRows + " 行非法草稿；请先切回表格修正或撤销"
-            : !rowsDirty && !hasPendingJson
+            : !rowsDirty &&
+                !hasPendingJson &&
+                !(jsonDocument !== null && priceDocumentHasChanges(jsonDocument, models))
               ? "没有未保存的修改"
               : null;
 
@@ -699,11 +705,7 @@ export function UpstreamPricesSection() {
           open
           onOpenChange={(open) => { if (!open) setJsonConfirm(false); }}
           title="确认保存价目 JSON？"
-          description={
-            "文件含 " + jsonDocument.upstream_models.length + " 个上游模型条目：" +
-            "校验通过的行将覆盖对应模型的现行成本与倍率，历史账目不重算；" +
-            "任一行校验失败则整批不生效。"
-          }
+          description={priceImportConfirmDescription(jsonDocument)}
           confirmLabel="确认保存"
           onConfirm={() => {
             setJsonConfirm(false);

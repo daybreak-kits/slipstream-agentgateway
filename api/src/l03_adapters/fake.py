@@ -23,6 +23,7 @@ from l01_core.timeutil import now_ms
 from l02_domain.ir import GatewayIR, TransformsSpec
 from l02_domain.models import RequestAttempt, UsageEvent
 from l02_domain.validation import ValidationResult, validate_gateway_ir
+from l03_adapters.sample_replay import replay_transform_sample
 from l03_adapters.spi import (
     AdapterInfo,
     ApplyResult,
@@ -38,6 +39,7 @@ from l03_adapters.spi import (
     MaterializationResult,
     TelemetryHandle,
     TransformPreview,
+    TransformSampleResult,
     UsageCursor,
     UsagePage,
     make_artifact,
@@ -252,6 +254,15 @@ class FakeAdapter:
             after={"fake": True, "rules": 0},
             notes=("fake adapter: transform preview is in-memory",),
         )
+
+    def replay_transform_sample(
+        self,
+        spec: TransformsSpec,
+        *,
+        request: dict[str, Any] | None = None,
+        response: dict[str, Any] | None = None,
+    ) -> TransformSampleResult:
+        return replay_transform_sample(spec, request=request, response=response)
 
     def materialize_credentials(
         self,

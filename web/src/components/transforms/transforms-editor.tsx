@@ -13,6 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { controlPlane } from "@/lib/control-plane";
+import { errorMessage } from "@/lib/control-plane/errors";
 import { ACTION_ICONS } from "@/lib/icons";
 import {
   CONDITION_MODES,
@@ -62,10 +63,6 @@ const EMPTY_DOCUMENT: UpstreamTransforms = {
   response_headers: [],
   response_body: [],
 };
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 /** 只读的「系统默认行为」说明块：让管理用户分清哪些改写不是自己写的。 */
 function ReadOnlyBlock({ title, lines }: { title: string; lines: string[] }) {
@@ -602,7 +599,9 @@ export function TransformsEditor({
   // 卸载时复位上抛的 dirty：切页签/保存成功后页面级状态不留脏标记。
   useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
 
-  const blocked = issues.length > 0 || jsonIssues.length > 0;
+  // 只有当前视图的问题阻塞操作：可视化视图下，JSON 面板里尚未应用的非法文本不可见，
+  // 不能因此永久禁用预览/保存（W8 复审 B1）。JSON 视图的问题仍然阻塞并在面板内提示。
+  const blocked = issues.length > 0 || (view === "json" && jsonIssues.length > 0);
 
   const previewMut = useMutation({
     mutationFn: (input: UpstreamTransforms) => controlPlane.upstreams.previewTransforms(upstreamId, input),
@@ -665,6 +664,12 @@ export function TransformsEditor({
       setDraft(parsed.document);
       setJsonText(formatTransformsJson(parsed.document));
     }
+  };
+
+  /** 重新载入：放弃 JSON 面板里的手改，用当前规则文档重建文本并清掉未应用的问题（W8 复审 B1）。 */
+  const reloadJsonFromDocument = () => {
+    setJsonText(formatTransformsJson(document));
+    setJsonIssues([]);
   };
 
   const runPreview = () => {
@@ -790,7 +795,14 @@ export function TransformsEditor({
       {view === "visual" && jsonIssues.length > 0 && (
         <Alert variant="warning">
           <AlertDescription>
-            JSON 视图里还有 {String(jsonIssues.length)} 处未应用的问题；切回 JSON 修正后才能预览/保存。
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span>
+                JSON 视图里还有 {String(jsonIssues.length)} 处未应用的问题；当前按可视化规则预览/保存，未应用的 JSON 文本不会写入。
+              </span>
+              <Button variant="outline" size="dense" onClick={reloadJsonFromDocument}>
+                重新载入 JSON
+              </Button>
+            </div>
           </AlertDescription>
         </Alert>
       )}
@@ -800,9 +812,19 @@ export function TransformsEditor({
           <CardContent className="space-y-2 p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-2xs text-faint">规则 JSON（wire 形状）；保存/预览前按 schema 校验，非法内容不会写库。</span>
-              <Button variant="outline" size="dense" onClick={formatJson} disabled={jsonText.trim().length === 0}>
-                格式化
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="dense"
+                  onClick={reloadJsonFromDocument}
+                  title="放弃 JSON 面板里的手改，按当前规则文档重新生成"
+                >
+                  重新载入
+                </Button>
+                <Button variant="outline" size="dense" onClick={formatJson} disabled={jsonText.trim().length === 0}>
+                  格式化
+                </Button>
+              </div>
             </div>
             <Textarea
               aria-label="改写规则 JSON"

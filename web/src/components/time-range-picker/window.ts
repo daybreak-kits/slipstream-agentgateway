@@ -120,8 +120,37 @@ function stamp(ms: number): string {
   );
 }
 
-/** 触发按钮/副标题用的区间文本：预设名，或完整到「年 + 秒」的毫秒窗起止（W8 票 02）。 */
-export function timeWindowLabel(window: TimeWindow): string {
-  if (window.kind === "range") return TIME_WINDOW_LABEL[window.value];
-  return `${stamp(window.fromMs)} 至 ${stamp(window.toMs)}`;
+/**
+ * 时间窗的本地起止毫秒：自定义窗原样返回；预设按展示口径换算（今天 = 本地 00:00 → 当前，
+ * 近 24 小时/7 天/30 天 = 当前往前推）。查询仍交后端按报表时区算，这里只服务展示，
+ * 与后端桶边界允许有秒级渲染误差。
+ */
+export function timeWindowBounds(
+  window: TimeWindow,
+  now = Date.now(),
+): { fromMs: number; toMs: number } {
+  switch (window.kind) {
+    case "custom":
+      return { fromMs: window.fromMs, toMs: window.toMs };
+    case "range":
+      switch (window.value) {
+        case "today":
+          return { fromMs: dayStartMs(now), toMs: now };
+        case "24h":
+          return { fromMs: now - DAY_MS, toMs: now };
+        case "7d":
+          return { fromMs: now - 7 * DAY_MS, toMs: now };
+        case "30d":
+          return { fromMs: now - 30 * DAY_MS, toMs: now };
+      }
+  }
+}
+
+/**
+ * 触发按钮/副标题用的区间文本：预设也展开成完整到「年 + 秒」的本地区间，
+ * 分隔符固定为 " - "（W8 票 02：预设、自定义同一展示口径）。
+ */
+export function timeWindowLabel(window: TimeWindow, now = Date.now()): string {
+  const { fromMs, toMs } = timeWindowBounds(window, now);
+  return `${stamp(fromMs)} - ${stamp(toMs)}`;
 }

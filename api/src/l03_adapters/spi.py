@@ -2,11 +2,11 @@
 
 Upper layers (l05_service/l06_api/l07_jobs) program against this Protocol only;
 concrete drivers (mock, fake, agentgateway) register themselves in
-l03_adapters.registry. The six business ports added in W6 ticket 01 keep every
+l03_adapters.registry. The standard ports added in W6 ticket 01 keep every
 data-plane-specific fact behind the adapter boundary: log payload reads, log
-retention, transform previews, credential materialization, the client contract
-and capability copy. AttemptSink and the telemetry lifecycle are part of this
-same contract (ADR-028/ADR-029).
+retention, transform compile previews, transform sample replay, credential
+materialization, the client contract and capability copy. AttemptSink and the
+telemetry lifecycle are part of this same contract (ADR-028/ADR-029).
 """
 
 from __future__ import annotations
@@ -38,6 +38,7 @@ __all__ = [
     "RequestAttempt",
     "TelemetryHandle",
     "TransformPreview",
+    "TransformSampleResult",
     "UsageCursor",
     "UsagePage",
     "ValidationResult",
@@ -150,6 +151,15 @@ class TransformPreview:
 
 
 @dataclass(frozen=True, slots=True)
+class TransformSampleResult:
+    """A read-only sample replay; the neutral before/after snapshots plus field diffs."""
+
+    before: dict[str, Any] = field(default_factory=dict)
+    after: dict[str, Any] = field(default_factory=dict)
+    diff: tuple[dict[str, Any], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class CredentialFile:
     """One credential the adapter may materialize into its own managed location.
 
@@ -233,7 +243,7 @@ class TelemetryHandle(Protocol):
 
 @runtime_checkable
 class DataPlaneAdapter(Protocol):
-    """The eight business methods plus the six ports and telemetry lifecycle."""
+    """The eight business methods plus the standard ports and telemetry lifecycle."""
 
     def describe(self) -> AdapterInfo: ...
 
@@ -263,6 +273,21 @@ class DataPlaneAdapter(Protocol):
 
     def preview_transforms(self, spec: TransformsSpec) -> TransformPreview:
         """Compile a transform spec inside the adapter; no data plane write."""
+        ...
+
+    def replay_transform_sample(
+        self,
+        spec: TransformsSpec,
+        *,
+        request: dict[str, Any] | None = None,
+        response: dict[str, Any] | None = None,
+    ) -> TransformSampleResult:
+        """Replay a transform spec against pasted samples; read-only, no upstream call.
+
+        The replay semantics are adapter-owned (they mirror the compiled behavior
+        documented in docs/contracts/transforms-compiler.md); the system layer sees
+        only the neutral before/after snapshots and field diffs.
+        """
         ...
 
     def materialize_credentials(

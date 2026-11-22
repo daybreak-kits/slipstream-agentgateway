@@ -3,10 +3,14 @@ import { describe, expect, it } from "vitest";
 import { ApiError } from "@/lib/control-plane/errors";
 
 import {
+  draftsAfterPriceImport,
   draftsFromPriceDocument,
   formatPriceDocument,
   normalizePriceImportErrors,
   parsePriceDocumentJson,
+  priceDocumentHasChanges,
+  priceImportConfirmDescription,
+  type PriceDocument,
   type PriceModelRef,
 } from "./document";
 
@@ -355,5 +359,70 @@ describe("价目导入失败：后端逐行错误归一", () => {
         new ApiError(422, "x", "y", "", { errors: [{ id: "m1" }] }),
       ),
     ).toEqual([{ index: 0, id: "m1", name: null, message: "未知错误" }]);
+  });
+});
+
+describe("价目 JSON 保存/导入后的草稿保留（W8 复审 B3）", () => {
+  const pricedModels = [
+    {
+      id: "m1",
+      name: "gpt-a",
+      model_type: "chat",
+      cost_input_per_1m: "1.500000",
+      cost_output_per_1m: null,
+      markup: "1.2000",
+    },
+    {
+      id: "m2",
+      name: "claude-b",
+      model_type: "chat",
+      cost_input_per_1m: null,
+      cost_output_per_1m: "3.000000",
+      markup: "1.0000",
+    },
+  ];
+
+  function parse(rows: unknown[]): PriceDocument {
+    const parsed = parsePriceDocumentJson(documentWith(rows), pricedModels);
+    expect(parsed.issues).toEqual([]);
+    if (!parsed.document) throw new Error("fixture 应当通过价目校验");
+    return parsed.document;
+  }
+
+  it("文档已覆盖的行丢弃草稿；文档为 null 的字段仍按未映射草稿保留", () => {
+    const document = parse([{ id: "m1", cost_input_per_1m: "2.5" }]);
+    const current = {
+      m1: { input: "2.5", output: "4.25", markup: "1.0000" },
+      m2: { input: "8", output: "", markup: "2.0000" },
+    };
+    expect(draftsAfterPriceImport(document, pricedModels, current)).toEqual({
+      m1: { input: "2.5", output: "4.25", markup: "1.0000" },
+      m2: { input: "8", output: "", markup: "2.0000" },
+    });
+  });
+
+  it("文档三个字段都显式覆盖时丢弃该行草稿，表格回到服务端值", () => {
+    const document = parse([
+      { id: "m1", cost_input_per_1m: "2.5", cost_output_per_1m: "5", markup: "1.5" },
+    ]);
+    const current = { m1: { input: "2.5", output: "5", markup: "1.5" } };
+    expect(draftsAfterPriceImport(document, pricedModels, current)).toEqual({});
+  });
+
+  it("priceDocumentHasChanges 只把非 null 且数值不同的字段算改动", () => {
+    expect(priceDocumentHasChanges(parse([{ id: "m1" }]), pricedModels)).toBe(false);
+    expect(
+      priceDocumentHasChanges(parse([{ id: "m1", cost_input_per_1m: "1.500000" }]), pricedModels),
+    ).toBe(false);
+    expect(
+      priceDocumentHasChanges(parse([{ id: "m1", cost_input_per_1m: "1.500001" }]), pricedModels),
+    ).toBe(true);
+  });
+
+  it("priceImportConfirmDescription 显示总行数与被覆盖行数", () => {
+    const document = parse([{ id: "m1", cost_input_per_1m: "2" }, { id: "m2" }]);
+    expect(priceImportConfirmDescription(document)).toBe(
+      "文件含 2 个上游模型条目，其中 1 行将覆盖对应模型的现行成本与倍率；历史账目不重算；任一行校验失败则整批不生效。",
+    );
   });
 });

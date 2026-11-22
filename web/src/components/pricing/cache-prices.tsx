@@ -8,11 +8,13 @@ import { useDialogDraftGuard } from "@/lib/use-dialog-draft-guard";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ResultCell } from "@/components/ui/table";
 import { PriceTable, type PriceColumn } from "@/components/pricing/table";
 import { UNIT_HINT, priceMicro } from "@/components/pricing/money";
 import { invalidatePricing, pricingKeys, useUpstreamModels } from "@/components/pricing/queries";
 import { controlPlane } from "@/lib/control-plane";
 import { fmtUnitPriceMicro } from "@/lib/format";
+import { actionColumnWidth } from "@/lib/table-columns";
 import { formatDateTime, useTimezone } from "@/lib/time";
 import { usePermissions } from "@/lib/permissions";
 import type { UpstreamModel } from "@/types";
@@ -135,15 +137,16 @@ export function CachePricesSection() {
       sortable: true,
       sortValue: (pair) => pair.modelName,
       cell: (pair) => (
-        <div>
-          <div className="font-medium text-title">{pair.modelName}</div>
-          <div className="text-2xs text-faint">{pair.upstreamName || "-"}</div>
-        </div>
+        <ResultCell
+          primary={<span className="font-medium text-title">{pair.modelName}</span>}
+          secondary={pair.upstreamName || "-"}
+        />
       ),
     },
     {
       key: "cache_read",
       label: "缓存读价",
+      width: "9.5rem",
       header: (
         <span className="flex flex-col leading-tight">
           <span>缓存读价</span>
@@ -163,6 +166,7 @@ export function CachePricesSection() {
     {
       key: "cache_write",
       label: "缓存写价",
+      width: "9.5rem",
       header: (
         <span className="flex flex-col leading-tight">
           <span>缓存写价</span>
@@ -182,6 +186,7 @@ export function CachePricesSection() {
     {
       key: "effective",
       label: "生效时间",
+      width: "10rem",
       sortable: true,
       sortValue: (pair) => pair.effectiveMs,
       cell: (pair) => <span className="tnum text-body">{formatDateTime(pair.effectiveMs, mode)}</span>,
@@ -192,6 +197,8 @@ export function CachePricesSection() {
       hideable: false,
       align: "right",
       sticky: "right",
+      // W8 t03 固定槽位：单个「编辑」dense 按钮也按固定宽度，只读态与可编辑态切换不抖列宽。
+      width: actionColumnWidth(1, 3.5),
       cell: (pair) =>
         canWrite ? (
           <Button size="dense" variant="outline" onClick={() => setEditing(pair)}>
@@ -234,6 +241,7 @@ export function CachePricesSection() {
         searchText={searchText}
         onSearchChange={setSearchText}
         searchPlaceholder="筛选模型 / 上游"
+        layout="fixed"
         emptyText="还没有缓存价（cache_read / cache_write）"
         emptyAction={
           canCreate ? (

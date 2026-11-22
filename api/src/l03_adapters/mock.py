@@ -11,6 +11,7 @@ from typing import Any
 from l02_domain.ir import GatewayIR, TransformsSpec
 from l02_domain.models import UsageEvent
 from l02_domain.validation import validate_gateway_ir
+from l03_adapters.sample_replay import replay_transform_sample
 from l03_adapters.spi import (
     AdapterInfo,
     ApplyResult,
@@ -24,6 +25,7 @@ from l03_adapters.spi import (
     MaterializationResult,
     TelemetryHandle,
     TransformPreview,
+    TransformSampleResult,
     UsageCursor,
     UsagePage,
     ValidationResult,
@@ -127,6 +129,15 @@ class MockAdapter:
 
     def preview_transforms(self, spec: TransformsSpec) -> TransformPreview:
         return TransformPreview(after={})
+
+    def replay_transform_sample(
+        self,
+        spec: TransformsSpec,
+        *,
+        request: dict[str, Any] | None = None,
+        response: dict[str, Any] | None = None,
+    ) -> TransformSampleResult:
+        return replay_transform_sample(spec, request=request, response=response)
 
     def materialize_credentials(
         self,

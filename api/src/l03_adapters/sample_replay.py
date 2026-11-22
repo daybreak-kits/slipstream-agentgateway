@@ -1,22 +1,28 @@
-"""In-memory sample simulation for rewrite rules (ticket 05 preview surface).
+"""In-memory sample replay for rewrite rules (adapter-private semantics).
 
-Sample testing lets an administrator paste request/response headers and bodies and see
-which fields a rule set would change. It is deliberately read-only: the same IR that the
-adapter compiles (`parse_transforms` output) is replayed against an in-memory snapshot;
-nothing is persisted, no adapter is asked to compile, and no upstream is contacted.
+Sample testing lets an administrator paste request/response headers and bodies and
+see which fields a rule set would change. It is deliberately read-only: a parsed
+IR (the same IR the driver compiles) is replayed against an in-memory snapshot;
+nothing is persisted, no upstream is contacted.
 
-Semantics mirror the compiled behavior where it is observable
-(docs/contracts/transforms-compiler.md v2):
-- header create only writes when the header is missing; header update is emitted as an
-  unconditional `set`, so the simulation also writes it (overwrite/create);
-- body create/update keep the compiler guards (missing field stays untouched);
+Where this lives (ADR-029 / docs/SYSTEM-BOUNDARY.md): rewrite semantics are part
+of the adapter knowledge. The upper layers exchange only the neutral
+TransformSampleResult through the replay_transform_sample SPI port; the system
+layer keeps no replay implementation of its own. The behavior below mirrors the
+compiled behavior where it is observable (docs/contracts/transforms-compiler.md
+v2):
+
+- header create only writes when the header is missing;
+- header update only overwrites an existing header (contract: 存在才覆盖，不存在保持不变);
+- body create/update only write when the field is missing/empty (contract guards);
+- body copy with a missing source writes nothing (no fabricated null);
 - string verbs only rewrite an existing string value; a missing/non-string field is
   left alone instead of crashing the preview;
 - rows are applied in document order per segment, conditions AND together and are
   evaluated against the current snapshot of the same phase.
 
-Absolute condition variables such as `response.code` are not part of the pasted sample,
-so those conditions never match and the row is reported as a no-op.
+Absolute condition variables such as response.code are not part of the pasted
+sample, so those conditions never match and the row is reported as a no-op.
 """
 
 from __future__ import annotations
@@ -27,6 +33,7 @@ import re
 from typing import Any
 
 from l02_domain.ir import BodyRule, HeaderRule, RewriteCondition, TransformsSpec
+from l03_adapters.spi import TransformSampleResult
 
 SAMPLE_SEGMENTS = (
     "request_headers",
@@ -243,7 +250,11 @@ def _apply_header_rule(rule: HeaderRule, phase: dict) -> dict | None:
     target = (rule.target_name or rule.name) if rule.op == "copy" else rule.name
     before = _header_get(headers, target)
     if rule.op == "update":
-        _header_set(headers, target, rule.value)
+        # Contract v2 section 2: update overwrites an existing header only; a
+        # missing header stays absent in the sample (the compiled set shape is an
+        # implementation detail, not the semantic contract).
+        if before is not _MISSING:
+            _header_set(headers, target, rule.value)
     elif rule.op == "create":
         if before is _MISSING:
             _header_set(headers, target, rule.value)
@@ -274,6 +285,11 @@ def _apply_header_rule(rule: HeaderRule, phase: dict) -> dict | None:
     return _diff(target, before, after)
 
 
+def _body_has_value(value: Any) -> bool:
+    """Contract guards treat a missing field and an explicit JSON null as empty."""
+    return value is not _MISSING and value is not None
+
+
 def _apply_body_rule(rule: BodyRule, phase: dict) -> dict | None:
     body = phase["body"]
     target = rule.target_path if rule.op == "copy" else rule.path
@@ -281,16 +297,17 @@ def _apply_body_rule(rule: BodyRule, phase: dict) -> dict | None:
         return None
     before = _body_get(body, target)
     if rule.op == "update":
-        if before is not _MISSING:
+        if _body_has_value(before):
             body = _body_set(body, target, _typed_value(rule.value))
     elif rule.op == "create":
-        if before is _MISSING:
+        if not _body_has_value(before):
             body = _body_set(body, target, _typed_value(rule.value))
     elif rule.op == "delete":
         body = _body_delete(body, target)
     elif rule.op == "copy":
         source = _body_get(body, rule.source_path)
-        body = _body_set(body, target, None if source is _MISSING else source)
+        if source is not _MISSING:
+            body = _body_set(body, target, source)
     elif rule.op in ("prepend", "append", "regex_replace", "to_upper", "to_lower"):
         if not isinstance(before, str):
             return None
@@ -313,16 +330,16 @@ def _apply_body_rule(rule: BodyRule, phase: dict) -> dict | None:
     return _diff(target, before, after)
 
 
-def apply_sample_transforms(
+def replay_transform_sample(
     spec: TransformsSpec,
     *,
     request: dict | None = None,
     response: dict | None = None,
-) -> dict:
+) -> TransformSampleResult:
     """Replay the rule set against pasted snapshots; returns before/after plus diffs.
 
     Read-only by construction: the input dicts are not mutated (deep copies are used),
-    and the function never talks to an adapter, a database or the network.
+    and the function never talks to a database or the network.
     """
     sample = {
         "request": _normalize_phase(request),
@@ -348,4 +365,4 @@ def apply_sample_transforms(
             if entry is None:
                 continue
             diff.append({**entry, "segment": segment, "kind": kind, "op": rule.op})
-    return {"before": before, "after": after, "diff": diff}
+    return TransformSampleResult(before=before, after=after, diff=tuple(diff))

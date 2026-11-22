@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { ResultCell } from "@/components/ui/table";
 import { PriceTable, type PriceColumn } from "@/components/pricing/table";
 import { UNIT_HINT } from "@/components/pricing/money";
 import { usePublicModels, usePublicPrices } from "@/components/pricing/queries";
@@ -67,6 +68,7 @@ export function PublicPricesSection() {
     {
       key: "price",
       label: "加权售价（入·出）",
+      width: "9rem",
       header: (
         <span className="flex flex-col leading-tight">
           <span>加权售价（入·出）</span>
@@ -98,6 +100,7 @@ export function PublicPricesSection() {
     {
       key: "members",
       label: "成员构成",
+      width: "16rem",
       cell: (price) => {
         const model = memberSummary.get(price.public_model_id);
         const summary = (model?.targets ?? [])
@@ -107,21 +110,27 @@ export function PublicPricesSection() {
           )
           .join("、");
         return (
-          <div className="min-w-0">
-            <div className="max-w-72 truncate text-body" title={summary || undefined}>
-              {summary || "-"}
-            </div>
-            <div className="text-2xs text-faint">
-              {price.priced_members}/{price.total_members} 已定价 ·{" "}
-              {price.weight_basis === "weight" ? "按成员权重" : "等权"}
-            </div>
-          </div>
+          <ResultCell
+            primary={
+              <span className="min-w-0 truncate text-body" title={summary || undefined}>
+                {summary || "-"}
+              </span>
+            }
+            secondary={
+              price.priced_members +
+              "/" +
+              price.total_members +
+              " 已定价 · " +
+              (price.weight_basis === "weight" ? "按成员权重" : "等权")
+            }
+          />
         );
       },
     },
     {
       key: "status",
       label: "状态",
+      width: "7rem",
       cell: (price) =>
         price.available ? (
           <Badge tone="success">可计算</Badge>
@@ -157,6 +166,7 @@ export function PublicPricesSection() {
         searchText={searchText}
         onSearchChange={setSearchText}
         searchPlaceholder="筛选公开模型"
+        layout="fixed"
         emptyText="还没有公开模型"
         onClearFilters={() => setSearchText("")}
         rowKey={(price) => price.public_model_id}

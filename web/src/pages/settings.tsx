@@ -20,7 +20,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { AUTH_ME_QUERY_KEY, fetchMe } from "@/lib/auth";
 import { usePermissions } from "@/lib/permissions";
 import { useConnection, usePreferencesSync, useSavePreferences, useSaveProfile } from "@/lib/settings-ia";
-import { PORT_DISABLED_LABEL, defaultBaseUrl, effectiveBaseUrl, isDataPlaneEnabled, isPortEnabled } from "@/lib/url";
+import { dataPlanePortCopy, defaultBaseUrl, effectiveBaseUrl, isDataPlaneEnabled, isPortEnabled } from "@/lib/url";
 import { useTheme, type Theme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { controlPlane } from "@/lib/control-plane";
@@ -314,8 +314,8 @@ function ConnectionKeysSection() {
             : connection.data?.configured
               ? "来自运营设置，所有用户共用"
               : dataPlaneEnabled
-                ? "未配置，浏览器当前 host + 适配器契约端口"
-                : "未配置，数据面端口由适配器契约提供（当前未启用）"
+                ? dataPlanePortCopy("address-default")
+                : dataPlanePortCopy("address-disabled")
         }
         action={
           <Badge tone={connection.data?.configured ? "info" : "neutral"}>
@@ -403,7 +403,7 @@ function ConnectionKeysSection() {
           </>
         ) : (
           <p className="text-2xs text-faint">
-            {PORT_DISABLED_LABEL}：数据面端口由适配器契约提供，配置公网连接地址后可复制完整示例。
+            {dataPlanePortCopy("example-disabled")}
           </p>
         )}
       </SettingsTile>

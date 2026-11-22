@@ -440,16 +440,28 @@ def preview_transforms(
     "/{upstream_id}/transforms/sample",
     dependencies=[Depends(require("transforms:read"))],
 )
-def sample_transforms(upstream_id: str, payload: TransformSampleIn) -> dict:
+def sample_transforms(
+    upstream_id: str,
+    payload: TransformSampleIn,
+    adapter: DataPlaneAdapter = Depends(get_adapter),
+) -> dict:
     """Replay the posted rules against pasted request/response samples (ticket 05).
 
-    Non-destructive by construction: the rules go through the storage codec, the
-    IR is applied in memory, and the endpoint neither writes the store nor calls
-    an adapter/upstream. Response: before/after snapshots plus a field-level diff.
+    Non-destructive by construction: the rules go through the storage codec, then
+    the adapter replays its own transform semantics in memory (ADR-029: the
+    system layer keeps no replay implementation). The endpoint neither writes the
+    store nor contacts an upstream. Response: before/after snapshots plus a
+    field-level diff.
     """
-    result = upstream_ops.sample_transforms(
-        payload.transforms,
+    spec = parse_transforms(payload.transforms)
+    result = adapter.replay_transform_sample(
+        spec,
         request=payload.request.model_dump(),
         response=payload.response.model_dump(),
     )
-    return {"upstream_id": upstream_id, **result}
+    return {
+        "upstream_id": upstream_id,
+        "before": result.before,
+        "after": result.after,
+        "diff": [dict(item) for item in result.diff],
+    }

@@ -22,6 +22,7 @@ import { ResultCell, Table, TableWrap, TD, TH, THead, TR } from "@/components/ui
 import { Textarea } from "@/components/ui/textarea";
 import { controlPlane } from "@/lib/control-plane";
 import { ACTION_ICONS } from "@/lib/icons";
+import { usePermissions } from "@/lib/permissions";
 import {
   actionColumnWidth,
   FROZEN_COLUMN_CELL_CLASS,
@@ -330,6 +331,9 @@ function PanelHeader({
 /** 已保存上游的源密钥面板：密钥平权（ADR-026）——重命名/删除/逐把测试/勾选批量删除。 */
 export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
   const qc = useQueryClient();
+  const { can } = usePermissions();
+  // 测试会真实请求上游（写操作）：没有 upstreams:write 时按钮不出现，与 DESIGN-AUDIT §13 一致。
+  const canTest = can("upstreams:write");
   const { mode: timezone } = useTimezone();
   const q = useQuery({
     queryKey: ["upstream-keys", upstreamId],
@@ -492,18 +496,20 @@ export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
   const batchTestPending = activeTarget !== null && "keyIds" in activeTarget;
   const batchActions = batchTarget ? (
     <>
-      <Button
-        variant="outline"
-        size="sm"
-        // 固定按钮宽度（W8 票04）：文案在「批量测试 N 把 / 测试中」间切换时不挤动并列的批量删除。
-        className="min-w-40"
-        disabled={testKeys.isPending}
-        title={"只测试选中的 " + selectedCount + " 把密钥"}
-        onClick={() => testKeys.mutate(batchTarget)}
-      >
-        <TestIcon className="h-3.5 w-3.5" />
-        {batchTestLabel(batchTestPending, selectedCount)}
-      </Button>
+      {canTest ? (
+        <Button
+          variant="outline"
+          size="sm"
+          // 固定按钮宽度（W8 票04）：文案在「批量测试 N 把 / 测试中」间切换时不挤动并列的批量删除。
+          className="min-w-40"
+          disabled={testKeys.isPending}
+          title={"只测试选中的 " + selectedCount + " 把密钥"}
+          onClick={() => testKeys.mutate(batchTarget)}
+        >
+          <TestIcon className="h-3.5 w-3.5" />
+          {batchTestLabel(batchTestPending, selectedCount)}
+        </Button>
+      ) : null}
       <Button variant="danger" size="sm" onClick={() => setBatchDeleteConfirm(true)}>
         <DeleteIcon className="h-3.5 w-3.5" /> 删除选中 {selectedCount} 把
       </Button>
@@ -539,15 +545,17 @@ export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
           selectable
           actions={(row) => (
             <div className="flex gap-1">
-              <Button
-                variant="outline"
-                size="dense"
-                disabled={testKeys.isPending}
-                title="只对该密钥发起一次最小鉴权请求"
-                onClick={() => testKeys.mutate({ keyId: row.id })}
-              >
-                {rowTestLabel(testKeys.isPending, isKeyTestTarget(activeTarget, row.id))}
-              </Button>
+              {canTest ? (
+                <Button
+                  variant="outline"
+                  size="dense"
+                  disabled={testKeys.isPending}
+                  title="只对该密钥发起一次最小鉴权请求"
+                  onClick={() => testKeys.mutate({ keyId: row.id })}
+                >
+                  {rowTestLabel(testKeys.isPending, isKeyTestTarget(activeTarget, row.id))}
+                </Button>
+              ) : null}
               <Button
                 variant="ghost"
                 size="dense"

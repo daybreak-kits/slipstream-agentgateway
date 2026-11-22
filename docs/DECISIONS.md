@@ -534,7 +534,7 @@
    - 审计与配置版本：revision id/operator/reason/status/hash/adapter_id/validation_note。
    系统表与对外字段使用中性词：usage event、request attempt、correlation key、availability、config revision。数据面列名、SQLite 文件名/路径、版本号、wire 属性名不得作为系统契约。
 4. **适配层吸收清单**：数据面配置与命名空间、协议/端点/端口、客户端调用契约、采集与遥测生命周期、日志存储与 payload 读取、日志保留清理、transform/CEL 编译与预览、凭据物化/清理/磁盘格式、能力词表与用户文案、健康与版本语义。系统只持有凭据元数据与意图。
-5. **六类标准端口**（`DataPlaneAdapter`）：`read_log_payload`、`prune_logs`、`preview_transforms`、`materialize_credentials`、`client_contract`、`capability_note`；`AttemptSink` 与 `start_telemetry`/`stop_telemetry` 生命周期同属 SPI 契约。上层只调用端口，不复制适配器知识。
+5. **标准端口**（`DataPlaneAdapter`）：`read_log_payload`、`prune_logs`、`preview_transforms`、`materialize_credentials`、`client_contract`、`capability_note`；`AttemptSink` 与 `start_telemetry`/`stop_telemetry` 生命周期同属 SPI 契约。上层只调用端口，不复制适配器知识。W8 复审补充：transform 样例回放与编译预览同属适配层语义，以 `replay_transform_sample` 端口暴露。
 6. **依赖方向与 import**：`l06_api`/`l07_jobs` 可依赖 `l05_service`、`l04_repo`、`l02_domain`、`l01_core` 与 `l03_adapters.spi`/`registry`；`l05_service` 只可 import `l03_adapters.spi`；`l02_domain` 不得 import `l03_adapters`。注册表负责适配器实例化与遥测生命周期，系统组合根不得按适配器名字分支。Web 只消费生成契约与系统字段，不得复制适配器能力矩阵。具体规则与检查清单见 `docs/SYSTEM-BOUNDARY.md`。
 7. **词表规则**：系统 API/UI/生成契约只出现产品语言与领域词；适配器名只允许作为 `adapter_id` 审计元数据，不进入用户可见文案；数据面配置路径、wire 字段、`trace/span/OTLP/attributes`、`keyHash`、`agentgateway_user` 等实现词必须由适配器归一化后再进入系统。
 8. **执行与基线**：新增 `ops/checks/import_lint.py`，默认只报告系统层具体数据面引用（W6 基线 8 条，EXIT=0），`--strict` 有引用即 EXIT=1；本票不把 `--strict` 接入门禁，ticket 06 在四侧迁移完成后转强制。新增 fake adapter，使系统在无真实数据面时可跑通启动、health、connection、usage、日志、渲染下发与清理主流程；真实适配器回归保持绿。

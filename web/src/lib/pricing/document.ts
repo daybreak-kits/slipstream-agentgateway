@@ -1,5 +1,6 @@
 import type { PriceExportFile } from "@/lib/control-plane/operations/prices";
 import { ApiError } from "@/lib/control-plane/errors";
+import { isPlainObject } from "@/lib/plain-object";
 
 /**
  * 价目 JSON 文档（ADR-020，W8 ticket 07）：在浏览器里直接编辑整份价目文件的纯 codec。
@@ -73,10 +74,6 @@ export interface PriceImportErrorRow {
 }
 
 const DECIMAL_TEXT = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function isKnownField(field: string, allowed: readonly string[]): boolean {
   return allowed.includes(field);
@@ -392,6 +389,101 @@ export function draftsFromPriceDocument(
     };
   }
   return drafts;
+}
+
+/** 单字段「不会写库」判定：文档里该字段为 null（不改），但表格草稿与模型现值不同。 */
+function unmappedDraftField(
+  documentValue: string | null,
+  draftValue: string,
+  modelValue: string | null | undefined,
+  fallback: string,
+): boolean {
+  if (documentValue !== null) return false;
+  return draftValue !== (modelValue ?? fallback);
+}
+
+/**
+ * 导入 / 保存 JSON 成功后的表格草稿（W8 复审 B3）：
+ * - 文档显式覆盖的字段已落库，对应行的草稿可丢弃（丢弃后表格显示服务端新值）；
+ * - 文档里为 null（不改）的字段若仍有表格待保存改动，保留整行草稿，避免静默丢稿；
+ * - 不在文档里的行草稿原样保留（JSON 不映射的草稿）。
+ */
+export function draftsAfterPriceImport(
+  document: PriceDocument,
+  models: readonly PriceDocumentModel[],
+  current: Record<string, PriceDraftValues>,
+): Record<string, PriceDraftValues> {
+  const next: Record<string, PriceDraftValues> = {};
+  const mapped = new Set<string>();
+  for (const row of document.upstream_models) {
+    const located = locateRow(row.id ?? null, row.name ?? null, models);
+    if (located.error !== null) continue;
+    const id = located.target.id;
+    mapped.add(id);
+    const draft = current[id];
+    if (!draft) continue;
+    const model = models.find((item) => item.id === id);
+    const keep =
+      unmappedDraftField(row.cost_input_per_1m, draft.input, model?.cost_input_per_1m, "") ||
+      unmappedDraftField(row.cost_output_per_1m, draft.output, model?.cost_output_per_1m, "") ||
+      unmappedDraftField(row.markup, draft.markup, model?.markup, "1.0000");
+    if (keep) next[id] = draft;
+  }
+  for (const [id, draft] of Object.entries(current)) {
+    if (!mapped.has(id)) next[id] = draft;
+  }
+  return next;
+}
+
+/** 文档是否含会实际写库的改动（非 null 字段与模型现值不同）。 */
+export function priceDocumentHasChanges(
+  document: PriceDocument,
+  models: readonly PriceDocumentModel[],
+): boolean {
+  for (const row of document.upstream_models) {
+    const located = locateRow(row.id ?? null, row.name ?? null, models);
+    if (located.error !== null) continue;
+    const model = models.find((item) => item.id === located.target.id);
+    if (!model) continue;
+    if (row.cost_input_per_1m !== null && !sameNumericText(row.cost_input_per_1m, model.cost_input_per_1m)) {
+      return true;
+    }
+    if (row.cost_output_per_1m !== null && !sameNumericText(row.cost_output_per_1m, model.cost_output_per_1m)) {
+      return true;
+    }
+    if (row.markup !== null && !sameNumericText(row.markup, model.markup ?? "1.0000")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** 数字文本按数值比较（"1.0" 与 "1.0000" 视为相同）；null/空串表示未配置。 */
+function sameNumericText(left: string, right: string | null | undefined): boolean {
+  const rightText = right === null || right === undefined ? "" : right.trim();
+  if (rightText === "") return false;
+  return Number(left) === Number(rightText);
+}
+
+/** 确认文案只需这三列的非空状态，兼容 PriceDocument 与导入前的 PriceExportFile。 */
+export interface PriceImportConfirmRow {
+  cost_input_per_1m?: string | number | null;
+  cost_output_per_1m?: string | number | null;
+  markup?: string | number | null;
+}
+
+/** 导入 / 保存 JSON 前的确认文案（W8 复审）：两个入口共用，并显示将覆盖的行数（null = 不改）。 */
+export function priceImportConfirmDescription(
+  document: { upstream_models: readonly PriceImportConfirmRow[] },
+): string {
+  const total = document.upstream_models.length;
+  const overwrite = document.upstream_models.filter(
+    (row) => row.cost_input_per_1m !== null || row.cost_output_per_1m !== null || row.markup !== null,
+  ).length;
+  return (
+    "文件含 " + total + " 个上游模型条目，其中 " + overwrite +
+    " 行将覆盖对应模型的现行成本与倍率；历史账目不重算；任一行校验失败则整批不生效。"
+  );
 }
 
 /** 后端 422 details.errors 归一为逐行错误；形状不符时返回空数组。 */

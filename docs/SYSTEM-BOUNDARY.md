@@ -43,6 +43,7 @@
 | 日志存储与 payload 读取 | `read_log_payload(event_id)` | `LogPayload` 或 None |
 | 日志保留清理 | `prune_logs(retention_days)` | 每表删除计数 |
 | transform/CEL 编译与预览 | `preview_transforms(spec)` | `TransformPreview` |
+| transform 样例回放（按编译语义） | `replay_transform_sample(spec, *, request, response)` | `TransformSampleResult` |
 | 凭据物化、白名单清理、磁盘格式 | `materialize_credentials(files, dry_run=...)` | `MaterializationResult` |
 | 能力词表、说明文案、版本限制 | `describe()` + `capability_note(key)` | 中性 capability key + 适配器提供的文案 |
 | 健康/版本/漂移语义 | `status()` / `health()` | `DataPlaneStatus` / `HealthSnapshot` |
@@ -153,6 +154,7 @@ API 与生成契约只使用中性领域字段。新增字段前先回答：换�
 | `read_log_payload(event_id)` | 读取适配器存储的请求/响应正文 | `LogPayload \| None` |
 | `prune_logs(retention_days)` | 适配器执行保留清理，只碰日志事实 | `dict[str, int]` |
 | `preview_transforms(spec)` | 在适配器内编译/预览规则，不写数据面 | `TransformPreview` |
+| `replay_transform_sample(spec, *, request, response)` | 在适配器内按编译语义回放粘贴样例，不写数据面、不访问上游 | `TransformSampleResult` |
 | `materialize_credentials(files, dry_run=False)` | 写/清理适配器管理的凭据文件 | `MaterializationResult` |
 | `client_contract()` | 端点、默认端口、健康路径等客户端事实 | `ClientContract` |
 | `capability_note(key)` | 中性能力键对应的适配器文案 | `str`（未知为空串） |

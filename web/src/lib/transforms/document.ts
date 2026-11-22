@@ -19,6 +19,7 @@ import type {
   TransformSection,
   UpstreamTransforms,
 } from "@/types";
+import { isPlainObject } from "@/lib/plain-object";
 
 export interface TransformOpMeta {
   value: TransformOp;
@@ -29,15 +30,15 @@ export interface TransformOpMeta {
 
 /** 契约 v2：头与体共用同一套动作词表（ADR-009），顺序即下拉顺序。 */
 export const TRANSFORM_OPS: readonly TransformOpMeta[] = [
-  { value: "create", label: "新增", hint: "不存在才写，已存在保持不变" },
-  { value: "update", label: "覆盖", hint: "写入目标值（头按编译后的 set 语义生效）" },
+  { value: "create", label: "创建字段", hint: "不存在才写，已存在保持不变" },
+  { value: "update", label: "更新字段", hint: "存在才覆盖，不存在保持不变（请求头同理）" },
   { value: "delete", label: "删除", hint: "删除；不存在视为成功" },
   { value: "copy", label: "复制", hint: "从源复制到目标（头填源头名 / 体填源路径）" },
-  { value: "prepend", label: "前缀", hint: "字符串开头插入" },
-  { value: "append", label: "后缀", hint: "字符串结尾追加" },
+  { value: "prepend", label: "头部添加", hint: "字符串开头插入" },
+  { value: "append", label: "尾部添加", hint: "字符串结尾追加" },
   { value: "regex_replace", label: "正则替换", hint: "按正则替换；填写正则与替换文本（CEL regexReplaceAll）" },
-  { value: "to_upper", label: "转大写", hint: "转大写" },
-  { value: "to_lower", label: "转小写", hint: "转小写" },
+  { value: "to_upper", label: "全部大写", hint: "转大写" },
+  { value: "to_lower", label: "全部小写", hint: "转小写" },
 ];
 
 const OP_VALUES = TRANSFORM_OPS.map((op) => op.value);
@@ -220,10 +221,6 @@ const CONDITION_KEYS = new Set(["field", "mode", "value"]);
 
 const HEADER_TEXT_FIELDS = ["name", "value", "source_name", "target_name", "regex", "replacement"] as const;
 const BODY_TEXT_FIELDS = ["path", "value", "source_path", "target_path", "regex", "replacement"] as const;
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 export interface ParseTransformsResult {
   /** 有任何问题时为 null：视图继续保留上一份合法文档，不把半截数据写进共用状态。 */

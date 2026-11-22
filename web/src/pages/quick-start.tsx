@@ -19,7 +19,7 @@ import { controlPlane } from "@/lib/control-plane";
 import { revisionStatusMeta } from "@/lib/revision-status";
 import { usePermissions } from "@/lib/permissions";
 import { useConnection } from "@/lib/settings-ia";
-import { PORT_DISABLED_LABEL, effectiveBaseUrl, formatPort, isDataPlaneEnabled, isPortEnabled } from "@/lib/url";
+import { dataPlanePortCopy, effectiveBaseUrl, formatPort, isDataPlaneEnabled, isPortEnabled } from "@/lib/url";
 import { useTimezone } from "@/lib/time";
 import { formatIntervalDateTime } from "@/lib/time-range";
 import { cn } from "@/lib/utils";
@@ -222,8 +222,8 @@ function ConnectionInfoCard({ canSettings }: { canSettings: boolean }) {
                   : connection.data?.configured
                     ? "来自运营设置"
                     : dataPlaneEnabled
-                      ? "未配置，浏览器当前 host + 适配器契约端口"
-                      : "未配置，数据面端口由适配器契约提供（当前未启用）"}
+                      ? dataPlanePortCopy("address-default")
+                      : dataPlanePortCopy("address-disabled")}
               </div>
             </div>
             <Button
@@ -370,7 +370,7 @@ export function OverviewPage() {
               />
             ) : (
               <p className="text-2xs text-faint">
-                {PORT_DISABLED_LABEL}：数据面端口由适配器契约提供，配置公网连接地址后可复制完整示例。
+                {dataPlanePortCopy("example-disabled")}
               </p>
             )}
           </StepCard>

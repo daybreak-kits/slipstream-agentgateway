@@ -33,13 +33,16 @@ from l03_adapters.spi import (
     MaterializationResult,
     TelemetryHandle,
     TransformPreview,
+    TransformSampleResult,
 )
 
-#: The six business ports added in W6 ticket 01, plus the two lifecycle methods.
+#: The standard ports added in W6 ticket 01 (plus the sample replay port added in
+#: W8 review), plus the two lifecycle methods.
 PORT_METHODS = (
     "read_log_payload",
     "prune_logs",
     "preview_transforms",
+    "replay_transform_sample",
     "materialize_credentials",
     "client_contract",
     "capability_note",
@@ -145,6 +148,11 @@ def test_fake_driver_serves_every_business_port() -> None:
     assert isinstance(preview, TransformPreview)
     assert isinstance(preview.after, dict)
 
+    sample = adapter.replay_transform_sample(TransformsSpec())
+    assert isinstance(sample, TransformSampleResult)
+    assert sample.before == {"request": {"headers": {}, "body": None}, "response": {"headers": {}, "body": None}}
+    assert sample.diff == ()
+
     contract = adapter.client_contract()
     assert isinstance(contract, ClientContract)
     assert contract.endpoints
@@ -211,6 +219,8 @@ def test_agentgateway_driver_ports_keep_the_existing_contract(workdir) -> None:
     assert isinstance(preview, TransformPreview)
     assert isinstance(preview.after, dict)
 
+    assert isinstance(adapter.replay_transform_sample(TransformsSpec()), TransformSampleResult)
+
     assert adapter.prune_logs(30) == {"request_logs": 0, "request_log_payloads": 0}
 
     connection = sqlite3.connect(db_path)
@@ -250,6 +260,7 @@ def test_mock_driver_ports_are_inert_but_usable() -> None:
     adapter = MockAdapter()
     assert adapter.read_log_payload("evt_missing") is None
     assert adapter.preview_transforms(TransformsSpec()).after == {}
+    assert isinstance(adapter.replay_transform_sample(TransformsSpec()), TransformSampleResult)
     assert adapter.client_contract().endpoints == ()
     assert adapter.prune_logs(30) == {"request_logs": 0, "request_log_payloads": 0}
     assert adapter.materialize_credentials([]).written == ()

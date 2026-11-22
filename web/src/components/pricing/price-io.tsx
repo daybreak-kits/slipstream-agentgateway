@@ -13,6 +13,7 @@ import { controlPlane } from "@/lib/control-plane";
 import { ApiError } from "@/lib/control-plane/errors";
 import {
   normalizePriceImportErrors,
+  priceImportConfirmDescription,
   type PriceImportErrorRow,
 } from "@/lib/pricing/document";
 import { formatDateTime, useTimezone } from "@/lib/time";
@@ -221,10 +222,7 @@ function ImportDialog({ onClose, queryClient }: { onClose: () => void; queryClie
         open
         onOpenChange={(open) => { if (!open) setImportConfirm(false); }}
         title={"确认导入价目？"}
-        description={
-          `文件含 ${parsed.upstream_models.length} 个上游模型条目：校验通过的行将覆盖对应模型的现行成本与倍率，` +
-          "历史账目不重算；任一行校验失败则整批不生效。"
-        }
+        description={priceImportConfirmDescription(parsed)}
         confirmLabel="确认导入"
         onConfirm={() => {
           setImportConfirm(false);

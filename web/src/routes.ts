@@ -163,6 +163,7 @@ export const ROUTES: RouteDef[] = [
     page: "upstream_detail",
     component: "UpstreamDetailPage",
     title: "上游详情",
+    permission: "upstreams:read",
   },
   {
     path: "/models",

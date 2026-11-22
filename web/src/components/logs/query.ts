@@ -1,4 +1,4 @@
-import { dayStartMs, timeWindowKey, type TimeWindow } from "@/components/time-range-picker";
+import { dayStartMs, timeWindowEquals, type TimeWindow } from "@/components/time-range-picker";
 import { SELECT_ALL_VALUE } from "@/lib/select-sentinels";
 
 /** 表头可排序的字段：后端 /admin/logs sort 白名单的子集（费用列需 billing:spend）。 */
@@ -157,7 +157,7 @@ export function buildLogQuery(draft: LogFilterDraft): {
 
 export function filterDraftEqual(a: LogFilterDraft, b: LogFilterDraft): boolean {
   return (
-    timeWindowKey(a.window).join("|") === timeWindowKey(b.window).join("|") &&
+    timeWindowEquals(a.window, b.window) &&
     a.model === b.model &&
     a.upstream === b.upstream &&
     a.user === b.user &&
