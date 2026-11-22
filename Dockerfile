@@ -25,7 +25,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && url="${AGENTGATEWAY_DOWNLOAD_URL:-https://github.com/agentgateway/agentgateway/releases/download/v${AG_VERSION}/agentgateway-linux-${AG_ARCH}}" \
     && (curl -fL --retry 1 --connect-timeout 8 --max-time 90 -o /usr/local/bin/agentgateway "$url" \
-        || curl -fL --retry 3 --connect-timeout 10 --max-time 300 -o /usr/local/bin/agentgateway "https://cdn.gh-proxy.org/$url") \
+        || curl -fL --retry 3 --connect-timeout 10 --max-time 300 -o /usr/local/bin/agentgateway "https://gh-proxy.com/$url") \
     && chmod 0755 /usr/local/bin/agentgateway \
     && /usr/local/bin/agentgateway --version
 
