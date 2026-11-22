@@ -23,15 +23,10 @@ from l04_repo.orm import (
     UpstreamModelORM,
     UserORM,
 )
+from l05_service.log_facts import cache_ratio, identity_of, identity_tables, raw_of
+from l05_service.log_query import parse_log_query
 from l06_api.deps import SESSION_COOKIE
-from l06_api.routers_ops import (
-    _cache_ratio,
-    _identity_of,
-    _identity_tables,
-    _log_item,
-    _parse_log_query,
-    _raw_of,
-)
+from l06_api.routers_ops import _log_item
 
 # Deterministic clock so from_ms/to_ms cases stay exact; the endpoint echoes it.
 _T = 1_735_000_000_000
@@ -279,7 +274,7 @@ def _legacy_search(
 ) -> dict:
     """The v1 search_logs body, kept as the parity oracle."""
     limit, off = page_size, offset
-    parsed = _parse_log_query(query)
+    parsed = parse_log_query(query)
     rows = list(
         session.scalars(
             select(GatewayUsageEventORM).order_by(
@@ -287,13 +282,13 @@ def _legacy_search(
             )
         ).all()
     )
-    keys_by_id, users_by_id = _identity_tables(session)
-    raws = {row.event_id: _raw_of(row) for row in rows}
+    keys_by_id, users_by_id = identity_tables(session)
+    raws = {row.event_id: raw_of(row.raw_json) for row in rows}
     identities = {
-        row.event_id: _identity_of(row.api_key_id, keys_by_id, users_by_id) for row in rows
+        row.event_id: identity_of(row.api_key_id, keys_by_id, users_by_id) for row in rows
     }
     streams = {row.event_id: _normalized_stream(row) for row in rows}
-    ratios = {row.event_id: _cache_ratio(row) for row in rows}
+    ratios = {row.event_id: cache_ratio(row) for row in rows}
     rows = [
         row
         for row in rows

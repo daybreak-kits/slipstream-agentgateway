@@ -206,6 +206,16 @@ export interface LogAttemptsOut {
   attempts?: LogAttemptOut[];
 }
 
+export interface LogQuerySyntaxOut {
+  tokens: LogQueryTokenOut[];
+}
+
+export interface LogQueryTokenOut {
+  token: string;
+  meaning: string;
+  example: string;
+}
+
 export interface LoginIn {
   username: string;
   password: string;

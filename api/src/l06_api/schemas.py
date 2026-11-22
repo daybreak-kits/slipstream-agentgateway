@@ -590,6 +590,20 @@ class PolicyCountsOut(BaseModel):
     users: int
 
 
+class LogQueryTokenOut(BaseModel):
+    """One documented log query token (help catalog)."""
+
+    token: str
+    meaning: str
+    example: str
+
+
+class LogQuerySyntaxOut(BaseModel):
+    """Canonical log query token catalog; the console never hardcodes a copy."""
+
+    tokens: list[LogQueryTokenOut]
+
+
 class LogAttemptOut(BaseModel):
     """One normalized upstream attempt for a request log (ADR-028)."""
 

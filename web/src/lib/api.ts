@@ -214,6 +214,7 @@ export const ENDPOINTS = {
   reportsHeatmap: "/admin/reports/heatmap",
   health: "/admin/health",
   logs: "/admin/logs",
+  logQuerySyntax: "/admin/logs/query-syntax",
   logAttempts: (id: string) => "/admin/logs/" + encodeURIComponent(id) + "/attempts",
   upstreamCreate: "/admin/upstreams",
   upstreamUpdate: (code: string) => "/admin/upstreams/" + code,
