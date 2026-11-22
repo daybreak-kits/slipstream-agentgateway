@@ -262,7 +262,7 @@ def strip_session_fields(text: str) -> list[str]:
     skipping = False
     for line in text.splitlines():
         stripped = line.strip()
-        if stripped.startswith("session:") and not line.startswith((" ", "\t")):
+        if stripped.startswith("session:"):
             skipping = True
             continue
         if skipping:
