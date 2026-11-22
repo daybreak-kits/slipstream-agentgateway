@@ -11,7 +11,7 @@ import {
 } from "@/components/models/cooldown-panel";
 import { cooldownModeState } from "@/components/models/cooldown-state";
 import { Field } from "@/components/models/field";
-import { MODEL_TYPES, parametersOf, toInt, TYPE_SOURCE_LABELS } from "@/components/models/model-vocab";
+import { MODEL_TYPES, parametersOf, toInt, toggleReasoningLevel, TYPE_SOURCE_LABELS } from "@/components/models/model-vocab";
 import { ActionButton } from "@/components/ui/action-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -89,46 +89,19 @@ function ParameterFields({ value, onChange }: { value: ModelParameters; onChange
           <Input inputMode="numeric" value={String(value.max_output_tokens)} onChange={(e) => onChange({ ...value, max_output_tokens: toInt(e.target.value) })} />
         </Field>
       </div>
+      {/* W8 票06：上游模型只声明思考档位能力；默认档归公开模型/模型试验，不再在此编辑。 */}
       <Field label="思考档位" hint="留空 = 未声明，模型试验会回退全部档位">
         <div className="flex flex-wrap gap-x-4 gap-y-1">
           {REASONING_LEVELS.map((level) => (
             <label key={level} className="flex items-center gap-1.5 text-2sm text-body">
               <Checkbox
                 checked={value.reasoning_levels?.includes(level) === true}
-                onCheckedChange={() => {
-                  const declared = value.reasoning_levels ?? [];
-                  const next = declared.includes(level)
-                    ? declared.filter((item) => item !== level)
-                    : [...declared, level];
-                  const defaultLevel =
-                    level === value.default_reasoning_level || next.length === 0
-                      ? ""
-                      : value.default_reasoning_level ?? "";
-                  onChange({ ...value, reasoning_levels: next, default_reasoning_level: defaultLevel });
-                }}
+                onCheckedChange={() => onChange(toggleReasoningLevel(value, level))}
               />
               {REASONING_LEVEL_LABELS[level]}
             </label>
           ))}
         </div>
-      </Field>
-      <Field label="默认思考档" hint="必须是已声明的档位之一；未声明 = 不指定默认档">
-        <Select
-          value={value.default_reasoning_level ?? ""}
-          onValueChange={(next) => onChange({ ...value, default_reasoning_level: next })}
-        >
-          <SelectTrigger className="w-44">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="">未声明</SelectItem>
-            {(value.reasoning_levels ?? []).map((level) => (
-              <SelectItem key={level} value={level}>
-                {REASONING_LEVEL_LABELS[level as keyof typeof REASONING_LEVEL_LABELS] ?? level}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
       </Field>
       <Field label="输入类型" hint="至少选择 1 个">
         <div className="flex flex-wrap gap-x-4 gap-y-1">
@@ -187,10 +160,18 @@ function DrawerSection({
 }) {
   return (
     <section data-slot="drawer-section" className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2 border-b border-border pb-2">
-        <h3 className="text-sm font-semibold text-title">{title}</h3>
+      {/* W8 票06：分组标题不换行——说明占剩余宽度并省略；未保存计数走固定槽（DirtyCountBadge），
+          徽章出现/消失不改变标题行高度，抽屉内容不位移。 */}
+      <div className="flex items-center gap-2 border-b border-border pb-2">
+        <h3 className="shrink-0 text-sm font-semibold text-title">{title}</h3>
+        {description ? (
+          <span className="min-w-0 flex-1 truncate text-2xs text-faint" title={description}>
+            {description}
+          </span>
+        ) : (
+          <span className="min-w-0 flex-1" />
+        )}
         <DirtyCountBadge count={dirtyCount} />
-        {description ? <span className="text-2xs text-faint">{description}</span> : null}
       </div>
       {children}
     </section>

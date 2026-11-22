@@ -210,9 +210,18 @@ check("DirtyCountBadge/DirtySummary/DirtySaveButton/DirtyFooter：计数、保�
   const { DirtyCountBadge, DirtySummary, DirtySaveButton, DirtyFooter } = await load(
     "/src/components/ui/dirty-field.tsx",
   );
-  expect(render(createElement(DirtyCountBadge, { count: 0 })) === "", "0 项时不应渲染计数徽章");
+  // W8 票06：计数徽章改用固定槽——0 项时槽位仍在（徽章不出现也不让标题行换行/变高）。
+  const cleanSlot = render(createElement(DirtyCountBadge, { count: 0 }));
+  includesAll(cleanSlot, ['data-slot="dirty-count-slot"', "shrink-0", "w-24"], "0 项时仍保留固定槽");
+  expect(!cleanSlot.includes("项未保存"), "0 项时槽内不渲染计数文案（不留假徽章）");
+  expect(cleanSlot.includes('aria-hidden="true"'), "空槽必须对读屏隐藏");
   const countHtml = render(createElement(DirtyCountBadge, { count: 3 }));
-  includesAll(countHtml, ["3 项未保存", "bg-warning-soft"], "未保存计数徽章");
+  includesAll(
+    countHtml,
+    ["3 项未保存", "bg-warning-soft", 'data-slot="dirty-count-slot"', 'data-slot="dirty-count"'],
+    "未保存计数徽章",
+  );
+  expect(!countHtml.includes('aria-hidden="true"'), "有计数时徽章不得对读屏隐藏");
   const summaryHtml = render(createElement(DirtySummary, { count: 2, onResetAll: () => {} }));
   includesAll(summaryHtml, ["未保存 2 项", "恢复全部"], "底部未保存摘要");
   includesAll(render(createElement(DirtySummary, { count: 2, saving: true })), ["保存中"], "保存中摘要");
@@ -510,6 +519,35 @@ check("上游模型满高抽屉：右侧满高、视口自适应宽度、四组�
   expect(!text.includes('variant="primary"'), "除保存外的按钮不得用 primary 变体（保存是唯一主按钮）");
 });
 
+// ---------- 6c. W8 票06：思考档能力声明 + 未保存计数固定槽 ----------
+check("上游模型抽屉：思考档位只声明能力，默认档编辑控件已删除（W8 票06）", () => {
+  const text = read("src/components/models/upstream-model-drawer.tsx");
+  includesAll(
+    text,
+    ["思考档位", "REASONING_LEVELS.map", "toggleReasoningLevel", "reasoning_levels"],
+    "思考档位能力声明",
+  );
+  expect(!text.includes("默认思考档"), "上游模型抽屉不得再有「默认思考档」编辑控件（默认档归公开模型/试验，W8 票06）");
+  expect(!text.includes("default_reasoning_level"), "抽屉不得直接编辑 default_reasoning_level（默认档归公开模型/试验）");
+});
+
+check("未保存计数固定槽：分组标题不换行、徽章出现/消失不改变标题行高度（W8 票06）", () => {
+  const drawer = read("src/components/models/upstream-model-drawer.tsx");
+  const section = drawer.slice(drawer.indexOf("function DrawerSection"), drawer.indexOf("interface UpstreamFormState"));
+  includesAll(section, ["DirtyCountBadge", "min-w-0", "truncate"], "分组标题固定槽与说明不换行");
+  expect(!section.includes("flex-wrap"), "分组标题不得换行（徽章出现不得把说明挤到第二行）");
+  // 全站继续复用既有 DirtyField 零位移标记槽（不新造字段级脏标记）。
+  const dirty = read("src/components/ui/dirty-field.tsx");
+  includesAll(dirty, ['data-slot="dirty-marker"', "absolute"], "DirtyField 字段级标记槽保持绝对定位零位移");
+  for (const file of [
+    "src/components/models/upstream-model-drawer.tsx",
+    "src/components/models/public-model-page.tsx",
+    "src/components/roles/role-drawer.tsx",
+  ]) {
+    includesAll(read(file), ["DirtyField"], file + " 必须复用统一 DirtyField 零位移原语");
+  }
+});
+
 check("接线：两处上游模型编辑改用抽屉，冷却入口只在抽屉", () => {
   for (const file of ["src/pages/models.tsx", "src/components/upstreams/models-panel.tsx"]) {
     const text = read(file);
@@ -693,7 +731,9 @@ check("PublicModelPageView：单页三段 + 页头 h1/状态/脏标记 + 唯一�
   expect(!html.includes("tablist"), "公开模型编辑器不能再有页签");
   expect(!html.includes('role="tab"'), "不能再有 tab role");
   expect(/<h1[^>]*>/.test(html), "页头必须是 h1");
-  includesAll(html, ["glm-5.3", "failover · 故障转移", "正常", "1 项未保存", "未保存 1 项"], "页头状态与脏标记");
+  includesAll(html, ["glm-5.3", "failover · 故障转移", "正常", "未保存 1 项"], "页头状态与脏标记");
+  // W8 票06：未保存数量只在摘要里出现一次（计数徽章固定槽只用于分组标题，页头不再重复）。
+  expect(!html.includes("1 项未保存"), "页头不得重复渲染「N 项未保存」计数徽章");
   const basic = html.indexOf("基本信息");
   const members = html.indexOf("成员编排");
   const summary = html.indexOf("只读摘要");
@@ -808,6 +848,7 @@ check("接线：公开模型编辑器单页（无 Tab、单 PATCH、双权限、
     page.includes("DirtySaveButton") && page.includes("DirtySummary") && !page.includes("DirtyFooter"),
     "保存/状态/未保存数量必须固定页头（ticket 14 后公开模型页不再用底部 DirtyFooter）",
   );
+  expect(!page.includes("DirtyCountBadge"), "W8 票06：页头未保存数量由摘要统一呈现，不重复渲染计数徽章");
 });
 
 // ---------- 9. 公开模型成员编排 chip 流（W5 ticket 14） ----------
