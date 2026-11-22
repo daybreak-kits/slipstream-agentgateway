@@ -47,6 +47,7 @@ services:
   gateway:
     image: slipstream-agentgateway:local
     pull_policy: never
+    working_dir: /data/ag-config
     restart: unless-stopped
     depends_on:
       app:
