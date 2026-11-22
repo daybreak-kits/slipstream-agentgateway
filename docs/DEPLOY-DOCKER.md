@@ -11,7 +11,7 @@
 ## 启动
 
 ```bash
-git clone --branch w8/docker-deploy <repo-url> slipstream-agentgateway
+git clone <repo-url> slipstream-agentgateway
 cd slipstream-agentgateway
 cp .env.docker.example .env
 # 至少改 POSTGRES_PASSWORD、SLIPSTREAM_ADMIN_PASSWORD、SLIPSTREAM_DEMO_ADMIN_PASSWORD
