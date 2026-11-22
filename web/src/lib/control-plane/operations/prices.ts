@@ -21,12 +21,22 @@ export interface UpstreamPriceInput {
   currency: string;
 }
 
+/** 价目导出/导入行（v1 只含模型行进价；null/空串 = 不改该字段）。 */
+export interface PriceExportRow {
+  id?: string | null;
+  name?: string | null;
+  model_type?: string | null;
+  cost_input_per_1m?: string | number | null;
+  cost_output_per_1m?: string | number | null;
+  markup?: string | number | null;
+}
+
 /** 价目 JSON 导出文件（v1 不含缓存价）。 */
 export interface PriceExportFile {
   schema_version?: number;
-  exported_at_ms?: number;
-  meta?: Record<string, unknown>;
-  upstream_models: Array<Record<string, unknown>>;
+  exported_at_ms?: number | null;
+  meta?: Record<string, unknown> | null;
+  upstream_models: PriceExportRow[];
 }
 
 export interface PriceImportResult {
