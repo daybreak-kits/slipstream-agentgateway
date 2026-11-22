@@ -138,7 +138,7 @@ export interface UpstreamsOperations {
   removeKey(id: string, keyId: string): Promise<void>;
   /** 勾选批量删除；逐把成败都在返回里。 */
   batchDeleteKeys(id: string, input: UpstreamKeyBatchDelete): Promise<KeyBatchDeleteResult>;
-  /** 逐把测试本上游全部密钥（同步落库）。 */
+  /** 逐把测试（同步落库）：不传=全部；key_id=行内单把；keys=选中批量（W8 票04）。 */
   testKeys(id: string, input?: UpstreamKeyTestIn): Promise<KeyTestResult>;
   /** 串行模型探测：一次一批模型 id，页面负责逐模型串行与中止。 */
   probeModels(id: string, input: UpstreamModelProbeIn, options?: ProbeModelsOptions): Promise<ModelProbeResponse>;

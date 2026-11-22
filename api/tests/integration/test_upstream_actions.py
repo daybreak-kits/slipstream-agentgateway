@@ -189,6 +189,107 @@ def test_key_test_reports_and_persists_per_key(client, monkeypatch):
     assert seen == ["sk-bad-9999", "sk-good-0001"]
 
 
+def test_key_test_scope_probes_only_the_requested_keys(client, monkeypatch):
+    """W8 ticket 04: row test probes only its key; batch probes only the selection.
+
+    One API/one probe loop serves both: key_id addresses one row, keys addresses
+    an explicit set (request order, duplicates collapse). Unknown ids and the
+    mutually exclusive body shapes are request errors raised before any request,
+    so a bad batch can never probe (or persist) a partially wrong set.
+    """
+    seen: list[str] = []
+
+    def fake_fetch_models(*, base_url, api_style, api_key, timeout_s=8.0):
+        seen.append(api_key)
+        if api_key == "sk-bad-9999":
+            return 401, [], 11
+        return 200, ["glm-5.3"], 5
+
+    monkeypatch.setattr(upstream_ops, "fetch_models", fake_fetch_models)
+    upstream_id = _upstream(client, key="sk-first-0001")["id"]
+    first_id = _keys(client, upstream_id)["items"][0]["id"]
+    second = client.post(
+        f"/admin/upstreams/{upstream_id}/keys",
+        json={"label": "second", "api_key": "sk-second-0002"},
+    ).json()
+    third = client.post(
+        f"/admin/upstreams/{upstream_id}/keys",
+        json={"label": "third", "api_key": "sk-third-0003"},
+    ).json()
+
+    # row scope: exactly one probe and exactly one persisted row
+    response = client.post(
+        f"/admin/upstreams/{upstream_id}/keys/test", json={"key_id": second["id"]}
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["upstream_id"] == upstream_id
+    assert [item["key_id"] for item in body["items"]] == [second["id"]]
+    assert body["items"][0]["ok"] is True
+    assert seen == ["sk-second-0002"]
+    by_id = {key["id"]: key for key in _keys(client, upstream_id)["items"]}
+    assert by_id[second["id"]]["last_test"]["ok"] is True
+    assert by_id[first_id]["last_test"] is None
+    assert by_id[third["id"]]["last_test"] is None
+
+    # batch scope: request order wins, duplicates collapse, untouched rows stay
+    seen.clear()
+    response = client.post(
+        f"/admin/upstreams/{upstream_id}/keys/test",
+        json={"keys": [third["id"], first_id, third["id"]]},
+    )
+    assert response.status_code == 200, response.text
+    batch = response.json()
+    assert [item["key_id"] for item in batch["items"]] == [third["id"], first_id]
+    assert seen == ["sk-third-0003", "sk-first-0001"]
+    by_id = {key["id"]: key for key in _keys(client, upstream_id)["items"]}
+    assert by_id[first_id]["last_test"]["ok"] is True
+    assert by_id[third["id"]]["last_test"]["ok"] is True
+    # the row tested earlier keeps its own outcome (the batch did not rewrite it)
+    assert by_id[second["id"]]["last_test"]["ok"] is True
+
+    # both scopes at once, an unknown id and unknown body fields are 422s
+    seen.clear()
+    both = client.post(
+        f"/admin/upstreams/{upstream_id}/keys/test",
+        json={"key_id": first_id, "keys": [first_id]},
+    )
+    assert both.status_code == 422, both.text
+    assert both.json()["code"] == "VALIDATION_ERROR"
+    unknown = client.post(
+        f"/admin/upstreams/{upstream_id}/keys/test", json={"key_id": "upk_missing"}
+    )
+    assert unknown.status_code == 422, unknown.text
+    assert unknown.json()["code"] == "VALIDATION_ERROR"
+    unknown_batch = client.post(
+        f"/admin/upstreams/{upstream_id}/keys/test",
+        json={"keys": [first_id, "upk_missing"]},
+    )
+    assert unknown_batch.status_code == 422, unknown_batch.text
+    assert unknown_batch.json()["code"] == "VALIDATION_ERROR"
+    assert seen == []
+
+    # empty selection, over-limit list and a typo field never reach the probe
+    assert (
+        client.post(
+            f"/admin/upstreams/{upstream_id}/keys/test", json={"keys": []}
+        ).status_code
+        == 422
+    )
+    too_many = ["upk_" + str(index) for index in range(21)]
+    assert (
+        client.post(
+            f"/admin/upstreams/{upstream_id}/keys/test", json={"keys": too_many}
+        ).status_code
+        == 422
+    )
+    typo = client.post(
+        f"/admin/upstreams/{upstream_id}/keys/test", json={"keyid": first_id}
+    )
+    assert typo.status_code == 422
+    assert seen == []
+
+
 def test_pre_migration_inline_key_is_not_surfaced_as_a_synthetic_row(
     client, engine_and_sessionmaker
 ):

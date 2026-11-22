@@ -342,19 +342,49 @@ def batch_delete_keys(
     return {"items": items, "deleted": len(deleted)}
 
 
+def _test_targets(
+    rows: list[UpstreamKeyORM], key_ids: list[str] | None
+) -> list[UpstreamKeyORM]:
+    """Rows one key test should probe (W8 ticket 04).
+
+    None = every row (the detail page's test-all button). An explicit list keeps
+    request order, drops repeats and rejects an unknown id with VALIDATION_ERROR
+    BEFORE any request, so a bad batch never probes or persists a partial set;
+    the row/batch entry points share this resolver instead of filtering twice.
+    """
+    if key_ids is None:
+        return rows
+    by_id = {row.id: row for row in rows}
+    targets: list[UpstreamKeyORM] = []
+    seen: set[str] = set()
+    for key_id in key_ids:
+        if key_id in seen:
+            continue
+        row = by_id.get(key_id)
+        if row is None:
+            raise AppError(ErrorCode.VALIDATION_ERROR, f"密钥不存在：{key_id}")
+        seen.add(key_id)
+        targets.append(row)
+    return targets
+
+
 def test_keys(
     session: Session,
     upstream: UpstreamORM,
     *,
     secret_box: SecretBox,
     api_style_override: str | None = None,
+    key_ids: list[str] | None = None,
     actor: str = "",
 ) -> dict[str, Any]:
-    """Test every key of this upstream against its base_url (ADR-026 ③).
+    """Probe this upstream's keys against its base_url (ADR-026 ③).
 
-    One minimal authenticated GET per row; the outcome lands on the row
-    (last_test_json/last_test_at_ms) and in the response. Network failures are
-    outcomes, not raises.
+    W8 ticket 04: key_ids scopes the probe to the requested rows - the key
+    table's row test sends one id, its multi-select batch sends the set, and
+    None keeps the detail page's test-all behaviour. Every scope reuses this one
+    loop. One minimal authenticated GET per target row; the outcome lands on the
+    row (last_test_json/last_test_at_ms) and in the response. Network failures
+    are outcomes, not raises.
     """
     requested = api_style_override or upstream.api_style
     try:
@@ -364,8 +394,9 @@ def test_keys(
             ErrorCode.VALIDATION_ERROR, f"unknown api_style: {requested}"
         ) from None
     rows = _ensure_rows(session, upstream, secret_box)
+    targets = _test_targets(rows, key_ids)
     items: list[dict[str, Any]] = []
-    for row in rows:
+    for row in targets:
         api_key = _decrypt(secret_box, row.key_enc)
         status_code, _models, latency_ms = 0, [], 0
         error = ""

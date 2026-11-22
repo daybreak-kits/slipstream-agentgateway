@@ -11,9 +11,15 @@ invalid rules never reach storage.
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+)
 
 from l05_service.rollout import RevisionStatus
 
@@ -455,11 +461,25 @@ class UpstreamKeyBatchDelete(BaseModel):
 
 
 class UpstreamKeyTestIn(BaseModel):
-    """POST /{id}/keys/test body: per-key probe; optional style override for this call."""
+    """POST /{id}/keys/test body (W8 ticket 04): every key, one key, or a set.
+
+    Exactly one of three scopes applies: no scope field = every row (the detail
+    page's test-all button, kept from ADR-026 ③); key_id = that row (the key
+    table's row test); keys = the explicit multi-select batch. key_id and keys
+    are mutually exclusive - the console always sends one shape, and silently
+    preferring one would hide a client bug. extra=forbid keeps a typo from
+    degrading a batch into "test every key".
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     api_style: str | None = Field(default=None, min_length=1, max_length=64)
+    key_id: Annotated[str, StringConstraints(min_length=1, max_length=64)] | None = None
+    # Same cap as UpstreamKeyBatchDelete (MAX_UPSTREAM_KEYS): a batch can never
+    # name more rows than one upstream can hold.
+    keys: (
+        list[Annotated[str, StringConstraints(min_length=1, max_length=64)]] | None
+    ) = Field(default=None, min_length=1, max_length=20)
 
 
 class UpstreamBatch(BaseModel):

@@ -614,6 +614,17 @@ export interface TimeseriesReportOut {
   estimate_note: string;
 }
 
+export interface TransformSampleIn {
+  transforms: Record<string, unknown>;
+  request?: TransformSamplePhaseIn;
+  response?: TransformSamplePhaseIn;
+}
+
+export interface TransformSamplePhaseIn {
+  headers?: Record<string, string>;
+  body?: unknown;
+}
+
 export interface TransformationsConfig {
   default_response_header_deletes?: string[];
   protected_request_headers?: string[];
@@ -654,6 +665,8 @@ export interface UpstreamKeyPatch {
 
 export interface UpstreamKeyTestIn {
   api_style?: string | null;
+  key_id?: string | null;
+  keys?: string[] | null;
 }
 
 export interface UpstreamModelCreate {

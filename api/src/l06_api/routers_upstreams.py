@@ -180,15 +180,30 @@ def test_keys(
 ) -> dict:
     """ADR-026 ③: one minimal authenticated request per key row.
 
-    Outcomes land on each row (last_test_json / last_test_at_ms) and are
-    returned in request order; network failures are outcomes, not raises.
+    W8 ticket 04: an absent body still tests every key (detail page), key_id
+    tests one row (table row action) and keys tests the multi-select batch;
+    all three share the service's probe loop. Outcomes land on each tested row
+    (last_test_json / last_test_at_ms) and are returned in request order;
+    network failures are outcomes, not raises.
     """
+    # Explicit scope exclusivity: the console sends one shape, and silently
+    # preferring one would hide a client bug. Raised as AppError (not a
+    # Pydantic validator) so the 422 keeps the unified JSON error shape.
+    if payload is not None and payload.key_id is not None and payload.keys is not None:
+        raise AppError(ErrorCode.VALIDATION_ERROR, "key_id 与 keys 不能同时提供")
+    key_ids: list[str] | None = None
+    if payload is not None:
+        if payload.keys is not None:
+            key_ids = payload.keys
+        elif payload.key_id is not None:
+            key_ids = [payload.key_id]
     upstream = _load(session, upstream_id)
     result = upstream_ops.test_keys(
         session,
         upstream,
         secret_box=_secret_box(),
         api_style_override=payload.api_style if payload else None,
+        key_ids=key_ids,
     )
     session.commit()
     return result

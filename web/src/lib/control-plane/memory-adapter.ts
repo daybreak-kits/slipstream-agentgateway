@@ -290,9 +290,34 @@ export function createMemoryUpstreams(): UpstreamsOperations {
       return { deleted, items };
     },
 
-    testKeys: async (id): Promise<KeyTestResult> => {
+    testKeys: async (id, input): Promise<KeyTestResult> => {
       const upstream = requireUpstream(id);
-      const items = keyStore(id).map((row, index) => {
+      if (input?.key_id != null && input?.keys != null) {
+        throw new ApiError(422, "VALIDATION_ERROR", "key_id 与 keys 不能同时提供");
+      }
+      // 与真实后端同一 scope 口径（W8 票04）：不传=全部；key_id=单把；
+      // keys=选中集合（按请求顺序、重复折叠、未知 id 整批 422，不产生部分结果）。
+      const rows = keyStore(id);
+      let targets = rows.map((row, index) => ({ row, index }));
+      if (input?.key_id != null) {
+        targets = targets.filter((item) => item.row.id === input.key_id);
+        if (targets.length === 0) {
+          throw new ApiError(422, "VALIDATION_ERROR", "密钥不存在：" + input.key_id);
+        }
+      } else if (input?.keys != null) {
+        const byId = new Map(targets.map((item) => [item.row.id, item] as const));
+        const seen = new Set<string>();
+        const scoped: typeof targets = [];
+        for (const keyId of input.keys) {
+          if (seen.has(keyId)) continue;
+          const target = byId.get(keyId);
+          if (!target) throw new ApiError(422, "VALIDATION_ERROR", "密钥不存在：" + keyId);
+          seen.add(keyId);
+          scoped.push(target);
+        }
+        targets = scoped;
+      }
+      const items = targets.map(({ row, index }) => {
         const ok = index % 4 !== 3;
         const item = {
           key_id: row.id,

@@ -91,6 +91,24 @@ describe("上游域 HTTP adapter 的路径与载荷", () => {
     ]);
   });
 
+  it("testKeys 单把/批量/全部各自带对 body（行内与批量共用一个入口）", async () => {
+    const { calls, request } = capture({ upstream_id: "up_01", api_style: "openai_chat", items: [] });
+    const ops = createHttpUpstreams(request);
+    await ops.testKeys("up_01", { key_id: "uk_02" });
+    await ops.testKeys("up_01", { keys: ["uk_01", "uk_03"] });
+    await ops.testKeys("up_01");
+    expect(calls.map((call) => call.body)).toEqual([
+      { key_id: "uk_02" },
+      { keys: ["uk_01", "uk_03"] },
+      undefined,
+    ]);
+    expect(calls.map((call) => call.method + " " + call.path)).toEqual([
+      "POST /admin/upstreams/up_01/keys/test",
+      "POST /admin/upstreams/up_01/keys/test",
+      "POST /admin/upstreams/up_01/keys/test",
+    ]);
+  });
+
   it("改写规则 GET/PUT/preview", async () => {
     const { calls, request } = capture({ upstream_id: "up_01", transforms: {} });
     const ops = createHttpUpstreams(request);

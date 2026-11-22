@@ -139,6 +139,37 @@ describe("源密钥组", () => {
     expect(list.items.find((row) => row.id === created.id)?.last_test?.ok).toBe(true);
   });
 
+  it("testKeys 只测请求指定的行：单把 key_id / 批量 keys 写回对应行", async () => {
+    const ops = memory.createMemoryUpstreams();
+    const first = await ops.createKey("up_03", { label: "一", api_key: "sk-scope-0001" });
+    const second = await ops.createKey("up_03", { label: "二", api_key: "sk-scope-0002" });
+    const third = await ops.createKey("up_03", { label: "三", api_key: "sk-scope-0003" });
+
+    // 行内单把：只落一行，其他行保持未测
+    const single = await ops.testKeys("up_03", { key_id: second.id });
+    expect(single.items.map((item) => item.key_id)).toEqual([second.id]);
+    let rows = (await ops.listKeys("up_03")).items;
+    expect(rows.find((row) => row.id === second.id)?.last_test).not.toBeNull();
+    expect(rows.find((row) => row.id === first.id)?.last_test).toBeNull();
+    expect(rows.find((row) => row.id === third.id)?.last_test).toBeNull();
+
+    // 批量：只测选中 keys，按请求顺序返回
+    const batch = await ops.testKeys("up_03", { keys: [third.id, first.id] });
+    expect(batch.items.map((item) => item.key_id)).toEqual([third.id, first.id]);
+    rows = (await ops.listKeys("up_03")).items;
+    expect(rows.find((row) => row.id === first.id)?.last_test).not.toBeNull();
+    expect(rows.find((row) => row.id === third.id)?.last_test).not.toBeNull();
+
+    // 未知 id 与同时给两种 scope 都是 422 VALIDATION_ERROR（与后端同一契约）
+    await expect(ops.testKeys("up_03", { key_id: "uk_missing" })).rejects.toMatchObject({
+      status: 422,
+      code: "VALIDATION_ERROR",
+    });
+    await expect(
+      ops.testKeys("up_03", { key_id: first.id, keys: [first.id] }),
+    ).rejects.toMatchObject({ status: 422, code: "VALIDATION_ERROR" });
+  });
+
   it("删除不存在的密钥抛 404", async () => {
     const ops = memory.createMemoryUpstreams();
     await expect(ops.removeKey("up_01", "uk_missing")).rejects.toMatchObject({ status: 404, code: "not_found" });

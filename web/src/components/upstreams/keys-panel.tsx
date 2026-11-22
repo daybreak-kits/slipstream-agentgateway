@@ -29,6 +29,15 @@ import {
   STABLE_ACTION_CELL_WRAPPER_CLASS,
 } from "@/lib/table-columns";
 import { formatDateTime, useTimezone } from "@/lib/time";
+import {
+  batchTestLabel,
+  batchTestTarget,
+  isKeyTestTarget,
+  keyTestInput,
+  keyTestNotice,
+  rowTestLabel,
+  type KeyTestTarget,
+} from "./key-test";
 import { parseKeyLines, type PendingKey } from "./shared";
 import type { UpstreamKey } from "@/types";
 
@@ -291,7 +300,7 @@ function PanelHeader({
   onAdd,
   onBatch,
   addDisabled,
-  batchDelete,
+  batchActions,
 }: {
   count: number;
   limit: number;
@@ -299,15 +308,15 @@ function PanelHeader({
   onAdd: () => void;
   onBatch: () => void;
   addDisabled: boolean;
-  /** 已存面板才有：勾选后可批量删除 */
-  batchDelete?: ReactNode;
+  /** 已存面板才有：勾选后出现的批量测试 + 批量删除（同排并列） */
+  batchActions?: ReactNode;
 }) {
   const AddIcon = ACTION_ICONS.add;
   return (
     <div className="flex flex-wrap items-start justify-between gap-2">
       <p className="text-2xs text-faint">{hint}</p>
       <div className="flex items-center gap-2">
-        {batchDelete}
+        {batchActions}
         <span className="text-2xs text-faint tnum">{count} / {limit} 把</span>
         <Button variant="outline" size="sm" disabled={addDisabled} onClick={onBatch}>批量粘贴</Button>
         <Button size="sm" disabled={addDisabled} onClick={onAdd}>
@@ -422,15 +431,16 @@ export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
     },
   });
 
-  /** 逐把测试：一次触发本上游全部密钥行，结果落库并回填每行。 */
+  /** 密钥测试（W8 票04）：行内单把与多选批量共用同一 POST，结果落库并回填对应行。 */
   const testKeys = useMutation({
-    mutationFn: () => controlPlane.upstreams.testKeys(upstreamId),
-    onSuccess: (result) => {
-      const okCount = result.items.filter((item) => item.ok).length;
-      const failCount = result.items.length - okCount;
-      const description = "成功 " + okCount + " 把" + (failCount > 0 ? " · 失效 " + failCount + " 把（已标红）" : "");
-      if (failCount > 0) toast.warning("逐把测试完成", { description });
-      else toast.success("逐把测试完成", { description });
+    mutationFn: (target: KeyTestTarget) =>
+      controlPlane.upstreams.testKeys(upstreamId, keyTestInput(target)),
+    onSuccess: (result, target) => {
+      const notice = keyTestNotice(target, result);
+      if (notice.tone === "warning") toast.warning(notice.title, { description: notice.description });
+      else toast.success(notice.title, { description: notice.description });
+      // 批量完成后收掉选中态：批量按钮只属于「本次多选」。
+      if ("keyIds" in target) setSelected(new Set());
       refresh();
     },
   });
@@ -475,10 +485,29 @@ export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
 
   const selectedCount = selected.size;
   const DeleteIcon = ACTION_ICONS.delete;
-  const batchDeleteButton = selectedCount > 0 ? (
-    <Button variant="danger" size="sm" onClick={() => setBatchDeleteConfirm(true)}>
-      <DeleteIcon className="h-3.5 w-3.5" /> 删除选中 {selectedCount} 把
-    </Button>
+  const TestIcon = ACTION_ICONS.testConnection;
+  // 正在测试的目标：只有它（批量则它的每一行）显示「测试中」，其余按钮禁用但文案不变。
+  const activeTarget = testKeys.isPending ? (testKeys.variables ?? null) : null;
+  const batchTarget = batchTestTarget(selected);
+  const batchTestPending = activeTarget !== null && "keyIds" in activeTarget;
+  const batchActions = batchTarget ? (
+    <>
+      <Button
+        variant="outline"
+        size="sm"
+        // 固定按钮宽度（W8 票04）：文案在「批量测试 N 把 / 测试中」间切换时不挤动并列的批量删除。
+        className="min-w-40"
+        disabled={testKeys.isPending}
+        title={"只测试选中的 " + selectedCount + " 把密钥"}
+        onClick={() => testKeys.mutate(batchTarget)}
+      >
+        <TestIcon className="h-3.5 w-3.5" />
+        {batchTestLabel(batchTestPending, selectedCount)}
+      </Button>
+      <Button variant="danger" size="sm" onClick={() => setBatchDeleteConfirm(true)}>
+        <DeleteIcon className="h-3.5 w-3.5" /> 删除选中 {selectedCount} 把
+      </Button>
+    </>
   ) : null;
 
   return (
@@ -490,7 +519,7 @@ export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
         onAdd={() => setAdding(true)}
         onBatch={() => setBatching(true)}
         addDisabled={keys.length >= limit}
-        batchDelete={batchDeleteButton}
+        batchActions={batchActions}
       />
       {q.isPending ? (
         <Skeleton className="h-24 w-full" />
@@ -514,10 +543,10 @@ export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
                 variant="outline"
                 size="dense"
                 disabled={testKeys.isPending}
-                title="对本上游全部密钥逐把发起最小鉴权请求"
-                onClick={() => testKeys.mutate()}
+                title="只对该密钥发起一次最小鉴权请求"
+                onClick={() => testKeys.mutate({ keyId: row.id })}
               >
-                {testKeys.isPending ? "测试中" : "测试"}
+                {rowTestLabel(testKeys.isPending, isKeyTestTarget(activeTarget, row.id))}
               </Button>
               <Button
                 variant="ghost"
