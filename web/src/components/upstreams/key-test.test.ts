@@ -64,7 +64,7 @@ describe("密钥测试目标（W8 票04）", () => {
     expect(rowTestLabel(true, false)).toBe("测试");
   });
 
-  it("批量按钮显示选中把数，进行中换「测试中」——同一按钮宽度不因文案变化", () => {
+  it("批量按钮显示选中把数，进行中换「测试中」：同一按钮宽度不因文案变化", () => {
     expect(batchTestLabel(false, 3)).toBe("批量测试 3 把");
     expect(batchTestLabel(true, 3)).toBe("测试中");
   });
