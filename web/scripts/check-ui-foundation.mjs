@@ -1773,13 +1773,17 @@ check("模型对话框：底部档位随模型能力收敛（Radix Dialog 走 Po
   );
 });
 
-check("上游模型编辑器：思考档位集合与默认档声明控件就位", () => {
+check("上游模型编辑器：只声明思考档位集合，默认档编辑控件已删除（W8 票06）", () => {
+  // W8 票06：上游模型只声明能力（reasoning_levels）；默认档归公开模型/模型试验，
+  // 抽屉不再出现「默认思考档」选择器（默认档必须属于已声明集合，由能力数据/试验决定）。
   const src = read("src/components/models/upstream-model-drawer.tsx");
   includesAll(
     src,
-    ["REASONING_LEVELS", "reasoning_levels", "default_reasoning_level"],
-    "上游模型编辑器必须能声明档位集合与默认档",
+    ["REASONING_LEVELS", "reasoning_levels", "toggleReasoningLevel"],
+    "上游模型编辑器必须能声明思考档位集合",
   );
+  expect(!src.includes("default_reasoning_level"), "上游模型编辑器不得再直接编辑默认思考档（默认档归公开模型/试验）");
+  expect(!src.includes("默认思考档"), "默认思考档选择器必须删除（W8 票06）");
   expect(src.includes('placeholder="留空 = 不声明"') === false, "推理档位自由文本输入必须移除（改为声明档位集合）");
 });
 
@@ -1965,10 +1969,12 @@ check("公开模型页头保存：保存/状态/未保存数量固定页头、�
   const page = read("src/components/models/public-model-page.tsx");
   includesAll(
     page,
-    ["sticky top-0", 'data-slot="header-save"', "DirtySummary", "DirtyCountBadge", "DirtySaveButton", 'data-slot="readonly-summary"', "<details"],
+    ["sticky top-0", 'data-slot="header-save"', "DirtySummary", "DirtySaveButton", 'data-slot="readonly-summary"', "<details"],
     "页头保存与只读摘要折叠",
   );
   expect(!page.includes("DirtyFooter"), "保存动作条已上移页头，公开模型页不得再渲染底部 DirtyFooter");
+  // W8 票06：页头未保存数量由摘要统一呈现（计数 + 恢复全部）；计数徽章固定槽只用于分组标题。
+  expect(!page.includes("DirtyCountBadge"), "公开模型页头不得重复渲染计数徽章（未保存数量由 DirtySummary 统一呈现）");
   // DirtyField（W7 ticket 12 收口）：去掉左侧 2px 警示线，变脏只换浅黄背景；
   // 标记槽绝对定位不占布局（不插下方行、不加左 padding）。
   const dirty = read("src/components/ui/dirty-field.tsx");
@@ -2363,6 +2369,29 @@ check("接线：两处模型表同一参数列口径，旧的堆叠摘要下线"
   expect(!vocab.includes("export function parameterSummary"), "旧的堆叠摘要函数必须下线（否则两套口径并存）");
   expect(models.includes('label: "参数"'), "模型管理页参数列表头必须是「参数」");
   expect(panel.includes('header: "参数"'), "上游详情模型表参数列表头必须是「参数」");
+});
+
+// ---------- 11b. 公开模型策略列（W8 票06）：只留徽章，长解释进 hover ----------
+// spec User Story 25 + Implementation Decisions「模型」：策略列只留 Badge；长解释收进统一
+// HoverInfo（hover/键盘/触屏三路可读），表格行高不再被说明文字撑高。
+check("公开模型策略列：只留 Badge，长解释进 HoverInfo（表格行高稳定）", () => {
+  const models = read("src/pages/models.tsx");
+  expect(
+    models.includes('from "@/components/ui/hover-info"'),
+    "策略列的长解释必须复用统一 HoverInfo 原语（不得用原生 title 或新造浮层）",
+  );
+  const start = models.indexOf('key: "routing"');
+  const end = models.indexOf('key: "members"');
+  expect(start >= 0 && end > start, "公开模型列必须保留策略列（key: routing）");
+  const routingCell = models.slice(start, end);
+  includesAll(
+    routingCell,
+    ["HoverInfo", "Badge", "ROUTING_LABELS[row.routing_mode]"],
+    "策略列只渲染 Badge，解释文字放在 HoverInfo 内容里",
+  );
+  expect(routingCell.includes(".desc"), "策略说明必须复用 ROUTING_LABELS 的 desc（单一文案来源）");
+  expect(!routingCell.includes("text-faint"), "策略列不得再把长解释渲染成第二行（行高必须保持稳定）");
+  expect(!routingCell.includes("mt-1"), "策略列不得用第二行说明（mt-1 会撑高表格行）");
 });
 
 // ---------- run ----------

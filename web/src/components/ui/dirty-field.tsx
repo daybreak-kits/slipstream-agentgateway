@@ -72,17 +72,33 @@ export function DirtyField({
 }
 
 export interface DirtyCountBadgeProps extends HTMLAttributes<HTMLSpanElement> {
-  /** 未保存变更数；<=0 时不渲染。 */
+  /** 未保存变更数；<=0 时槽位保留、徽章不出现。 */
   count: number;
 }
 
-/** 区块标题上的未保存数量（如权限组「3 项未保存」）。 */
+/**
+ * 区块标题上的未保存数量（如权限组「3 项未保存」）。
+ *
+ * W8 票06：改成固定槽——徽章出现/消失不再改变标题行宽度与高度（不被 flex 换行推挤）。
+ * 槽位宽度按最长计数「NN 项未保存」预留并 shrink-0，空态只占位不渲染文案；
+ * 有计数时才渲染 Badge（aria-hidden 只在空槽上设置，读屏不会漏掉真实计数）。
+ */
 export function DirtyCountBadge({ count, className, ...rest }: DirtyCountBadgeProps) {
-  if (count <= 0) return null;
+  const active = count > 0;
   return (
-    <Badge tone="warning" data-slot="dirty-count" className={cn("tnum", className)} {...rest}>
-      {count} 项未保存
-    </Badge>
+    <span
+      data-slot="dirty-count-slot"
+      data-count={active ? count : 0}
+      aria-hidden={active ? undefined : true}
+      className={cn("inline-flex h-[22px] w-24 shrink-0 items-center justify-end", className)}
+      {...rest}
+    >
+      {active ? (
+        <Badge tone="warning" data-slot="dirty-count" className="tnum">
+          {count} 项未保存
+        </Badge>
+      ) : null}
+    </span>
   );
 }
 

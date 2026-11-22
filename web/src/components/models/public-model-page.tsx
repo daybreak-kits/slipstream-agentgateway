@@ -18,7 +18,7 @@ import {
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { DirtyCountBadge, DirtyField, DirtySaveButton, DirtySummary } from "@/components/ui/dirty-field";
+import { DirtyField, DirtySaveButton, DirtySummary } from "@/components/ui/dirty-field";
 import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { formatDateTime, useTimezone } from "@/lib/time";
@@ -123,7 +123,8 @@ export function PublicModelPageView({
             <div className="flex flex-wrap items-center gap-2" data-slot="header-save">
               <Badge tone="primary">{routing.label}</Badge>
               <Badge tone={statusTone}>{statusText}</Badge>
-              <DirtyCountBadge count={dirty.dirtyCount} />
+              {/* W8 票06：未保存数量由摘要统一呈现（计数 + 恢复全部）；不再重复渲染计数徽章，
+                  避免页头 actions 多一枚宽度随脏态变化的徽章。计数徽章固定槽只用于分组标题。 */}
               <DirtySummary count={dirty.dirtyCount} onResetAll={onResetAll} saving={saving} />
               {blockedReasons.length > 0 ? (
                 <span className="text-2xs text-danger-text" data-slot="save-blocked" title={blockedReasons.join("；")}>
