@@ -18,6 +18,7 @@ from l04_repo.repository import UPSTREAM_REPO
 from l05_service import crud, upstream_ops
 from l06_api.deps import get_adapter, page_params, require, session_of
 from l06_api.schemas import (
+    TransformSampleIn,
     UpstreamBatch,
     UpstreamCreate,
     UpstreamImportModels,
@@ -418,3 +419,22 @@ def preview_transforms(
         "skipped": list(preview.skipped),
         "notes": list(preview.notes),
     }
+
+
+@router.post(
+    "/{upstream_id}/transforms/sample",
+    dependencies=[Depends(require("transforms:read"))],
+)
+def sample_transforms(upstream_id: str, payload: TransformSampleIn) -> dict:
+    """Replay the posted rules against pasted request/response samples (ticket 05).
+
+    Non-destructive by construction: the rules go through the storage codec, the
+    IR is applied in memory, and the endpoint neither writes the store nor calls
+    an adapter/upstream. Response: before/after snapshots plus a field-level diff.
+    """
+    result = upstream_ops.sample_transforms(
+        payload.transforms,
+        request=payload.request.model_dump(),
+        response=payload.response.model_dump(),
+    )
+    return {"upstream_id": upstream_id, **result}

@@ -26,6 +26,8 @@ from l01_core.errors import AppError, ErrorCode
 from l01_core.ids import new_id
 from l01_core.timeutil import now_ms
 from l02_domain.models import ApiStyle, ModelType
+from l02_domain.transforms_codec import parse_transforms
+from l02_domain.transforms_sample import apply_sample_transforms
 from l04_repo.orm import (
     AuditLogORM,
     ModelTargetORM,
@@ -1264,3 +1266,16 @@ def batch_upstreams(
         changed.append(upstream_id)
     session.flush()
     return {"changed": changed, "missing": missing, "failed": failed, "action": action}
+
+
+def sample_transforms(
+    rules: dict, *, request: dict | None = None, response: dict | None = None
+) -> dict:
+    """Replay a rewrite-rule document against pasted request/response samples.
+
+    Preview only: the rule document goes through the same codec as save/compile
+    (parse_transforms), then the IR is applied in memory. No session, no adapter,
+    no network, no persistence - the caller's upstream row is never touched.
+    """
+    spec = parse_transforms(rules)
+    return apply_sample_transforms(spec, request=request, response=response)

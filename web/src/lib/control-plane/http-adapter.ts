@@ -266,6 +266,8 @@ export function createHttpUpstreams(request: HttpRequester): UpstreamsOperations
     getTransforms: (id) => request({ method: "GET", path: one(id) + "/transforms" }),
     saveTransforms: (id, value) => request({ method: "PUT", path: one(id) + "/transforms", body: value }),
     previewTransforms: (id, value) => request({ method: "POST", path: one(id) + "/transforms/preview", body: value }),
+    sampleTransforms: (id, input) =>
+      request({ method: "POST", path: one(id) + "/transforms/sample", body: input }),
   };
 }
 

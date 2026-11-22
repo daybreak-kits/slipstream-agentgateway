@@ -45,6 +45,8 @@ src/
 ├─ lib/
 │  ├─ control-plane/         类型化控制面操作层（组合根 index、operations/ 按域、
 │  │                          http-adapter、memory-adapter、errors、内存 fixtures）
+│  ├─ transforms/            改写规则的纯逻辑：wire 文档/中文词表/JSON 校验（document）
+│  │                         与样例粘贴解析（sample），可视化与 JSON 视图共用同一份文档
 │  ├─ theme.ts               深浅色（localStorage + .dark class，index.html 反闪烁）
 │  ├─ format.ts              数字 / 金额 / 百分比 / 时间格式化
 │  └─ utils.ts               cn()（clsx + tailwind-merge）
@@ -54,7 +56,8 @@ src/
 │  ├─ data-table.tsx         TanStack Table 封装：排序 / 筛选 / 分页(25/50/100/200) / 空态 / 骨架
 │  ├─ stat-card.tsx          指标卡
 │  ├─ transforms/transforms-editor.tsx
-│  │                          改写规则编辑器（四段分区 / 条件行 / 保护头拦截 / 分段预览 / custom_cel）
+│  │                          改写规则编辑器（四段分区 / 中文动作标签 / 条件行逐条校验 / 保护头拦截 /
+│  │                          可视化↔JSON 共用文档 / 全局编译预览 / 样例回放 before/after diff）
 │  └─ ui/                    button / card / badge / input / table / skeleton / empty / tabs
 └─ pages/                    17 个列表页壳（含成本 / 营收 / 上游价目 / 下游价目 / 待补价）+ upstream_detail（基本信息 | 改写 双 tab），每页都经 TanStack Query 调 control-plane 的类型化操作（内存或 HTTP 适配器由组合根选择）
 ```

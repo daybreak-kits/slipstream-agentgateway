@@ -389,6 +389,7 @@ AG 1.7 拒绝（`mcp.transport.http=false`），保存即 422。渲染到顶层 
 | GET | /admin/upstreams/{id}/transforms | transforms:read | 返回 `{upstream_id, transforms}`，transforms 为 4 段规则或 `null` |
 | PUT | /admin/upstreams/{id}/transforms | transforms:write | 整体替换 4 段规则 |
 | POST | /admin/upstreams/{id}/transforms/preview | transforms:read | body 为 4 段完整规则（本段用草稿覆盖）→ `{upstream_id, before, after, skipped, notes}`；不落库 |
+| POST | /admin/upstreams/{id}/transforms/sample | transforms:read | **样例回放**：body `{transforms, request:{headers, body}, response:{headers, body}}`（`extra=forbid`，body 任意 JSON）→ `{upstream_id, before, after, diff}`；`diff` 为 `{segment, kind, path, op, before, after}` 字段级差异。用同一 codec 在内存中应用当前草稿规则，不访问上游、不落库、不写审计 |
 
 权限对照（易写错，ticket 17 核对）：`test-connection`、`keys/test`、`discover-models`、`import-models`、上游 `batch` 都是 `upstreams:write`；逐模型 `models/probe` 是 `upstream_models:write`（权限注册表注释里的 `model_write` 即该键，ticket 05）；`transforms` 为 `transforms:read` / `transforms:write`；上游密钥 CRUD 为 `upstreams:write`。
 
