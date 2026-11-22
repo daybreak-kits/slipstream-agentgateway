@@ -93,6 +93,14 @@ export function timeWindowUsable(window: TimeWindow): boolean {
   return window.toMs > window.fromMs && customWindowSpanError(window.fromMs, window.toMs) === null;
 }
 
+/** 两个时间窗是否同值：dirty 判定的唯一口径（不得用数组/对象引用比较）。 */
+export function timeWindowEquals(a: TimeWindow, b: TimeWindow): boolean {
+  if (a.kind === "range" || b.kind === "range") {
+    return a.kind === "range" && b.kind === "range" && a.value === b.value;
+  }
+  return a.fromMs === b.fromMs && a.toMs === b.toMs;
+}
+
 /** 进 react-query queryKey 的稳定片段：预设与毫秒窗互不混淆。 */
 export function timeWindowKey(window: TimeWindow): Array<string | number> {
   return window.kind === "range"
@@ -107,12 +115,12 @@ function pad2(value: number): string {
 function stamp(ms: number): string {
   const at = new Date(ms);
   return (
-    `${pad2(at.getMonth() + 1)}/${pad2(at.getDate())} ` +
-    `${pad2(at.getHours())}:${pad2(at.getMinutes())}`
+    `${at.getFullYear()}/${pad2(at.getMonth() + 1)}/${pad2(at.getDate())} ` +
+    `${pad2(at.getHours())}:${pad2(at.getMinutes())}:${pad2(at.getSeconds())}`
   );
 }
 
-/** 触发按钮/副标题用的区间文本：预设名或毫秒窗起止。 */
+/** 触发按钮/副标题用的区间文本：预设名，或完整到「年 + 秒」的毫秒窗起止（W8 票 02）。 */
 export function timeWindowLabel(window: TimeWindow): string {
   if (window.kind === "range") return TIME_WINDOW_LABEL[window.value];
   return `${stamp(window.fromMs)} 至 ${stamp(window.toMs)}`;
