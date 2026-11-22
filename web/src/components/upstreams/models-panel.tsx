@@ -15,11 +15,13 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusIcon } from "@/components/ui/status-icon";
+import { ResultCell } from "@/components/ui/table";
 import { controlPlane } from "@/lib/control-plane";
 import { fmtMarkup, fmtPricePerM } from "@/lib/format";
 import { ACTION_ICONS } from "@/lib/icons";
 import { usePermissions } from "@/lib/permissions";
 import { SELECT_NONE_VALUE } from "@/lib/select-sentinels";
+import { actionColumnWidth } from "@/lib/table-columns";
 import { probeSummary, type ModelProbeController } from "./model-probe";
 import { ModelProbeBadge, ModelProbeProgress } from "./model-probe-view";
 import { type UpstreamRow } from "./shared";
@@ -98,17 +100,21 @@ export function UpstreamModelsPanel({
     {
       accessorKey: "model_type",
       header: "类型",
+      // W8 t03：table-fixed 下由列定义写死宽度，内容（型号长短）不再改变列宽。
+      meta: { width: "8rem" },
       cell: (c) => <Badge tone="info">{c.row.original.model_type}</Badge>,
     },
     {
       id: "params",
       header: "参数",
+      meta: { width: "12rem" },
       // W7 t09：与模型管理页同一口径——列里只留输入/输出上限，其余进悬浮详情。
       cell: (c) => <ModelParamsCell row={c.row.original} />,
     },
     {
       id: "price",
       header: "进价（入 · 出 · 倍率）",
+      meta: { width: "10rem" },
       cell: (c) => (
         <span className="tnum text-2sm text-body">
           {fmtPricePerM(c.row.original.cost_input_per_1m)} · {fmtPricePerM(c.row.original.cost_output_per_1m)} · {fmtMarkup(c.row.original.markup)}
@@ -118,20 +124,25 @@ export function UpstreamModelsPanel({
     {
       id: "probe",
       header: "测试结果",
+      meta: { width: "11rem" },
+      // W8 t03：三态共用固定两行槽位（运行中/无结果/有结果），结果出现时行高与列宽不变。
       cell: (c) => {
         const row = c.row.original;
         if (probe.session.running && probe.session.currentModelId === row.id) {
-          return <Badge tone="info">测试中…</Badge>;
+          return (
+            <ResultCell primary={<Badge tone="info">测试中…</Badge>} />
+          );
         }
         const item = probe.session.results[row.id];
-        if (!item) return <span className="text-faint">-</span>;
+        if (!item) return <ResultCell primary={<span className="text-faint">-</span>} />;
         return <ModelProbeBadge item={item} />;
       },
     },
     {
       id: "actions",
       header: "操作",
-      meta: { sticky: "right" },
+      // 最多 5 个 dense 操作按钮（测试/编辑/关闭|启用/解除/删除），列宽按按钮数固定。
+      meta: { sticky: "right", width: actionColumnWidth(5) },
       cell: (c) => {
         const row = c.row.original;
         if (!canWrite) return null;
@@ -254,6 +265,7 @@ export function UpstreamModelsPanel({
       </div>
 
       <DataTable
+        layout="fixed"
         columns={columns}
         data={rows}
         loading={q.isPending}

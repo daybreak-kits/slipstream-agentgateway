@@ -21,8 +21,10 @@ import {
   ACTION_CELL_WRAPPER_CLASS,
   rowToneClass,
   rowToneTrStyle,
+  STABLE_ACTION_CELL_WRAPPER_CLASS,
   tableColumnCellClass,
   tableColumnHeaderClass,
+  tableColumnWidthStyle,
   type TableColumnLayoutMeta,
   type TableRowTone,
 } from "@/lib/table-columns";
@@ -163,13 +165,18 @@ interface DataTableProps<T> {
   /** W6 ticket 10（user story 41/43）：行状态底色（neutral=关闭微灰 / warning=冷却微黄），
    * 冻结列经 --row-bg 同步着色。 */
   rowTone?: (row: T) => TableRowTone | undefined;
+  /** W8 t03：固定列宽布局（table-fixed）。列定义用 meta.width 声明宽度，操作列按钮固定最小宽度，
+   * 单元格内容/状态变化不再改变列宽；不传保持原 auto 布局（页面行为不变）。 */
+  layout?: "auto" | "fixed";
 }
 
 /** 全站统一的表格封装：排序 / 全局筛选 / 分页 / 空态 / 加载骨架。 */
 export function DataTable<T>({
   columns, data, loading = false, error, onRetry, emptyText = "暂无数据", emptyDescription, emptyAction,
   filterPlaceholder, onRowClick, pageSize = 50, paging, storageKey, columnLabels, closedLast, rowTone,
+  layout = "auto",
 }: DataTableProps<T>) {
+  const fixedLayout = layout === "fixed";
   const [sorting, setSorting] = useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = useState("");
   const [hiddenCols, setHiddenCols] = useState<string[]>(() => readHiddenCols(storageKey));
@@ -312,7 +319,7 @@ export function DataTable<T>({
       {/* 表体内部滚动（DESIGN-AUDIT 四期 §3/§9）：滚动区高度自适应视口（起步公式 17rem），
           不设最小高度——数据少时表格随内容收缩，不整块留白；表头在该容器内吸顶。 */}
       <TableWrap className="table-responsive overflow-y-auto rounded-lg border border-border bg-surface">
-        <Table>
+        <Table fixed={fixedLayout}>
           <THead>
             {table.getHeaderGroups().map((hg) => (
               <tr key={hg.id}>
@@ -325,6 +332,7 @@ export function DataTable<T>({
                       key={header.id}
                       onClick={canSort ? header.column.getToggleSortingHandler() : undefined}
                       aria-sort={dir === "asc" ? "ascending" : dir === "desc" ? "descending" : undefined}
+                      style={tableColumnWidthStyle(meta)}
                       className={cn(
                         "sticky top-0 z-[var(--z-sticky)] bg-surface-2",
                         canSort && "cursor-pointer hover:text-body",
@@ -392,9 +400,12 @@ export function DataTable<T>({
                         key={cell.id}
                         className={tableColumnCellClass(cellMeta)}
                       >
-                        {/* W6 ticket 10：操作列（sticky 尾列）内容统一 flex justify-end 贴右边缘。 */}
+                        {/* W6 ticket 10：操作列（sticky 尾列）内容统一 flex justify-end 贴右边缘。
+                            W8 t03：固定布局下按钮再固定最小宽度，文案在「测试 / 测试中」间切换不改变列宽。 */}
                         {cellMeta?.sticky === "right" ? (
-                          <div className={ACTION_CELL_WRAPPER_CLASS}>{content}</div>
+                          <div className={fixedLayout ? STABLE_ACTION_CELL_WRAPPER_CLASS : ACTION_CELL_WRAPPER_CLASS}>
+                            {content}
+                          </div>
                         ) : (
                           content
                         )}

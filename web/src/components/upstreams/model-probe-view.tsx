@@ -3,27 +3,30 @@
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ResultCell } from "@/components/ui/table";
 import { ACTION_ICONS } from "@/lib/icons";
 import { probeResultView, probeSummary, type ModelProbeItem, type ModelProbeSession } from "./model-probe";
 
-/** 会话内单项结果：成功绿/失败红/超时琥珀 + 延迟 + 脱敏错误行。 */
+/** 会话内单项结果：成功绿/失败红/超时琥珀 + 延迟 + 脱敏错误行。
+ * W8 t03：结果走共享 ResultCell 固定两行槽位——失败行的错误详情落在第二行，
+ * 结果出现/消失（未测试 → 有结果）时行高不跳；data-probe-tone 供探测量产断言。 */
 export function ModelProbeBadge({ item }: { item: ModelProbeItem }) {
   const view = probeResultView(item);
   const detailTone =
     view.tone === "danger" ? "text-danger-text" : view.tone === "warning" ? "text-warning-text" : "text-faint";
   return (
-    <div className="flex min-w-0 flex-col gap-0.5" data-probe-tone={view.tone}>
-      <span className="flex flex-wrap items-center gap-1.5">
-        <Badge tone={view.tone}>{view.label}</Badge>
-        {view.latencyText !== "" ? <span className="tnum text-2xs text-body">{view.latencyText}</span> : null}
-        {item.status > 0 ? <span className="tnum text-2xs text-faint">HTTP {item.status}</span> : null}
-      </span>
-      {view.detail !== "" ? (
-        <span className={"max-w-56 truncate text-2xs " + detailTone} title={view.detail}>
-          {view.detail}
-        </span>
-      ) : null}
-    </div>
+    <ResultCell
+      data-probe-tone={view.tone}
+      primary={
+        <>
+          <Badge tone={view.tone}>{view.label}</Badge>
+          {view.latencyText !== "" ? <span className="tnum text-2xs text-body">{view.latencyText}</span> : null}
+          {item.status > 0 ? <span className="tnum text-2xs text-faint">HTTP {item.status}</span> : null}
+        </>
+      }
+      secondary={view.detail !== "" ? view.detail : undefined}
+      secondaryClassName={view.detail !== "" ? "max-w-56 " + detailTone : undefined}
+    />
   );
 }
 

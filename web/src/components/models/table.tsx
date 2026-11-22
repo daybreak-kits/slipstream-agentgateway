@@ -15,8 +15,10 @@ import {
   ACTION_CELL_WRAPPER_CLASS,
   rowToneClass,
   rowToneTrStyle,
+  STABLE_ACTION_CELL_WRAPPER_CLASS,
   tableColumnCellClass,
   tableColumnHeaderClass,
+  tableColumnWidthStyle,
   type TableColumnLayoutMeta,
   type TableRowTone,
 } from "@/lib/table-columns";
@@ -70,6 +72,9 @@ interface ModelsTableProps<T> {
   /** W6 ticket 10（user story 41/43）：行状态底色（neutral=关闭微灰 / warning=冷却微黄），
    * 冻结列经 --row-bg 同步着色。冷却行只变色不置尾。 */
   rowTone?: (row: T) => TableRowTone | undefined;
+  /** W8 t03：固定列宽布局（table-fixed）。列定义用 width 声明宽度，操作列按钮固定最小宽度；
+   * 不传保持原 auto 布局（页面行为不变）。 */
+  layout?: "auto" | "fixed";
 }
 
 type ColsMap = Record<string, string[]>;
@@ -107,8 +112,9 @@ export function ModelsTable<T>({
   columns, rows, totalCount, loading = false, error, onRetry,
   storageKey, tabKey, searchText, onSearchChange, searchPlaceholder,
   typeFilter, toolbarEnd, emptyText, emptyAction, onClearFilters, onRowClick,
-  closedLast, rowTone,
+  closedLast, rowTone, layout = "auto",
 }: ModelsTableProps<T>) {
+  const fixedLayout = layout === "fixed";
   const [hiddenCols, setHiddenCols] = useState<string[]>(() => readHiddenCols(storageKey, tabKey));
   const [pageIndex, setPageIndex] = useState(1);
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_OPTIONS[0] ?? 50);
@@ -196,12 +202,13 @@ export function ModelsTable<T>({
       </div>
       {/* 表体内部滚动（DESIGN-AUDIT 四期 §3/§9）：高度公式与 DataTable 一致（17rem 起步，不设最小高度）。 */}
       <TableWrap className="table-responsive overflow-y-auto rounded-lg border border-border bg-surface">
-        <Table>
+        <Table fixed={fixedLayout}>
           <THead>
             <tr>
               {visibleColumns.map((col) => (
                 <TH
                   key={col.key}
+                  style={tableColumnWidthStyle(col)}
                   className={cn(
                     "sticky top-0 z-[var(--z-sticky)] bg-surface-2 h-8",
                     tableColumnHeaderClass(col),
@@ -272,7 +279,9 @@ export function ModelsTable<T>({
                     <TD key={col.key} className={cn("h-8 py-0.5", tableColumnCellClass(col))}>
                       {/* W6 ticket 10：操作列（sticky 尾列）内容统一 flex justify-end 贴右边缘。 */}
                       {col.sticky === "right" ? (
-                        <div className={ACTION_CELL_WRAPPER_CLASS}>{col.cell(row)}</div>
+                        <div className={fixedLayout ? STABLE_ACTION_CELL_WRAPPER_CLASS : ACTION_CELL_WRAPPER_CLASS}>
+                          {col.cell(row)}
+                        </div>
                       ) : (
                         col.cell(row)
                       )}

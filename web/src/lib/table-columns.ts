@@ -18,8 +18,11 @@ export interface TableColumnLayoutMeta {
   sticky?: TableColumnSticky;
   /** 追加到 th 与 td 的类（对齐/字号等逃生通道；常规对齐优先用 align）。 */
   className?: string;
-  /** 仅追加到 th 的覆盖通道（列宽、多行表头等）。 */
+  /** 仅追加到 th 的覆盖通道（多行表头等）。 */
   headerClassName?: string;
+  /** 固定布局列宽（CSS 长度，如 "10rem"、"18.25%"）：table-fixed 下由 `tableColumnWidthStyle`
+   * 写进表头内联样式，列宽只由列定义决定、不随单元格内容或状态变化（W8 t03）。 */
+  width?: string;
 }
 
 const ALIGN_CLASS: Record<TableColumnAlign, string> = {
@@ -48,6 +51,52 @@ export const FROZEN_COLUMN_HEADER_CLASS =
  * 只对 td 内容生效（th 由 align 控制文本对齐）。
  */
 export const ACTION_CELL_WRAPPER_CLASS = "flex justify-end";
+
+/**
+ * 固定布局表格（W8 t03）：table-layout: fixed —— 列宽只由列定义 width 决定，
+ * 单元格内容（测试结果出现、按钮文案变化）不再反过来改变列宽。
+ */
+export const TABLE_FIXED_LAYOUT_CLASS = "table-fixed";
+
+/**
+ * 固定布局表格的操作列内容包装（W8 t03）：在右贴边的基础上，把行内按钮的最小宽度固定为
+ * 3.5rem——文案在「测试 / 测试中」、空态与结果态之间切换时按钮不塌缩，操作列不抖动。
+ * 仅在 `layout="fixed"` 的表格（及密钥表）使用；普通表格继续用 ACTION_CELL_WRAPPER_CLASS。
+ */
+export const STABLE_ACTION_CELL_WRAPPER_CLASS =
+  ACTION_CELL_WRAPPER_CLASS + " [&_button]:min-w-14";
+
+/**
+ * 结果列固定两行槽位（W8 t03）：第一行 22px（结果徽章/摘要）、第二行 18px（时间/补充），
+ * 空槽也占位——测试结果出现/消失时行高不变。
+ */
+export const RESULT_CELL_SLOT_CLASS = "grid grid-rows-[1.375rem_1.125rem] gap-0.5";
+/** 结果列槽位第一行（徽章/摘要）。 */
+export const RESULT_CELL_PRIMARY_CLASS = "flex min-w-0 items-center gap-1.5 overflow-hidden";
+/** 结果列槽位第二行（时间/补充信息），空串也保留占位行。 */
+export const RESULT_CELL_SECONDARY_CLASS = "block truncate text-2xs";
+/** 结果列槽位固定行数：DOM 断言与 SSR 检查用它证明「两行槽位」不随状态变化。 */
+export const RESULT_CELL_LINE_COUNT = 2;
+
+/**
+ * 列宽 → 表头/单元格内联样式（table-fixed 取首行表头宽度）。未声明 width 时不出样式，
+ * 由固定布局把剩余宽度留给唯一未声明宽度的弹性列。
+ */
+export function tableColumnWidthStyle(meta?: TableColumnLayoutMeta): CSSProperties | undefined {
+  return meta?.width ? { width: meta.width } : undefined;
+}
+
+/**
+ * 操作列固定宽度（W8 t03）：按行内按钮数量换算，保证结果/按钮文案变化时操作列宽度恒定。
+ * - 带图标 dense ActionButton 自然宽 4rem（图标 14 + 间距 8 + 2 汉字 26 + 左右 padding 16）；
+ * - 纯文字 dense 按钮传 buttonWidthRem=3.5（密钥表）；
+ * - 间距 0.25rem（gap-1）、单元格左右 padding 1.5rem（px-3 + 冻结列 pr-2 的余量）。
+ */
+export function actionColumnWidth(buttonCount: number, buttonWidthRem = 4): string {
+  const count = Math.max(1, Math.trunc(buttonCount));
+  const width = count * buttonWidthRem + (count - 1) * 0.25 + 1.5;
+  return String(Math.round(width * 100) / 100).replace(/\.0+$/, "") + "rem";
+}
 
 /** 列的对齐类：th 与 td 共用，保证头身同侧。 */
 export function tableColumnAlignClass(align?: TableColumnAlign): string | undefined {

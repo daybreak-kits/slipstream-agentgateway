@@ -669,6 +669,227 @@ check("ModelsTable：操作列同样右对齐贴边（justify-end + pr-2 + 默�
   );
 });
 
+// ---------- 4.6 表格固定布局与稳定槽位（W8 t03） ----------
+/** 表头内联宽度：用于证明表格在不同状态下列宽完全一致。 */
+const headerWidths = (html) =>
+  [...html.matchAll(/<th[^>]*style="width:([^"]+)"/g)].map((match) => match[1]);
+/** 结果列固定两行槽位的 class（同一表格两个状态必须完全一致）。 */
+const resultSlotClass = (html) =>
+  (html.match(/data-slot="result-cell"[^>]*class="([^"]+)"/) ?? [])[1] ?? "";
+/** 取最后一个表头（操作列）的 attrs / 内容。 */
+const lastHeader = (html) => {
+  const headers = [...html.matchAll(/<th([^>]*)>([\s\S]*?)<\/th>/g)].map((match) => ({
+    attrs: match[1],
+    body: match[2],
+  }));
+  return headers[headers.length - 1] ?? { attrs: "", body: "" };
+};
+
+check("W8 t03：DataTable 固定布局——结果出现/按钮文案变化时列宽、结果槽位、操作列不变", async () => {
+  const { DataTable } = await load("/src/components/data-table.tsx");
+  const { ResultCell } = await load("/src/components/ui/table.tsx");
+  const { actionColumnWidth } = await load("/src/lib/table-columns.ts");
+  const renderState = (hasResult, pending) =>
+    render(
+      createElement(DataTable, {
+        layout: "fixed",
+        data: [{ name: "alpha" }],
+        emptyText: "暂无数据",
+        columns: [
+          { accessorKey: "name", header: "名称" },
+          {
+            id: "probe",
+            header: "最近探测",
+            enableSorting: false,
+            meta: { width: "10rem" },
+            cell: () =>
+              createElement(ResultCell, {
+                primary: hasResult
+                  ? createElement("span", null, "连通")
+                  : createElement("span", { className: "text-faint" }, "-"),
+                secondary: hasResult ? "2026-11-22 20:00:00" : undefined,
+              }),
+          },
+          {
+            id: "actions",
+            header: "操作",
+            enableSorting: false,
+            meta: { sticky: "right", hideable: false, width: actionColumnWidth(2) },
+            cell: () =>
+              createElement(
+                "button",
+                { type: "button", className: "h-7 rounded-control border px-2" },
+                pending ? "测试中" : "测试",
+              ),
+          },
+        ],
+      }),
+    );
+  const idle = renderState(false, false);
+  const busy = renderState(true, true);
+  expect(/<table[^>]*class="[^"]*table-fixed/.test(idle), "layout=fixed 的 DataTable 必须渲染 table-fixed 固定布局");
+  expect(
+    /<table[^>]*class="[^"]*table-fixed/.test(
+      render(createElement(DataTable, { columns: [{ accessorKey: "name", header: "名称" }], data: [{ name: "a" }], emptyText: "暂无" })),
+    ) === false,
+    "未声明 layout=fixed 的 DataTable 必须保持原布局（不改变其它页面）",
+  );
+  const idleWidths = headerWidths(idle);
+  const busyWidths = headerWidths(busy);
+  expect(idleWidths.length === 2, "声明的两列必须把宽度写进表头样式，实际 " + JSON.stringify(idleWidths));
+  expect(
+    idleWidths.join("|") === busyWidths.join("|"),
+    "结果出现/按钮文案变化不得改变列宽：" + idleWidths.join("|") + " vs " + busyWidths.join("|"),
+  );
+  const idleSlot = resultSlotClass(idle);
+  expect(idleSlot.includes("grid-rows-[1.375rem_1.125rem]"), "结果列必须是固定两行槽位，实际 " + idleSlot);
+  expect(idleSlot === resultSlotClass(busy), "结果出现前后槽位 class 必须一致");
+  expect(
+    (idle.match(/data-slot="result-cell"/g) ?? []).length === 1 && idle.includes("block truncate text-2xs"),
+    "没有结果时也必须渲染第二行占位，行高不塌缩",
+  );
+  const actionTh = lastHeader(idle);
+  expect(actionTh.body.includes("操作"), "操作列必须是最后一列");
+  expect(actionTh.attrs.includes("sticky right-0"), "操作列必须 sticky right-0（尾部冻结）");
+  expect(
+    actionTh.attrs.includes('style="width:' + actionColumnWidth(2) + '"'),
+    "操作列必须有固定宽度，实际 " + actionTh.attrs,
+  );
+  expect(idle.includes("min-w-14"), "固定布局操作列的按钮必须有固定最小宽度（按钮文案变化不抖）");
+  expect(busy.includes("min-w-14"), "结果出现后操作列按钮最小宽度不得丢失");
+});
+
+check("W8 t03：ModelsTable 固定布局——列宽与操作列在两个状态下完全一致", async () => {
+  const { ModelsTable } = await load("/src/components/models/table.tsx");
+  const { ResultCell } = await load("/src/components/ui/table.tsx");
+  const { actionColumnWidth } = await load("/src/lib/table-columns.ts");
+  const renderState = (hasResult, pending) =>
+    render(
+      createElement(ModelsTable, {
+        layout: "fixed",
+        rows: [{ id: "a" }],
+        totalCount: 1,
+        storageKey: "slipstream.test",
+        tabKey: "t",
+        searchText: "",
+        onSearchChange: () => {},
+        searchPlaceholder: "搜索",
+        emptyText: "暂无数据",
+        onClearFilters: () => {},
+        columns: [
+          { key: "name", label: "名称", cell: () => "alpha" },
+          {
+            key: "probe",
+            label: "测试结果",
+            width: "10rem",
+            cell: () =>
+              createElement(ResultCell, {
+                primary: hasResult
+                  ? createElement("span", null, "连通")
+                  : createElement("span", { className: "text-faint" }, "-"),
+                secondary: hasResult ? "2026-11-22 20:00:00" : undefined,
+              }),
+          },
+          {
+            key: "actions",
+            label: "操作",
+            hideable: false,
+            sticky: "right",
+            width: actionColumnWidth(2),
+            cell: () =>
+              createElement("button", { type: "button", className: "h-7 rounded-md border px-2" }, pending ? "测试中" : "测试"),
+          },
+        ],
+      }),
+    );
+  const idle = renderState(false, false);
+  const busy = renderState(true, true);
+  expect(/<table[^>]*class="[^"]*table-fixed/.test(idle), "layout=fixed 的 ModelsTable 必须渲染 table-fixed 固定布局");
+  const idleWidths = headerWidths(idle);
+  const busyWidths = headerWidths(busy);
+  expect(idleWidths.length === 2, "声明的两列必须把宽度写进表头样式，实际 " + JSON.stringify(idleWidths));
+  expect(
+    idleWidths.join("|") === busyWidths.join("|"),
+    "结果出现/按钮文案变化不得改变列宽：" + idleWidths.join("|") + " vs " + busyWidths.join("|"),
+  );
+  const idleSlot = resultSlotClass(idle);
+  expect(idleSlot.includes("grid-rows-[1.375rem_1.125rem]"), "结果列必须是固定两行槽位，实际 " + idleSlot);
+  expect(idleSlot === resultSlotClass(busy), "结果出现前后槽位 class 必须一致");
+  const actionTh = lastHeader(idle);
+  expect(actionTh.body.includes("操作"), "操作列必须是最后一列");
+  expect(actionTh.attrs.includes("sticky right-0"), "操作列必须 sticky right-0");
+  expect(idle.includes("min-w-14"), "固定布局操作列的按钮必须有固定最小宽度");
+});
+
+check("W8 t03：密钥表固定布局——未测试/有结果行高一致，操作列固定且按钮不塌缩", async () => {
+  const { KeysTable } = await load("/src/components/upstreams/keys-panel.tsx");
+  const { actionColumnWidth } = await load("/src/lib/table-columns.ts");
+  const nowMs = Date.parse("2026-11-22T12:00:00");
+  const rowsFor = (lastTest) => [
+    {
+      id: "k1",
+      seq: 1,
+      label: "主账号",
+      masked: "…abcd",
+      createdText: "2026-11-01 09:00:00",
+      lastTest,
+      lastTestAtMs: lastTest ? nowMs : 0,
+      pending: false,
+    },
+  ];
+  const renderKeys = (lastTest) =>
+    render(
+      createElement(KeysTable, {
+        rows: rowsFor(lastTest),
+        selected: new Set(),
+        onToggle: () => {},
+        onToggleAll: () => {},
+        selectable: true,
+        actions: () => createElement("button", { type: "button", className: "h-7" }, "测试"),
+      }),
+    );
+  const idle = renderKeys(null);
+  const tested = renderKeys({ ok: true, status_code: 200, latency_ms: 240, error: "" });
+  expect(/<table[^>]*class="[^"]*table-fixed/.test(idle), "密钥表必须使用 table-fixed 固定布局");
+  const idleWidths = headerWidths(idle);
+  const testedWidths = headerWidths(tested);
+  expect(idleWidths.length >= 6, "密钥表必须为各列声明固定宽度，实际 " + JSON.stringify(idleWidths));
+  expect(
+    idleWidths.join("|") === testedWidths.join("|"),
+    "测试结果出现不得改变密钥表列宽：" + idleWidths.join("|") + " vs " + testedWidths.join("|"),
+  );
+  const idleSlot = resultSlotClass(idle);
+  expect(idleSlot.includes("grid-rows-[1.375rem_1.125rem]"), "密钥表结果列必须是固定两行槽位，实际 " + idleSlot);
+  expect(idleSlot === resultSlotClass(tested), "未测试/有结果两个状态的结果槽位 class 必须一致");
+  const actionTh = lastHeader(idle);
+  expect(actionTh.body.includes("操作"), "密钥表操作列必须是最后一列");
+  expect(actionTh.attrs.includes("sticky right-0"), "密钥表操作列必须 sticky right-0");
+  expect(
+    actionTh.attrs.includes('style="width:' + actionColumnWidth(3, 3.5) + '"'),
+    "密钥表操作列必须有固定宽度，实际 " + actionTh.attrs,
+  );
+  expect(idle.includes("min-w-14"), "密钥表操作列按钮必须有固定最小宽度");
+});
+
+check("W8 t03：密钥/路由/模型表接线固定布局原语（页面行为不变）", () => {
+  includesAll(
+    read("src/pages/upstreams.tsx"),
+    ['layout="fixed"', "actionColumnWidth(", "ResultCell", "width:"],
+    "上游路由表",
+  );
+  includesAll(
+    read("src/components/upstreams/models-panel.tsx"),
+    ['layout="fixed"', "actionColumnWidth(", "ResultCell", "width:"],
+    "路由与模型表",
+  );
+  includesAll(read("src/pages/models.tsx"), ['layout="fixed"', "actionColumnWidth(", "width:"], "模型表");
+  includesAll(
+    read("src/components/upstreams/keys-panel.tsx"),
+    ["<Table fixed", "STABLE_ACTION_CELL_WRAPPER_CLASS", "ResultCell", "actionColumnWidth("],
+    "密钥表",
+  );
+});
+
 check("table-order：partitionClosedLast 稳定分区——关闭行置尾、启用行保持原序、不原地改入参", async () => {
   const { partitionClosedLast } = await load("/src/lib/table-order.ts");
   const rows = [

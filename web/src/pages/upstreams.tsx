@@ -23,12 +23,13 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { PAGE_SIZE_OPTIONS } from "@/components/ui/pagination";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ResultCell } from "@/components/ui/table";
 import { controlPlane } from "@/lib/control-plane";
 import { ACTION_ICONS } from "@/lib/icons";
 import { formatDateTime, useTimezone } from "@/lib/time";
 import { usePermissions } from "@/lib/permissions";
 import { partitionClosedLast } from "@/lib/table-order";
-import type { TableRowTone } from "@/lib/table-columns";
+import { actionColumnWidth, type TableRowTone } from "@/lib/table-columns";
 import { API_STYLE_LABELS, probeStatusView, upstreamRoutingHref, type UpstreamRow } from "@/components/upstreams/shared";
 import { PageHeader } from "@/components/layout/page-header";
 
@@ -221,7 +222,8 @@ export function UpstreamsPage() {
     {
       id: "select",
       enableSorting: false,
-      meta: { hideable: false },
+      // W8 t03：固定布局下各列宽度写进列定义（body 宽 0 不参与分配），名称列吸收剩余宽度。
+      meta: { hideable: false, width: "2.5rem" },
       header: () => (
         <Checkbox
           checked={allSelected ? true : someSelected ? "indeterminate" : false}
@@ -269,6 +271,7 @@ export function UpstreamsPage() {
       accessorKey: "alias",
       header: "上游别名",
       enableSorting: false,
+      meta: { width: "5rem" },
       cell: ({ row }) => {
         const alias = (row.original.alias ?? "").trim();
         return alias === "" ? <span className="text-faint">-</span> : <span className="text-2sm text-body">{alias}</span>;
@@ -279,6 +282,7 @@ export function UpstreamsPage() {
       accessorKey: "api_style",
       header: "类型",
       enableSorting: false,
+      meta: { width: "8rem" },
       cell: ({ row }) => (
         <Badge tone="info">{API_STYLE_LABELS[row.original.api_style] ?? row.original.api_style}</Badge>
       ),
@@ -288,7 +292,7 @@ export function UpstreamsPage() {
       accessorKey: "key_count",
       header: "密钥数",
       enableSorting: false,
-      meta: { className: "text-right" },
+      meta: { className: "text-right", width: "11rem" },
       cell: ({ row }) => {
         const keyCount = row.original.key_count ?? 0;
         if (keyCount > 0) return <span className="tnum text-2sm">{keyCount}</span>;
@@ -311,25 +315,30 @@ export function UpstreamsPage() {
       accessorKey: "model_count",
       header: "模型数",
       enableSorting: false,
-      meta: { className: "text-right" },
+      meta: { className: "text-right", width: "4.5rem" },
       cell: ({ row }) => <span className="tnum text-2sm">{row.original.model_count ?? 0}</span>,
     },
     {
       id: "probe",
       header: "最近探测",
       enableSorting: false,
+      meta: { width: "10rem" },
+      // W8 t03：无探测/有探测共用固定两行槽位——最近探测出现时行高与列宽不变。
       cell: ({ row }) => {
         const probe = row.original.last_probe;
-        if (!probe) return <span className="text-faint">-</span>;
+        if (!probe) return <ResultCell primary={<span className="text-faint">-</span>} />;
         const probeStatus = probeStatusView(probe.status);
         return (
-          <div>
-            <div className="flex items-center gap-2">
-              <Badge tone={probeStatus.tone}>{probeStatus.label}</Badge>
-              <span className="tnum text-2xs text-body">{probe.latency_ms} ms</span>
-            </div>
-            <div className="tnum text-2xs text-faint">{formatDateTime(probe.tested_at_ms, timezone)}</div>
-          </div>
+          <ResultCell
+            primary={
+              <>
+                <Badge tone={probeStatus.tone}>{probeStatus.label}</Badge>
+                <span className="tnum text-2xs text-body">{probe.latency_ms} ms</span>
+              </>
+            }
+            secondary={formatDateTime(probe.tested_at_ms, timezone)}
+            secondaryClassName="tnum text-faint"
+          />
         );
       },
     },
@@ -342,6 +351,8 @@ export function UpstreamsPage() {
         // 统一给 th 与 td 上类（不透明底 + 左分割阴影 + 行悬浮同步），窄屏横向滚动时仍可见。
         hideable: false,
         sticky: "right",
+        // 4 个 dense 操作按钮（关闭|启用/测试/编辑/删除），列宽固定。
+        width: actionColumnWidth(4),
       },
       cell: ({ row }) => {
         const item = row.original;
@@ -448,6 +459,7 @@ export function UpstreamsPage() {
       {/* 裸表迁移到 DataTable（W4-A1）：列设置 + 持久化 + 内部滚动；分页/筛选行为保持不变 ——
           页面自持 search/status 筛选与 page/pageSize 状态，经 server 分页模式只下发当前页。 */}
       <DataTable
+        layout="fixed"
         columns={columns}
         data={pagedRows}
         loading={q.isPending}
