@@ -129,6 +129,10 @@
 `openapi_extra={"x-money-amount-class": "cost" | "spend"}`，中间件据此决定归哪本账；
 有名称的键直接按上表词表处理。不要用 null 判断“无权”，要用键是否存在。
 
+报表 payload 已由 response_model 定型（ticket 03，见 §4.1）：金额字段在模型里以 0 默认值
+声明，有权限时线格式带数值、无权限时中间件整键删除（不会是 null），因此生成的 TS 契约里
+这些字段一律可选。前端 wire 形状来自生成契约，不再手写金额可选/可空规则。
+
 唯一逃逸口是流式响应（NDJSON/CSV/text）：它们不经过该中间件，路由必须在投影处自行
 sanitize。W6 票05 起 API 不再返回字符串化的原始 wire 行（`raw_json` 只留在系统表内作诊断
 附件），金额键不会借道 raw 字段泄漏。
@@ -536,6 +540,16 @@ AES-GCM 密文 + sk-...abcd 掩码。
 `tz` 参数可显式指定，缺省取运营设置）；`bucket=auto` 按 range 选 hour/day。
 `error_count` 口径 = `http_status != 200` 的失败请求（billing.md §6）；`active_minutes` =
 区间内出现过事件的去重分钟数（**含失败请求**；报表时区墙钟分钟）。
+
+**响应契约（ticket 03）**：v2 五个报表端点（overview/latency/timeseries/heatmap/flow）与
+`/admin/overview` 别名各自声明 Pydantic response_model，模型集中在
+`api/src/l06_api/report_schemas.py`；`python ops/contract/gen_ts.py` 由这些模型生成前端唯一
+wire 契约 `web/src/generated/contract.ts`（`gen_ts.py --check` 进 CI），前端不再手写 wire 形状、
+也不保留旧别名。端点→模型：overview→`ReportsOverviewOut`、latency→`LatencyReportOut`、
+timeseries→`TimeseriesReportOut`、heatmap→`HeatmapReportOut`、flow→`FlowReportOut`；
+`/admin/overview` 与 overview 同模型。金额字段按 §0.5 缺省（无权限时整键删除，不是 null），
+在生成的 TS 里是可选字段；分位 `null` 是真实语义（样本不足），与金额缺省不同。
+legacy `/admin/reports/trend` 未声明 response_model（保留旧线格式）。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |

@@ -37,7 +37,13 @@ from l01_core.timeutil import now_ms
 from l05_service import aggregates, auth, rbac
 from l05_service.prices import margin_report
 from l06_api.deps import raise_span_over_cap, require, session_of, validate_window_pair
-from l06_api.schemas import FlowReportOut
+from l06_api.report_schemas import (
+    FlowReportOut,
+    HeatmapReportOut,
+    LatencyReportOut,
+    ReportsOverviewOut,
+    TimeseriesReportOut,
+)
 
 router = APIRouter(tags=["reports"])
 
@@ -97,6 +103,15 @@ def _window_override(from_ms: int | None, to_ms: int | None) -> tuple[int, int] 
     return from_ms, to_ms
 
 
+def _echo_range(range_key: str) -> str:
+    """Normalise an enum range key for the response model's Literal echo.
+
+    resolve_range accepts the key case-insensitively; the payload echo (and the
+    generated TS contract) uses the canonical lower-case form.
+    """
+    return (range_key or "").strip().lower()
+
+
 def _timezone(session: Session, tz: str):
     """Explicit tz wins and is validated; omitted tz follows app_settings."""
     if tz:
@@ -148,7 +163,7 @@ def _parse_metrics(metrics: str, metric: str) -> list[str]:
     return series
 
 
-@router.get("/admin/reports/overview")
+@router.get("/admin/reports/overview", response_model=ReportsOverviewOut)
 def overview(
     session: Session = Depends(session_of),
     principal: auth.Principal = Depends(require("reports:read")),
@@ -234,7 +249,7 @@ def trend(
     return {"metric": metric, "range": range, "points": points, "estimate_note": _ESTIMATE_NOTE}
 
 
-@router.get("/admin/reports/latency")
+@router.get("/admin/reports/latency", response_model=LatencyReportOut)
 def latency(
     session: Session = Depends(session_of),
     principal: auth.Principal = Depends(require("reports:read")),
@@ -263,8 +278,8 @@ def latency(
     if override is not None:
         window_from, window_to, range_key = override[0], override[1], "custom"
     elif range:
-        window_from, window_to, _bucket = _range_window(range, now_ms(), zone)
-        range_key = range
+        range_key = _echo_range(range)
+        window_from, window_to, _bucket = _range_window(range_key, now_ms(), zone)
     else:
         window_from, window_to, range_key = 0, 0, "all"
     payload = {
@@ -278,7 +293,11 @@ def latency(
     return payload
 
 
-@router.get("/admin/reports/timeseries")
+@router.get(
+    "/admin/reports/timeseries",
+    response_model=TimeseriesReportOut,
+    response_model_exclude_none=True,
+)
 def timeseries(
     session: Session = Depends(session_of),
     principal: auth.Principal = Depends(require("reports:read")),
@@ -320,8 +339,8 @@ def timeseries(
         range_key = "custom"
         auto_bucket = "hour" if window_to - window_from <= _AUTO_HOUR_SPAN_MS else "day"
     else:
-        window_from, window_to, auto_bucket = _range_window(range, now_ms(), zone)
-        range_key = range
+        range_key = _echo_range(range)
+        window_from, window_to, auto_bucket = _range_window(range_key, now_ms(), zone)
     bucket_key = auto_bucket if bucket_param in ("", "auto") else bucket
     if bucket_key not in aggregates.BUCKET_KEYS:
         raise AppError(
@@ -329,7 +348,7 @@ def timeseries(
             "bucket must be auto, hour or day",
             details={"bucket": bucket},
         )
-    if override is None and bucket_key == "hour" and range == "365d":
+    if override is None and bucket_key == "hour" and range_key == "365d":
         raise AppError(
             ErrorCode.VALIDATION_ERROR,
             "bucket=hour is not supported for range=365d",
@@ -350,7 +369,7 @@ def timeseries(
     return payload
 
 
-@router.get("/admin/reports/heatmap")
+@router.get("/admin/reports/heatmap", response_model=HeatmapReportOut)
 def heatmap(
     session: Session = Depends(session_of),
     principal: auth.Principal = Depends(require("reports:read")),
@@ -457,8 +476,8 @@ def flow(
         window_from, window_to = override
         range_key = "custom"
     elif range:
-        window_from, window_to, _bucket = _range_window(range, now_ms(), zone)
-        range_key = range
+        range_key = _echo_range(range)
+        window_from, window_to, _bucket = _range_window(range_key, now_ms(), zone)
     else:
         window_from, window_to, range_key = 0, now_ms() + 1, ""
     payload = aggregates.build_flow(

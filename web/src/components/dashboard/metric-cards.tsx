@@ -7,11 +7,13 @@ import { METRIC_ICONS } from "@/lib/metric-icons";
 import { usePermissions } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 
-import type { LatencyReport, TimeseriesReport } from "./report-types";
+import type { LatencyReportOut } from "@/generated/contract";
+
+import type { TimeseriesReport } from "./report-types";
 
 interface DashboardKpisProps {
   data: TimeseriesReport | undefined;
-  latency: LatencyReport | undefined;
+  latency: LatencyReportOut | undefined;
   loading: boolean;
   error: unknown;
   onRetry: () => void;

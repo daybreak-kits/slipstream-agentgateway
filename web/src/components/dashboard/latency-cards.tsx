@@ -2,12 +2,12 @@ import { fmtInt, fmtSeconds } from "@/lib/format";
 
 import { seriesVar } from "./chart-theme";
 import { ChartCard } from "./chart-card";
-import type { LatencyBlock, LatencyReport } from "./report-types";
+import type { LatencyBlockOut, LatencyReportOut } from "@/generated/contract";
 import { timeWindowLabel, type TimeWindow } from "@/components/time-range-picker";
 
 interface LatencyCardsProps {
   window: TimeWindow;
-  data: LatencyReport | undefined;
+  data: LatencyReportOut | undefined;
   loading: boolean;
   error: unknown;
   onRetry: () => void;
@@ -25,7 +25,7 @@ type QuantileKey = (typeof QUANTILES)[number]["key"];
 /** 行网格模板（表头与两行共用同一模板，列天然对齐）。 */
 const GRID_COLUMNS = { gridTemplateColumns: "minmax(110px, 170px) repeat(4, minmax(0, 1fr))" };
 
-function quantileOf(block: LatencyBlock | undefined, key: QuantileKey): number | null {
+function quantileOf(block: LatencyBlockOut | undefined, key: QuantileKey): number | null {
   if (!block) return null;
   return block[key];
 }
@@ -36,7 +36,7 @@ function quantileOf(block: LatencyBlock | undefined, key: QuantileKey): number |
  * 配对样本 < min_samples 时后端给 null，界面显示「样本不足」。
  */
 export function LatencyCards({ window, data, loading, error, onRetry }: LatencyCardsProps) {
-  const rows: Array<{ key: string; label: string; hint: string; block: LatencyBlock | undefined; color: string }> = [
+  const rows: Array<{ key: string; label: string; hint: string; block: LatencyBlockOut | undefined; color: string }> = [
     { key: "ttft", label: "首字延迟 TTFT", hint: "请求到首个词元", block: data?.ttft, color: seriesVar(0) },
     { key: "total", label: "总体耗时", hint: "请求到响应结束", block: data?.total, color: seriesVar(1) },
   ];

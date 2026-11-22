@@ -32,6 +32,19 @@ export interface AdoptModelsDevResult {
   params_source?: string;
 }
 
+export interface AllSamplesBlockOut {
+  samples: number;
+  p50_ms: number | null;
+  p75_ms: number | null;
+  p95_ms: number | null;
+}
+
+export interface AllSamplesLatencyOut {
+  samples: number;
+  ttft: AllSamplesBlockOut;
+  total: AllSamplesBlockOut;
+}
+
 export interface ApiKeyConfig {
   enabled?: boolean;
   mode?: string;
@@ -126,7 +139,7 @@ export interface FlowReportOut {
   currency: string;
   fx_missing: string[];
   estimate_note: string;
-  range: string;
+  range: "today" | "24h" | "7d" | "30d" | "365d" | "custom" | "all";
   from_ms: number;
   to_ms: number;
   timezone: string;
@@ -180,6 +193,62 @@ export interface HealthConfig {
   consecutive_failures?: number;
   duration?: string;
   restore_health?: number;
+}
+
+export interface HeatmapColumnOut {
+  key: string;
+  label: string;
+}
+
+export interface HeatmapReportOut {
+  range: "7d" | "30d" | "365d" | "custom";
+  mode: "weekday_hour" | "date_hour";
+  metric: "tokens" | "cost_micro" | "charge_micro";
+  from_ms: number;
+  to_ms: number;
+  timezone: string;
+  currency: string;
+  columns: HeatmapColumnOut[];
+  rows: HeatmapRowOut[];
+  max: number;
+  total: number;
+  fx_missing: string[];
+  estimate_note: string;
+}
+
+export interface HeatmapRowOut {
+  key: string;
+  label: string;
+  values: number[];
+}
+
+export interface LatencyBlockOut {
+  samples: number;
+  p50_ms: number | null;
+  p75_ms: number | null;
+  p95_ms: number | null;
+  p99_ms: number | null;
+}
+
+export interface LatencyReportOut {
+  range: "today" | "24h" | "7d" | "30d" | "365d" | "custom" | "all";
+  from_ms: number;
+  to_ms: number;
+  timezone: string;
+  paired_samples: number;
+  min_samples: number;
+  ttft: LatencyBlockOut;
+  total: LatencyBlockOut;
+  all: AllSamplesLatencyOut;
+  estimate_note: string;
+}
+
+export interface LatencyStatsOut {
+  paired_samples: number;
+  min_samples: number;
+  ttft: LatencyBlockOut;
+  total: LatencyBlockOut;
+  all: AllSamplesLatencyOut;
 }
 
 export interface LocalRateLimitConfig {
@@ -377,6 +446,42 @@ export interface RegexRuleIn {
   builtin?: string;
 }
 
+export interface ReportTotalsOut {
+  requests: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  tokens: number;
+  cost_micro?: number;
+  charge_micro?: number;
+  error_count: number;
+  active_minutes: number;
+  peak_rpm: number;
+  peak_tpm: number;
+}
+
+export interface ReportsOverviewOut {
+  requests: number;
+  error_count: number;
+  active_minutes: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  charge_micro?: number;
+  cost_micro?: number;
+  margin_micro?: number;
+  currency: string;
+  money_scope: "converted" | "report_currency_only";
+  fx_missing: string[];
+  latency_p50_ms: number;
+  latency_p95_ms: number;
+  ttft_p50_ms: number;
+  latency: LatencyStatsOut;
+  estimate_note: string;
+}
+
 export interface RetryConfig {
   attempts?: number;
   codes?: number[];
@@ -469,6 +574,44 @@ export interface TimeoutConfig {
   request_timeout?: string;
   backend_request_timeout?: string;
   response_idle_timeout?: string;
+}
+
+export interface TimeseriesMemberOut {
+  id: string;
+  label: string;
+  total: number;
+  share: number;
+  requests: number;
+  tokens: number;
+  cost_micro?: number;
+  charge_micro?: number;
+  totals?: Record<string, number> | null;
+}
+
+export interface TimeseriesPointOut {
+  bucket_start_ms: number;
+  label: string;
+  total: number;
+  values: Record<string, number> | Record<string, Record<string, number>>;
+}
+
+export interface TimeseriesReportOut {
+  range: "today" | "24h" | "7d" | "30d" | "365d" | "custom";
+  bucket: "hour" | "day";
+  dimension: "combo" | "upstream" | "channel";
+  metric: "requests" | "tokens" | "input_tokens" | "output_tokens" | "cost_micro" | "charge_micro";
+  metrics: ("requests" | "tokens" | "input_tokens" | "output_tokens" | "cost_micro" | "charge_micro")[];
+  from_ms: number;
+  to_ms: number;
+  timezone: string;
+  currency: string;
+  points: TimeseriesPointOut[];
+  members: TimeseriesMemberOut[];
+  totals: ReportTotalsOut;
+  metric_total: number;
+  folded_members: number;
+  fx_missing: string[];
+  estimate_note: string;
 }
 
 export interface TransformationsConfig {

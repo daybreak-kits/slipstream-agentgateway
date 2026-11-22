@@ -7,15 +7,12 @@ import {
   Search,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import type { AllSamplesLatencyOut, LatencyReportOut } from "@/generated/contract";
 import { toast } from "@/lib/notify";
 
 import { DataTable } from "@/components/data-table";
 import { mockLatency } from "@/components/dashboard/report-mocks";
-import {
-  REPORT_PATHS,
-  type AllSamplesLatency,
-  type LatencyReport,
-} from "@/components/dashboard/report-types";
+import { REPORT_PATHS } from "@/components/dashboard/report-types";
 import {
   cacheHitFraction,
   cacheRatioText,
@@ -157,7 +154,7 @@ export function LogsPage() {
     queryKey: ["logs", "latency", applied.from_ms ?? 0, applied.to_ms ?? 0],
     enabled: timeWindowUsable(applied.draft.window),
     placeholderData: keepPreviousData,
-    queryFn: ({ signal }): Promise<LatencyReport> => {
+    queryFn: ({ signal }): Promise<LatencyReportOut> => {
       if (useMock) {
         const fromMs = applied.from_ms ?? 0;
         return Promise.resolve(mockLatency({ kind: "custom", fromMs, toMs: applied.to_ms ?? Date.now() }));
@@ -168,7 +165,7 @@ export function LogsPage() {
         params.set("to_ms", String(applied.to_ms));
       }
       const query = params.toString();
-      return api.get<LatencyReport>(REPORT_PATHS.latency + (query ? "?" + query : ""), { signal });
+      return api.get<LatencyReportOut>(REPORT_PATHS.latency + (query ? "?" + query : ""), { signal });
     },
   });
 
@@ -489,7 +486,7 @@ interface LogColumnSpec {
   canCost: boolean;
   canSpend: boolean;
   /** 延迟报表 all 块（W4-F）：耗时列语义色的分位锚；加载中/旧后端缺位时中性灰。 */
-  latencyAll?: AllSamplesLatency;
+  latencyAll?: AllSamplesLatencyOut;
 }
 
 /**

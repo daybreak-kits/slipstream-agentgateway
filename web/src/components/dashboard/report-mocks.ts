@@ -1,19 +1,23 @@
 import type {
-  FlowLink,
-  FlowReport,
+  FlowLinkOut,
+  FlowReportOut,
+  HeatmapReportOut,
+  LatencyReportOut,
+  ReportTotalsOut,
+  ReportsOverviewOut,
+  TimeseriesMemberOut,
+  TimeseriesPointOut,
+  TimeseriesReportOut,
+} from "@/generated/contract";
+import type { TimeWindow } from "@/components/time-range-picker";
+
+import type {
+  HeatmapMetric,
   HeatmapRange,
-  HeatmapReport,
-  LatencyReport,
-  ReportTotals,
-  ReportsOverview,
   RevisionLike,
-  TimeseriesMember,
-  TimeseriesPoint,
-  TimeseriesReport,
   TrendDimension,
   TrendMetric,
 } from "./report-types";
-import type { TimeWindow } from "@/components/time-range-picker";
 
 import { flowChainOf, flowMatchNodes } from "./flow-search";
 
@@ -146,7 +150,7 @@ export function mockTimeseries(
   window: TimeWindow,
   dimension: TrendDimension,
   metric: TrendMetric,
-): TimeseriesReport {
+): TimeseriesReportOut {
   const buckets = bucketsFor(window);
   const bucket = buckets[0]?.bucket ?? "day";
   const definitions = MEMBERS[dimension];
@@ -168,20 +172,17 @@ export function mockTimeseries(
   const cacheSplit = tokenSplit(tokenTotal);
   const windowMinutes = Math.max(1, Math.round((buckets[buckets.length - 1]!.startMs - buckets[0]!.startMs) / 60_000) + (bucket === "hour" ? 60 : 1440));
 
-  const members: TimeseriesMember[] = perMember.map((entry) => {
+  const members: TimeseriesMemberOut[] = perMember.map((entry) => {
     const mTokens = entry.tokens.reduce((a, b) => a + b, 0);
     const mRequests = entry.requests.reduce((a, b) => a + b, 0);
     const mCost = entry.cost.reduce((a, b) => a + b, 0);
     const mCharge = entry.charge.reduce((a, b) => a + b, 0);
-    const split = tokenSplit(mTokens);
     return {
       id: entry.member.id,
       label: entry.member.label,
       total: metric === "money" ? mCost : metric === "tokens" ? mTokens : mRequests,
       share: 0,
       requests: mRequests,
-      input_tokens: split.input,
-      output_tokens: split.output,
       tokens: mTokens,
       cost_micro: mCost,
       charge_micro: mCharge,
@@ -192,26 +193,35 @@ export function mockTimeseries(
   for (const member of members) member.share = metricTotal > 0 ? member.total / metricTotal : 0;
   members.sort((left, right) => right.total - left.total);
 
-  const points: TimeseriesPoint[] = buckets.map((slot, index) => {
+  const points: TimeseriesPointOut[] = buckets.map((slot, index) => {
+    if (metric === "money") {
+      const values: Record<string, Record<string, number>> = {};
+      let cost = 0;
+      for (const entry of perMember) {
+        const entryCost = entry.cost[index] ?? 0;
+        const entryCharge = entry.charge[index] ?? 0;
+        values[entry.member.id] = { cost_micro: entryCost, charge_micro: entryCharge };
+        cost += entryCost;
+      }
+      return {
+        bucket_start_ms: slot.startMs,
+        label: slot.label,
+        total: cost,
+        values,
+      };
+    }
     const values: Record<string, number> = {};
-    let cost = 0;
-    let charge = 0;
     let total = 0;
     for (const entry of perMember) {
-      const mTokens = entry.tokens[index] ?? 0;
-      values[entry.member.id] =
-        metric === "money" ? entry.cost[index] ?? 0 : metric === "tokens" ? mTokens : entry.requests[index] ?? 0;
-      cost += entry.cost[index] ?? 0;
-      charge += entry.charge[index] ?? 0;
-      total += values[entry.member.id] ?? 0;
+      const value = metric === "tokens" ? entry.tokens[index] ?? 0 : entry.requests[index] ?? 0;
+      values[entry.member.id] = value;
+      total += value;
     }
-    return metric === "money"
-      ? { bucket_start_ms: slot.startMs, label: slot.label, total, values: {}, cost_micro: cost, charge_micro: charge }
-      : { bucket_start_ms: slot.startMs, label: slot.label, total, values };
+    return { bucket_start_ms: slot.startMs, label: slot.label, total, values };
   });
 
   const activeMinutesTotal = Math.min(windowMinutes, Math.max(1, Math.round(requestTotal / 11)));
-  const totals: ReportTotals = {
+  const totals: ReportTotalsOut = {
     requests: requestTotal,
     input_tokens: cacheSplit.input,
     output_tokens: cacheSplit.output,
@@ -233,11 +243,18 @@ export function mockTimeseries(
     charge_micro: chargeTotal,
   };
 
+  const canonicalMetric =
+    metric === "money" ? "cost_micro" : metric === "tokens" ? "tokens" : "requests";
+  const wireMetrics =
+    metric === "money"
+      ? (["cost_micro", "charge_micro"] as const)
+      : ([canonicalMetric] as const);
   return {
     range: window.kind === "custom" ? "custom" : window.value,
     bucket,
     dimension,
-    metric,
+    metric: canonicalMetric,
+    metrics: [...wireMetrics],
     from_ms: points[0]?.bucket_start_ms ?? Date.now(),
     to_ms: window.kind === "custom" ? window.toMs : Date.now(),
     timezone: "Asia/Shanghai",
@@ -252,10 +269,20 @@ export function mockTimeseries(
   };
 }
 
-export function mockLatency(window: TimeWindow): LatencyReport {
+export function mockLatency(window: TimeWindow): LatencyReportOut {
   const seed = window.kind === "custom" ? Math.round(window.fromMs / DAY) : window.value.length * 4517;
   const rand = seeded(seed);
   const jitter = 0.8 + rand() * 0.5;
+  const to_ms = window.kind === "custom" ? window.toMs : Date.now();
+  const rangeSpan =
+    window.kind === "custom"
+      ? 0
+      : window.value === "today" || window.value === "24h"
+        ? DAY
+        : window.value === "7d"
+          ? 7 * DAY
+          : 30 * DAY;
+  const from_ms = window.kind === "custom" ? window.fromMs : to_ms - rangeSpan;
   const block = (p50: number, p75: number, p95: number, p99: number) => ({
     samples: 17_820,
     p50_ms: Math.round(p50 * jitter),
@@ -273,6 +300,8 @@ export function mockLatency(window: TimeWindow): LatencyReport {
   });
   return {
     range: window.kind === "custom" ? "custom" : window.value,
+    from_ms,
+    to_ms,
     paired_samples: 17_820,
     min_samples: 5,
     ttft: block(231, 348, 512, 890),
@@ -283,7 +312,6 @@ export function mockLatency(window: TimeWindow): LatencyReport {
       total: allBlock(706, 1_265, 2_320),
     },
     timezone: "Asia/Shanghai",
-    currency: CURRENCY,
     estimate_note: ESTIMATE,
   };
 }
@@ -295,7 +323,7 @@ const HEATMAP_MODE: Record<HeatmapRange, { mode: "weekday_hour" | "date_hour"; d
 };
 
 /** mock 热力图：7D 按星期×小时，30D/365D 按日期×小时，空格子保持 0。 */
-export function mockHeatmap(range: HeatmapRange, metric: "tokens" | "cost" | "spend"): HeatmapReport {
+export function mockHeatmap(range: HeatmapRange, metric: HeatmapMetric): HeatmapReportOut {
   const config = HEATMAP_MODE[range];
   const rand = seeded(range.length * 3137 + metric.length * 977);
   const weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
@@ -351,7 +379,7 @@ const FLOW_PATHS: Array<[string, string, string, string, string]> = [
   ["user:carol", "key:sk-c3", "model:claude", "umodel:gpt-5.2", "channel:智谱"],
 ];
 
-const FLOW_STAGE_TABLE: Array<{ id: FlowReport["node_meta"][string]["stage"]; label: string }> = [
+const FLOW_STAGE_TABLE: Array<{ id: FlowReportOut["node_meta"][string]["stage"]; label: string }> = [
   { id: "user", label: "用户" },
   { id: "key", label: "连接密钥" },
   { id: "model", label: "公开模型" },
@@ -371,7 +399,8 @@ export function mockFlow(
   metric: "requests" | "tokens",
   collapse: string[] = [],
   narrowing: MockFlowNarrowing = {},
-): FlowReport {
+  window?: TimeWindow,
+): FlowReportOut {
   // 投影与后端同语义：隐藏段由路径重连（W5-01 splice 跨接的 mock 版），
   // q/focus 取聚合图闭包，topN 折尾为 other:<stage>，totals 恒等于窗口全量。
   const rand = seeded(metric.length * 20261117);
@@ -393,17 +422,17 @@ export function mockFlow(
     __target: string;
   };
   const links = new Map<string, Slot>();
-  const node_meta: FlowReport["node_meta"] = {};
+  const node_meta: FlowReportOut["node_meta"] = {};
   const node_values = new Map<string, number>();
   const totals = { requests: 0, tokens: 0, cost_micro: 0, charge_micro: 0 };
 
   const label = (id: string): string => id.slice(id.indexOf(":") + 1);
-  const stageOf = (id: string): FlowReport["node_meta"][string]["stage"] => {
+  const stageOf = (id: string): FlowReportOut["node_meta"][string]["stage"] => {
     if (id.startsWith("user:")) return "user";
     if (id.startsWith("key:")) return "key";
     if (id.startsWith("model:")) return "model";
     if (id.startsWith("umodel:")) return "upstream";
-    if (id.startsWith("other:")) return id.slice("other:".length) as FlowReport["node_meta"][string]["stage"];
+    if (id.startsWith("other:")) return id.slice("other:".length) as FlowReportOut["node_meta"][string]["stage"];
     return "channel";
   };
   const register = (id: string) => {
@@ -528,7 +557,7 @@ export function mockFlow(
     }
   }
 
-  const linkRows: FlowLink[] = [...links.values()]
+  const linkRows: FlowLinkOut[] = [...links.values()]
     .sort(
       (left, right) =>
         left.__source.localeCompare(right.__source) || left.__target.localeCompare(right.__target),
@@ -552,6 +581,19 @@ export function mockFlow(
     meta.value = node_values.get(id) ?? 0;
   }
 
+  const range = window === undefined ? "all" : window.kind === "custom" ? "custom" : window.value;
+  const to_ms = window?.kind === "custom" ? window.toMs : Date.now();
+  const flowSpan = window?.kind === "range" ? window.value : null;
+  const from_ms =
+    window?.kind === "custom"
+      ? window.fromMs
+      : flowSpan === "today" || flowSpan === "24h"
+        ? to_ms - DAY
+        : flowSpan === "7d"
+          ? to_ms - 7 * DAY
+          : flowSpan === "30d"
+            ? to_ms - 30 * DAY
+            : 0;
   return {
     metric,
     nodes,
@@ -562,10 +604,14 @@ export function mockFlow(
     currency: CURRENCY,
     fx_missing: [],
     estimate_note: ESTIMATE,
+    range,
+    from_ms,
+    to_ms,
+    timezone: "Asia/Shanghai",
   };
 }
 
-export function mockOverview(): ReportsOverview {
+export function mockOverview(): ReportsOverviewOut {
   const cost = 62_400_000;
   const charge = 96_800_000;
   return {
@@ -590,6 +636,11 @@ export function mockOverview(): ReportsOverview {
       min_samples: 5,
       ttft: { samples: 17_820, p50_ms: 231, p75_ms: 348, p95_ms: 512, p99_ms: 890 },
       total: { samples: 17_820, p50_ms: 642, p75_ms: 1_180, p95_ms: 2_140, p99_ms: 3_980 },
+      all: {
+        samples: 20_455,
+        ttft: { samples: 20_455, p50_ms: 180, p75_ms: 296, p95_ms: 480 },
+        total: { samples: 20_455, p50_ms: 706, p75_ms: 1_265, p95_ms: 2_320 },
+      },
     },
     estimate_note: ESTIMATE,
   };

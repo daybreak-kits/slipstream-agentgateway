@@ -172,3 +172,85 @@ def test_cost_endpoints_forbidden_without_billing_cost(client, engine_and_sessio
     assert browser.get("/admin/cost/entries").status_code == 403
     assert browser.get("/admin/reports/margin").status_code == 403
     assert browser.get("/admin/charge/entries").status_code == 200
+
+
+# ---------------------------------------------------------------- 报表 payload 契约
+
+
+def _walk_keys(node) -> set[str]:
+    found: set[str] = set()
+    if isinstance(node, dict):
+        for key, value in node.items():
+            found.add(key)
+            found |= _walk_keys(value)
+    elif isinstance(node, list):
+        for item in node:
+            found |= _walk_keys(item)
+    return found
+
+
+REPORT_PATHS = (
+    "/admin/reports/overview",
+    "/admin/reports/latency",
+    "/admin/reports/timeseries",
+    "/admin/reports/heatmap",
+    "/admin/reports/flow",
+)
+
+
+def test_report_payloads_omit_money_without_permission(client, engine_and_sessionmaker):
+    """ticket 03: no billing permission -> the money KEY is absent, not null."""
+    _, factory = engine_and_sessionmaker
+    _seed_books(factory)
+    browser = _custom_role_browser(
+        client, factory, ["reports:read"], "报表无金额", user_id="usr_filter"
+    )
+    for path in REPORT_PATHS:
+        response = browser.get(path)
+        assert response.status_code == 200, (path, response.text)
+        money_keys = {"cost_micro", "charge_micro", "margin_micro"} & _walk_keys(response.json())
+        assert money_keys == set(), (path, sorted(money_keys))
+
+    timeseries = browser.get("/admin/reports/timeseries").json()
+    assert "cost_micro" not in timeseries["totals"]
+    assert "charge_micro" not in timeseries["totals"]
+    assert "cost_micro" not in _walk_keys(timeseries["members"])
+    # Money metrics stay forbidden without billing, whatever the route.
+    assert browser.get("/admin/reports/timeseries?metric=cost_micro").status_code == 403
+    assert browser.get("/admin/reports/heatmap?metric=cost_micro").status_code == 403
+
+
+def test_report_payloads_include_money_with_permission(client, engine_and_sessionmaker):
+    """ticket 03: the same payload keeps the money VALUES when permitted."""
+    _, factory = engine_and_sessionmaker
+    _seed_books(factory)
+    browser = _custom_role_browser(
+        client,
+        factory,
+        ["reports:read", "billing:cost", "billing:spend"],
+        "报表有金额",
+        user_id="usr_filter",
+    )
+
+    overview = browser.get("/admin/reports/overview").json()
+    assert overview["cost_micro"] == 800
+    assert overview["charge_micro"] == 1000
+    assert overview["margin_micro"] == 200
+
+    timeseries = browser.get(
+        "/admin/reports/timeseries",
+        params={"metrics": "cost_micro,charge_micro"},
+    ).json()
+    assert timeseries["totals"]["cost_micro"] == 800
+    assert timeseries["totals"]["charge_micro"] == 1000
+
+    flow = browser.get("/admin/reports/flow").json()
+    assert flow["totals"]["cost_micro"] == 800
+    assert flow["totals"]["charge_micro"] == 1000
+
+    heatmap = browser.get("/admin/reports/heatmap", params={"metric": "cost_micro"}).json()
+    assert heatmap["metric"] == "cost_micro"
+    assert heatmap["total"] == 800
+
+    latency = browser.get("/admin/reports/latency").json()
+    assert not ({"cost_micro", "charge_micro", "margin_micro"} & _walk_keys(latency))

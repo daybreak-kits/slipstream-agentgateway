@@ -83,63 +83,19 @@ export function heatmapMetricLabel(metric: HeatmapMetric): string {
   return HEATMAP_METRICS.find((item) => item.value === metric)?.label ?? metric;
 }
 
-/** 金额字段按权限「键不存在」，所以全部可选；margin 在缺汇率时可能是 null。 */
-export interface ReportsOverview {
-  requests: number;
-  /** 失败请求（http_status != 200，billing.md §6）。 */
-  error_count: number;
-  /** 区间内出现过事件的去重分钟数（含失败请求，报表时区墙钟）。 */
-  active_minutes: number;
-  input_tokens: number;
-  output_tokens: number;
-  /** 缓存词元（后端 H 契约已钉死：顶层整数；未合入时为 undefined，前端按 0 降级）。 */
-  cache_read_tokens?: number;
-  cache_write_tokens?: number;
-  charge_micro?: number;
-  cost_micro?: number;
-  margin_micro?: number | null;
-  currency: string;
-  fx_missing?: string[];
-  money_scope?: "converted" | "report_currency_only";
-  latency_p50_ms: number;
-  latency_p95_ms: number;
-  ttft_p50_ms: number;
-  latency?: {
-    paired_samples: number;
-    min_samples: number;
-    ttft: LatencyBlock;
-    total: LatencyBlock;
-  };
-  estimate_note: string;
-}
+/**
+ * 报表 wire 形状由后端 response_model 唯一生成（ops/contract/gen_ts.py →
+ * @/generated/contract）。这里不再手写 wire 类型，只保留图表用的派生形与归一化。
+ * 金额字段按权限「键不存在」，所以生成类型里全部可选。
+ */
+import type { TimeseriesMemberOut, TimeseriesReportOut } from "@/generated/contract";
 
-/** 金额字段按权限「键不存在」，缓存词元与分钟峰值待后端合入前为 undefined——全部可选。 */
-export interface ReportTotals {
-  requests: number;
-  input_tokens: number;
-  output_tokens: number;
-  tokens: number;
-  error_count?: number;
-  active_minutes?: number;
-  /** 窗口内单分钟峰值（GLOSSARY §5 「最高峰」）：最忙一分钟的请求数 / 词元数；缺位降级「—」。 */
-  peak_rpm?: number;
-  peak_tpm?: number;
-  cache_read_tokens?: number;
-  cache_write_tokens?: number;
-  cost_micro?: number;
-  charge_micro?: number;
-}
-
-export interface TimeseriesMember extends ReportTotals {
-  id: string;
-  label: string;
-  total: number;
-  /** 占比 0..1；双指标时由首序列（cost_micro）驱动，空窗口为 0 而不是 NaN。 */
-  share: number;
-  /** 双指标回显：该成员各指标合计。 */
+/** 成员合计：wire 是通用 Record，图表只认 cost/charge 两列。 */
+export type TimeseriesMember = Omit<TimeseriesMemberOut, "totals"> & {
   totals?: { cost_micro?: number; charge_micro?: number };
-}
+};
 
+/** 归一化后的桶：单指标 values 平面；费用双系列把桶合计落到 cost/charge 列。 */
 export interface TimeseriesPoint {
   bucket_start_ms: number;
   label: string;
@@ -151,56 +107,27 @@ export interface TimeseriesPoint {
   charge_micro?: number;
 }
 
-export interface TimeseriesReport {
+/** 前端规范形：range 是页面区间，metric 是前端口径（requests/tokens/money）。 */
+export type TimeseriesReport = Omit<
+  TimeseriesReportOut,
+  "range" | "metric" | "points" | "members"
+> & {
   /** 自定义区间生效时后端回显 "custom"。 */
   range: ReportRange | "custom";
-  bucket: "hour" | "day";
-  dimension: TrendDimension;
   /** 前端口径的指标（requests/tokens/money），后端 echo 是 cost_micro 等字段名。 */
   metric: TrendMetric;
-  from_ms: number;
-  to_ms: number;
-  timezone: string;
-  currency: string;
   points: TimeseriesPoint[];
   members: TimeseriesMember[];
-  totals: ReportTotals;
-  metric_total: number;
-  folded_members: number;
-  fx_missing: string[];
-  estimate_note: string;
-}
-
-/** 后端原始回包：单指标 values 为平面 {memberId:value}，双指标为 {memberId:{cost_micro,charge_micro}}。 */
-export interface RawTimeseriesReport {
-  range: string;
-  bucket: "hour" | "day";
-  dimension: TrendDimension;
-  metric?: string;
-  metrics?: string[];
-  from_ms: number;
-  to_ms: number;
-  timezone: string;
-  currency: string;
-  points: Array<{
-    bucket_start_ms: number;
-    label: string;
-    total: number;
-    values: Record<string, number> | Record<string, Record<string, number>>;
-  }>;
-  members: Array<TimeseriesMember & { totals?: Record<string, number> }>;
-  totals: ReportTotals;
-  metric_total: number;
-  folded_members: number;
-  fx_missing: string[];
-  estimate_note: string;
-}
+};
 
 /**
  * 归一化：把后端「单指标平面 / 双指标嵌套」两种 values 形状拉平成前端规范形。
  * 费用（money）模式下按桶跨成员求和出 cost/charge 两列，成员列改读 member.totals。
  */
-export function normalizeTimeseries(raw: RawTimeseriesReport, requested: TrendMetric): TimeseriesReport {
+export function normalizeTimeseries(
+  raw: TimeseriesReportOut,
+  requested: TrendMetric,
+): TimeseriesReport {
   const dual = requested === "money";
   const points: TimeseriesPoint[] = raw.points.map((point) => {
     if (!dual) {
@@ -245,91 +172,6 @@ export function normalizeTimeseries(raw: RawTimeseriesReport, requested: TrendMe
   };
 }
 
-export interface LatencyBlock {
-  samples: number;
-  p50_ms: number | null;
-  p75_ms: number | null;
-  p95_ms: number | null;
-  p99_ms: number | null;
-}
-
-/**
- * 全样本分位块（W4-F）：窗口内全部事件——不过滤 ttft>0 配对，非流式（ttft=0）
- * 也计入——只有语义色锚点 p50/p75/p95（后端不回 p99）。样本不足 5 时分位为 null。
- */
-export interface AllSamplesBlock {
-  samples: number;
-  p50_ms: number | null;
-  p75_ms: number | null;
-  p95_ms: number | null;
-}
-
-/** 与 paired 块同窗不同口径；all.samples 是窗口内全部事件数（≥ paired_samples）。 */
-export interface AllSamplesLatency {
-  samples: number;
-  ttft: AllSamplesBlock;
-  total: AllSamplesBlock;
-}
-
-export interface LatencyReport {
-  /** 自定义区间生效时后端回显 "custom"；窗口缺省（全时段，W4-F）回显 "all"。 */
-  range: ReportRange | "custom" | "all";
-  paired_samples: number;
-  min_samples: number;
-  ttft: LatencyBlock;
-  total: LatencyBlock;
-  /** W4-F 新键：日志页耗时语义色的分位锚点；旧后端无此键，消费方一律判空降级。 */
-  all?: AllSamplesLatency;
-  timezone?: string;
-  currency?: string;
-  estimate_note: string;
-}
-
-export interface HeatmapColumn {
-  key: string;
-  label: string;
-}
-
-export interface HeatmapRow {
-  key: string;
-  label: string;
-  values: number[];
-}
-
-export interface HeatmapReport {
-  range: HeatmapRange;
-  mode: "weekday_hour" | "date_hour";
-  /** 规范化 metric（cost→cost_micro / spend→charge_micro）。 */
-  metric: string;
-  from_ms: number;
-  to_ms: number;
-  timezone: string;
-  currency: string;
-  columns: HeatmapColumn[];
-  rows: HeatmapRow[];
-  max: number;
-  total: number;
-  fx_missing: string[];
-  estimate_note: string;
-}
-
-export interface FlowNodeMeta {
-  id: string;
-  label: string;
-  stage: "user" | "key" | "model" | "upstream" | "channel";
-  value: number;
-}
-
-export interface FlowLink {
-  source: string;
-  target: string;
-  requests: number;
-  tokens: number;
-  value: number;
-  cost_micro?: number;
-  charge_micro?: number;
-}
-
 /** 五段固定轴：后端 collapse 后只返回可见段，前端仍用完整表渲染轴名与恢复入口。 */
 export const FLOW_STAGES = [
   { id: "user", label: "用户" },
@@ -338,18 +180,6 @@ export const FLOW_STAGES = [
   { id: "upstream", label: "上游模型" },
   { id: "channel", label: "上游" },
 ] as const;
-
-export interface FlowReport {
-  metric: "requests" | "tokens";
-  nodes: string[];
-  node_meta: Record<string, FlowNodeMeta>;
-  links: FlowLink[];
-  stages: Array<{ id: string; label: string }>;
-  totals: { requests: number; tokens: number; cost_micro?: number; charge_micro?: number };
-  currency: string;
-  fx_missing: string[];
-  estimate_note: string;
-}
 
 /**
  * report 端点路径。lib/api.ts 的 ENDPOINTS 是唯一来源（ticket 07 约定），

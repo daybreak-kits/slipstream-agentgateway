@@ -14,7 +14,9 @@ import { usePermissions } from "@/lib/permissions";
 import { fmtMoney } from "./chart-format";
 import { useChartPalette, type ChartPalette } from "./chart-theme";
 import { flowSearchView } from "./flow-search";
-import { FLOW_STAGES, type FlowReport } from "./report-types";
+import type { FlowReportOut } from "@/generated/contract";
+
+import { FLOW_STAGES } from "./report-types";
 
 echarts.use([SankeyChart, TooltipComponent, CanvasRenderer]);
 
@@ -35,14 +37,14 @@ function shortLabel(value: string): string {
   return value.length <= 18 ? value : value.slice(0, 17) + "…";
 }
 
-function stageColor(id: string, data: FlowReport, palette: ChartPalette): string {
+function stageColor(id: string, data: FlowReportOut, palette: ChartPalette): string {
   const stage = data.node_meta[id]?.stage ?? "channel";
   const index = FLOW_STAGES.findIndex((item) => item.id === stage);
   return palette.series[(index < 0 ? 0 : index) % palette.series.length] ?? palette.primary;
 }
 
 export interface FlowChartProps {
-  data: FlowReport | undefined;
+  data: FlowReportOut | undefined;
   /** 当前被隐藏的阶段（竖轴）id 列表。 */
   hiddenStages: string[];
   onToggleStage: (stageId: string) => void;

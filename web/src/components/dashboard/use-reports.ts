@@ -1,5 +1,12 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
+import type {
+  FlowReportOut,
+  HeatmapReportOut,
+  LatencyReportOut,
+  ReportsOverviewOut,
+  TimeseriesReportOut,
+} from "@/generated/contract";
 import { api } from "@/lib/api";
 import { useMock } from "@/lib/mock";
 
@@ -8,14 +15,9 @@ import { timeWindowKey, timeWindowUsable, type TimeWindow } from "@/components/t
 import { mockFlow, mockHeatmap, mockLatency, mockOverview, mockRevisions, mockTimeseries } from "./report-mocks";
 import { normalizeTimeseries, REPORT_PATHS } from "./report-types";
 import type {
-  FlowReport,
   HealthReport,
   HeatmapMetric,
   HeatmapRange,
-  HeatmapReport,
-  LatencyReport,
-  RawTimeseriesReport,
-  ReportsOverview,
   RevisionLike,
   TimeseriesReport,
   TrendDimension,
@@ -52,7 +54,7 @@ export function useReportsOverview(window: TimeWindow) {
     queryKey: ["reports", "overview", ...timeWindowKey(window)],
     enabled: timeWindowUsable(window),
     placeholderData: keepPreviousData,
-    queryFn: async ({ signal }): Promise<ReportsOverview> => {
+    queryFn: async ({ signal }): Promise<ReportsOverviewOut> => {
       if (useMock) return mockOverview();
       const params = new URLSearchParams();
       if (window.kind === "custom") {
@@ -60,7 +62,7 @@ export function useReportsOverview(window: TimeWindow) {
         params.set("to_ms", String(window.toMs));
       }
       const query = params.toString();
-      return api.get<ReportsOverview>(REPORT_PATHS.overview + (query ? "?" + query : ""), { signal });
+      return api.get<ReportsOverviewOut>(REPORT_PATHS.overview + (query ? "?" + query : ""), { signal });
     },
   });
 }
@@ -83,12 +85,12 @@ export function useReportsTimeseries({ window, dimension, metric, enabled = true
     enabled: enabled && timeWindowUsable(window),
     placeholderData: keepPreviousData,
     queryFn: async ({ signal }): Promise<TimeseriesReport> => {
-      if (useMock) return mockTimeseries(window, dimension, metric);
+      if (useMock) return normalizeTimeseries(mockTimeseries(window, dimension, metric), metric);
       const params = windowParams(window);
       params.set("dimension", dimension);
       if (metric === "money") params.set("metrics", "cost_micro,charge_micro");
       else params.set("metric", metric);
-      const raw = await api.get<RawTimeseriesReport>(REPORT_PATHS.timeseries + "?" + params.toString(), {
+      const raw = await api.get<TimeseriesReportOut>(REPORT_PATHS.timeseries + "?" + params.toString(), {
         signal,
       });
       return normalizeTimeseries(raw, metric);
@@ -102,9 +104,9 @@ export function useReportsLatency(window: TimeWindow) {
     queryKey: ["reports", "latency", ...timeWindowKey(window)],
     enabled: timeWindowUsable(window),
     placeholderData: keepPreviousData,
-    queryFn: async ({ signal }): Promise<LatencyReport> => {
+    queryFn: async ({ signal }): Promise<LatencyReportOut> => {
       if (useMock) return mockLatency(window);
-      return api.get<LatencyReport>(REPORT_PATHS.latency + "?" + windowParams(window).toString(), { signal });
+      return api.get<LatencyReportOut>(REPORT_PATHS.latency + "?" + windowParams(window).toString(), { signal });
     },
   });
 }
@@ -114,10 +116,10 @@ export function useReportsHeatmap(range: HeatmapRange, metric: HeatmapMetric) {
   return useQuery({
     queryKey: ["reports", "heatmap", range, metric],
     placeholderData: keepPreviousData,
-    queryFn: async ({ signal }): Promise<HeatmapReport> => {
+    queryFn: async ({ signal }): Promise<HeatmapReportOut> => {
       if (useMock) return mockHeatmap(range, metric);
       const params = new URLSearchParams({ range, metric });
-      return api.get<HeatmapReport>(REPORT_PATHS.heatmap + "?" + params.toString(), { signal });
+      return api.get<HeatmapReportOut>(REPORT_PATHS.heatmap + "?" + params.toString(), { signal });
     },
   });
 }
@@ -153,15 +155,15 @@ export function useReportsFlow({
     queryKey: ["reports", "flow", ...timeWindowKey(window), metric, narrowedKey],
     enabled: enabled && timeWindowUsable(window),
     placeholderData: keepPreviousData,
-    queryFn: async ({ signal }): Promise<FlowReport> => {
-      if (useMock) return mockFlow(metric, collapse, { focus, q, topN });
+    queryFn: async ({ signal }): Promise<FlowReportOut> => {
+      if (useMock) return mockFlow(metric, collapse, { focus, q, topN }, window);
       const params = windowParams(window);
       params.set("metric", metric);
       if (hidden) params.set("collapse", hidden);
       if (focus.trim()) params.set("focus", focus.trim());
       if (q.trim()) params.set("q", q.trim());
       if (topN > 0) params.set("top_n", String(topN));
-      return api.get<FlowReport>(REPORT_PATHS.flow + "?" + params.toString(), { signal });
+      return api.get<FlowReportOut>(REPORT_PATHS.flow + "?" + params.toString(), { signal });
     },
   });
 }

@@ -6,7 +6,9 @@ import { usePermissions } from "@/lib/permissions";
 
 import { ChartCard } from "./chart-card";
 import { fmtMoney } from "./chart-format";
-import { HEATMAP_METRICS, HEATMAP_RANGES, heatmapMetricLabel, type HeatmapMetric, type HeatmapRange, type HeatmapRow } from "./report-types";
+import type { HeatmapRowOut } from "@/generated/contract";
+
+import { HEATMAP_METRICS, HEATMAP_RANGES, heatmapMetricLabel, type HeatmapMetric, type HeatmapRange } from "./report-types";
 import { useReportsHeatmap } from "./use-reports";
 
 const CHIP =
@@ -73,7 +75,7 @@ interface RowAccumulator {
   values: number[];
 }
 
-function foldRows(rows: HeatmapRow[], groupKeyOf: (date: Date) => string): AggregatedRow[] {
+function foldRows(rows: HeatmapRowOut[], groupKeyOf: (date: Date) => string): AggregatedRow[] {
   const groups = new Map<string, RowAccumulator>();
   const order: string[] = [];
   for (const row of rows) {
@@ -108,7 +110,7 @@ function foldRows(rows: HeatmapRow[], groupKeyOf: (date: Date) => string): Aggre
 }
 
 /** 30D：按周一开端的自然周折叠，行标签如「11/17–11/23」（覆盖不满一周时截到窗口）。 */
-function aggregateWeeks(rows: HeatmapRow[]): AggregatedRow[] {
+function aggregateWeeks(rows: HeatmapRowOut[]): AggregatedRow[] {
   return foldRows(rows, (date) => {
     const monday = mondayOf(date);
     return `week:${isoDate(monday)}`;
@@ -116,7 +118,7 @@ function aggregateWeeks(rows: HeatmapRow[]): AggregatedRow[] {
 }
 
 /** 365D：按自然月折叠，行标签如「11月」；跨年窗口里去年的月份带年份前缀防重复。 */
-function aggregateMonths(rows: HeatmapRow[]): AggregatedRow[] {
+function aggregateMonths(rows: HeatmapRowOut[]): AggregatedRow[] {
   const lastYear = parseRowDate(rows[rows.length - 1]?.key ?? "")?.getFullYear();
   const folded = foldRows(rows, (date) => `month:${date.getFullYear()}-${date.getMonth() + 1}`);
   return folded.map((row) => {

@@ -26,6 +26,7 @@ from l04_repo.orm import AppSettingORM, AuditLogORM, ConfigRevisionORM
 from l04_repo.repository import get_setting, put_setting
 from l05_service import auth, settings_schema, status_notice
 from l06_api.deps import current_principal, get_adapter, require, session_of
+from l06_api.report_schemas import ReportsOverviewOut
 from l06_api.routers_config import _body as revision_body
 from l06_api.routers_reports import overview as reports_overview
 from l06_api.schemas import ConfigRevisionOut, SettingsSchemaOut
@@ -223,7 +224,11 @@ def latest_revision(session: Session = Depends(session_of)) -> ConfigRevisionOut
     return revision_body(row)
 
 
-@router.get("/admin/overview", dependencies=[Depends(require("reports:read"))])
+@router.get(
+    "/admin/overview",
+    response_model=ReportsOverviewOut,
+    dependencies=[Depends(require("reports:read"))],
+)
 def admin_overview(
     session: Session = Depends(session_of),
     principal: auth.Principal = Depends(require("reports:read")),
