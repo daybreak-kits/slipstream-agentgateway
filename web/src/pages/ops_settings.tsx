@@ -28,13 +28,8 @@ import { ACTION_ICONS } from "@/lib/icons";
 import { usePermissions } from "@/lib/permissions";
 import { useDirtyFields } from "@/lib/use-dirty-fields";
 import { useDirtyGuard } from "@/lib/use-dirty-guard";
-import {
-  CONNECTION_QUERY_KEY,
-  effectiveBaseUrl,
-  defaultBaseUrl,
-  useConnection,
-  validateBaseUrl,
-} from "@/lib/settings-ia";
+import { CONNECTION_QUERY_KEY, useConnection, validateBaseUrl } from "@/lib/settings-ia";
+import { defaultBaseUrl, effectiveBaseUrl, formatPort, isDataPlaneEnabled } from "@/lib/url";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/layout/page-header";
 
@@ -168,7 +163,7 @@ function FieldTile({ field, value, missing, canWrite }: {
   );
 }
 
-/** 运营设置·连接地址：默认浏览器 host + 3600，可改公网地址，所有用户共用。 */
+/** 运营设置·连接地址：默认浏览器 host + 适配器契约端口，可改公网地址，所有用户共用。 */
 function ConnectionSection({ canWrite }: { canWrite: boolean }) {
   const queryClient = useQueryClient();
   const connection = useConnection();
@@ -207,9 +202,15 @@ function ConnectionSection({ canWrite }: { canWrite: boolean }) {
     <>
     <SettingsGrid>
       <SettingsTile title="当前生效地址" hint="客户只能读，不能改。" className="md:col-span-3 xl:col-span-2">
-        <p className="break-all font-mono text-2sm text-title">{address}</p>
+        <p className="break-all font-mono text-2sm text-title">{connection.isPending ? "读取中…" : address}</p>
         <p className="text-2xs text-faint">
-          {connection.data?.configured ? "来源：运营设置显式配置" : "来源：浏览器当前 host + " + (connection.data?.default_port ?? 3600) + " 端口"}
+          {connection.isPending
+            ? "读取连接设置…"
+            : connection.data?.configured
+              ? "来源：运营设置显式配置"
+              : isDataPlaneEnabled(connection.data)
+                ? "来源：浏览器当前 host + " + formatPort(connection.data?.default_port) + " 端口（由适配器契约提供）"
+                : "来源：数据面端口由适配器契约提供（当前未启用）"}
         </p>
         {connection.data?.updated_at && (
           <p className="text-2xs text-faint">更新于 {fmtMs(Date.parse(connection.data.updated_at))}</p>
@@ -217,7 +218,7 @@ function ConnectionSection({ canWrite }: { canWrite: boolean }) {
       </SettingsTile>
       <SettingsTile
         title="公网连接地址"
-        hint="留空 = 自动取浏览器当前 host + 3600；保存后所有用户共用。必须 http(s) 且带主机名，不能含账号密码/查询参数/锚点。"
+        hint="留空 = 自动取浏览器当前 host + 适配器契约提供的数据面端口；保存后所有用户共用。必须 http(s) 且带主机名，不能含账号密码/查询参数/锚点。"
         action={<Badge tone={connection.data?.configured ? "success" : "neutral"}>{connection.data?.configured ? "已配置" : "自动"}</Badge>}
         className="md:col-span-3 xl:col-span-3"
       >
@@ -231,7 +232,11 @@ function ConnectionSection({ canWrite }: { canWrite: boolean }) {
               <div className="space-y-1.5">
                 <Input
                   className="h-8 font-mono"
-                  placeholder={defaultBaseUrl(connection.data?.default_port ?? 3600)}
+                  placeholder={
+                    isDataPlaneEnabled(connection.data)
+                      ? defaultBaseUrl(connection.data?.default_port)
+                      : "https://gateway.example.com"
+                  }
                   value={value}
                   disabled={!canWrite}
                   onChange={(event) => {
@@ -263,9 +268,14 @@ function ConnectionSection({ canWrite }: { canWrite: boolean }) {
           </>
         )}
       </SettingsTile>
-      <SettingsTile title="端口约定" hint="数据面固定 3600，控制面固定 3700；本设置只影响展示给用户的接入地址。" className="md:col-span-3 xl:col-span-6">
+      <SettingsTile
+        title="端口约定"
+        hint="数据面端口由适配器契约提供；本设置只影响展示给用户的接入地址。"
+        className="md:col-span-3 xl:col-span-6"
+      >
         <p className="text-2xs text-faint">
-          默认值不落库：控制面只在显式配置公网地址时写入 gateway_base_url。清空配置即回到「浏览器当前 host + 3600」，
+          默认值不落库：控制面只在显式配置公网地址时写入 gateway_base_url。清空配置即回到「浏览器当前 host + 适配器契约提供的端口」；
+          端口为 0 或缺失表示数据面未启用（外部数据面），页面不会生成 host:0。
           同一份设置被连接密钥页、概览页与客户端配置示例统一读取。
         </p>
       </SettingsTile>

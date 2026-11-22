@@ -52,6 +52,21 @@ export function parametersOf(row: { parameters?: ModelParameters }): ModelParame
   return { ...DEFAULT_PARAMETERS, ...(row.parameters ?? {}) };
 }
 
+/**
+ * 切换声明的思考档位（W8 票06）：上游模型只声明能力，默认档由公开模型/模型试验决定。
+ * 默认档不在抽屉里编辑，但取消勾选当前默认档时必须一并清空——后端校验
+ * default_reasoning_level 必须属于 reasoning_levels（api/src/l05_service/model_params.py）。
+ */
+export function toggleReasoningLevel(parameters: ModelParameters, level: string): ModelParameters {
+  const declared = parameters.reasoning_levels ?? [];
+  const next = declared.includes(level)
+    ? declared.filter((item) => item !== level)
+    : [...declared, level];
+  const currentDefault = parameters.default_reasoning_level ?? "";
+  const defaultLevel = currentDefault !== "" && next.includes(currentDefault) ? currentDefault : "";
+  return { ...parameters, reasoning_levels: next, default_reasoning_level: defaultLevel };
+}
+
 /** 参数列只显示输入/输出上限（W7 t09 · D9）：0 = 未声明 → 明确写「未配置」，不留空也不画成输入框。 */
 export const PARAM_MISSING = "未配置";
 
