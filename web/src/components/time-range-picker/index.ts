@@ -10,6 +10,7 @@ export {
   nextDayStartMs,
   startOfMonthMs,
   startOfWeekMs,
+  timeWindowEquals,
   timeWindowKey,
   timeWindowLabel,
   timeWindowUsable,
