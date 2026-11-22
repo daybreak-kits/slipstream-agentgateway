@@ -100,7 +100,9 @@ def _scoped_users(session: Session, principal: auth.Principal) -> list[UserORM]:
         if not visible:
             return []
         stmt = stmt.where(UserORM.id.in_(visible))
-    rows = list(session.scalars(stmt).all())
+    rows = [
+        row for row in session.scalars(stmt).all() if not user_tree.is_system_user(row)
+    ]
     tree = user_tree.snapshot(session)
     return sorted(
         rows, key=lambda row: (tree["nodes"][row.id]["depth"], row.created_at_ms, row.id)

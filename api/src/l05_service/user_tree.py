@@ -31,6 +31,12 @@ if TYPE_CHECKING:
     from l05_service.auth import Principal
 
 ROOT_USER_NAME = "D"
+SYSTEM_USER_NAME = "playground"
+
+
+def is_system_user(row: UserORM) -> bool:
+    """Internal identities have no login name and must stay out of user management."""
+    return row.name == SYSTEM_USER_NAME and not row.username
 
 
 # ---------------------------------------------------------------- root
@@ -118,7 +124,7 @@ def descendants(session: Session, root_id: str) -> list[UserORM]:
 
 def snapshot(session: Session) -> dict:
     """Tree metrics for the whole table: depth, direct children, subtree size."""
-    rows = session.scalars(select(UserORM)).all()
+    rows = [row for row in session.scalars(select(UserORM)).all() if not is_system_user(row)]
     by_id = {row.id: row for row in rows}
     children = {row.id: 0 for row in rows}
     sizes = {row.id: 1 for row in rows}

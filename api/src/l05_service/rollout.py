@@ -24,6 +24,7 @@ from l03_adapters.spi import ApplyResult, DataPlaneAdapter, DataPlaneStatus, mak
 from l04_repo.orm import ConfigRevisionORM
 from l04_repo.repository import REVISION_REPO, put_setting
 from l05_service import rendering
+from l05_service.playground_identity import ensure_playground_identity
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,9 @@ class Rollout:
         try:
             session = self._session
             adapter = self._adapter
+            # The Playground internal key must exist in the rendered config on a fresh
+            # install; creating it lazily on first use would 401 until the next apply.
+            ensure_playground_identity(session)
             plan = rendering.build_render_plan(session, revision=revision, adapter=adapter)
             ir, credentials = plan
             # S3: the driver's own validate() is part of the SPI contract, so the apply

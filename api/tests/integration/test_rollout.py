@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from tests.conftest import seed_channel
 
 from l02_domain.ir import GatewayIR
@@ -14,7 +16,9 @@ from l03_adapters.spi import (
     ValidationResult,
     make_artifact,
 )
-from l04_repo.orm import ConfigRevisionORM
+from l04_repo.orm import ApiKeyORM, ConfigRevisionORM, UserORM
+from l04_repo.repository import get_setting
+from l05_service.rendering import build_render_plan
 from l05_service.rollout import RevisionStatus, Rollout
 
 
@@ -168,3 +172,30 @@ def test_status_and_history_expose_the_active_revision(engine_and_sessionmaker):
         assert snapshot.active_revision is not None
         assert snapshot.active_revision.id == "rev_active"
         assert [row.id for row in rollout.history(limit=2)] == ["rev_active", "rev_old"]
+
+def test_first_apply_bootstraps_playground_identity(engine_and_sessionmaker):
+    """A fresh install must render the Playground key in its first config apply.
+
+    Before this test, the key was created lazily on the first Playground request,
+    after apply had already rendered the AG config; that request then hit an AG
+    401. The key now joins the apply transaction and the rendered IR.
+    """
+    engine, factory = engine_and_sessionmaker
+    seed_channel(engine, factory)
+    adapter = _ScriptedAdapter(ApplyResult(ok=True))
+    with factory() as session:
+        assert get_setting(session, "playground_user_id") is None
+        row = Rollout(session, adapter).apply("tester")
+        assert row is not None and row.status == RevisionStatus.ACTIVE
+        session.commit()
+
+        meta = json.loads(get_setting(session, "playground_user_id") or "{}")
+        key = session.get(ApiKeyORM, meta.get("key_id", ""))
+        user = session.get(UserORM, meta.get("id", ""))
+        assert key is not None and key.status == "active"
+        assert user is not None and user.name == "playground"
+
+        ir, _credentials = build_render_plan(
+            session, revision="rev_playground_check", adapter=adapter
+        )
+        assert key.key_hash in {spec.key_hash for spec in ir.api_keys}

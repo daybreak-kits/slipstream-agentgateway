@@ -107,13 +107,19 @@ npm run dev
 
 ### 数据面（可选）
 
-控制面只渲染配置，不启动 agentgateway。只有需要真实客户端流量（默认端口 3600）时才单独运行 pinned AG：
+控制面只渲染配置，不启动 agentgateway。只有需要真实客户端流量（默认端口 3600）时才单独运行 pinned AG。用仓库脚本启动，它会为 AG 注入 `SSL_CERT_FILE`（指向 api venv 的 certifi 根证书），否则连接真实 HTTPS 上游时在 Windows 可能报 `UnknownIssuer` 并返回 503：
 
-```bash
-agentgateway -f api/.data_store/ag-config/config.yaml
+```powershell
+powershell -ExecutionPolicy Bypass -File ops/start-data-plane.ps1
+# 只检查证书路径，不启动 AG：
+powershell -ExecutionPolicy Bypass -File ops/start-data-plane.ps1 -CheckOnly
 ```
 
-配置由管理台「保存并下发」写出；以配置目录为 cwd 启动（配置里的相对路径按配置文件所在目录解析）。只调控制面/管理台时可跳过。
+```bash
+ops/start-data-plane.sh
+```
+
+配置由管理台「保存并下发」写出；脚本会以配置目录为 cwd 启动（配置里的相对路径按配置文件所在目录解析）。只调控制面/管理台时可跳过。
 
 ### 环境排错
 

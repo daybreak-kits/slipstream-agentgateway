@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-
 import httpx
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
@@ -12,9 +10,7 @@ from sqlalchemy.orm import Session
 
 from l01_core.crypto import AesGcmBox
 from l01_core.errors import AppError, ErrorCode
-from l01_core.ids import new_id
 from l01_core.settings import get_settings
-from l01_core.timeutil import now_ms
 from l03_adapters.spi import DataPlaneAdapter
 from l04_repo.orm import (
     ApiKeyORM,
@@ -26,8 +22,7 @@ from l04_repo.orm import (
     UpstreamModelORM,
     UserORM,
 )
-from l04_repo.repository import get_setting, put_setting
-from l05_service import auth, client_keys, log_facts, log_query
+from l05_service import auth, log_facts, log_query
 from l05_service.attempts import (
     AttemptChainSummary,
     attempt_summaries,
@@ -35,6 +30,7 @@ from l05_service.attempts import (
     resolve_attempt_upstream_facts,
 )
 from l05_service.models_dev import user_model_parameters
+from l05_service.playground_identity import ensure_playground_identity
 from l06_api.deps import get_adapter, page_params, require, session_of
 from l06_api.playground import (
     REGISTERED_OUTPUT_CAP_FIELDS,
@@ -493,40 +489,6 @@ def log_detail(
 # ---------------------------------------------------------------- playground
 
 
-def _playground_identity(session: Session) -> ApiKeyORM:
-    """Ensure the playground system user + its internal key exist; return the key.
-
-    The plaintext never persists: it is decrypted from key_enc per request and
-    used server-side to call the configured data plane (admin-only, low
-    frequency).
-    """
-    settings = get_settings()
-    stored = get_setting(session, "playground_user_id")
-    if stored:
-        try:
-            meta = json.loads(stored)
-        except json.JSONDecodeError:
-            meta = {}
-        key = session.get(ApiKeyORM, meta.get("key_id", ""))
-        user = session.get(UserORM, meta.get("id", ""))
-        if key is not None and user is not None and key.status == "active":
-            return key
-    user = UserORM(id=new_id("user"), name="playground", created_at_ms=now_ms())
-    session.add(user)
-    session.flush()
-    issued = client_keys.issue_client_key(
-        session, user_id=user.id, box=AesGcmBox(settings.secret_key)
-    )
-    put_setting(
-        session,
-        "playground_user_id",
-        json.dumps({"id": user.id, "key_id": issued.key_id}),
-        now_ms(),
-    )
-    session.commit()
-    return session.get(ApiKeyORM, issued.key_id)
-
-
 def _registered_max_output_tokens(session: Session, model: str) -> int | None:
     """所选模型（公开模型名）登记的 max_output_tokens；未登记/未声明返回 None.
 
@@ -568,7 +530,7 @@ async def playground_stream(
                     details={"model": payload.model, "field": field, "registered": registered},
                 )
     settings = get_settings()
-    key = _playground_identity(session)
+    key, _created = ensure_playground_identity(session, commit=True)
     plaintext = AesGcmBox(settings.secret_key).decrypt(key.key_enc)
     contract = adapter.client_contract()
     endpoint = contract.endpoint_for("chat.completions")
