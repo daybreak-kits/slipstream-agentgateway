@@ -141,7 +141,8 @@ export function LoginPage() {
             三层寻址、请求内重试与健康驱逐、双账本计费：一个控制面管住从入口到上游的每一步。
           </p>
           <RequestChain className="mt-8 max-w-xl" />
-          <p className="mt-10 font-mono text-2xs text-faint">SLIPSTREAM · 控制面 :3700 · 数据面 :3600</p>
+          {/* 数据面端口由适配器契约提供（ADR-029），登录页无连接数据，只保留控制面端口。 */}
+          <p className="mt-10 font-mono text-2xs text-faint">SLIPSTREAM · 控制面 :3700</p>
         </section>
 
         {/* 登录框三档：基础 384 / md 460 / 2xl 576；m-auto 让矮视口顶对齐、高视口垂直居中。

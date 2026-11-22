@@ -29,6 +29,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { HoverInfo } from "@/components/ui/hover-info";
 import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { StatusIcon } from "@/components/ui/status-icon";
@@ -842,12 +843,26 @@ function PublicTab() {
     {
       key: "routing",
       label: "策略",
-      cell: (row) => (
-        <div>
-          <Badge tone="primary">{ROUTING_LABELS[row.routing_mode].label}</Badge>
-          <div className="mt-1 max-w-64 text-2xs text-faint">{ROUTING_LABELS[row.routing_mode].desc}</div>
-        </div>
-      ),
+      // W8 票06：列里只留徽章；长解释进统一悬浮详情（hover/键盘/触屏三路可读），
+      // 不再用第二行说明撑高表格行。
+      cell: (row) => {
+        const routing = ROUTING_LABELS[row.routing_mode];
+        return (
+          <HoverInfo
+            side="top"
+            align="start"
+            label={"策略说明：" + routing.label}
+            content={
+              <div className="space-y-1">
+                <div className="font-medium">{routing.label}</div>
+                <div>{routing.desc}</div>
+              </div>
+            }
+          >
+            <Badge tone="primary">{routing.label}</Badge>
+          </HoverInfo>
+        );
+      },
     },
     {
       key: "members",

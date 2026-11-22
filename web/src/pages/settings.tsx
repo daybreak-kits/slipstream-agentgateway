@@ -19,14 +19,8 @@ import { Textarea } from "@/components/ui/textarea";
 
 import { AUTH_ME_QUERY_KEY, fetchMe } from "@/lib/auth";
 import { usePermissions } from "@/lib/permissions";
-import {
-  useConnection,
-  usePreferencesSync,
-  useSavePreferences,
-  useSaveProfile,
-  effectiveBaseUrl,
-  defaultBaseUrl,
-} from "@/lib/settings-ia";
+import { useConnection, usePreferencesSync, useSavePreferences, useSaveProfile } from "@/lib/settings-ia";
+import { PORT_DISABLED_LABEL, defaultBaseUrl, effectiveBaseUrl, isDataPlaneEnabled, isPortEnabled } from "@/lib/url";
 import { useTheme, type Theme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { controlPlane } from "@/lib/control-plane";
@@ -292,7 +286,9 @@ function ConnectionKeysSection() {
   const { can } = usePermissions();
   const connection = useConnection();
   const address = effectiveBaseUrl(connection.data);
-  const baseUrl = address + "/v1";
+  // 端口 0/缺失 = 数据面未启用（外部数据面）：不拼 /v1，也不提供会复制出 host:0 的按钮。
+  const dataPlaneEnabled = isDataPlaneEnabled(connection.data);
+  const baseUrl = dataPlaneEnabled ? address + "/v1" : address;
   const canReadKeys = can("apikeys:read");
   const keys = useQuery({
     queryKey: ["api-keys", "settings"],
@@ -312,24 +308,51 @@ function ConnectionKeysSection() {
     <SettingsGrid>
       <SettingsTile
         title="统一连接地址"
-        hint={connection.data?.configured ? "来自运营设置，所有用户共用" : "未配置，默认浏览器当前 host + 3600 端口"}
-        action={<Badge tone={connection.data?.configured ? "info" : "neutral"}>{connection.data?.configured ? "已配置" : "默认"}</Badge>}
+        hint={
+          connection.isPending
+            ? "读取连接设置…"
+            : connection.data?.configured
+              ? "来自运营设置，所有用户共用"
+              : dataPlaneEnabled
+                ? "未配置，浏览器当前 host + 适配器契约端口"
+                : "未配置，数据面端口由适配器契约提供（当前未启用）"
+        }
+        action={
+          <Badge tone={connection.data?.configured ? "info" : "neutral"}>
+            {connection.data?.configured ? "已配置" : dataPlaneEnabled ? "默认" : "未启用"}
+          </Badge>
+        }
         className="md:col-span-3 xl:col-span-2"
       >
-        <p className="break-all font-mono text-2sm text-title">{address}</p>
+        <p className="break-all font-mono text-2sm text-title">{connection.isPending ? "读取中…" : address}</p>
         <div className="flex gap-1.5">
-          <Button variant="outline" size="sm" onClick={() => void copyText(address, "连接地址")}>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={connection.isPending || !dataPlaneEnabled}
+            onClick={() => void copyText(address, "连接地址")}
+          >
             <Copy className="h-3.5 w-3.5" />
             复制
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => void copyText(defaultBaseUrl(), "默认地址")}>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={connection.isPending || !isPortEnabled(connection.data?.default_port)}
+            onClick={() => void copyText(defaultBaseUrl(connection.data?.default_port), "默认地址")}
+          >
             默认地址
           </Button>
         </div>
       </SettingsTile>
       <SettingsTile title="Base URL" hint="OpenAI 兼容客户端填这个地址。" className="md:col-span-3 xl:col-span-2">
-        <p className="break-all font-mono text-2sm text-title">{baseUrl}</p>
-        <Button variant="outline" size="sm" onClick={() => void copyText(baseUrl, "Base URL")}>
+        <p className="break-all font-mono text-2sm text-title">{connection.isPending ? "读取中…" : baseUrl}</p>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={connection.isPending || !dataPlaneEnabled}
+          onClick={() => void copyText(baseUrl, "Base URL")}
+        >
           <Copy className="h-3.5 w-3.5" />
           复制
         </Button>
@@ -366,13 +389,23 @@ function ConnectionKeysSection() {
         )}
       </SettingsTile>
       <SettingsTile title="接入示例" hint="把占位密钥换成你的连接密钥。" className="md:col-span-3 xl:col-span-6">
-        <pre className="overflow-x-auto rounded-md border border-border bg-surface-2 p-2 text-2xs leading-5">
-          <code className="font-mono text-body">{curlSample}</code>
-        </pre>
-        <Button variant="outline" size="sm" className="self-start" onClick={() => void copyText(curlSample, "接入示例")}>
-          <Copy className="h-3.5 w-3.5" />
-          复制
-        </Button>
+        {connection.isPending ? (
+          <Skeleton className="h-16 w-full" />
+        ) : dataPlaneEnabled ? (
+          <>
+            <pre className="overflow-x-auto rounded-md border border-border bg-surface-2 p-2 text-2xs leading-5">
+              <code className="font-mono text-body">{curlSample}</code>
+            </pre>
+            <Button variant="outline" size="sm" className="self-start" onClick={() => void copyText(curlSample, "接入示例")}>
+              <Copy className="h-3.5 w-3.5" />
+              复制
+            </Button>
+          </>
+        ) : (
+          <p className="text-2xs text-faint">
+            {PORT_DISABLED_LABEL}：数据面端口由适配器契约提供，配置公网连接地址后可复制完整示例。
+          </p>
+        )}
       </SettingsTile>
     </SettingsGrid>
   );
