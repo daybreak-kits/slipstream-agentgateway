@@ -12,6 +12,7 @@ RUN cd web && npm run build
 FROM python:3.12-slim AS runtime
 ARG AG_VERSION=1.7.0
 ARG AG_ARCH=amd64
+ARG AGENTGATEWAY_DOWNLOAD_URL=""
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/api/src \
@@ -22,8 +23,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && curl -fsSL -o /usr/local/bin/agentgateway \
-       "https://github.com/agentgateway/agentgateway/releases/download/v${AG_VERSION}/agentgateway-linux-${AG_ARCH}" \
+    && url="${AGENTGATEWAY_DOWNLOAD_URL:-https://github.com/agentgateway/agentgateway/releases/download/v${AG_VERSION}/agentgateway-linux-${AG_ARCH}}" \
+    && (curl -fL --retry 1 --connect-timeout 8 --max-time 90 -o /usr/local/bin/agentgateway "$url" \
+        || curl -fL --retry 3 --connect-timeout 10 --max-time 300 -o /usr/local/bin/agentgateway "https://cdn.gh-proxy.org/$url") \
     && chmod 0755 /usr/local/bin/agentgateway \
     && /usr/local/bin/agentgateway --version
 

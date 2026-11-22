@@ -21,6 +21,7 @@ services:
       context: .
       args:
         AG_VERSION: ${AG_VERSION:-1.7.0}
+        AGENTGATEWAY_DOWNLOAD_URL: ${AGENTGATEWAY_DOWNLOAD_URL:-}
     image: slipstream-agentgateway:local
     pull_policy: build
     restart: unless-stopped
