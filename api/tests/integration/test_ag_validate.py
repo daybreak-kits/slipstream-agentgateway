@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from l03_adapters.agentgateway.ca_bundle import ensure_ca_bundle
+
 FIXTURE = Path(__file__).parents[1] / "contract" / "fixtures" / "ag_1_7_full_config.yaml"
 DEFAULT_BINARY = Path("C:/Users/microsoft/agentgateway/agentgateway.exe")
 
@@ -37,6 +39,7 @@ def _run_validate(config_text: str, tmp_path: Path) -> subprocess.CompletedProce
     (tmp_path / "keys").mkdir()
     for key_file in ("ups_a.key", "ups_b.key"):
         (tmp_path / "keys" / key_file).write_text("test-key\n", encoding="utf-8")
+    ensure_ca_bundle(str(tmp_path))
     (tmp_path / "config.yaml").write_text(config_text, encoding="utf-8")
     return subprocess.run(
         [binary, "--validate-only", "-f", "config.yaml"],

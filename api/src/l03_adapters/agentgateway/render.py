@@ -54,6 +54,7 @@ from l02_domain.ir import (
     sort_targets,
 )
 from l03_adapters.agentgateway import telemetry
+from l03_adapters.agentgateway.ca_bundle import CA_BUNDLE_RELATIVE_PATH
 from l03_adapters.agentgateway.deployment import get_deployment
 from l03_adapters.agentgateway.transforms import compile_transforms
 from l03_adapters.spi import Artifact, make_artifact
@@ -253,10 +254,13 @@ def _render_health(health) -> dict:
 
 
 def _render_model_tls(upstream) -> dict | None:
-    """https upstreams render llm.models[].tls.hostname (E17 TLS finding).
+    """https upstreams render llm.models[].tls (E17 TLS finding).
 
     The pinned 1.7 TLS dial needs the SNI/verification hostname explicitly;
     full-form used backendTLS.hostname, the hybrid model surface uses tls.
+    root is a config-relative CA bundle materialized by the adapter: the
+    pinned binary does not use the Windows system store, so a real HTTPS
+    upstream otherwise fails with UnknownIssuer.
     """
     parts = urlsplit(upstream.base_url)
     if parts.scheme != "https":
@@ -266,7 +270,7 @@ def _render_model_tls(upstream) -> dict | None:
             f"上游 {upstream.id} base_url 缺少 host，无法渲染 tls.hostname: "
             f"{upstream.base_url!r}"
         )
-    return {"hostname": parts.hostname}
+    return {"hostname": parts.hostname, "root": CA_BUNDLE_RELATIVE_PATH}
 
 
 def _render_route_retry(ir: GatewayIR) -> list[dict]:

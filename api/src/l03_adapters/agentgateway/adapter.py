@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from typing import Any
 
@@ -11,6 +12,7 @@ from l02_domain.validation import ValidationResult, validate_gateway_ir
 from l03_adapters.agentgateway import credentials
 from l03_adapters.agentgateway.apply import ConfigApplier
 from l03_adapters.agentgateway.binary_validate import build_validator
+from l03_adapters.agentgateway.ca_bundle import ensure_ca_bundle
 from l03_adapters.agentgateway.render import render_artifact
 from l03_adapters.agentgateway.transforms import (
     compile_transforms,
@@ -42,6 +44,8 @@ from l03_adapters.spi import (
 )
 
 DEFAULT_MAX_BUFFER_BYTES = 2097152
+
+logger = logging.getLogger(__name__)
 
 
 def validate_agentgateway_ir(ir: GatewayIR) -> ValidationResult:
@@ -367,6 +371,10 @@ class AgentgatewayAdapter:
         return render_artifact(ir, llm_port=self._llm_port)
 
     def apply(self, artifact: Artifact) -> ApplyResult:
+        try:
+            ensure_ca_bundle(self._config_dir)
+        except OSError:
+            logger.warning("certifi CA bundle 写入失败；真实 HTTPS 上游可能无法校验", exc_info=True)
         return self._applier.apply(artifact)
 
     def status(self) -> DataPlaneStatus:
@@ -392,6 +400,10 @@ class AgentgatewayAdapter:
         )
 
     def rollback(self, revision_id: str) -> ApplyResult:
+        try:
+            ensure_ca_bundle(self._config_dir)
+        except OSError:
+            logger.warning("certifi CA bundle 写入失败；真实 HTTPS 上游可能无法校验", exc_info=True)
         return self._applier.rollback(revision_id)
 
     # --- W6 ticket 01 ports ------------------------------------------------

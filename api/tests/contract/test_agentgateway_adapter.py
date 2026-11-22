@@ -170,6 +170,16 @@ def test_render_rejects_unmapped_api_style(adapter: AgentgatewayAdapter) -> None
         adapter.render(ir)
 
 
+def test_apply_materializes_config_relative_tls_ca_bundle(
+    adapter: AgentgatewayAdapter, config_dir: Path
+) -> None:
+    result = adapter.apply(adapter.render(_ir()))
+    assert result.ok
+    ca = config_dir / "ca" / "certifi-ca.pem"
+    assert ca.is_file() and ca.stat().st_size > 0
+    assert "root: \"ca/certifi-ca.pem\"" in _config_text(config_dir)
+
+
 def test_apply_then_status_reports_applied_hash(
     adapter: AgentgatewayAdapter, config_dir: Path
 ) -> None:
@@ -183,7 +193,11 @@ def test_apply_then_status_reports_applied_hash(
     assert "matches" in status.detail
     assert adapter.health().healthy is True
     # §4: apply is atomic - no stray temp files may survive.
-    assert sorted(path.name for path in config_dir.iterdir()) == ["config.yaml", "config.yaml.hash"]
+    assert sorted(path.name for path in config_dir.iterdir()) == [
+        "ca",
+        "config.yaml",
+        "config.yaml.hash",
+    ]
 
 
 def test_apply_write_failure_keeps_previous_config(

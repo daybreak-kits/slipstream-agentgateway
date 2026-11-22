@@ -37,6 +37,7 @@ llm:
         model: "glm-5.3"
       tls:
         hostname: api.example.com
+        root: "ca/certifi-ca.pem"
       health:
         unhealthyExpression: "response.code >= 400"
         eviction:
@@ -69,6 +70,7 @@ llm:
         model: "claude-sonnet-4-5"
       tls:
         hostname: api.anthropic.com
+        root: "ca/certifi-ca.pem"
       health:
         unhealthyExpression: "response.code >= 400"
         eviction:

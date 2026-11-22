@@ -514,7 +514,10 @@ def test_https_models_render_tls_hostname_and_policy_health():
     )
     cfg = render_config(ir, 3600)
     for model in cfg["llm"]["models"]:
-        assert model["tls"] == {"hostname": "api.example.com"}
+        assert model["tls"] == {
+            "hostname": "api.example.com",
+            "root": "ca/certifi-ca.pem",
+        }
         assert model["health"] == {
             "unhealthyExpression": "response.code >= 400",
             "eviction": {"consecutiveFailures": 1},

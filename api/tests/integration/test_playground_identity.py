@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from l04_repo.orm import ApiKeyORM, UserORM
-from l05_service.playground_identity import SETTING_KEY, ensure_playground_identity
 from l04_repo.repository import get_setting
+from l05_service.playground_identity import SETTING_KEY, ensure_playground_identity
 
 
 def test_existing_system_user_without_setting_is_reused(engine_and_sessionmaker):
