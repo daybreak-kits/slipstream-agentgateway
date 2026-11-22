@@ -1,73 +1,38 @@
-import { api } from "./api";
-import { useMock } from "./mock";
+import { controlPlane } from "./control-plane";
 
-/** 权限项：key 为 resource:action，group/label 用于权限矩阵分组展示。 */
-export interface PermissionEntry {
-  key: string;
-  label: string;
-  description: string;
-  group: string;
-}
+/**
+ * 角色与权限注册表的页面级门面：类型与操作都归 control-plane（W4 票04），
+ * 这里保留既有导出名，避免调用方一次性重写。
+ */
+export type {
+  PermissionEntry,
+  PermissionGroup,
+  RoleDefinition,
+} from "./control-plane/operations/roles";
 
-export interface PermissionGroup {
-  group: string;
-  permissions: PermissionEntry[];
-}
+import type { PermissionGroup, RoleDefinition } from "./control-plane/operations/roles";
 
-/** 角色（admin_roles）：builtin 角色不可删除，all_permissions 角色永远拥有全部权限。 */
-export interface RoleDefinition {
-  id: string;
-  key: string;
-  name: string;
-  description: string;
-  builtin: boolean;
-  all_permissions: boolean;
-  permissions: string[];
-  member_count: number;
-}
-
+/** 更新角色时可提交的字段。 */
 export interface RolePatchInput {
   name?: string;
   description?: string;
   permissions?: string[];
 }
 
-const MOCK_GROUPS: Array<[string, string[]]> = [
-  ["主数据", ["upstreams:read", "upstreams:write", "upstream_models:read", "upstream_models:write", "public_models:read", "public_models:write", "model_targets:read", "model_targets:write"]],
-  ["流量治理", ["availability:read", "availability:write", "transforms:read", "transforms:write"]],
-  ["治理", ["config:read", "config:write", "settings:read", "settings:write", "audits:read", "policies:read", "policies:write"]],
-  ["计费", ["prices:read", "prices:write", "billing:cost", "billing:spend", "billing:subtree", "ledger:read"]],
-  ["用量", ["logs:read", "logs:pull", "reports:read"]],
-  ["账号", ["users:read", "users:create", "users:update", "users:delete", "apikeys:read", "apikeys:write", "admins:read", "admins:write", "roles:read", "roles:write"]],
-  ["模型试验", ["playground:use"]],
-];
-
-function mockEntry(key: string, group: string): PermissionEntry {
-  return { key, label: key, description: "", group };
-}
-
-export const MOCK_PERMISSION_GROUPS: PermissionGroup[] = MOCK_GROUPS.map(([group, keys]) => ({
-  group,
-  permissions: keys.map((key) => mockEntry(key, group)),
-}));
-
 /** GET /admin/permissions：分组权限注册表。 */
-export async function fetchPermissionGroups(): Promise<PermissionGroup[]> {
-  if (useMock) return MOCK_PERMISSION_GROUPS;
-  const payload = await api.get<{ groups: PermissionGroup[] }>("/admin/permissions");
-  return payload.groups;
+export function fetchPermissionGroups(): Promise<PermissionGroup[]> {
+  return controlPlane.roles.permissions();
 }
 
-/** GET /admin/roles：内置角色在前，自定义角色在后（mock 模式由 lib/mock.ts 的内存 admin_roles 应答）。 */
+/** GET /admin/roles：内置角色在前，自定义角色在后。 */
 export async function fetchRoles(): Promise<RoleDefinition[]> {
-  const payload = await api.get<{ items: RoleDefinition[]; total: number }>("/admin/roles");
-  return payload.items;
+  return controlPlane.roles.list();
 }
 
-export async function updateRole(id: string, input: RolePatchInput): Promise<RoleDefinition> {
-  return api.patch<RoleDefinition>("/admin/roles/" + id, input);
+export function updateRole(id: string, input: RolePatchInput): Promise<RoleDefinition> {
+  return controlPlane.roles.update(id, input);
 }
 
-export async function deleteRole(id: string): Promise<void> {
-  return api.del<void>("/admin/roles/" + id);
+export function deleteRole(id: string): Promise<void> {
+  return controlPlane.roles.remove(id);
 }

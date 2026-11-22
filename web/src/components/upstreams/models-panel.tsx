@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusIcon } from "@/components/ui/status-icon";
-import { api, apiList, ENDPOINTS } from "@/lib/api";
+import { controlPlane } from "@/lib/control-plane";
 import { fmtMarkup, fmtPricePerM } from "@/lib/format";
 import { ACTION_ICONS } from "@/lib/icons";
 import { usePermissions } from "@/lib/permissions";
@@ -23,7 +23,7 @@ import { SELECT_NONE_VALUE } from "@/lib/select-sentinels";
 import { probeSummary, type ModelProbeController } from "./model-probe";
 import { ModelProbeBadge, ModelProbeProgress } from "./model-probe-view";
 import { type UpstreamRow } from "./shared";
-import type { UpstreamKeyList, UpstreamModel } from "@/types";
+import type { UpstreamModel } from "@/types";
 
 /** Tab2 路由与模型：本上游登记的上游模型表 + 会话内模型探测（W5 ticket 07）。
  *
@@ -44,11 +44,11 @@ export function UpstreamModelsPanel({
   const canCost = can("billing:cost");
   const q = useQuery({
     queryKey: ["upstream-models"],
-    queryFn: () => apiList<UpstreamModel>(ENDPOINTS.upstreamModels),
+    queryFn: () => controlPlane.models.listUpstreamModels(),
   });
   const keysQ = useQuery({
     queryKey: ["upstream-keys", upstream.id],
-    queryFn: () => api.get<UpstreamKeyList>(ENDPOINTS.upstreamKeys(upstream.id)),
+    queryFn: () => controlPlane.upstreams.listKeys(upstream.id),
   });
   const [drawer, setDrawer] = useState<{ open: boolean; initial: UpstreamModel | null }>({ open: false, initial: null });
   const [deleting, setDeleting] = useState<UpstreamModel | null>(null);
@@ -57,7 +57,7 @@ export function UpstreamModelsPanel({
 
   // 稳定引用：TanStack Table 行模型 memo 依赖 data 引用（见 DataTable 注释）。
   const rows = useMemo(
-    () => (q.data?.items ?? []).filter((model) => model.upstream_id === upstream.id),
+    () => (q.data ?? []).filter((model) => model.upstream_id === upstream.id),
     [q.data, upstream.id],
   );
   const keys = keysQ.data?.items ?? [];
@@ -66,7 +66,7 @@ export function UpstreamModelsPanel({
 
   const toggle = useMutation({
     mutationFn: (model: UpstreamModel) =>
-      api.patch<UpstreamModel>(ENDPOINTS.upstreamModelUpdate(model.id), { enabled: !model.enabled }),
+      controlPlane.models.updateUpstreamModel(model.id, { enabled: !model.enabled }),
     onSuccess: (model) => {
       toast.success(model.enabled ? "模型已启用" : "模型已关闭");
       void qc.invalidateQueries({ queryKey: ["upstream-models"] });
@@ -74,7 +74,7 @@ export function UpstreamModelsPanel({
   });
 
   const del = useMutation({
-    mutationFn: (model: UpstreamModel) => api.del<void>(ENDPOINTS.upstreamModelUpdate(model.id)),
+    mutationFn: (model: UpstreamModel) => controlPlane.models.removeUpstreamModel(model.id),
     onSuccess: () => {
       toast.success("模型已删除");
       setDeleting(null);

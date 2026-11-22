@@ -26,10 +26,10 @@ import {
   type SessionState,
 } from "@/components/playground/sessions";
 import { Button } from "@/components/ui/button";
-import { api, ENDPOINTS } from "@/lib/api";
+import type { LogRow } from "@/components/logs/types";
+import { controlPlane, isMockMode } from "@/lib/control-plane";
 import { formatDuration } from "@/lib/format";
 import { AUTH_ME_QUERY_KEY, fetchMe } from "@/lib/auth";
-import { useMock } from "@/lib/mock";
 import {
   buildUsage,
   buildUserContent,
@@ -48,32 +48,10 @@ import {
   type PlaygroundMessage,
   type PlaygroundUsage,
 } from "@/lib/playground";
-import type { MyModelOut } from "@/types";
 import { PageHeader } from "@/components/layout/page-header";
 
 /** 后端 /admin/logs 只接受 25/50/100/200 四档 page_size（api deps.page_params）。 */
 const USAGE_LOG_PAGE_SIZE = 25;
-
-/** /admin/logs 里用到的字段（账本口径：金额是整数微单位）。 */
-interface UsageLogRow {
-  event_id: string;
-  started_at_ms: number;
-  public_model: string;
-  duration_ms: number;
-  time_to_first_token_ms: number;
-  input_tokens: number;
-  output_tokens: number;
-  total_tokens: number;
-  cost_micro: number | null;
-  charge_micro: number | null;
-  currency: string;
-}
-
-interface UsageLogPage {
-  total: number;
-  items: UsageLogRow[];
-  next_offset: number | null;
-}
 
 /** 附件上限：只读文本，256 KB / 最多 5 个，够贴日志和代码片段。 */
 const MAX_ATTACHMENT_BYTES = 256 * 1024;
@@ -97,7 +75,7 @@ const SAMPLE_PROMPTS = [
 ];
 
 /** 把 /admin/logs 里刚落地的那条记录并进用量：成本/花费只有账本才有。 */
-function mergeLedgerUsage(usage: PlaygroundUsage, row: UsageLogRow): PlaygroundUsage {
+function mergeLedgerUsage(usage: PlaygroundUsage, row: LogRow): PlaygroundUsage {
   return {
     ...usage,
     promptTokens: row.input_tokens || usage.promptTokens,
@@ -178,7 +156,7 @@ export function PlaygroundPage() {
   // W4-H：登录用户可见的启用公开模型参数（/admin/my/models，无金额键）；失败静默隐藏。
   const myModelsQuery = useQuery({
     queryKey: ["my-models"],
-    queryFn: () => api.get<MyModelOut[]>(ENDPOINTS.myModels),
+    queryFn: () => controlPlane.playground.myModels(),
     staleTime: 60_000,
     retry: false,
   });
@@ -239,9 +217,15 @@ export function PlaygroundPage() {
 
   const enrichUsage = useCallback(
     async (sessionId: string, messageId: string, model: string, startedAt: number, usage: PlaygroundUsage) => {
-      if (useMock) return;
+      if (isMockMode) return;
       try {
-        const page = await api.get<UsageLogPage>("/admin/logs?page_size=" + USAGE_LOG_PAGE_SIZE + "&offset=0");
+        const page = await controlPlane.logs.list({
+          query: "",
+          pageSize: USAGE_LOG_PAGE_SIZE,
+          offset: 0,
+          sort: "started_at",
+          order: "desc",
+        });
         const row = page.items.find(
           (item) =>
             item.public_model === model &&
@@ -737,7 +721,7 @@ export function PlaygroundPage() {
           value={params}
           onChange={setParams}
           disabled={streaming}
-          mockMode={useMock}
+          mockMode={isMockMode}
           onOpenModels={() => setModelDialogOpen(true)}
           modelInfo={activeModelInfo}
         />

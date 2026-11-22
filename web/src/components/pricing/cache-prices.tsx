@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { PriceTable, type PriceColumn } from "@/components/pricing/table";
 import { UNIT_HINT, priceMicro } from "@/components/pricing/money";
 import { invalidatePricing, pricingKeys, useUpstreamModels } from "@/components/pricing/queries";
-import { api, apiList, ENDPOINTS } from "@/lib/api";
+import { controlPlane } from "@/lib/control-plane";
 import { fmtUnitPriceMicro } from "@/lib/format";
 import { formatDateTime, useTimezone } from "@/lib/time";
 import { usePermissions } from "@/lib/permissions";
@@ -50,7 +50,7 @@ function effectiveMs(row: UpstreamPriceRow | null | undefined): number | null {
 function useCachePrices(enabled: boolean) {
   return useQuery({
     queryKey: pricingKeys.cachePrices,
-    queryFn: () => apiList<UpstreamPriceRow>(ENDPOINTS.pricesUpstream + "?page_size=200"),
+    queryFn: () => controlPlane.prices.upstreamPrices(),
     enabled,
   });
 }
@@ -74,14 +74,14 @@ export function CachePricesSection() {
   // 模型行 id → 展示名（模型名 + 所属上游名）：upstream_model_id 是价目归属键（ADR-030）
   const modelLabels = useMemo(() => {
     const map = new Map<string, { name: string; upstream: string }>();
-    for (const model of modelsQuery.data?.items ?? []) {
+    for (const model of modelsQuery.data ?? []) {
       map.set(model.id, { name: model.name, upstream: model.upstream_name ?? "" });
     }
     return map;
   }, [modelsQuery.data]);
 
   const pairs = useMemo<CachePair[]>(() => {
-    const rows = [...(pricesQuery.data?.items ?? [])];
+    const rows = [...(pricesQuery.data ?? [])];
     // 每个范围（模型行, item）版本号最大者为现行价：先按版本倒序，折叠时首见即最新
     rows.sort(
       (a, b) => b.version - a.version || (effectiveMs(b) ?? 0) - (effectiveMs(a) ?? 0),
@@ -260,7 +260,7 @@ export function CachePricesSection() {
       {creating ? (
         <CachePriceDialog
           mode="create"
-          models={modelsQuery.data?.items ?? []}
+          models={modelsQuery.data ?? []}
           onClose={() => setCreating(false)}
         />
       ) : null}
@@ -322,7 +322,7 @@ function CachePriceDialog({
         items
           .filter((entry): entry is { item: "cache_read" | "cache_write"; micro: number } => entry.micro !== null)
           .map((entry) =>
-            api.post(ENDPOINTS.pricesUpstream, {
+            controlPlane.prices.addUpstreamPrice({
               upstream_model_id: targetModelId,
               item: entry.item,
               unit_price_micro: entry.micro,

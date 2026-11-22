@@ -2,12 +2,11 @@
 //
 // 真实路径只有一条：POST /admin/playground/stream。后端以 SSE 逐块透传上游
 // chunk，所以无论是「流式渲染」还是「整段返回」，都走这个端点；HTTP 基址与
-// 错误形状统一来自 lib/api，不自己拼 URL、不自己造错误类型。
-// VITE_MOCK=1（lib/mock.ts 的 useMock）时退回本地模拟流，只用于演示。
+// 错误形状与基址统一来自 control-plane 组合根，不自己拼 URL、不自己造错误类型。
+// VITE_MOCK=1（组合根的 isMockMode）时退回本地模拟流，只用于演示。
 
-import { API_BASE, ApiError, api } from "@/lib/api";
-import { useMock } from "@/lib/mock";
-import type { ModelTarget, PublicModel } from "@/types";
+import { API_BASE, ApiError, controlPlane, isMockMode } from "@/lib/control-plane";
+import type { PublicModel } from "@/types";
 
 /** Mock 演示用的模型清单：只在 useMock 时出现，不冒充真实目录。 */
 const DEMO_PLAYGROUND_MODELS: PlaygroundModel[] = [
@@ -497,10 +496,10 @@ export function rememberPlaygroundModel(name: string): string[] {
 
 /** 参数面板的模型清单：只列启用的对外模型；Mock 模式给一份演示清单。 */
 export async function listPlaygroundModels(): Promise<PlaygroundModel[]> {
-  if (useMock) return DEMO_PLAYGROUND_MODELS;
+  if (isMockMode) return DEMO_PLAYGROUND_MODELS;
   const [rows, targets] = await Promise.all([
-    api.get<PublicModel[]>("/admin/public-models"),
-    api.get<ModelTarget[]>("/admin/model-targets").catch(() => [] as ModelTarget[]),
+    controlPlane.models.listPublicModels(),
+    controlPlane.models.listModelTargets().catch(() => []),
   ]);
   const counts = new Map<string, number>();
   for (const target of targets) {
@@ -692,7 +691,7 @@ export async function sendChatStream(
   messages: ChatMessage[],
   options: StreamOptions = {},
 ): Promise<StreamStats> {
-  if (useMock) return mockStreamChat(model, messages, options);
+  if (isMockMode) return mockStreamChat(model, messages, options);
   const started = performance.now();
   const params = options.params ?? {};
   const body: Record<string, unknown> = {

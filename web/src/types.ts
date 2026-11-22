@@ -77,10 +77,6 @@ export interface UpstreamProbe {
   tested_at_ms: number;
 }
 
-export interface UpstreamProbeResult extends UpstreamProbe {
-  upstream_id: string;
-}
-
 export interface UpstreamBatchResult {
   changed: string[];
   missing: string[];
@@ -164,50 +160,15 @@ export interface UpstreamModel {
 /** W4-H：参数块来源徽章。 */
 export type ModelParamsSource = "manual" | "models.dev";
 
-/** W4-H：POST /admin/upstream-models/{id}/adopt-modelsdev 单条兑入结果（逐键状态）。 */
-export interface AdoptModelsDevResult {
-  id: string;
-  name: string;
-  matched: boolean;
-  /** filled=已填空键 / nothing-to-fill=无空键可填 / no-match=未命中 models.dev */
-  status: string;
-  provider?: string;
-  model?: string;
-  /** 本次是否真的刷新了快照（false=拉取失败，降级用库内快照） */
-  refreshed?: boolean;
-  /** 逐键结果：键（parameters.xxx / cost_input_per_1m …）→ filled / skipped-manual / skipped-no-fx */
-  results?: Record<string, string>;
-  filled?: string[];
-  params_source?: ModelParamsSource;
-}
-
-/** W4-H：GET /admin/upstream-models/modelsdev-status 已存快照摘要（上次同步时间）。 */
-export interface ModelsDevSnapshotStatus {
-  models: number;
-  providers: number;
-  /** 0 = 从未同步；否则为快照抓取时刻（毫秒时间戳） */
-  fetched_at_ms: number;
-}
-
-/** W4-H：POST /admin/upstream-models/adopt-modelsdev 批量同步汇总。 */
-export interface AdoptModelsDevBatchResult {
-  refreshed: boolean;
-  snapshot?: { providers?: number; models?: number; fetched_at_ms?: number };
-  total: number;
-  matched: number;
-  filled_models: number;
-  filled_keys: number;
-  no_match: number;
-  items: AdoptModelsDevResult[];
-}
-
-/** W4-H：GET /admin/my/models 行（登录用户可见的启用公开模型参数，无金额键）。 */
-export interface MyModelOut {
-  name: string;
-  model_type: string;
-  parameters: ModelParameters;
-  sources: string[];
-}
+// W4-H 的 models.dev 兑入结果与 my/models 行已进生成契约（W4 票04）：删除手写 wire 类型，
+// 保留同名 re-export，页面 import 路径不变；字段以 web/src/generated/contract.ts 为准。
+export type {
+  AdoptModelsDevBatchResult,
+  AdoptModelsDevResult,
+  ModelsDevSnapshotStatus,
+  MyModelOut,
+  MyModelParameters,
+} from "@/generated/contract";
 
 export interface ModelTarget {
   id: string;
@@ -240,12 +201,6 @@ export interface PublicModel {
   target_count?: number;
   /** GET /admin/public-models 直接内联成员列表（服务端已按 priority 升序） */
   targets?: ModelTarget[];
-}
-
-export interface TopupRecord {
-  ts: string;
-  amount_tokens: number;
-  note: string;
 }
 
 export interface ApiKey {
@@ -368,58 +323,6 @@ export interface AuditLogList {
   total: number;
 }
 
-/** 策略快照（只读）：GET /admin/policies 返回单对象 */
-export interface PolicySnapshot {
-  cors: {
-    allow_origins: string[];
-    allow_credentials: boolean;
-    env_override: string;
-    note: string;
-  };
-  key_auth: { scheme: string; storage: string; reveal: string; failure: string };
-  local_rate_limit: { key: string; type: string; tokensPerFill: number; semantics: string };
-  transforms_defaults: {
-    response_header_deletes: string[];
-    response_body_guard: string;
-    protected_request_headers: string[];
-    forbidden_body_paths: string[];
-    mount: string;
-  };
-  routing: { modes: RoutingMode[]; failover: string; weighted: string; conditional: string };
-  counts: Record<string, number>;
-}
-
-/** 能力矩阵：supported=false 为路线图说明而非今日可配置；verified=false 表示尚未经数据面实测 */
-export interface GuardrailCapability {
-  key: string;
-  supported: boolean;
-  since_version: string;
-  note: string;
-  verified: boolean;
-}
-
-export interface GuardrailMatrix {
-  adapter: string;
-  items: GuardrailCapability[];
-  note: string;
-}
-
-/** MCP servers：数据面 v1 暂不支持，字段为前端预留 */
-export interface McpServerRow {
-  name: string;
-  url?: string;
-  tool_count?: number;
-  enabled?: boolean;
-}
-
-export interface McpServersInfo {
-  supported: boolean;
-  note: string;
-  servers: McpServerRow[];
-}
-
-/** ── 改写规则（A 模式，契约 docs/contracts/transforms-compiler.md）── */
-
 export type TransformSection = "request_headers" | "request_body" | "response_headers" | "response_body";
 /** 契约 v2：头与体共用同一套动作词表 */
 export type TransformOp = "create" | "update" | "delete" | "copy" | "prepend" | "append" | "regex_replace" | "to_upper" | "to_lower";
@@ -479,14 +382,6 @@ export interface SettingItem {
   updated_at: string;
 }
 
-export interface SettingsList {
-  items: SettingItem[];
-}
-
-export interface SettingsPutResult {
-  values: Record<string, string>;
-}
-
 export interface AdminAccount {
   id: string;
   username: string;
@@ -496,17 +391,6 @@ export interface AdminAccount {
   last_login_at: string | null;
 }
 
-export interface EndUser {
-  id: string;
-  name: string;
-  key_masked: string;
-  balance_micro: number;
-  consumed_micro: number;
-  enabled: boolean;
-  created_at: string;
-}
-
-/** 运营设置·统一连接地址（ticket 16）：空 base_url = 跟随浏览器当前 host + default_port。 */
 export interface ConnectionInfo {
   base_url: string;
   configured: boolean;
@@ -547,23 +431,6 @@ export interface UserTreeResponse {
   root_ids: string[];
   total: number;
   nodes: UserTreeNode[];
-}
-
-export interface LedgerRow {
-  id: string;
-  ts: string;
-  kind: "topup" | "charge";
-  delta_micro: number;
-  balance_after_micro: number;
-  note: string;
-}
-
-/** 上游模型成本账（ticket 05）：CNY/1M 词元，字符串避免浮点；null = 尚未配置单价 */
-export interface UpstreamModelPricing {
-  cost_input_per_1m: string | null;
-  cost_output_per_1m: string | null;
-  /** 倍率，花费 = 成本 × 倍率；默认 1.0000 */
-  markup: string;
 }
 
 /** 公开模型价格是派生值：成员有效单价（成本 × 倍率）的加权平均，只读不落库 */
@@ -633,18 +500,3 @@ export interface MySpendResponse {
   by_user: SpendDimension[];
   by_model: SpendDimension[];
 }
-
-export interface BillingLedgerEntry {
-  id: string;
-  gateway_event_id: string;
-  cost_micro?: number | null;
-  spend_micro?: number | null;
-  margin_micro?: number | null;
-  /** 实际倍率 = 花费 / 成本，成本为 0 或缺失时为 null */
-  markup: string | null;
-  currency: string;
-  cost_status: string;
-  spend_status: string;
-  created_at_ms: number;
-}
-

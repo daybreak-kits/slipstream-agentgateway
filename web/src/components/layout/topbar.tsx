@@ -17,18 +17,11 @@ import {
   DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
-import { API_BASE_LABEL, api, ENDPOINTS } from "@/lib/api";
 import { AUTH_ME_QUERY_KEY, fetchMe, logoutAdmin } from "@/lib/auth";
-import { useMock } from "@/lib/mock";
+import { API_BASE_LABEL, controlPlane, isMockMode } from "@/lib/control-plane";
 import { usePermissions } from "@/lib/permissions";
 import { usePreferencesSync, useSavePreferences } from "@/lib/settings-ia";
 import { useTheme, type Theme } from "@/lib/theme";
-
-interface LatestRevision {
-  id: string;
-  artifact_hash: string;
-  status: string;
-}
 
 /** 顶栏主题三选一：与用户设置页 /settings/theme 同一份选项与同一个服务端端点。 */
 const THEME_OPTIONS: Array<{ value: Theme; label: string; icon: typeof Sun }> = [
@@ -84,7 +77,7 @@ export function Topbar({ title, group, collapsed, onToggleCollapse, onOpenMobile
   const latest = useQuery({
     queryKey: ["config-revisions", "latest"],
     queryFn: async () => {
-      const rows = await api.get<LatestRevision[]>(ENDPOINTS.configRevisions + "?limit=1");
+      const rows = await controlPlane.config.revisions({ limit: 1 });
       return rows[0] ?? null;
     },
   });
@@ -127,7 +120,7 @@ export function Topbar({ title, group, collapsed, onToggleCollapse, onOpenMobile
         <span className="truncate font-medium text-title">{title}</span>
       </nav>
       <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-1.5">
-        {useMock ? <Badge tone="warning" className="hidden md:inline-flex">Mock 演示</Badge> : null}
+        {isMockMode ? <Badge tone="warning" className="hidden md:inline-flex">Mock 演示</Badge> : null}
         <span className="hidden text-2xs text-faint xl:inline">
           {API_BASE_LABEL.replace("https://", "").replace("http://", "")}
         </span>

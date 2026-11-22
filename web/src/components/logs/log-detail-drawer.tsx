@@ -21,7 +21,8 @@ import {
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
-import { api, ApiError } from "@/lib/api";
+import { controlPlane } from "@/lib/control-plane";
+import { ApiError } from "@/lib/control-plane/errors";
 import { fmtInt, fmtMoneyAvg, fmtPctPoint, fmtSeconds, fmtThroughput } from "@/lib/format";
 import { usePermissions } from "@/lib/permissions";
 import { formatDateTime } from "@/lib/time";
@@ -30,7 +31,7 @@ import type { IntervalTimezone } from "@/lib/time-range";
 import { statusLabel, statusTone, upstreamLabel } from "./format";
 import { rowErrorText } from "./error-summary";
 import { NoChainRecord, RequestAttemptChain } from "./request-attempt-chain";
-import type { LogDetail, LogPayload, LogRow } from "./types";
+import type { LogDetail, LogRow } from "./types";
 import { useLogAttempts } from "./use-log-attempts";
 
 interface LogDetailDrawerProps {
@@ -69,7 +70,7 @@ export function LogDetailDrawer({ open, row, timezone, onOpenChange }: LogDetail
     queryKey: ["log-detail", row?.event_id ?? ""],
     queryFn: ({ signal }) => {
       if (!row) throw new Error("缺少日志行");
-      return api.get<LogDetail>("/admin/logs/" + encodeURIComponent(row.event_id), { signal });
+      return controlPlane.logs.detail(row.event_id, { signal });
     },
     enabled: open && row !== null,
     staleTime: 30_000,
@@ -339,7 +340,7 @@ function PayloadSection({ eventId }: { eventId: string }) {
   const payloadQuery = useQuery({
     queryKey: ["log-payload", eventId],
     queryFn: ({ signal }) =>
-      api.get<LogPayload>("/admin/logs/" + encodeURIComponent(eventId) + "/payload", { signal }),
+      controlPlane.logs.payload(eventId, { signal }),
     enabled: open,
     staleTime: 30_000,
     retry: false,

@@ -9,17 +9,13 @@ import {
   useRecentRevisions,
 } from "@/components/dashboard/use-reports";
 import type { RevisionLike } from "@/components/dashboard/report-types";
-import {
-  normalizeSettings,
-  type SettingsItem,
-  type SettingsPayload,
-} from "@/components/governance/settings-schema";
+import { normalizeSettings } from "@/components/governance/settings-schema";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs } from "@/components/ui/tabs";
-import { api, ENDPOINTS } from "@/lib/api";
+import { controlPlane } from "@/lib/control-plane";
 import { revisionStatusMeta } from "@/lib/revision-status";
 import { usePermissions } from "@/lib/permissions";
 import { effectiveBaseUrl, useConnection } from "@/lib/settings-ia";
@@ -189,7 +185,7 @@ function ConnectionInfoCard({ canSettings }: { canSettings: boolean }) {
   const connection = useConnection();
   const settings = useQuery({
     queryKey: ["settings", "quick-start"],
-    queryFn: () => api.get<SettingsPayload | SettingsItem[]>(ENDPOINTS.settings),
+    queryFn: () => controlPlane.settings.getSettings(),
     enabled: canSettings,
     retry: false,
     staleTime: 60_000,

@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableWrap, TD, TH, THead, TR } from "@/components/ui/table";
-import { apiList } from "@/lib/api";
+import { controlPlane } from "@/lib/control-plane";
 import { fmtCny } from "@/lib/format";
 import { SELECT_ALL_VALUE } from "@/lib/select-sentinels";
 
@@ -26,14 +26,11 @@ export function LedgerDrawer({ userId, userName, onClose }: LedgerDrawerProps) {
   const [kind, setKind] = useState<string>(SELECT_ALL_VALUE);
   const ledger = useQuery({
     queryKey: ["user-ledger", userId],
-    queryFn: () =>
-      apiList<LedgerEntry>(
-        "/admin/users/" + (userId ?? "") + "/ledger?page_size=" + LEDGER_PAGE_SIZE + "&offset=0",
-      ),
+    queryFn: () => controlPlane.users.ledger(userId ?? ""),
     enabled: userId !== null,
   });
 
-  const entries = ledger.data?.items ?? [];
+  const entries = ledger.data ?? [];
   const filtered = useMemo(
     () => (kind === SELECT_ALL_VALUE ? entries : entries.filter((entry) => entry.kind === kind)),
     [entries, kind],

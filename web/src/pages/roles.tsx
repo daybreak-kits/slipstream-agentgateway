@@ -11,10 +11,10 @@ import { ActionButton } from "@/components/ui/action-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { api } from "@/lib/api";
 import { describeApiError } from "@/components/users/api-error";
 import { ACTION_ICONS } from "@/lib/icons";
 import { usePermissions } from "@/lib/permissions";
+import { controlPlane } from "@/lib/control-plane";
 import { deleteRole, fetchPermissionGroups, fetchRoles, updateRole } from "@/lib/roles";
 import { fmtInt } from "@/lib/format";
 import type { RoleDefinition } from "@/lib/roles";
@@ -47,7 +47,7 @@ export function AdminsPage() {
 
   const createRole = useMutation({
     mutationFn: (values: RoleFormValues) =>
-      api.post<RoleDefinition>("/admin/roles", {
+      controlPlane.roles.create({
         name: values.name,
         description: values.description,
         permissions: values.permissions,

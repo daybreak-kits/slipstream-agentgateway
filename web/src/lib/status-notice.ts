@@ -1,5 +1,7 @@
-import { api, ENDPOINTS } from "./api";
+import { controlPlane } from "./control-plane";
 import { pushNotification } from "./notification-store";
+
+export type { SystemStatus, SystemStatusNotice } from "./control-plane/operations/system";
 
 /**
  * 每日状态提醒进通知中心（W6 票08）：后端每日任务做配置 hash 与前后端版本
@@ -11,22 +13,6 @@ import { pushNotification } from "./notification-store";
  * 持久化，页面刷新/重新登录不会把同一条提醒再灌一遍。恢复后后端产生新提醒
  * （新的 notified_at_ms），自然再次推送。
  */
-
-/** GET /admin/system-status 的载荷（后端 routers_meta，纯 dict 无契约模型）。 */
-export interface SystemStatusNotice {
-  check: string;
-  title: string;
-  detail: string;
-  notified_at_ms: number;
-  notified_at: string;
-}
-
-export interface SystemStatus {
-  checked_at: string;
-  backend_version: string;
-  checks: Record<string, { status: string; detail?: string }>;
-  notices: SystemStatusNotice[];
-}
 
 /** 已推送记录：check -> 最近推送过的 notified_at_ms。 */
 const PUSHED_KEY = "slipstream.status_notice.pushed";
@@ -65,7 +51,7 @@ function savePushed(map: Record<string, number>): void {
 
 /** 拉一次系统状态；把未见过的提醒记入通知中心。失败静默（查询失败已由 lib/api 的票07路径去重上报）。 */
 export async function pollSystemStatus(): Promise<void> {
-  const status = await api.get<SystemStatus>(ENDPOINTS.systemStatus);
+  const status = await controlPlane.system.status();
   if (!status.notices?.length) return;
   const pushed = pushedMap();
   let changed = false;

@@ -18,7 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { api, ENDPOINTS } from "@/lib/api";
+import { controlPlane } from "@/lib/control-plane";
 import { ACTION_ICONS } from "@/lib/icons";
 import {
   linesToList,
@@ -47,7 +47,7 @@ export function PoliciesTab({ data, draft, onDraftChange, canWrite, dirtyCount }
   const [rawError, setRawError] = useState<string | undefined>(undefined);
 
   const reset = useMutation({
-    mutationFn: () => saveAndApply(() => api.del<unknown>(ENDPOINTS.policies), "恢复默认策略"),
+    mutationFn: () => saveAndApply(() => controlPlane.governance.resetPolicies().then(() => undefined), "恢复默认策略"),
     onSuccess: (revisionId) => {
       toast.success("已恢复默认策略并下发", { description: "配置修订 " + revisionId });
       void queryClient.invalidateQueries({ queryKey: ["policies"] });

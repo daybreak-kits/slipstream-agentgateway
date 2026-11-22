@@ -1,8 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 
-import { apiList, ENDPOINTS } from "@/lib/api";
-import type { PublicModel, PublicModelPrice, Upstream, UpstreamModel } from "@/types";
+import { controlPlane } from "@/lib/control-plane";
 
 /**
  * 价目页共享 query key：改价/导入后统一失效。key 与模型管理、日志等页面保持同源，
@@ -26,7 +25,7 @@ export async function invalidatePricing(queryClient: QueryClient): Promise<void>
 export function useUpstreamModels(enabled: boolean) {
   return useQuery({
     queryKey: pricingKeys.upstreamModels,
-    queryFn: () => apiList<UpstreamModel>(ENDPOINTS.upstreamModels),
+    queryFn: () => controlPlane.models.listUpstreamModels(),
     enabled,
   });
 }
@@ -34,7 +33,7 @@ export function useUpstreamModels(enabled: boolean) {
 export function useUpstreams(enabled: boolean) {
   return useQuery({
     queryKey: pricingKeys.upstreams,
-    queryFn: () => apiList<Upstream>(ENDPOINTS.upstreams),
+    queryFn: () => controlPlane.upstreams.list(),
     enabled,
   });
 }
@@ -42,7 +41,7 @@ export function useUpstreams(enabled: boolean) {
 export function usePublicModels(enabled: boolean) {
   return useQuery({
     queryKey: pricingKeys.publicModels,
-    queryFn: () => apiList<PublicModel>(ENDPOINTS.publicModels),
+    queryFn: () => controlPlane.models.listPublicModels(),
     enabled,
   });
 }
@@ -50,7 +49,7 @@ export function usePublicModels(enabled: boolean) {
 export function usePublicPrices(enabled: boolean) {
   return useQuery({
     queryKey: pricingKeys.publicPrices,
-    queryFn: () => apiList<PublicModelPrice>(ENDPOINTS.pricesPublicModels),
+    queryFn: () => controlPlane.prices.publicModelPrices(),
     enabled,
   });
 }

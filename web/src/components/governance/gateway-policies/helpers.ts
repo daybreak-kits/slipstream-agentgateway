@@ -1,4 +1,4 @@
-import { ApiError } from "@/lib/api";
+import { ApiError } from "@/lib/control-plane/errors";
 import type { GuardrailConfig, McpServerConfig, PolicyConfig } from "@/lib/policies";
 
 /** 网关策略三 Tab 的共用纯函数：错误描述与草稿脏计数（无 JSX，供页级动作条与各 Tab 共用）。 */

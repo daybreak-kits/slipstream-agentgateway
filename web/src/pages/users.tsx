@@ -4,10 +4,10 @@ import { useSearchParams } from "react-router-dom";
 
 import { ErrorState } from "@/components/governance/panel";
 import { UsersPanel } from "@/components/users/users-panel";
-import { api } from "@/lib/api";
+import { controlPlane } from "@/lib/control-plane";
 import { usePermissions } from "@/lib/permissions";
 import { fetchRoles } from "@/lib/roles";
-import type { ApiKey, UserTreeResponse } from "@/types";
+
 import { PageHeader } from "@/components/layout/page-header";
 
 const TREE_KEY = ["admin-user-tree"] as const;
@@ -43,11 +43,11 @@ export function UsersPage() {
 
   const tree = useQuery({
     queryKey: TREE_KEY,
-    queryFn: () => api.get<UserTreeResponse>("/admin/users/tree"),
+    queryFn: () => controlPlane.users.tree(),
   });
   const apiKeys = useQuery({
     queryKey: KEYS_KEY,
-    queryFn: () => api.get<ApiKey[]>("/admin/api-keys?page_size=200&offset=0"),
+    queryFn: () => controlPlane.clientKeys.list(),
     enabled: tree.isSuccess && canReadKeys,
   });
   const roles = useQuery({

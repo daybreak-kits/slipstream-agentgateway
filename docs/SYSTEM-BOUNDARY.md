@@ -108,7 +108,7 @@ settings.ag_llm_port
 - `api/src/l02_domain`、`l04_repo`、`l05_service`、`l06_api`、`l07_jobs` 的 Python import/引用；
 - `web/src`（含 `web/src/generated/contract.ts`）中的具体适配器模块引用。
 
-**默认模式即强制**：任何泄漏 EXIT=1（`--strict` 为等价别名）。W6 基线（2287de5）曾记录 8 条泄漏，由 tickets 02/03/04 清零系统侧七条，ticket 06 清零最后一条（`web/src/lib/mock.ts` 的适配器能力矩阵复制：mock 改为消费票05 中性词表键的自有声明）；现状基线为 **0 条**，`python ops/checks/import_lint.py` 在干净边界上 EXIT=0。
+**默认模式即强制**：任何泄漏 EXIT=1（`--strict` 为等价别名）。W6 基线（2287de5）曾记录 8 条泄漏，由 tickets 02/03/04 清零系统侧七条，ticket 06 清零最后一条（`web/src/lib/mock.ts` 的适配器能力矩阵复制：mock 改为消费票05 中性词表键的自有声明；该文件已在 W4 票04 删除，演示数据迁入 `web/src/lib/control-plane/` 内存适配器）；现状基线为 **0 条**，`python ops/checks/import_lint.py` 在干净边界上 EXIT=0。
 
 历史例外以显式白名单登记（脚本内 `RAW_JSON_ALLOWLIST`，逐条带理由；新增白名单条目必须同步本节）：
 

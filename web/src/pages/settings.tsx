@@ -16,7 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Textarea } from "@/components/ui/textarea";
-import { api, apiList, ENDPOINTS } from "@/lib/api";
+
 import { AUTH_ME_QUERY_KEY, fetchMe } from "@/lib/auth";
 import { usePermissions } from "@/lib/permissions";
 import {
@@ -29,12 +29,13 @@ import {
 } from "@/lib/settings-ia";
 import { useTheme, type Theme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
-import type { ApiKey, MySpendResponse, UserPreferences } from "@/types";
+import { controlPlane } from "@/lib/control-plane";
+import type { UserPreferences } from "@/types";
 import { PageHeader } from "@/components/layout/page-header";
 
 // docs/api-contract.md：POST /admin/auth/change-password（自助改密，ADR-019）；
-// lib/api.ts 的 ENDPOINTS 没有这条（本工位不改 lib），故在页面内拼写。
-const CHANGE_PASSWORD_ENDPOINT = "/admin/auth/change-password";
+
+
 
 type SectionKey = "profile" | "theme" | "tokens" | "spend" | "notifications";
 
@@ -82,7 +83,7 @@ function PasswordTile() {
   const [formError, setFormError] = useState<string | null>(null);
   const save = useMutation({
     mutationFn: (payload: { old_password: string; new_password: string }) =>
-      api.post<{ ok: boolean; revoked_sessions: number }>(CHANGE_PASSWORD_ENDPOINT, payload),
+      controlPlane.settings.changePassword(payload),
     onSuccess: (result) => {
       toast.success("密码已修改", {
         description:
@@ -295,7 +296,7 @@ function ConnectionKeysSection() {
   const canReadKeys = can("apikeys:read");
   const keys = useQuery({
     queryKey: ["api-keys", "settings"],
-    queryFn: () => apiList<ApiKey>(ENDPOINTS.apiKeys),
+    queryFn: () => controlPlane.clientKeys.list(),
     enabled: canReadKeys,
     retry: false,
   });
@@ -344,11 +345,11 @@ function ConnectionKeysSection() {
           <Skeleton className="h-6 w-full" />
         ) : keys.isError ? (
           <p className="text-2xs text-danger-text">密钥列表加载失败：{(keys.error as Error).message}</p>
-        ) : (keys.data?.items.length ?? 0) === 0 ? (
+        ) : (keys.data?.length ?? 0) === 0 ? (
           <p className="text-2xs text-faint">还没有连接密钥。</p>
         ) : (
           <ul className="space-y-1">
-            {keys.data!.items.slice(0, 5).map((item) => (
+            {(keys.data ?? []).slice(0, 5).map((item) => (
               <li key={item.id} className="flex items-center gap-1.5 text-2xs">
                 <span className="font-mono text-title">{item.mask}</span>
                 <Badge tone={item.status === "active" ? "success" : "warning"}>
@@ -382,7 +383,7 @@ function SpendSection() {
   const { can } = usePermissions();
   const spend = useQuery({
     queryKey: ["bills", "my-spend", "30d", "self"],
-    queryFn: () => api.get<MySpendResponse>(ENDPOINTS.mySpend + "?range=30d&scope=self"),
+    queryFn: () => controlPlane.settings.mySpend({ range: "30d", scope: "self" }),
     staleTime: 30_000,
   });
   const stats = spend.data?.summary;

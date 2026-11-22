@@ -14,7 +14,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { api, apiList, ENDPOINTS } from "@/lib/api";
+import { controlPlane } from "@/lib/control-plane";
 import { fmtMs } from "@/lib/format";
 import { ACTION_ICONS } from "@/lib/icons";
 import { revisionStatusMeta } from "@/lib/revision-status";
@@ -26,10 +26,6 @@ import { PageHeader } from "@/components/layout/page-header";
  * 配置版本（统一列表规范）：版本号/操作人/状态徽标/时间/备注 + 详情抽屉
  * （变更摘要 / artifact 摘要 / 失败详情）+ 回滚（红色确认，写明将下发旧配置）。
  */
-
-// docs/api-contract.md：POST /admin/config/rollback/{revision_id}；lib/api.ts 的
-// ENDPOINTS 没有这条（本工位不改 lib），故在页面内按同一前缀拼写。
-const ROLLBACK_ENDPOINT_PREFIX = "/admin/config/rollback/";
 
 async function copyText(text: string, label: string): Promise<void> {
   try {
@@ -53,8 +49,7 @@ function RevisionDetailDrawer({ row, open, onOpenChange }: {
   const failed = row?.status === "failed";
 
   const rollback = useMutation({
-    mutationFn: (revisionId: string) =>
-      api.post<ConfigRevision>(ROLLBACK_ENDPOINT_PREFIX + encodeURIComponent(revisionId)),
+    mutationFn: (revisionId: string) => controlPlane.config.rollback(revisionId),
     onSuccess: (revision) => {
       toast.success("已回滚并下发旧配置", { description: "生成新版本 " + revision.id });
       setConfirmOpen(false);
@@ -167,7 +162,7 @@ function RevisionDetailDrawer({ row, open, onOpenChange }: {
 }
 
 export function ConfigRevisionsPage() {
-  const q = useQuery({ queryKey: ["config-revisions"], queryFn: () => apiList<ConfigRevision>(ENDPOINTS.configRevisions) });
+  const q = useQuery({ queryKey: ["config-revisions"], queryFn: () => controlPlane.config.revisions() });
   const [detailRow, setDetailRow] = useState<ConfigRevision | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
@@ -229,7 +224,7 @@ export function ConfigRevisionsPage() {
       />
       <DataTable
         columns={columns}
-        data={q.data?.items}
+        data={q.data}
         loading={q.isPending}
         error={q.isError ? (q.error as Error).message : null}
         onRetry={() => void q.refetch()}

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { AUTH_ME_QUERY_KEY } from "./auth";
-import { api, ENDPOINTS } from "./api";
+import { controlPlane } from "./control-plane";
 import { applyTheme, THEME_STORAGE_KEY, type Theme } from "./theme";
 import type { ConnectionInfo, UserPreferences } from "@/types";
 
@@ -55,20 +55,20 @@ export function validateBaseUrl(input: string): string | null {
 }
 
 export async function fetchConnection(): Promise<ConnectionInfo> {
-  return api.get<ConnectionInfo>(ENDPOINTS.connection);
+  return controlPlane.settings.connection();
 }
 
 export async function fetchPreferences(): Promise<UserPreferences> {
-  const payload = await api.get<UserPreferences>(ENDPOINTS.preferences);
+  const payload = await controlPlane.settings.preferences();
   return { ...DEFAULT_PREFERENCES, ...payload };
 }
 
 export async function savePreferences(next: UserPreferences): Promise<UserPreferences> {
-  return api.put<UserPreferences>(ENDPOINTS.preferences, next);
+  return controlPlane.settings.savePreferences(next);
 }
 
 export async function saveProfile(name: string): Promise<void> {
-  await api.patch<unknown>("/admin/auth/me", { name });
+  await controlPlane.settings.saveProfile({ name });
 }
 
 /** 读取连接地址；接口不可用（mock/旧后端）时回退默认值，页面不白屏。 */

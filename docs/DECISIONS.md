@@ -579,4 +579,4 @@ vendors 表、`vendors:*` 权限键、`/admin/vendors` 路由与上游/价目/�
 
 **后果**：`/admin/prices/upstream` 只收 `upstream_model_id`；成本流水与日聚合只认模型行；
 前端上游/价目/账单页面不再有厂商筛选、列与文案；旧厂商痕迹由 seed 重置与退役清理兜底；
-mock 演示数据（`web/src/lib/mock.ts`）同步到无厂商形态。
+mock 演示数据（W4 票04 后为 `web/src/lib/control-plane/memory-*`）同步到无厂商形态。

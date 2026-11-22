@@ -16,9 +16,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { api, apiList, ENDPOINTS } from "@/lib/api";
-import { API_STYLE_LABELS, MODEL_TYPE_OPTIONS, type ProbeResultView } from "./shared";
-import type { UpstreamImportResult, UpstreamModel } from "@/types";
+import { controlPlane } from "@/lib/control-plane";
+import { API_STYLE_LABELS, MODEL_TYPE_OPTIONS } from "./shared";
 
 /** 获取上游模型弹窗：POST discover-models（协议风格用页面当前选择），勾选后 import-models。
  *  后端按已保存的上游地址探测，弹窗只在已保存上游可用（新建先保存，见编辑器页头）。 */
@@ -35,13 +34,13 @@ export function DiscoverModelsDialog({
   const qc = useQueryClient();
   const discover = useQuery({
     queryKey: ["upstream-discover", upstreamId, apiStyle],
-    queryFn: () => api.post<ProbeResultView>(ENDPOINTS.discoverModels(upstreamId), { api_style: apiStyle }),
+    queryFn: () => controlPlane.upstreams.discoverModels(upstreamId, { api_style: apiStyle }),
     retry: false,
     staleTime: Number.POSITIVE_INFINITY,
   });
   const existingQ = useQuery({
     queryKey: ["upstream-models"],
-    queryFn: () => apiList<UpstreamModel>(ENDPOINTS.upstreamModels),
+    queryFn: () => controlPlane.models.listUpstreamModels(),
   });
 
   const [modelType, setModelType] = useState("chat");
@@ -50,7 +49,7 @@ export function DiscoverModelsDialog({
 
   const models = useMemo(() => discover.data?.models ?? [], [discover.data]);
   const existingNames = useMemo(() => {
-    const list = existingQ.data?.items ?? [];
+    const list = existingQ.data ?? [];
     return new Set(list.filter((model) => model.upstream_id === upstreamId).map((model) => model.name));
   }, [existingQ.data, upstreamId]);
   const visibleModels = useMemo(() => {
@@ -73,7 +72,7 @@ export function DiscoverModelsDialog({
 
   const importModels = useMutation({
     mutationFn: () =>
-      api.post<UpstreamImportResult>(ENDPOINTS.upstreamImportModels(upstreamId), {
+      controlPlane.upstreams.importModels(upstreamId, {
         names: models.filter((name) => chosen.has(name)),
         model_type: modelType,
       }),

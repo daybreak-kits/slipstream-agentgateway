@@ -4,7 +4,7 @@
  *
  * 为什么存在：web 没有单测框架，而 mock 投影（collapse/focus/q/topN）与搜索闭包
  * （flow-search）是纯逻辑，错了只有演示模式才会暴露。本脚本用 esbuild 把
- * report-mocks / flow-search 打包成临时 ESM，在 node 里跑行为断言，
+ * control-plane/memory/report-fixtures 与 lib/reports/flow-search 打包成临时 ESM，在 node 里跑行为断言，
  * 语义与后端 pytest（test_reports_flow_focus.py）逐条对齐：
  *
  *   1. mock 默认输出：五段、节点/边形状、totals = 窗口全量；
@@ -29,8 +29,8 @@ const OUT_DIR = path.join(WEB_ROOT, ".scratch", "check-flow-mock");
 const asPosix = (target) => path.relative(WEB_ROOT, target).replace(/\\/g, "/");
 
 const ENTRY = `
-export { mockFlow } from "${asPosix(path.join(WEB_ROOT, "src/components/dashboard/report-mocks"))}";
-export { flowMatchNodes, flowChainOf, flowSearchView } from "${asPosix(path.join(WEB_ROOT, "src/components/dashboard/flow-search"))}";
+export { mockFlow } from "${asPosix(path.join(WEB_ROOT, "src/lib/control-plane/memory/report-fixtures"))}";
+export { flowMatchNodes, flowChainOf, flowSearchView } from "${asPosix(path.join(WEB_ROOT, "src/lib/reports/flow-search"))}";
 `;
 
 let failures = 0;

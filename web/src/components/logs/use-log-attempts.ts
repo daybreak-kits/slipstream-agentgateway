@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
-import type { LogAttemptsOut } from "@/generated/contract";
-import { api, ENDPOINTS } from "@/lib/api";
+import { controlPlane } from "@/lib/control-plane";
 
 /**
  * GET /admin/logs/{event_id}/attempts（ADR-028）：列表 popover 与详情抽屉共用同一
@@ -10,8 +9,7 @@ import { api, ENDPOINTS } from "@/lib/api";
 export function useLogAttempts(eventId: string, enabled = true) {
   return useQuery({
     queryKey: ["log-attempts", eventId],
-    queryFn: ({ signal }) =>
-      api.get<LogAttemptsOut>(ENDPOINTS.logAttempts(eventId), { signal }),
+    queryFn: ({ signal }) => controlPlane.logs.attempts(eventId, { signal }),
     enabled: enabled && eventId.length > 0,
     staleTime: 30_000,
     retry: false,

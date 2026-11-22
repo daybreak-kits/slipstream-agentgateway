@@ -21,7 +21,7 @@
 - 后果：query 失败后 data=undefined——
   - StatCard 永久骨架：stat-card.tsx:21 `loading || value === undefined` → 骨架永不消失（验收第 1 查「骨架 300ms 内消失」同样不过）；
   - DataTable 页误报空态：data-table.tsx:29 默认 `emptyText="暂无数据"`，错误被当成「没有数据」。
-- 缓解：lib/api.ts:44-52 连接失败/HTTP 错误已有全局 toast，用户并非无反馈，但页面体无重试。
+- 缓解：统一请求层（W4 票04 后为 lib/control-plane/http-adapter.ts）连接失败/HTTP 错误已有全局 toast，用户并非无反馈，但页面体无重试。
 - 建议：给 DataTable/StatCard 增加 `error` + `onRetry`（或包 QueryErrorResetBoundary），W2 接线时每页补一行即可；验收前必须完成。
 
 ### B2 关键流程 CRUD 未接线（FRONTEND-PLAN §4 流程 1/2/4 暂不可走）
@@ -68,10 +68,10 @@
 
 | 检查 | 结果 |
 |---|---|
-| 裸 fetch | 仅 lib/api.ts:43（统一入口），页面 0 命中 ✓ |
-| 3691 / 1900x 端口、localhost | 仅 lib/api.ts:5 默认 `http://127.0.0.1:3700`（合规），违禁端口 0 命中 ✓ |
+| 裸 fetch | 仅统一请求层（W4 票04 后为 lib/control-plane/http-adapter.ts；此前 lib/api.ts:43），页面 0 命中 ✓ |
+| 3691 / 1900x 端口、localhost | 仅统一请求层默认 `http://127.0.0.1:3700`（W4 票04 后为 lib/control-plane/http-adapter.ts；此前 lib/api.ts:5，合规），违禁端口 0 命中 ✓ |
 | console.log / `: any` / as any / TODO | 全 0 ✓ |
-| mock 硬编码进页面 | 0；mock 集中在 lib/mock.ts + lib/playground.ts（W1 进行中）+ app-shell useMock 开关 ✓ |
+| mock 硬编码进页面 | 0；mock 集中在组合根 lib/control-plane/index.ts + 内存适配器 + lib/playground.ts（W1 进行中），页面无 useMock ✓（W4 票04 后） |
 | .tnum 等宽数字 | 58 处 ✓ |
 | tsc --noEmit | **1 error**：pages/admins.tsx:133 TS6133 openEdit 未使用（t4 收尾可清零） |
 | eslint src | **1 error**（同上 admins.tsx:132）+ 1 warning（user-dialogs.tsx:312 react-refresh） |

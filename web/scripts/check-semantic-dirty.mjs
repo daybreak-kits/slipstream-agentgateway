@@ -793,7 +793,7 @@ check("接线：公开模型编辑器单页（无 Tab、单 PATCH、双权限、
   const text = read("src/components/models/public-model-editor.tsx");
   includesAll(
     text,
-    ["PublicModelPageView", "useDirtyFields", "usePermissions", "useDirtyGuard", "ENDPOINTS.publicModelUpdate"],
+    ["PublicModelPageView", "useDirtyFields", "usePermissions", "useDirtyGuard", "controlPlane.models.updatePublicModel"],
     "公开模型编辑器接线",
   );
   const formContract = read("src/components/models/public-model-form.ts");
@@ -801,7 +801,7 @@ check("接线：公开模型编辑器单页（无 Tab、单 PATCH、双权限、
   expect(!text.includes("Tabs"), "必须移除 Tabs 引入与使用");
   expect(!text.includes("保存整页") && !text.includes("保存成员"), "旧保存文案必须移除");
   expect((text.match(/save\.mutate\(/g) ?? []).length === 1, "整页只能有一个保存入口");
-  includesAll(text, ["api.patch", "patchPayloadOf"], "保存必须走单 PATCH 且携带 targets");
+  includesAll(text, ["updatePublicModel", "patchPayloadOf"], "保存必须走单次更新操作且携带 targets");
   const page = read("src/components/models/public-model-page.tsx");
   expect(!page.includes("Tabs"), "单页视图不得使用 Tabs");
   expect(

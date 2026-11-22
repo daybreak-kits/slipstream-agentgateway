@@ -8,7 +8,7 @@ import { ErrorState } from "@/components/governance/panel";
 import { ActionButton } from "@/components/ui/action-button";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { api } from "@/lib/api";
+import { controlPlane } from "@/lib/control-plane";
 import { fmtCny } from "@/lib/format";
 import { ACTION_ICONS } from "@/lib/icons";
 import { usePermissions } from "@/lib/permissions";
@@ -76,7 +76,6 @@ interface UsersPanelProps {
   onChanged: () => void;
 }
 
-type CreatedUser = UserTreeNode & { initial_password?: string };
 type ResetTarget = { id: string; name: string };
 
 /**
@@ -140,7 +139,7 @@ export function UsersPanel({
 
   const createUser = useMutation({
     mutationFn: (values: { name: string; username: string; role: string; parentUserId: string | null }) =>
-      api.post<CreatedUser>("/admin/users", {
+      controlPlane.users.create({
         name: values.name,
         ...(values.username !== "" ? { username: values.username } : {}),
         role: values.role,
@@ -163,7 +162,7 @@ export function UsersPanel({
       id: string;
       values: { name: string; role: string; parentUserId: string | null; status: string };
     }) =>
-      api.patch<UserTreeNode>("/admin/users/" + vars.id, {
+      controlPlane.users.update(vars.id, {
         name: vars.values.name,
         role: vars.values.role,
         parent_user_id: vars.values.parentUserId,
@@ -182,7 +181,7 @@ export function UsersPanel({
   /** 行内 启用/关闭：只切状态，角色等其余字段走 EditUserDialog。 */
   const patchStatus = useMutation({
     mutationFn: (vars: { id: string; status: string }) =>
-      api.patch<UserTreeNode>("/admin/users/" + vars.id, { status: vars.status }),
+      controlPlane.users.update(vars.id, { status: vars.status }),
     onSuccess: (user) => {
       toast.success(user.status === "active" ? "用户已启用" : "用户已关闭", {
         description: user.name + "（" + user.username + "）",
@@ -198,9 +197,7 @@ export function UsersPanel({
    */
   const resetPassword = useMutation({
     mutationFn: (vars: { id: string; password: string }) =>
-      api.put<{ id: string; username: string }>("/admin/users/" + vars.id + "/password", {
-        password: vars.password,
-      }),
+      controlPlane.users.resetPassword(vars.id, { password: vars.password }),
     onSuccess: (result, vars) => {
       toast.success("密码已重置", { description: result.username + " 的已有会话已全部注销" });
       setResetTarget(null);
@@ -214,7 +211,7 @@ export function UsersPanel({
 
   const topup = useMutation({
     mutationFn: (vars: { userId: string; amountMicro: number; note: string }) =>
-      api.post<{ balance_after_micro: number }>("/admin/users/" + vars.userId + "/balance", {
+      controlPlane.users.topup(vars.userId, {
         amount_micro: vars.amountMicro,
         currency: "CNY",
         note: vars.note,
@@ -229,7 +226,7 @@ export function UsersPanel({
 
   const adjust = useMutation({
     mutationFn: (vars: { userId: string; deltaMicro: number; note: string }) =>
-      api.post<{ balance_after_micro: number }>("/admin/users/" + vars.userId + "/balance/adjust", {
+      controlPlane.users.adjust(vars.userId, {
         delta_micro: vars.deltaMicro,
         currency: "CNY",
         note: vars.note,
@@ -244,7 +241,7 @@ export function UsersPanel({
   });
 
   const deleteUser = useMutation({
-    mutationFn: (id: string) => api.del<{ id: string; status: string }>("/admin/users/" + id),
+    mutationFn: (id: string) => controlPlane.users.remove(id),
     onSuccess: () => {
       toast.success("用户已删除", { description: "软删除：余额与流水保留存档" });
       setDeleteTarget(null);

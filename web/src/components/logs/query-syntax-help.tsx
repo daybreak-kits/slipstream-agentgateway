@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Table, TD, TH, THead, TR } from "@/components/ui/table";
 import type { LogQuerySyntaxOut } from "@/generated/contract";
-import { api, ENDPOINTS } from "@/lib/api";
+import { controlPlane } from "@/lib/control-plane";
 
 export function QuerySyntaxHelp() {
   const [open, setOpen] = useState(false);
@@ -24,8 +24,8 @@ export function QuerySyntaxHelp() {
     let cancelled = false;
     setLoading(true);
     setFailed(false);
-    api
-      .get<LogQuerySyntaxOut>(ENDPOINTS.logQuerySyntax)
+    controlPlane.logs
+      .querySyntax()
       .then((payload) => {
         if (!cancelled) setTokens(payload.tokens);
       })

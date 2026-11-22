@@ -34,11 +34,11 @@ export function PublicPricesSection() {
 
   const memberSummary = useMemo(() => {
     const map = new Map<string, PublicModel>();
-    for (const model of modelsQuery.data?.items ?? []) map.set(model.id, model);
+    for (const model of modelsQuery.data ?? []) map.set(model.id, model);
     return map;
   }, [modelsQuery.data]);
 
-  const prices = useMemo(() => pricesQuery.data?.items ?? [], [pricesQuery.data]);
+  const prices = useMemo(() => pricesQuery.data ?? [], [pricesQuery.data]);
   const filtered = useMemo(() => {
     const query = searchText.trim().toLowerCase();
     if (!query) return prices;

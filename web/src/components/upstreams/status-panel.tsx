@@ -4,9 +4,8 @@ import type { ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { api, ENDPOINTS } from "@/lib/api";
+import { controlPlane } from "@/lib/control-plane";
 import { formatDateTime, useTimezone } from "@/lib/time";
-import type { UpstreamKeyList } from "@/types";
 import {
   API_STYLE_LABELS,
   API_STYLE_SHORT,
@@ -102,7 +101,7 @@ export function UpstreamStatusPanel({
   // 密钥行落库的逐把测试（label 用密钥行备注补齐）；runtime 响应与落库内容一致。
   const keysQ = useQuery({
     queryKey: ["upstream-keys", upstream?.id ?? ""],
-    queryFn: () => api.get<UpstreamKeyList>(ENDPOINTS.upstreamKeys(upstream?.id ?? "")),
+    queryFn: () => controlPlane.upstreams.listKeys(upstream?.id ?? ""),
     enabled: !!upstream,
   });
   const testedRows = (keysQ.data?.items ?? []).filter((key) => key.last_test !== null);

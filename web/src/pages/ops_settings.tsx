@@ -14,8 +14,6 @@ import {
   type SettingFieldDef,
   type SettingGroupDef,
   type SettingsItem,
-  type SettingsPayload,
-  type SettingsSchemaPayload,
 } from "@/components/governance/settings-schema";
 import { SettingsGrid, SettingsTile } from "@/components/settings/tile";
 import { Badge } from "@/components/ui/badge";
@@ -25,7 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableWrap, TD, TH, THead, TR } from "@/components/ui/table";
-import { api, ENDPOINTS } from "@/lib/api";
+import { controlPlane } from "@/lib/control-plane";
 import { ACTION_ICONS } from "@/lib/icons";
 import { usePermissions } from "@/lib/permissions";
 import { useDirtyFields } from "@/lib/use-dirty-fields";
@@ -42,8 +40,6 @@ import { PageHeader } from "@/components/layout/page-header";
 
 const SETTINGS_KEY = ["settings"] as const;
 const SETTINGS_SCHEMA_KEY = ["settings", "schema"] as const;
-type SettingsResponse = SettingsPayload | SettingsItem[];
-
 type SectionKey = "connection" | "system" | "runtime";
 
 const SECTIONS: Array<{ key: SectionKey; label: string; hint: string; icon: typeof Link2 }> = [
@@ -82,7 +78,7 @@ function FieldTile({ field, value, missing, canWrite }: {
   const [draft, setDraft] = useState(value);
   const [error, setError] = useState<string | null>(null);
   const save = useMutation({
-    mutationFn: (next: string) => api.put<SettingsResponse>(ENDPOINTS.settings, { values: { [field.key]: next } }),
+    mutationFn: (next: string) => controlPlane.settings.saveSettings({ [field.key]: next }),
     onSuccess: () => {
       toast.success(field.label + " 已保存");
       setEditing(false);
@@ -179,7 +175,7 @@ function ConnectionSection({ canWrite }: { canWrite: boolean }) {
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
   const save = useMutation({
-    mutationFn: (next: string) => api.put<SettingsResponse>(ENDPOINTS.settings, { values: { gateway_base_url: next } }),
+    mutationFn: (next: string) => controlPlane.settings.saveSettings({ gateway_base_url: next }),
     onSuccess: () => {
       toast.success("连接地址已保存", { description: "所有用户的连接密钥页与概览会读取同一地址" });
       setError(null);
@@ -383,11 +379,11 @@ export function OpsSettingsPage() {
   const canWrite = can("settings:write");
   const settings = useQuery({
     queryKey: SETTINGS_KEY,
-    queryFn: () => api.get<SettingsResponse>(ENDPOINTS.settings),
+    queryFn: () => controlPlane.settings.getSettings(),
   });
   const schema = useQuery({
     queryKey: SETTINGS_SCHEMA_KEY,
-    queryFn: () => api.get<SettingsSchemaPayload>(ENDPOINTS.settingsSchema),
+    queryFn: () => controlPlane.settings.getSettingsSchema(),
     staleTime: 5 * 60_000,
   });
   const items = normalizeSettings(settings.data);

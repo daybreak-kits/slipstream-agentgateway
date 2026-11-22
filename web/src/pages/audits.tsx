@@ -14,10 +14,10 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { api, ENDPOINTS } from "@/lib/api";
+import { controlPlane } from "@/lib/control-plane";
 import { fmtTime } from "@/lib/format";
 import { ACTION_ICONS } from "@/lib/icons";
-import type { AuditLog, AuditLogList } from "@/types";
+import type { AuditLog } from "@/types";
 import { PageHeader } from "@/components/layout/page-header";
 
 /**
@@ -32,7 +32,7 @@ const SAMPLE_LIMIT = 200;
 function useAuditOptions() {
   const sample = useQuery({
     queryKey: ["audit-logs", "options"],
-    queryFn: () => api.get<AuditLogList>(ENDPOINTS.auditLogs + "?limit=" + SAMPLE_LIMIT),
+    queryFn: () => controlPlane.audits.list({ limit: SAMPLE_LIMIT, offset: 0 }),
     staleTime: 60_000,
   });
   const distinct = (values: string[]) => [...new Set(values.filter((v) => v.length > 0))].sort();
@@ -94,15 +94,13 @@ export function AuditLogsPage() {
   const { data, isPending, isError, error, refetch } = useQuery({
     placeholderData: keepPreviousData,
     queryKey: ["audit-logs", page, pageSize, actor, action],
-    queryFn: () => {
-      const params = new URLSearchParams({
-        limit: String(pageSize),
-        offset: String(page * pageSize),
-      });
-      if (actor !== "all") params.set("actor", actor);
-      if (action !== "all") params.set("action", action);
-      return api.get<AuditLogList>(ENDPOINTS.auditLogs + "?" + params.toString());
-    },
+    queryFn: () =>
+      controlPlane.audits.list({
+        limit: pageSize,
+        offset: page * pageSize,
+        ...(actor !== "all" ? { actor } : {}),
+        ...(action !== "all" ? { action } : {}),
+      }),
   });
 
   useEffect(() => {

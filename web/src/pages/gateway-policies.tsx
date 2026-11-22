@@ -20,18 +20,11 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TabBar } from "@/components/ui/tabs";
-import { api, ENDPOINTS } from "@/lib/api";
+import { controlPlane } from "@/lib/control-plane";
 import { ACTION_ICONS } from "@/lib/icons";
 import { usePermissions } from "@/lib/permissions";
 import { useDirtyGuard } from "@/lib/use-dirty-guard";
-import type {
-  ApplyRevision,
-  GuardrailConfig,
-  McpServersResponse,
-  PoliciesResponse,
-  PolicyConfig,
-  GuardrailsResponse,
-} from "@/lib/policies";
+import type { GuardrailConfig, PolicyConfig } from "@/lib/policies";
 
 /**
  * 网关策略（ADR-023 第 3 条）：流量策略 / 护栏 / MCP 单页三 Tab。
@@ -43,8 +36,6 @@ import type {
  */
 
 type TabKey = "policies" | "guardrails" | "mcp";
-
-type ValidateResult = { ok: boolean; errors: string[]; warnings: string[] };
 
 const TAB_ITEMS: Array<{ key: TabKey; label: string }> = [
   { key: "policies", label: "流量策略" },
@@ -65,15 +56,15 @@ export function GatewayPoliciesPage() {
 
   const policies = useQuery({
     queryKey: ["policies"],
-    queryFn: () => api.get<PoliciesResponse>(ENDPOINTS.policies),
+    queryFn: () => controlPlane.governance.policies(),
   });
   const guardrails = useQuery({
     queryKey: ["guardrails"],
-    queryFn: () => api.get<GuardrailsResponse>(ENDPOINTS.guardrails),
+    queryFn: () => controlPlane.governance.guardrails(),
   });
   const mcpServers = useQuery({
     queryKey: ["mcp-servers"],
-    queryFn: () => api.get<McpServersResponse>(ENDPOINTS.mcpServers),
+    queryFn: () => controlPlane.governance.mcpServers(),
   });
 
   // 三份草稿：null = 该 Tab 无未保存修改；挂在页级，Tab 切换不丢。
@@ -122,19 +113,19 @@ export function GatewayPoliciesPage() {
     const checked: string[] = [];
     try {
       if (policyDraft !== null && policies.data !== undefined) {
-        const result = await api.post<ValidateResult>(ENDPOINTS.policiesValidate, { config: policyDraft });
+        const result = await controlPlane.governance.validatePolicies(policyDraft);
         checked.push("流量策略");
         if (result.ok) warnings.push(...result.warnings.map((item) => "流量策略：" + item));
         else failures.push("流量策略：" + (result.errors.join("；") || "未通过校验"));
       }
       if (guardrailDraft !== null && guardrails.data !== undefined) {
-        const result = await api.post<ValidateResult>(ENDPOINTS.guardrailsValidate, { config: guardrailDraft });
+        const result = await controlPlane.governance.validateGuardrails(guardrailDraft);
         checked.push("护栏");
         if (result.ok) warnings.push(...result.warnings.map((item) => "护栏：" + item));
         else failures.push("护栏：" + (result.errors.join("；") || "未通过校验"));
       }
       if (mcpDraft !== null && mcpServers.data !== undefined) {
-        const result = await api.post<ValidateResult>(ENDPOINTS.mcpValidate, mcpDraft);
+        const result = await controlPlane.governance.validateMcp(mcpDraft);
         checked.push("MCP");
         if (result.ok) warnings.push(...result.warnings.map((item) => "MCP：" + item));
         else failures.push("MCP：" + (result.errors.join("；") || "未通过校验"));
@@ -168,20 +159,18 @@ export function GatewayPoliciesPage() {
     const savedTabs: string[] = [];
     try {
       if (policyDraft !== null) {
-        await api.put(ENDPOINTS.policies, { config: policyDraft });
+        await controlPlane.governance.savePolicies(policyDraft);
         savedTabs.push("流量策略");
       }
       if (guardrailDraft !== null) {
-        await api.put(ENDPOINTS.guardrails, { config: guardrailDraft });
+        await controlPlane.governance.saveGuardrails(guardrailDraft);
         savedTabs.push("护栏");
       }
       if (mcpDraft !== null) {
-        await api.put(ENDPOINTS.mcpServers, mcpDraft);
+        await controlPlane.governance.saveMcpServers(mcpDraft);
         savedTabs.push("MCP");
       }
-      const revision = await api.post<ApplyRevision>(ENDPOINTS.configApply, {
-        reason: "控制面网关策略编辑（" + savedTabs.join("、") + "）",
-      });
+      const revision = await controlPlane.config.apply("控制面网关策略编辑（" + savedTabs.join("、") + "）");
       toast.success("网关策略已保存并下发", {
         description: "配置修订 " + revision.id + " · " + savedTabs.join("、"),
       });

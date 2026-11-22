@@ -17,9 +17,9 @@ import type {
   RevisionLike,
   TrendDimension,
   TrendMetric,
-} from "./report-types";
+} from "@/components/dashboard/report-types";
 
-import { flowChainOf, flowMatchNodes } from "./flow-search";
+import { flowChainOf, flowMatchNodes } from "@/lib/reports/flow-search";
 
 const ESTIMATE = "mock 数据：词元含缓存估算（阶段 B 待接入）";
 const CURRENCY = "CNY";

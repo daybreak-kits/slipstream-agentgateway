@@ -1344,14 +1344,13 @@ check("日志页：模型格 attempts>0 分叉图标开 popover，独立尝试�
 });
 
 check("mock：多尝试失败行与行级错误摘要可用于演示路由链", async () => {
-  const { mockRequest } = await load("/src/lib/mock.ts");
-  const page = await mockRequest("/admin/logs?page_size=200", { method: "GET" });
+  const { createMemoryLogs } = await load("/src/lib/control-plane/memory-logs.ts");
+  const logs = createMemoryLogs();
+  const page = await logs.list({ query: "", pageSize: 200, offset: 0, sort: "started_at", order: "desc" });
   const withChain = page.items.find((item) => item.has_attempts && item.http_status >= 400);
   expect(Boolean(withChain), "mock 必须有一行上游失败但带 attempts 的日志");
   expect(withChain.attempts_count > 0, "失败行的 attempts_count 必须 > 0");
-  const chain = await mockRequest("/admin/logs/" + withChain.event_id + "/attempts", {
-    method: "GET",
-  });
+  const chain = await logs.attempts(withChain.event_id);
   expect(chain.attempts.length === withChain.attempts_count, "mock 尝试链长度必须与 attempts_count 一致");
   const { rowErrorText } = await load("/src/components/logs/error-summary.ts");
   const lastFailed = [...chain.attempts].reverse().find((attempt) => attempt.status_code >= 400);
@@ -1449,7 +1448,7 @@ check("路由与模型面板：单模型/全部测试 + 密钥选择 + 串行进
   const probe = read("src/components/upstreams/model-probe.ts");
   includesAll(
     probe,
-    ["ENDPOINTS.upstreamModelsProbe", "AbortController", "MODEL_PROBE_REQUEST_TIMEOUT_MS", "probeReducer"],
+    ["probeModels", "AbortController", "MODEL_PROBE_REQUEST_TIMEOUT_MS", "probeReducer"],
     "模型探测模块接线",
   );
   const view = read("src/components/upstreams/model-probe-view.tsx");
@@ -1566,13 +1565,13 @@ check("分流图隐藏阶段：前端不做跨接重连，隐藏集合作为后�
   expect(!chart.includes("splice"), "flow-chart.tsx 仍在前端 splice 重接桑基边（W5 已改后端 collapse 投影）");
   includesAll(chart, ["hiddenStages", "canHideMore", "至少保留两个可见阶段"], "分流图隐藏阶段守卫");
   const reports = read("src/components/dashboard/use-reports.ts");
-  includesAll(reports, ["collapse", 'params.set("collapse", hidden)'], "flow collapse 请求参数");
+  includesAll(reports, ["collapse", "narrowedKey"], "flow collapse 请求参数");
   const panel = read("src/components/dashboard/trend-panel.tsx");
   includesAll(panel, ["hiddenStages", "collapse: hiddenStages"], "看板 hiddenStages 接线");
 });
 
 check("分流图隐藏阶段：mock 按路径投影 collapse（W6 票 17），隐藏到两段即禁用请求", () => {
-  const mocks = read("src/components/dashboard/report-mocks.ts");
+  const mocks = read("src/lib/control-plane/memory/report-fixtures.ts");
   includesAll(mocks, ["FLOW_PATHS", "flowChainOf", "flowMatchNodes"], "mock 路径投影与闭包复用");
   const panel = read("src/components/dashboard/trend-panel.tsx");
   expect(
@@ -1601,7 +1600,7 @@ check("分流图票 17：replaceMerge 替换 series、轴右竖排、搜索左�
   expect(!dash.includes("RequestChain"), "看板不得再引用 RequestChain（独立请求链路面板已删，组件留给登录页）");
   includesAll(dash, ["查看分流"], "页头必须保留查看分流入口");
   includesAll(
-    read("src/components/dashboard/flow-search.ts"),
+    read("src/lib/reports/flow-search.ts"),
     ["flowChainOf", "flowSearchView", "flowMatchNodes"],
     "搜索闭包纯函数层",
   );
@@ -1642,19 +1641,19 @@ check("错误通知去重：同因失败窗口内只产生一条通知", async (
   store.clearNotifications();
 });
 
-check("错误治理接线：main.tsx retry 接策略函数，api.ts 查询失败进通知中心", () => {
+check("错误治理接线：main.tsx retry 接策略函数，control-plane 请求层查询失败进通知中心", () => {
   const main = read("src/main.tsx");
   expect(main.includes("queryRetry"), "main.tsx 必须把 queries.retry 接到 lib/query-retry 的策略函数");
-  const api = read("src/lib/api.ts");
+  const adapter = read("src/lib/control-plane/http-adapter.ts");
   includesAll(
-    api,
+    adapter,
     ["pushErrorNotificationOnce", "reportFailure(err, isQuery)"],
-    "api.ts：查询失败走通知中心去重",
+    "http-adapter.ts：查询失败走通知中心去重",
   );
   // 查询错误不逐查询弹 toast：每个 toast.error 都必须直接落在非查询（写操作）分支里。
-  const toasts = (api.match(/toast\.error/g) ?? []).length;
-  const guarded = (api.match(/if \(!isQuery\) \{\s*toast\.error/g) ?? []).length;
-  expect(toasts > 0 && toasts === guarded, "api.ts 的每个 toast.error 都必须在 !isQuery（写操作）分支内");
+  const toasts = (adapter.match(/toast\.error/g) ?? []).length;
+  const guarded = (adapter.match(/if \(!isQuery\) \{\s*toast\.error/g) ?? []).length;
+  expect(toasts > 0 && toasts === guarded, "http-adapter.ts 的每个 toast.error 都必须在 !isQuery（写操作）分支内");
 });
 
 // ---------- 六期：模型试验思考等级与模型能力声明（W6 ticket 18）----------

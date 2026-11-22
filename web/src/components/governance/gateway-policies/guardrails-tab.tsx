@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableWrap, TD, TH, THead, TR } from "@/components/ui/table";
-import { api, ENDPOINTS } from "@/lib/api";
+import { controlPlane } from "@/lib/control-plane";
 import { ACTION_ICONS } from "@/lib/icons";
 import {
   parseJsonDocument,
@@ -85,7 +85,7 @@ export function GuardrailsTab({ data, draft, onDraftChange, canWrite, dirtyCount
   const [rawError, setRawError] = useState<string | undefined>(undefined);
 
   const reset = useMutation({
-    mutationFn: () => saveAndApply(() => api.del<unknown>(ENDPOINTS.guardrails), "恢复默认护栏"),
+    mutationFn: () => saveAndApply(() => controlPlane.governance.resetGuardrails().then(() => undefined), "恢复默认护栏"),
     onSuccess: (revisionId) => {
       toast.success("已恢复默认护栏并下发", { description: "配置修订 " + revisionId });
       void queryClient.invalidateQueries({ queryKey: ["guardrails"] });

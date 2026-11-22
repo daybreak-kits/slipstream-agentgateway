@@ -7,13 +7,12 @@ import type {
   ReportsOverviewOut,
   TimeseriesReportOut,
 } from "@/generated/contract";
-import { api } from "@/lib/api";
-import { useMock } from "@/lib/mock";
+import { controlPlane } from "@/lib/control-plane";
+import type { ReportWindow } from "@/lib/control-plane/operations/reports";
 
 import { timeWindowKey, timeWindowUsable, type TimeWindow } from "@/components/time-range-picker";
 
-import { mockFlow, mockHeatmap, mockLatency, mockOverview, mockRevisions, mockTimeseries } from "./report-mocks";
-import { normalizeTimeseries, REPORT_PATHS } from "./report-types";
+import { normalizeTimeseries } from "./report-types";
 import type {
   HealthReport,
   HeatmapMetric,
@@ -25,24 +24,18 @@ import type {
 } from "./report-types";
 
 /**
- * 全部报表 hooks 都把 react-query 的 queryFn signal 透传给 lib/api（AbortController）：
+ * 全部报表 hooks 都把 react-query 的 queryFn signal 透传给控制面（AbortController）：
  * 换区间/换维度/换指标时旧请求立刻取消，连点不排队（W6 验收流程 4）。
+ *
+ * W4 票04：页面/hook 不再判断 mock、不拼 URL——数据来自 control-plane 的 reports 操作，
+ * 适配器（HTTP / 内存）在组合根按 VITE_MOCK 选择。
  */
 
-/**
- * 时间窗 → query 参数。预设区间只传 range 枚举（桶边界按报表时区切，前端不自算毫秒）；
- * 本周/本月/自定义传成对 from_ms/to_ms（后端 F 契约：成对生效，payload range 回显 "custom"）。
- */
-function windowParams(window: TimeWindow): URLSearchParams {
-  const params = new URLSearchParams();
-  if (window.kind === "range") {
-    params.set("range", window.value);
-  } else {
-    params.set("range", "7d");
-    params.set("from_ms", String(window.fromMs));
-    params.set("to_ms", String(window.toMs));
-  }
-  return params;
+/** 展示层时间窗 → 操作层参数（query 串由适配器生成）。 */
+function toReportWindow(window: TimeWindow): ReportWindow {
+  return window.kind === "range"
+    ? { kind: "range", value: window.value }
+    : { kind: "custom", fromMs: window.fromMs, toMs: window.toMs };
 }
 
 /**
@@ -55,14 +48,7 @@ export function useReportsOverview(window: TimeWindow) {
     enabled: timeWindowUsable(window),
     placeholderData: keepPreviousData,
     queryFn: async ({ signal }): Promise<ReportsOverviewOut> => {
-      if (useMock) return mockOverview();
-      const params = new URLSearchParams();
-      if (window.kind === "custom") {
-        params.set("from_ms", String(window.fromMs));
-        params.set("to_ms", String(window.toMs));
-      }
-      const query = params.toString();
-      return api.get<ReportsOverviewOut>(REPORT_PATHS.overview + (query ? "?" + query : ""), { signal });
+      return controlPlane.reports.overview(toReportWindow(window), { signal });
     },
   });
 }
@@ -85,15 +71,11 @@ export function useReportsTimeseries({ window, dimension, metric, enabled = true
     enabled: enabled && timeWindowUsable(window),
     placeholderData: keepPreviousData,
     queryFn: async ({ signal }): Promise<TimeseriesReport> => {
-      if (useMock) return normalizeTimeseries(mockTimeseries(window, dimension, metric), metric);
-      const params = windowParams(window);
-      params.set("dimension", dimension);
-      if (metric === "money") params.set("metrics", "cost_micro,charge_micro");
-      else params.set("metric", metric);
-      const raw = await api.get<TimeseriesReportOut>(REPORT_PATHS.timeseries + "?" + params.toString(), {
-        signal,
-      });
-      return normalizeTimeseries(raw, metric);
+      const raw = await controlPlane.reports.timeseries(
+        { window: toReportWindow(window), dimension, metric },
+        { signal },
+      );
+      return normalizeTimeseries(raw as TimeseriesReportOut, metric);
     },
   });
 }
@@ -105,8 +87,7 @@ export function useReportsLatency(window: TimeWindow) {
     enabled: timeWindowUsable(window),
     placeholderData: keepPreviousData,
     queryFn: async ({ signal }): Promise<LatencyReportOut> => {
-      if (useMock) return mockLatency(window);
-      return api.get<LatencyReportOut>(REPORT_PATHS.latency + "?" + windowParams(window).toString(), { signal });
+      return controlPlane.reports.latency(toReportWindow(window), { signal });
     },
   });
 }
@@ -117,9 +98,7 @@ export function useReportsHeatmap(range: HeatmapRange, metric: HeatmapMetric) {
     queryKey: ["reports", "heatmap", range, metric],
     placeholderData: keepPreviousData,
     queryFn: async ({ signal }): Promise<HeatmapReportOut> => {
-      if (useMock) return mockHeatmap(range, metric);
-      const params = new URLSearchParams({ range, metric });
-      return api.get<HeatmapReportOut>(REPORT_PATHS.heatmap + "?" + params.toString(), { signal });
+      return controlPlane.reports.heatmap({ range, metric }, { signal });
     },
   });
 }
@@ -156,36 +135,20 @@ export function useReportsFlow({
     enabled: enabled && timeWindowUsable(window),
     placeholderData: keepPreviousData,
     queryFn: async ({ signal }): Promise<FlowReportOut> => {
-      if (useMock) return mockFlow(metric, collapse, { focus, q, topN }, window);
-      const params = windowParams(window);
-      params.set("metric", metric);
-      if (hidden) params.set("collapse", hidden);
-      if (focus.trim()) params.set("focus", focus.trim());
-      if (q.trim()) params.set("q", q.trim());
-      if (topN > 0) params.set("top_n", String(topN));
-      return api.get<FlowReportOut>(REPORT_PATHS.flow + "?" + params.toString(), { signal });
+      return controlPlane.reports.flow(
+        { window: toReportWindow(window), metric, collapse, focus, q, topN },
+        { signal },
+      );
     },
   });
 }
 
-/**
- * 控制面健康。mock 下没有 /admin/health 路由，直接给等价 fixture；
- * 真实模式打 routers_health.py 的 /admin/health（data_plane_port=3600）。
- */
+/** 控制面健康：真实模式打 /admin/health，离线演示由内存适配器给等价 fixture。 */
 export function useControlPlaneHealth() {
   return useQuery({
     queryKey: ["reports", "health"],
     queryFn: async ({ signal }): Promise<HealthReport> => {
-      if (useMock) {
-        return {
-          status: "ok",
-          ir_version: "v1",
-          adapter: "agentgateway",
-          data_plane_port: 3600,
-          now_ms: Date.now(),
-        };
-      }
-      return api.get<HealthReport>(REPORT_PATHS.health, { signal });
+      return controlPlane.reports.health({ signal });
     },
     refetchInterval: 60_000,
   });
@@ -196,10 +159,7 @@ export function useRecentRevisions(limit = 5) {
   return useQuery({
     queryKey: ["reports", "revisions", limit],
     queryFn: async ({ signal }): Promise<RevisionLike[]> => {
-      if (useMock) return mockRevisions().slice(0, limit);
-      // 真实后端：/admin/config/revisions?page_size=25&offset=0，取前 limit 条
-      const rows = await api.get<RevisionLike[]>("/admin/config/revisions?page_size=25&offset=0", { signal });
-      return rows.slice(0, limit);
+      return controlPlane.reports.revisions(limit, { signal });
     },
   });
 }

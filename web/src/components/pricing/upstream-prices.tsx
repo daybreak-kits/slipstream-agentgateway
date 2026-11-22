@@ -12,7 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { PriceTable, type PriceColumn } from "@/components/pricing/table";
 import { UNIT_HINT, deriveSpendMicro, priceMicro } from "@/components/pricing/money";
 import { invalidatePricing, useUpstreamModels } from "@/components/pricing/queries";
-import { api, ENDPOINTS } from "@/lib/api";
+import { controlPlane } from "@/lib/control-plane";
 import { fmtPriceAmount, fmtUnitPriceMicro } from "@/lib/format";
 import { ACTION_ICONS } from "@/lib/icons";
 import { usePermissions } from "@/lib/permissions";
@@ -83,7 +83,7 @@ export function UpstreamPricesSection() {
 
   const modelsQuery = useUpstreamModels(!permissionsPending && canReadModels);
   const models = useMemo(() => {
-    const rows = [...(modelsQuery.data?.items ?? [])];
+    const rows = [...(modelsQuery.data ?? [])];
     rows.sort(
       (a, b) =>
         (a.upstream_name ?? "").localeCompare(b.upstream_name ?? "", "zh") ||
@@ -129,7 +129,7 @@ export function UpstreamPricesSection() {
 
   const save = useMutation({
     mutationFn: ({ model, draft }: { model: UpstreamModel; draft: Draft }) =>
-      api.patch<UpstreamModel>(ENDPOINTS.upstreamModelUpdate(model.id), {
+      controlPlane.models.updateUpstreamModel(model.id, {
         cost_input_per_1m: draft.input.trim() === "" ? null : draft.input.trim(),
         cost_output_per_1m: draft.output.trim() === "" ? null : draft.output.trim(),
         markup: draft.markup.trim(),
@@ -537,7 +537,7 @@ function BatchPriceDialog({
       if (output.trim() !== "") body.cost_output_per_1m = output.trim();
       if (markup.trim() !== "") body.markup = markup.trim();
       const results = await Promise.allSettled(
-        ids.map((id) => api.patch<UpstreamModel>(ENDPOINTS.upstreamModelUpdate(id), body)),
+        ids.map((id) => controlPlane.models.updateUpstreamModel(id, body)),
       );
       const failed = results.filter((item) => item.status === "rejected").length;
       const firstError = results.find(

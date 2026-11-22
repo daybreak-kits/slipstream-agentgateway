@@ -11,8 +11,6 @@ import type { AllSamplesLatencyOut, LatencyReportOut } from "@/generated/contrac
 import { toast } from "@/lib/notify";
 
 import { DataTable } from "@/components/data-table";
-import { mockLatency } from "@/components/dashboard/report-mocks";
-import { REPORT_PATHS } from "@/components/dashboard/report-types";
 import {
   cacheHitFraction,
   cacheRatioText,
@@ -41,7 +39,7 @@ import {
   type LogStatusFilter,
 } from "@/components/logs/query";
 import { QuerySyntaxHelp } from "@/components/logs/query-syntax-help";
-import type { LogListResponse, LogRow } from "@/components/logs/types";
+import type { LogRow } from "@/components/logs/types";
 import { TimeRangePicker, timeWindowUsable, timeWindowKey } from "@/components/time-range-picker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -50,15 +48,13 @@ import { Empty } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
-import { api, apiList, ENDPOINTS } from "@/lib/api";
+import { controlPlane } from "@/lib/control-plane";
 import { fmtInt, fmtMoney, fmtPct, fmtSeconds } from "@/lib/format";
 import { ACTION_ICONS } from "@/lib/icons";
-import { useMock } from "@/lib/mock";
 import { usePermissions } from "@/lib/permissions";
 import { SELECT_ALL_VALUE } from "@/lib/select-sentinels";
 import { formatDateTime, useTimezone, type TimezoneMode } from "@/lib/time";
 import { cn } from "@/lib/utils";
-import type { PublicModel, Upstream, UserTreeNode } from "@/types";
 import { PageHeader } from "@/components/layout/page-header";
 
 interface AppliedLogFilters {
@@ -107,15 +103,15 @@ export function LogsPage() {
   // 筛选下拉的数据源与接口类型 join（upstream_model_id → model_type）。
   const publicModelsQ = useQuery({
     queryKey: ["public-models"],
-    queryFn: () => apiList<PublicModel>(ENDPOINTS.publicModels),
+    queryFn: () => controlPlane.models.listPublicModels(),
   });
   const upstreamsQ = useQuery({
     queryKey: ["upstreams"],
-    queryFn: () => apiList<Upstream>(ENDPOINTS.upstreams),
+    queryFn: () => controlPlane.upstreams.list(),
   });
   const usersQ = useQuery({
     queryKey: ["users"],
-    queryFn: () => apiList<UserTreeNode>(ENDPOINTS.users),
+    queryFn: () => controlPlane.users.list(),
   });
   const logsQuery = useQuery({
     queryKey: [
@@ -129,19 +125,20 @@ export function LogsPage() {
       page,
       pageSize,
     ],
-    queryFn: ({ signal }) => {
-      const params = new URLSearchParams({
-        query: applied.query,
-        page_size: String(pageSize),
-        offset: String(page * pageSize),
-        sort: sort.field,
-        order: sort.order,
-      });
-      if (applied.from_ms !== undefined) params.set("from_ms", String(applied.from_ms));
-      if (applied.to_ms !== undefined) params.set("to_ms", String(applied.to_ms));
-      if (applied.hasError !== undefined) params.set("has_error", String(applied.hasError));
-      return api.get<LogListResponse>("/admin/logs?" + params.toString(), { signal });
-    },
+    queryFn: ({ signal }) =>
+      controlPlane.logs.list(
+        {
+          query: applied.query,
+          pageSize,
+          offset: page * pageSize,
+          sort: sort.field,
+          order: sort.order,
+          fromMs: applied.from_ms,
+          toMs: applied.to_ms,
+          hasError: applied.hasError,
+        },
+        { signal },
+      ),
     placeholderData: keepPreviousData,
   });
 
@@ -155,27 +152,21 @@ export function LogsPage() {
     enabled: timeWindowUsable(applied.draft.window),
     placeholderData: keepPreviousData,
     queryFn: ({ signal }): Promise<LatencyReportOut> => {
-      if (useMock) {
-        const fromMs = applied.from_ms ?? 0;
-        return Promise.resolve(mockLatency({ kind: "custom", fromMs, toMs: applied.to_ms ?? Date.now() }));
-      }
-      const params = new URLSearchParams();
-      if (applied.from_ms !== undefined && applied.to_ms !== undefined) {
-        params.set("from_ms", String(applied.from_ms));
-        params.set("to_ms", String(applied.to_ms));
-      }
-      const query = params.toString();
-      return api.get<LatencyReportOut>(REPORT_PATHS.latency + (query ? "?" + query : ""), { signal });
+      const window =
+        applied.from_ms !== undefined && applied.to_ms !== undefined
+          ? { kind: "custom" as const, fromMs: applied.from_ms, toMs: applied.to_ms }
+          : undefined;
+      return controlPlane.reports.latency(window, { signal });
     },
   });
 
   const modelOptions = useMemo<ComboboxOption[]>(
-    () => (publicModelsQ.data?.items ?? []).map((model) => ({ value: model.name, label: model.name })),
+    () => (publicModelsQ.data ?? []).map((model) => ({ value: model.name, label: model.name })),
     [publicModelsQ.data],
   );
   const upstreamOptions = useMemo<ComboboxOption[]>(
     () =>
-      (upstreamsQ.data?.items ?? []).map((upstream) => ({
+      (upstreamsQ.data ?? []).map((upstream) => ({
         value: upstream.id,
         label: upstream.name,
         description: upstream.base_url,
@@ -184,7 +175,7 @@ export function LogsPage() {
   );
   const userOptions = useMemo<ComboboxOption[]>(
     () =>
-      (usersQ.data?.items ?? []).map((user) => ({
+      (usersQ.data ?? []).map((user) => ({
         value: user.id,
         label: user.name,
         description: user.id,

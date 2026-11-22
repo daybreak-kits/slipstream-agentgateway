@@ -3,7 +3,7 @@ import { Copy } from "lucide-react";
 import { toast } from "@/lib/notify";
 
 import { Button } from "@/components/ui/button";
-import { ENDPOINTS, api } from "@/lib/api";
+import { controlPlane } from "@/lib/control-plane";
 import { copyText } from "@/lib/clipboard";
 
 interface CopyKeyButtonProps {
@@ -17,7 +17,7 @@ interface CopyKeyButtonProps {
  */
 export function CopyKeyButton({ keyId }: CopyKeyButtonProps) {
   const reveal = useMutation({
-    mutationFn: () => api.post<{ key: string }>(ENDPOINTS.apiKeyReveal(keyId), {}),
+    mutationFn: () => controlPlane.clientKeys.reveal(keyId),
     onSuccess: async (data) => {
       const copied = await copyText(data.key);
       if (copied) {

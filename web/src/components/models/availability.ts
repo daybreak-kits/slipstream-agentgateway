@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/lib/notify";
 
-import { ApiError, api, ENDPOINTS } from "@/lib/api";
+import { controlPlane } from "@/lib/control-plane";
+import { ApiError } from "@/lib/control-plane/errors";
 import type { TableRowTone } from "@/lib/table-columns";
 import { formatDateTime, useTimezone, type TimezoneMode } from "@/lib/time";
 import type {
@@ -96,14 +97,12 @@ export function buildScheduleJson(
   return JSON.stringify({ windows: [window] });
 }
 
-const RULE_PAGE_SIZE = 200;
-
 export function scopeOf(kind: "upstream" | "public"): string {
   return kind === "upstream" ? "upstream_model" : "public_model";
 }
 
 async function fetchAvailabilityRules(): Promise<AvailabilityRule[]> {
-  return api.get<AvailabilityRule[]>(ENDPOINTS.availabilityRules + "?page_size=" + RULE_PAGE_SIZE);
+  return controlPlane.models.listRules();
 }
 
 /**
@@ -121,7 +120,7 @@ async function writeCooldownNote(scope: string, scopeId: string, note: string): 
       toast.warning("冷却原因未能写入规则表", { description: "未找到该行对应的冷却规则；冷却本身已生效" });
       return;
     }
-    await api.patch(ENDPOINTS.availabilityRule(managed.id), { note: note.trim() });
+    await controlPlane.models.updateRule(managed.id, { note: note.trim() });
   } catch {
     toast.warning("冷却原因未能写入规则表", { description: "冷却本身已生效；可稍后在规则列表补充原因" });
   }
@@ -255,14 +254,13 @@ export function useAvailabilityMutation(kind: "upstream" | "public") {
   const listKey = kind === "upstream" ? "upstream-models" : "public-models";
   return useMutation({
     mutationFn: async (vars: { id: string; action: AvailabilityAction; cooldown_until_ms?: number; note?: string }) => {
-      const path = kind === "upstream" ? ENDPOINTS.upstreamModelUpdate(vars.id) : ENDPOINTS.publicModelUpdate(vars.id);
-      const body: Record<string, unknown> = {};
+      const body: { enabled?: boolean; cooldown_until_ms?: number } = {};
       if (vars.action === "enable") body.enabled = true;
       else if (vars.action === "disable") body.enabled = false;
       else if (vars.action === "cooldown") body.cooldown_until_ms = vars.cooldown_until_ms ?? 0;
       else body.cooldown_until_ms = 0;
       // 启用响应带 window_skip（工单 G）：窗口期内启用=仅跳过当前窗口，提示语由后端给出。
-      const result = await api.patch<{ window_skip?: { message: string } | null }>(path, body);
+      const result = await controlPlane.models.setAvailability(kind, vars.id, body);
       // 原因补写进规则表；失败只提示，不影响冷却本身。
       if (vars.action === "cooldown" && vars.note && vars.note.trim() !== "") {
         await writeCooldownNote(scopeOf(kind), vars.id, vars.note);
@@ -285,11 +283,12 @@ export function useAvailabilityMutation(kind: "upstream" | "public") {
 export function useBatchMutation(kind: "upstream" | "public") {
   const qc = useQueryClient();
   const listKey = kind === "upstream" ? "upstream-models" : "public-models";
-  const path = kind === "upstream" ? ENDPOINTS.upstreamModelBatch : ENDPOINTS.publicModelBatch;
   const title = kind === "upstream" ? "批量操作上游模型" : "批量操作公开模型";
   return useMutation({
     mutationFn: async (vars: { ids: string[]; action: "enable" | "disable" | "delete" }) => {
-      return api.patch<ModelBatchResult>(path, { ids: vars.ids, action: vars.action });
+      return kind === "upstream"
+        ? controlPlane.models.bulkUpstreamModels({ ids: vars.ids, action: vars.action })
+        : controlPlane.models.bulkPublicModels({ ids: vars.ids, action: vars.action });
     },
     onSuccess: (result, vars) => {
       reportBatchResult(title, result);

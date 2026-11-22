@@ -20,12 +20,12 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableWrap, TD, TH, THead, TR } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { api, ENDPOINTS } from "@/lib/api";
+import { controlPlane } from "@/lib/control-plane";
 import { ACTION_ICONS } from "@/lib/icons";
 import { ACTION_CELL_WRAPPER_CLASS, FROZEN_COLUMN_CELL_CLASS, FROZEN_COLUMN_HEADER_CLASS } from "@/lib/table-columns";
 import { formatDateTime, useTimezone } from "@/lib/time";
 import { parseKeyLines, type PendingKey } from "./shared";
-import type { UpstreamKey, UpstreamKeyList } from "@/types";
+import type { UpstreamKey } from "@/types";
 
 /** 后端 l05_service/upstream_ops.MAX_UPSTREAM_KEYS；列表响应也会带 limit。 */
 const KEY_LIMIT = 20;
@@ -303,7 +303,7 @@ export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
   const { mode: timezone } = useTimezone();
   const q = useQuery({
     queryKey: ["upstream-keys", upstreamId],
-    queryFn: () => api.get<UpstreamKeyList>(ENDPOINTS.upstreamKeys(upstreamId)),
+    queryFn: () => controlPlane.upstreams.listKeys(upstreamId),
   });
   const keys = q.data?.items ?? [];
   const limit = q.data?.limit ?? KEY_LIMIT;
@@ -331,7 +331,7 @@ export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
 
   const add = useMutation({
     mutationFn: (vars: { label: string; apiKey: string }) =>
-      api.post<UpstreamKey>(ENDPOINTS.upstreamKeys(upstreamId), {
+      controlPlane.upstreams.createKey(upstreamId, {
         label: vars.label,
         api_key: vars.apiKey,
       }),
@@ -357,7 +357,7 @@ export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
       let failed = 0;
       for (const entry of entries) {
         try {
-          await api.post(ENDPOINTS.upstreamKeys(upstreamId), {
+          await controlPlane.upstreams.createKey(upstreamId, {
             label: "批次 " + batchNextNo,
             api_key: entry.apiKey,
           });
@@ -383,7 +383,7 @@ export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
   const rename = useMutation({
     mutationFn: () => {
       if (!renaming) throw new Error("未选中密钥行");
-      return api.patch<UpstreamKey>(ENDPOINTS.upstreamKey(upstreamId, renaming.id), { label: renameLabel.trim() });
+      return controlPlane.upstreams.updateKey(upstreamId, renaming.id, { label: renameLabel.trim() });
     },
     onSuccess: () => {
       toast.success("备注已更新");
@@ -393,7 +393,7 @@ export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
   });
 
   const del = useMutation({
-    mutationFn: (key: UpstreamKey) => api.del<{ deleted: string }>(ENDPOINTS.upstreamKey(upstreamId, key.id)),
+    mutationFn: (key: UpstreamKey) => controlPlane.upstreams.removeKey(upstreamId, key.id),
     onSuccess: () => {
       toast.success("密钥已删除");
       setDeleting(null);
@@ -403,7 +403,7 @@ export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
 
   /** 逐把测试：一次触发本上游全部密钥行，结果落库并回填每行。 */
   const testKeys = useMutation({
-    mutationFn: () => api.post<{ items: Array<{ key_id: string; ok: boolean }> }>(ENDPOINTS.upstreamKeysTest(upstreamId)),
+    mutationFn: () => controlPlane.upstreams.testKeys(upstreamId),
     onSuccess: (result) => {
       const okCount = result.items.filter((item) => item.ok).length;
       const failCount = result.items.length - okCount;
@@ -415,11 +415,7 @@ export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
   });
 
   const batchDelete = useMutation({
-    mutationFn: () =>
-      api.post<{ deleted: number; items: Array<{ key_id: string; ok: boolean; error?: string }> }>(
-        ENDPOINTS.upstreamKeysBatchDelete(upstreamId),
-        { ids: [...selected] },
-      ),
+    mutationFn: () => controlPlane.upstreams.batchDeleteKeys(upstreamId, { ids: [...selected] }),
     onSuccess: (result) => {
       const failedItems = result.items.filter((item) => !item.ok);
       const parts = ["删除 " + result.deleted + " 把"];

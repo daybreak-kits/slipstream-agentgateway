@@ -17,11 +17,10 @@ import {
 } from "@/components/models/public-model-form";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, apiList, ENDPOINTS } from "@/lib/api";
+import { controlPlane } from "@/lib/control-plane";
 import { usePermissions } from "@/lib/permissions";
 import { useDirtyFields } from "@/lib/use-dirty-fields";
 import { useDirtyGuard } from "@/lib/use-dirty-guard";
-import type { PublicModel, UpstreamModel } from "@/types";
 
 /**
  * 公开模型单页编辑器（ticket 13，路由 /models/public/:id）。
@@ -38,7 +37,7 @@ export function PublicModelEditor({ id }: { id: string }) {
   const { can } = usePermissions();
   const q = useQuery({
     queryKey: ["public-models"],
-    queryFn: () => apiList<PublicModel>(ENDPOINTS.publicModels),
+    queryFn: () => controlPlane.models.listPublicModels(),
     refetchInterval: 30_000,
   });
   // 成员候选需要全量上游模型：列表端点分页档位 25/50/100/200（默认 50），
@@ -46,10 +45,10 @@ export function PublicModelEditor({ id }: { id: string }) {
   // 改变表格/全局搜索等共用键的取数行为，前缀失效（["upstream-models"]）仍然命中。
   const qModels = useQuery({
     queryKey: ["upstream-models", "editor"],
-    queryFn: () => apiList<UpstreamModel>(ENDPOINTS.upstreamModels + "?page_size=200"),
+    queryFn: () => controlPlane.models.listUpstreamModels({ pageSize: 200 }),
   });
-  const model = useMemo(() => (q.data?.items ?? []).find((row) => row.id === id) ?? null, [q.data, id]);
-  const upstreamModels = qModels.data?.items ?? [];
+  const model = useMemo(() => (q.data ?? []).find((row) => row.id === id) ?? null, [q.data, id]);
+  const upstreamModels = qModels.data ?? [];
 
   const [form, setForm] = useState<PublicModelForm>(EMPTY_PUBLIC_MODEL_FORM);
   // baseline = 上一次保存成功（或首次载入）时的整页快照：保存成功回填后脏标记清零，
@@ -84,7 +83,7 @@ export function PublicModelEditor({ id }: { id: string }) {
 
   // 单 PATCH 提交整页：基本字段 + 策略 + 启用 + 成员整批替换，服务端单事务提交。
   const save = useMutation({
-    mutationFn: () => api.patch<PublicModel>(ENDPOINTS.publicModelUpdate(id), patchPayloadOf(form)),
+    mutationFn: () => controlPlane.models.updatePublicModel(id, patchPayloadOf(form)),
     onSuccess: () => {
       const saved = normalizeForm(form);
       setForm(saved);

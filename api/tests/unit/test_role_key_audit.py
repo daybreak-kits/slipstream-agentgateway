@@ -104,29 +104,31 @@ def test_frontend_role_constants_only_contain_new_keys() -> None:
     option_keys = re.findall(r"key:\s*[\"']([^\"']+)[\"']", options.group(1))
     assert option_keys == ["admin", "customer", "reseller"]
 
-    mock_ts = _read(WEB_SRC / "lib" / "mock.ts")
-    admin_start = mock_ts.index("const adminRoles")
-    mock_roles = mock_ts[admin_start : mock_ts.index("\n];", admin_start)]
+    # W4 票04：旧 lib/mock.ts 删除，演示 fixtures 迁入 control-plane 内存适配器。
+    fixtures_ts = _read(WEB_SRC / "lib" / "control-plane" / "memory" / "fixtures.ts")
+    admin_start = fixtures_ts.index("const adminRoles")
+    mock_roles = fixtures_ts[admin_start : fixtures_ts.index("\n];", admin_start)]
     mock_role_keys = re.findall(r"key:\s*[\"']([^\"']+)[\"']", mock_roles)
     assert not (set(mock_role_keys) & set(OLD_KEYS)), mock_role_keys
     assert {"admin", "customer", "reseller"} <= set(mock_role_keys)
 
-    users_start = mock_ts.index("const mockUsers")
-    mock_users = mock_ts[users_start : mock_ts.index("\n];", users_start)]
+    users_start = fixtures_ts.index("const mockUsers")
+    mock_users = fixtures_ts[users_start : fixtures_ts.index("\n];", users_start)]
     mock_user_roles = set(re.findall(r"role:\s*[\"']([^\"']+)[\"']", mock_users))
     assert mock_user_roles <= {"admin", "customer", "reseller"}, mock_user_roles
 
-    reserved = re.search(r"const RESERVED_ROLE_KEYS = new Set\(\[(.*?)\]\)", mock_ts)
+    reserved = re.search(r"const RESERVED_ROLE_KEYS = new Set\(\[(.*?)\]\)", fixtures_ts)
     assert reserved, "RESERVED_ROLE_KEYS must stay a literal set"
     reserved_keys = set(re.findall(r"[\"']([^\"']+)[\"']", reserved.group(1)))
     assert not (reserved_keys & set(OLD_KEYS)), reserved_keys
 
-    mock_user_block = mock_ts[mock_ts.index("const MOCK_CUSTOMER = {"):]
+    mock_user_block = fixtures_ts[fixtures_ts.index("const MOCK_CUSTOMER = {"):]
     mock_user_block = mock_user_block[: mock_user_block.index("\n};")]
     mock_role = re.search(r"role:\s*[\"']([^\"']+)[\"']", mock_user_block)
     assert mock_role and mock_role.group(1) == "customer"
 
-    assert 'role: body.role ?? "customer"' in mock_ts
+    memory_users_ts = _read(WEB_SRC / "lib" / "control-plane" / "memory-users.ts")
+    assert 'role: body.role ?? "customer"' in memory_users_ts
     for dialog in ("edit-user-dialog.tsx", "create-user-dialog.tsx"):
         text = _read(WEB_SRC / "components" / "users" / dialog)
         assert '?? "customer"' in text, dialog

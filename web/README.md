@@ -14,14 +14,14 @@ cd ../api && PYTHONPATH=src python -m uvicorn l06_api.app:create_app --factory -
 npm run dev        # http://localhost:5173
 ```
 
-后端未就绪时可演示：`.env.example` 里有 `VITE_USE_MOCK=1`，复制为 `.env` 即启用 mock（侧栏顶栏会显示「Mock 演示」徽章）。置 `0` 或删掉则直连控制面。
+后端未就绪时可演示：`.env.example` 里有 `VITE_MOCK=1`，复制为 `.env` 即启用内存演示数据（侧栏顶栏会显示「Mock 演示」徽章）。置 `0` 或删掉则直连控制面。
 
 ## 环境变量
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `VITE_API_BASE` | 空（同源） | 控制面 API 地址。单端口部署留空走相对路径；独立 dev/分离部署时设为控制面地址（如 `http://localhost:3700`）。**只允许打 3700 控制面**；3600 是数据面入口，3691 / 1900x 是生产实例，前端一律不碰 |
-| `VITE_USE_MOCK` | 未设置=直连 | `1` / `true` 时走 `src/lib/mock.ts` 内置数据 |
+| `VITE_MOCK` | 未设置=直连 | `1` / `true` 时组合根切到 `src/lib/control-plane/memory-*` 内存适配器（离线演示数据） |
 
 ## 脚本
 
@@ -31,6 +31,7 @@ npm run dev        # http://localhost:5173
 | `npm run build` | `tsc --noEmit` + vite 生产构建 |
 | `npm run typecheck` | 仅类型检查 |
 | `npm run lint` | eslint（flat config） |
+| `npm test` | vitest（纯 TS/node，覆盖 control-plane 操作与错误映射） |
 | `npm run format` | prettier（行宽 100） |
 
 ## 目录
@@ -40,10 +41,10 @@ src/
 ├─ main.tsx                  入口：QueryClient + Router + Toaster
 ├─ app.tsx                   路由表（13 个页面）
 ├─ index.css                 语义色 token（:root / .dark）+ @theme 映射 + .tnum 等宽数字
-├─ types.ts                  后端 snake_case 类型（前端不二次改名）
+├─ types.ts                  仍手写的领域响应类型（wire 契约以 generated/contract.ts 为准）
 ├─ lib/
-│  ├─ api.ts                 baseURL(VITE_API_BASE) + 统一错误处理 + toast（ApiError）
-│  ├─ mock.ts                mock 数据与路径表（VITE_USE_MOCK 开关）
+│  ├─ control-plane/         类型化控制面操作层（组合根 index、operations/ 按域、
+│  │                          http-adapter、memory-adapter、errors、内存 fixtures）
 │  ├─ theme.ts               深浅色（localStorage + .dark class，index.html 反闪烁）
 │  ├─ format.ts              数字 / 金额 / 百分比 / 时间格式化
 │  └─ utils.ts               cn()（clsx + tailwind-merge）
@@ -55,14 +56,14 @@ src/
 │  ├─ transforms/transforms-editor.tsx
 │  │                          改写规则编辑器（四段分区 / 条件行 / 保护头拦截 / 分段预览 / custom_cel）
 │  └─ ui/                    button / card / badge / input / table / skeleton / empty / tabs
-└─ pages/                    17 个列表页壳（含成本 / 营收 / 上游价目 / 下游价目 / 待补价）+ upstream_detail（基本信息 | 改写 双 tab），每页都经 TanStack Query 走 api.ts（mock 或直连）
+└─ pages/                    17 个列表页壳（含成本 / 营收 / 上游价目 / 下游价目 / 待补价）+ upstream_detail（基本信息 | 改写 双 tab），每页都经 TanStack Query 调 control-plane 的类型化操作（内存或 HTTP 适配器由组合根选择）
 ```
 
 ## 设计约定
 
 - 语义色只用 token：`bg-surface`、`text-title`、`text-faint`、`bg-primary`、`bg-danger-soft` 等，禁止裸十六进制与紫色渐变；深色只靠 `.dark` 覆盖 CSS 变量。
 - 数字与金额一律加 `tnum`（等宽数字）。
-- 页面不直接 fetch，统一 `api.get/post/patch/del`；错误统一 `{code, message, details?, request_id}` → toast。
+- 页面不直接 fetch、不拼 URL/query：只调 `src/lib/control-plane` 的类型化操作；HTTP/内存差异、`{code, message, details?, request_id}` 错误解析与 toast 都在适配层收口（统一 `ApiError`）。
 - 表格分页档位固定 25/50/100/200，默认 50。
 
 ## 已知环境限制

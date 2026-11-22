@@ -181,45 +181,8 @@ export const FLOW_STAGES = [
   { id: "channel", label: "上游" },
 ] as const;
 
-/**
- * report 端点路径。lib/api.ts 的 ENDPOINTS 是唯一来源（ticket 07 约定），
- * 这里只做看板范围的再导出，避免页面里散落字符串。
- */
-import { ENDPOINTS } from "@/lib/api";
-
-export const REPORT_PATHS = {
-  overview: ENDPOINTS.overview,
-  trend: ENDPOINTS.reportsTrend,
-  timeseries: ENDPOINTS.reportsTimeseries,
-  latency: ENDPOINTS.reportsLatency,
-  heatmap: ENDPOINTS.reportsHeatmap,
-  flow: ENDPOINTS.reportsFlow,
-  /** 控制面健康（routers_health.py），用于总览的连接与健康卡 */
-  health: ENDPOINTS.health,
-} as const;
-
-/** 配置版本行：mock 与真实后端的字段名不同，用宽松类型在渲染层归一（见 normalizeRevision）。 */
-export interface RevisionLike {
-  id?: string;
-  revision?: string;
-  artifact_hash?: string;
-  adapter_id?: string;
-  operator?: string;
-  reason?: string;
-  note?: string;
-  status?: string;
-  created_at_ms?: number;
-  created_at?: string;
-  previous_revision_id?: string | null;
-}
-
-export interface HealthReport {
-  status: string;
-  ir_version: string;
-  adapter: string;
-  data_plane_port: number;
-  now_ms: number;
-}
+/** 配置版本行与健康响应归 control-plane 操作层（W4 票04），这里保留同名 re-export。 */
+export type { HealthReport, RevisionLike } from "@/lib/control-plane/operations/reports";
 
 /** 后端 estimate_note 目前是英文常量，界面统一翻成中文；未知文案原样透传。 */
 const ESTIMATE_NOTE_ZH: Record<string, string> = {

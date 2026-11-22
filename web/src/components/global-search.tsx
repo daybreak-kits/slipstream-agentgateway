@@ -15,10 +15,10 @@ import {
 } from "@/components/ui/command";
 import { roleLabel } from "@/components/governance/roles";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
-import { apiList, ENDPOINTS } from "@/lib/api";
+import { controlPlane } from "@/lib/control-plane";
 import { usePermissions } from "@/lib/permissions";
 import { fetchRoles } from "@/lib/roles";
-import type { ApiKey, PublicModel, Upstream, UpstreamModel, UserTreeNode } from "@/types";
+
 
 interface SearchHit {
   id: string;
@@ -82,29 +82,29 @@ export function GlobalSearch() {
   // 用户/角色按权限键拉取（DESIGN-AUDIT §13）：无对应权限不发请求、不出现分组。
   const upstreams = useQuery({
     queryKey: ["upstreams"],
-    queryFn: () => apiList<Upstream>(ENDPOINTS.upstreams),
+    queryFn: () => controlPlane.upstreams.list(),
     enabled: open,
   });
   const upstreamModels = useQuery({
     queryKey: ["upstream-models"],
-    queryFn: () => apiList<UpstreamModel>(ENDPOINTS.upstreamModels),
+    queryFn: () => controlPlane.models.listUpstreamModels(),
     enabled: open,
   });
   const publicModels = useQuery({
     queryKey: ["public-models"],
-    queryFn: () => apiList<PublicModel>(ENDPOINTS.publicModels),
+    queryFn: () => controlPlane.models.listPublicModels(),
     enabled: open,
   });
   const apiKeys = useQuery({
     queryKey: ["api-keys"],
-    queryFn: () => apiList<ApiKey>(ENDPOINTS.apiKeys),
+    queryFn: () => controlPlane.clientKeys.list(),
     enabled: open,
   });
   const canSearchUsers = open && can("users:read");
   const canSearchRoles = open && can("roles:read");
   const users = useQuery({
     queryKey: ["users"],
-    queryFn: () => apiList<UserTreeNode>(ENDPOINTS.users + "?page_size=200&offset=0"),
+    queryFn: () => controlPlane.users.list(),
     enabled: canSearchUsers,
   });
   const roles = useQuery({
@@ -120,7 +120,7 @@ export function GlobalSearch() {
   const groups = [
     {
       heading: "上游",
-      items: (upstreams.data?.items ?? []).map<SearchHit>((row) => ({
+      items: (upstreams.data ?? []).map<SearchHit>((row) => ({
         id: "upstream-" + row.id,
         label: row.name,
         detail: row.base_url,
@@ -130,7 +130,7 @@ export function GlobalSearch() {
     },
     {
       heading: "上游模型",
-      items: (upstreamModels.data?.items ?? []).map<SearchHit>((row) => ({
+      items: (upstreamModels.data ?? []).map<SearchHit>((row) => ({
         id: "upstream-model-" + row.id,
         label: row.name,
         detail: [row.upstream_name, row.model_type].filter(Boolean).join(" · "),
@@ -140,7 +140,7 @@ export function GlobalSearch() {
     },
     {
       heading: "公开模型",
-      items: (publicModels.data?.items ?? []).map<SearchHit>((row) => ({
+      items: (publicModels.data ?? []).map<SearchHit>((row) => ({
         id: "public-model-" + row.id,
         label: row.name,
         detail: row.routing_mode,
@@ -150,7 +150,7 @@ export function GlobalSearch() {
     },
     {
       heading: "连接密钥",
-      items: (apiKeys.data?.items ?? []).map<SearchHit>((row) => ({
+      items: (apiKeys.data ?? []).map<SearchHit>((row) => ({
         id: "api-key-" + row.id,
         label: row.mask,
         detail: [row.key_suffix, row.status].filter(Boolean).join(" · "),
@@ -161,7 +161,7 @@ export function GlobalSearch() {
     {
       heading: "用户",
       items: canSearchUsers
-        ? (users.data?.items ?? []).map<SearchHit>((row) => ({
+        ? (users.data ?? []).map<SearchHit>((row) => ({
             id: "user-" + row.id,
             label: row.name,
             detail: [row.username, roleLabel(row.role)].filter(Boolean).join(" · "),

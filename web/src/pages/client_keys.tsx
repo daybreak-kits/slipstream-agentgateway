@@ -16,7 +16,7 @@ import { fmtMs } from "@/lib/format";
 import { ACTION_ICONS } from "@/lib/icons";
 import { useDialogDraftGuard } from "@/lib/use-dialog-draft-guard";
 import { OneTimeSecretDialog } from "@/components/users/one-time-secret-dialog";
-import { ENDPOINTS, api } from "@/lib/api";
+import { controlPlane } from "@/lib/control-plane";
 import { usePermissions } from "@/lib/permissions";
 import type { TableRowTone } from "@/lib/table-columns";
 import type { ApiKey } from "@/types";
@@ -48,7 +48,7 @@ export function ClientKeysPage() {
 
   const qKeys = useQuery({
     queryKey: KEYS_QUERY_KEY,
-    queryFn: () => api.get<ApiKey[]>(ENDPOINTS.apiKeys + "?page_size=200&offset=0"),
+    queryFn: () => controlPlane.clientKeys.list(),
   });
 
   const [renameTarget, setRenameTarget] = useState<ApiKey | null>(null);
@@ -64,7 +64,7 @@ export function ClientKeysPage() {
 
   const usersQ = useQuery({
     queryKey: ["admin-users-lite"],
-    queryFn: () => api.get<Array<{ id: string; name: string; status: string }>>(ENDPOINTS.users + "?page_size=200&offset=0"),
+    queryFn: () => controlPlane.users.list(),
     // customer 没有 users:read，代签用户列表不请求（B 方案固定为自己）。
     enabled: canPickUser,
   });
@@ -76,10 +76,10 @@ export function ClientKeysPage() {
   const issue = useMutation({
     mutationFn: (vars: { userId: string; name: string }) =>
       // ApiKeyIssue.user_id 必填（后端按 body 内 user_id 归属），路径 user_id 仅供路由
-      api.post<{ id: string; key: string; mask: string }>(
-        ENDPOINTS.users + "/" + vars.userId + "/api-keys",
-        { user_id: vars.userId, ...(vars.name.trim() ? { name: vars.name.trim() } : {}) },
-      ),
+      controlPlane.clientKeys.issue(vars.userId, {
+        user_id: vars.userId,
+        ...(vars.name.trim() ? { name: vars.name.trim() } : {}),
+      }),
     onSuccess: (result) => {
       setIssueOpen(false);
       setIssueUserId("");
@@ -106,7 +106,7 @@ export function ClientKeysPage() {
 
   const setStatus = useMutation({
     mutationFn: (vars: { keyId: string; status: "active" | "disabled" }) =>
-      api.patch<ApiKey>(ENDPOINTS.apiKeys + "/" + vars.keyId + "/status", { status: vars.status }),
+      controlPlane.clientKeys.setStatus(vars.keyId, { status: vars.status }),
     onSuccess: (key) => {
       toast.success(key.status === "active" ? "密钥已启用" : "密钥已关闭", {
         description: key.name ?? key.key_suffix,
@@ -118,7 +118,7 @@ export function ClientKeysPage() {
 
   const rename = useMutation({
     mutationFn: (vars: { keyId: string; name: string }) =>
-      api.patch<ApiKey>(ENDPOINTS.apiKeys + "/" + vars.keyId, { name: vars.name }),
+      controlPlane.clientKeys.rename(vars.keyId, { name: vars.name }),
     onSuccess: (key) => {
       toast.success("密钥已重命名", { description: key.name ?? undefined });
       setRenameTarget(null);
@@ -128,7 +128,7 @@ export function ClientKeysPage() {
   });
 
   const rotate = useMutation({
-    mutationFn: (keyId: string) => api.post<{ key: string }>(ENDPOINTS.apiKeyRotate(keyId), {}),
+    mutationFn: (keyId: string) => controlPlane.clientKeys.rotate(keyId),
     onSuccess: (data) => {
       setRotateTarget(null);
       setRotatedSecret(data.key);
@@ -142,7 +142,7 @@ export function ClientKeysPage() {
   });
 
   const deleteKey = useMutation({
-    mutationFn: (keyId: string) => api.del<void>(ENDPOINTS.apiKeys + "/" + keyId),
+    mutationFn: (keyId: string) => controlPlane.clientKeys.remove(keyId),
     onSuccess: () => {
       toast.success("密钥已删除", { description: "删除立即生效，不可恢复" });
       setDeleteTarget(null);

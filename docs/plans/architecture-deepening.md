@@ -203,20 +203,20 @@ Playground chat module 放在 04 之后，复用 typed operation / transport sea
 
 ### 分域顺序与每域完成条件
 
-- [ ] upstreams：上游列表/详情/创建/编辑/删改/密钥/探测/发现。
-- [ ] models：上游模型、公开模型、成员、价目、同步。
-- [ ] reports：看板 5 个报表（等 03）。
-- [ ] logs：列表、详情、payload、attempts、查询语法（等 01）。
-- [ ] admin/settings/playground 非 chat：用户、角色、连接密钥、审计、配置版本、设置、运营设置。
+- [x] upstreams：上游列表/详情/创建/编辑/删改/密钥/探测/发现。
+- [x] models：上游模型、公开模型、成员、价目、同步。
+- [x] reports：看板 5 个报表（等 03）。
+- [x] logs：列表、详情、payload、attempts、查询语法（等 01）。
+- [x] admin/settings/playground 非 chat：用户、角色、连接密钥、审计、配置版本、设置、运营设置。
 - 每域：定义操作 → HTTP adapter → in-memory adapter → 迁调用方 → 删旧 api/mock 分支 → vitest 单测 → 页面冒烟。
 
 ### 验收
 
-- [ ] 页面/hooks 不再直接 api.get/post；只剩 control-plane。
-- [ ] useMock 只在组合根；页面不知道 mock。
-- [ ] 旧 mockRequest path 分发、旧 ENDPOINTS 引用、旧兼容类型删除。
-- [ ] 离线演示（in-memory adapter）完整可用。
-- [ ] vitest 覆盖操作集与错误映射；全量门禁通过。
+- [x] 页面/hooks 不再直接 api.get/post；只剩 control-plane。
+- [x] useMock 只在组合根；页面不知道 mock。
+- [x] 旧 mockRequest path 分发、旧 ENDPOINTS 引用、旧兼容类型删除。
+- [x] 离线演示（in-memory adapter）完整可用。
+- [x] vitest 覆盖操作集与错误映射；全量门禁通过。
 
 ### Out of scope
 

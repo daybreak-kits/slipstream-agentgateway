@@ -21,7 +21,8 @@ import { DirtyCountBadge, DirtyField, DirtyFooter, DirtySaveButton } from "@/com
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { api, apiList, ENDPOINTS } from "@/lib/api";
+import type { UpstreamModelCreate } from "@/generated/contract";
+import { controlPlane } from "@/lib/control-plane";
 import { sameJson } from "@/lib/dirty-fields";
 import { REASONING_LEVELS, REASONING_LEVEL_LABELS } from "@/lib/playground";
 import { formatDateTime, useTimezone } from "@/lib/time";
@@ -263,10 +264,10 @@ export function UpstreamModelDrawer({
   // 抽屉打开期间行状态以列表缓存为准：启用/关闭/冷却后 invalidate 会带回最新行。
   const liveQ = useQuery({
     queryKey: ["upstream-models"],
-    queryFn: () => apiList<UpstreamModel>(ENDPOINTS.upstreamModels),
+    queryFn: () => controlPlane.models.listUpstreamModels(),
     enabled: initial !== null,
   });
-  const liveRow = initial === null ? null : (liveQ.data?.items.find((item) => item.id === initial.id) ?? initial);
+  const liveRow = initial === null ? null : (liveQ.data?.find((item) => item.id === initial.id) ?? initial);
   const cooldown = cooldownModeState({
     row: liveRow ?? { enabled: true },
     rules: canReadRules ? rules : null,
@@ -296,7 +297,7 @@ export function UpstreamModelDrawer({
   const createPeriodic = useMutation({
     mutationFn: (input: PeriodicCooldownInput) => {
       if (initial === null) throw new Error("先保存上游模型，再设置周期冷却");
-      return api.post<AvailabilityRule>(ENDPOINTS.availabilityRules, {
+      return controlPlane.models.createRule({
         kind: "cooldown",
         scope: "upstream_model",
         scope_id: initial.id,
@@ -310,7 +311,7 @@ export function UpstreamModelDrawer({
     onError: (e: Error) => toast.error("设置失败", { description: conflictDescription(e, timezone) }),
   });
   const removePeriodic = useMutation({
-    mutationFn: (ruleId: string) => api.del<void>(ENDPOINTS.availabilityRule(ruleId)),
+    mutationFn: (ruleId: string) => controlPlane.models.removeRule(ruleId),
     onSuccess: () => {
       toast.success("周期冷却规则已删除");
       setRemovingRule(null);
@@ -340,9 +341,8 @@ export function UpstreamModelDrawer({
         body.cost_output_per_1m = form.cost_output_per_1m.trim() === "" ? null : form.cost_output_per_1m.trim();
         if (initial === null || form.markup.trim() !== "") body.markup = form.markup.trim();
       }
-      if (initial !== null) return api.patch<UpstreamModel>(ENDPOINTS.upstreamModelUpdate(initial.id), body);
-      body.upstream_id = form.upstream_id;
-      return api.post<UpstreamModel>(ENDPOINTS.upstreamModelCreate, body);
+      if (initial !== null) return controlPlane.models.updateUpstreamModel(initial.id, body);
+      return controlPlane.models.createUpstreamModel({ ...body, upstream_id: form.upstream_id } as UpstreamModelCreate);
     },
     onSuccess: () => {
       toast.success(initial !== null ? "上游模型已更新" : "上游模型已登记");
@@ -357,9 +357,9 @@ export function UpstreamModelDrawer({
   const adopt = useMutation({
     mutationFn: async () => {
       if (initial === null) throw new Error("新模型请先保存后再兑入");
-      const result = await api.post<AdoptModelsDevResult>(ENDPOINTS.upstreamModelAdopt(initial.id));
-      const page = await apiList<UpstreamModel>(ENDPOINTS.upstreamModels + "?page_size=200");
-      const row = page.items.find((item) => item.id === initial.id);
+      const result = await controlPlane.models.adoptModelsDev(initial.id);
+      const page = await controlPlane.models.listUpstreamModels({ pageSize: 200 });
+      const row = page.find((item) => item.id === initial.id);
       return { result, row };
     },
     onSuccess: ({ result, row }) => {

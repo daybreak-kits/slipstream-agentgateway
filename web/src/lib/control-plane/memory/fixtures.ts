@@ -1,29 +1,30 @@
+// 演示状态：部分 export let 由内存适配器的命令操作（登录/策略保存等）重写，fixtures 只给初始值。
+/* eslint-disable prefer-const -- 演示状态会被命令操作重写 */
 import type {
   AdminAccount, ApiKey, AuditLog, AvailabilityRule, ChargePrice, ChargeEntry, ConfigRevision,
   CostEntry, ModelTarget, MyModelOut, OverviewStats,
-  PublicModel, PublicModelPrice, SettingItem, TransformPreviewResult, UnpricedList, Upstream,
+  PublicModel, PublicModelPrice, SettingItem, UnpricedList, Upstream,
   UpstreamModel, UpstreamPrice, UpstreamTransforms, UserPreferences, UserTreeNode,
-} from "../types";
+} from "@/types";
 // 页面契约类型（gateway-policies 三 Tab / 角色管理）：只做类型引用不产生运行时依赖
 import type {
   GuardrailConfig, GuardrailsResponse, McpServerConfig, McpServersResponse,
   PoliciesResponse, PolicyConfig,
-} from "./policies";
-import type { RoleDefinition } from "./roles";
+} from "@/lib/control-plane/operations/governance";
+import type { RoleDefinition } from "@/lib/control-plane/operations/roles";
 import type { LogAttemptsOut } from "@/generated/contract";
+import type { LedgerEntry } from "@/components/governance/types";
 
 /**
  * Mock 数据开关：只有显式设置 VITE_MOCK=1 才启用（默认关闭，全部走真实 /admin 接口）。
  * 离线开发 / 演示：`VITE_MOCK=1 npm run dev`；生产构建不设置即真实数据。
  */
-export const useMock: boolean = ["1", "true"].includes(String(import.meta.env.VITE_MOCK ?? ""));
 
-const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** mock 会话：登录成功置 true，退出置 false；刷新页面即回到未登录（演示足够）。 */
-let mockLoggedIn = false;
+export let mockLoggedIn = false;
 /** 与后端管理用户角色一致：mock 会话默认拥有全部权限，前端只做显隐不做安全边界。 */
-const MOCK_ALL_PERMISSIONS = [
+export const MOCK_ALL_PERMISSIONS = [
   "upstreams:read", "upstreams:write",
   "upstream_models:read", "upstream_models:write", "public_models:read", "public_models:write",
   "model_targets:read", "model_targets:write", "availability:read", "availability:write",
@@ -34,7 +35,7 @@ const MOCK_ALL_PERMISSIONS = [
   "apikeys:read", "apikeys:write", "admins:read", "admins:write", "roles:read", "roles:write",
   "playground:use",
 ];
-const MOCK_ADMIN = {
+export const MOCK_ADMIN = {
   id: "adm_mock",
   username: "admin",
   name: "张三",
@@ -44,7 +45,7 @@ const MOCK_ADMIN = {
   expires_at: "2026-11-18T00:00:00",
 };
 /** 客户镜像（l05_service/rbac.py _CUSTOMER_PERMISSIONS）：只读 + 己方花费 + 模型试验。 */
-const MOCK_CUSTOMER_PERMISSIONS = [
+export const MOCK_CUSTOMER_PERMISSIONS = [
   "upstreams:read", "upstream_models:read", "public_models:read",
   "model_targets:read", "availability:read", "transforms:read", "config:read",
   "settings:read", "audits:read", "policies:read", "prices:read",
@@ -52,7 +53,7 @@ const MOCK_CUSTOMER_PERMISSIONS = [
   "roles:read", "playground:use",
 ];
 /** 受限演示账号（W4-E 验收：无 users:update/users:delete/ledger:read/roles:write 的显隐对照）。 */
-const MOCK_CUSTOMER = {
+export const MOCK_CUSTOMER = {
   id: "adm_mock_user",
   username: "user01",
   name: "李四",
@@ -62,10 +63,19 @@ const MOCK_CUSTOMER = {
   expires_at: "2026-11-18T00:00:00",
 };
 /** 当前 mock 会话身份：登录时按账号切换。 */
-let mockSession: typeof MOCK_ADMIN | typeof MOCK_CUSTOMER = MOCK_ADMIN;
+export let mockSession: typeof MOCK_ADMIN | typeof MOCK_CUSTOMER = MOCK_ADMIN;
+
+/** 登录/退出要切换会话：导入方不能直接赋值 export let，统一经此写回。 */
+export function setMockSession(session: typeof MOCK_ADMIN | typeof MOCK_CUSTOMER): void {
+  mockSession = session;
+}
+
+export function setMockLoggedIn(value: boolean): void {
+  mockLoggedIn = value;
+}
 
 /** ADR-023 #6：名称由连接地址生成（host:port 折叠 [a-z0-9-]，默认端口去掉），重名加 -N。 */
-function upstreamNameFromBaseUrl(baseUrl: string, existing: Upstream[]): string {
+export function upstreamNameFromBaseUrl(baseUrl: string, existing: Upstream[]): string {
   let host = baseUrl.replace(/^\w+:\/\//, "").split("/")[0] ?? "";
   try {
     const url = new URL(baseUrl);
@@ -84,13 +94,13 @@ function upstreamNameFromBaseUrl(baseUrl: string, existing: Upstream[]): string 
 }
 
 /** 实测 /admin/upstreams 形状：名称由 base_url 生成（ADR-023 #6）；alias 为 t04 展示名 */
-const upstreams: Upstream[] = [
+export const upstreams: Upstream[] = [
   { id: "up_01", name: "zai-01", alias: "", base_url: "https://open.bigmodel.cn/api/paas/v4", api_style: "openai_chat", transforms: null, max_buffer_bytes: 2097152, enabled: true, created_at_ms: Date.parse("2026-11-01T09:00:00") },
   { id: "up_02", name: "or-01", alias: "", base_url: "https://openrouter.ai/api/v1", api_style: "openai_chat", transforms: null, max_buffer_bytes: 2097152, enabled: true, created_at_ms: Date.parse("2026-11-01T09:01:00") },
   { id: "up_03", name: "nebula-01", alias: "", base_url: "https://api.nebula.example/v1", api_style: "anthropic_messages", transforms: null, max_buffer_bytes: 2097152, enabled: false, created_at_ms: Date.parse("2026-11-01T09:02:00") },
 ];
 
-const upstreamModels: UpstreamModel[] = [
+export const upstreamModels: UpstreamModel[] = [
   { id: "um_01", upstream_id: "up_01", name: "glm-5.3", model_type: "chat", enabled: true, created_at_ms: Date.parse("2026-11-01T09:00:00"), upstream_name: "zai-01", cost_input_per_1m: "2.500000", cost_output_per_1m: "10.000000", markup: "1.2000" },
   { id: "um_02", upstream_id: "up_01", name: "glm-5.3-flash", model_type: "chat", enabled: true, created_at_ms: Date.parse("2026-11-01T09:00:00"), upstream_name: "zai-01", cost_input_per_1m: "0.300000", cost_output_per_1m: "1.200000", markup: "1.5000" },
   { id: "um_03", upstream_id: "up_01", name: "embedding-4", model_type: "embedding", enabled: true, created_at_ms: Date.parse("2026-11-01T09:00:00"), upstream_name: "zai-01", cost_input_per_1m: "0.050000", cost_output_per_1m: "0.000000", markup: "1.0000" },
@@ -98,14 +108,14 @@ const upstreamModels: UpstreamModel[] = [
   { id: "um_05", upstream_id: "up_02", name: "qwen/max-next", model_type: "chat", enabled: false, created_at_ms: Date.parse("2026-11-02T09:00:00"), upstream_name: "or-01", cost_input_per_1m: "1.200000", cost_output_per_1m: "4.800000", markup: "1.1000" },
 ];
 
-const publicModels: PublicModel[] = [
+export const publicModels: PublicModel[] = [
   { id: "pm_01", name: "glm-5.3", routing_mode: "failover", note: "主力对话", enabled: true, created_at_ms: Date.parse("2026-11-05T10:00:00") },
   { id: "pm_02", name: "glm-flash", routing_mode: "weighted", note: "轻量对话", enabled: true, created_at_ms: Date.parse("2026-11-06T10:00:00") },
   { id: "pm_03", name: "embed-v4", routing_mode: "conditional", note: null, enabled: false, created_at_ms: Date.parse("2026-11-07T10:00:00") },
 ];
 
 /** W4-H：GET /admin/my/models 的演示数据（启用公开模型 → 成员参数合集，无金额键）。 */
-const myModels: MyModelOut[] = [
+export const myModels: MyModelOut[] = [
   {
     name: "glm-5.3",
     model_type: "chat",
@@ -144,15 +154,15 @@ const myModels: MyModelOut[] = [
   },
 ];
 
-const modelTargets: ModelTarget[] = [
+export const modelTargets: ModelTarget[] = [
   { id: "mt_01", public_model_id: "pm_01", upstream_model_id: "um_01", upstream_model_name: "glm-5.3", upstream_name: "智谱直连", priority: 1, weight: null, when: null, enabled: true },
   { id: "mt_02", public_model_id: "pm_01", upstream_model_id: "um_04", upstream_model_name: "deepseek/v5-chat", upstream_name: "OpenRouter 聚合", priority: 2, weight: null, when: null, enabled: true },
   { id: "mt_03", public_model_id: "pm_02", upstream_model_id: "um_02", upstream_model_name: "glm-5.3-flash", upstream_name: "智谱直连", priority: null, weight: 12000, when: null, enabled: true },
   { id: "mt_04", public_model_id: "pm_03", upstream_model_id: "um_03", upstream_model_name: "embedding-4", upstream_name: "智谱直连", priority: null, weight: null, when: 'request.user_tier == "trial"', enabled: true },
 ];
-let mtSeq = 4;
+export let mtSeq = 4;
 
-const clientKeys: ApiKey[] = [
+export const clientKeys: ApiKey[] = [
   { id: "ak_01", user_id: "eu_01", mask: "sk-…G7H8", key_suffix: "G7H8", status: "active", created_at_ms: Date.parse("2026-11-01T10:00:00") },
   { id: "ak_02", user_id: "eu_02", mask: "sk-…R5S6", key_suffix: "R5S6", status: "active", created_at_ms: Date.parse("2026-11-10T14:30:00") },
   { id: "ak_03", user_id: "eu_03", mask: "sk-…Z3A4", key_suffix: "Z3A4", status: "disabled", created_at_ms: Date.parse("2026-10-20T09:00:00") },
@@ -162,7 +172,7 @@ const clientKeys: ApiKey[] = [
  * mock 模式日志行：结构镜像 components/logs/types.ts 的 LogRow（lib 不反向 import
  * components），供 /admin/logs 的排序/筛选/分页演示（W6 补桩）。
  */
-interface MockLogRow {
+export interface MockLogRow {
   event_id: string;
   correlation_key: string;
   started_at_ms: number;
@@ -203,17 +213,17 @@ interface MockLogRow {
   estimate: boolean;
 }
 
-const MOCK_LOG_START_MS = Date.parse("2026-11-03T08:00:00");
-const MOCK_LOG_MODELS = ["glm-5.3", "glm-4.6", "qwen-max"];
-const MOCK_LOG_PEOPLE = [
+export const MOCK_LOG_START_MS = Date.parse("2026-11-03T08:00:00");
+export const MOCK_LOG_MODELS = ["glm-5.3", "glm-4.6", "qwen-max"];
+export const MOCK_LOG_PEOPLE = [
   { id: "eu_01", name: "内部平台" },
   { id: "eu_02", name: "数据分析组" },
   { id: "eu_03", name: "试用-临时" },
 ];
-const MOCK_LOG_KEYS = ["sk-…G7H8", "sk-…R5S6", "sk-…Z3A4"];
-const MOCK_LOG_UPSTREAMS = ["zai-01", "or-01", "host-01"];
+export const MOCK_LOG_KEYS = ["sk-…G7H8", "sk-…R5S6", "sk-…Z3A4"];
+export const MOCK_LOG_UPSTREAMS = ["zai-01", "or-01", "host-01"];
 
-const mockLogs: MockLogRow[] = Array.from({ length: 36 }, (_, i) => {
+export const mockLogs: MockLogRow[] = Array.from({ length: 36 }, (_, i) => {
   const person = MOCK_LOG_PEOPLE[i % 3]!;
   const model = MOCK_LOG_MODELS[i % 3]!;
   const started_at_ms = MOCK_LOG_START_MS + i * 7 * 3600_000 + (i % 5) * 600_000;
@@ -294,7 +304,7 @@ const mockLogs: MockLogRow[] = Array.from({ length: 36 }, (_, i) => {
 });
 
 /** /admin/logs 的筛选（关键词 + model:/upstream:/user:/key:/status:/stream:/latency>/ttft>/cache>）、排序、分页，行为对齐 routers_ops.search_logs。 */
-function queryMockLogs(params: URLSearchParams): { total: number; items: MockLogRow[]; next_offset: number | null } {
+export function queryMockLogs(params: URLSearchParams): { total: number; items: MockLogRow[]; next_offset: number | null } {
   let rows = mockLogs.slice();
   const query = (params.get("query") ?? "").trim();
   if (query) {
@@ -377,8 +387,8 @@ function queryMockLogs(params: URLSearchParams): { total: number; items: MockLog
  * cor_m5b_retry：第 1 轮 500 → 第 2 轮 200（跨 zai-01 → or-01）；
  * cor_m5b_three：第 1/2 轮 503/500 → 第 3 轮 200。
  */
-const MOCK_TRACE_BASE_MS = Date.parse("2026-11-17T01:04:59");
-const mockAttempts: Record<string, LogAttemptsOut> = {
+export const MOCK_TRACE_BASE_MS = Date.parse("2026-11-17T01:04:59");
+export const mockAttempts: Record<string, LogAttemptsOut> = {
   cor_m5b_retry: {
     event_id: "",
     correlation_key: "cor_m5b_retry",
@@ -504,13 +514,13 @@ const mockAttempts: Record<string, LogAttemptsOut> = {
   },
 };
 
-const availabilityRules: AvailabilityRule[] = [
+export const availabilityRules: AvailabilityRule[] = [
   { id: "ar_01", kind: "ban", scope: "model_target", scope_id: "mt_01", recurrence: "once", expires_at_ms: null, schedule_json: null, note: "连续超时，人工关闭待查", created_at_ms: Date.parse("2026-11-17T08:00:00") },
   { id: "ar_02", kind: "cooldown", scope: "model_target", scope_id: "mt_02", recurrence: "once", expires_at_ms: Date.parse("2026-11-17T02:30:00"), schedule_json: null, note: "429 限流自动冷却", created_at_ms: Date.parse("2026-11-17T01:30:00") },
   { id: "ar_03", kind: "cooldown", scope: "upstream", scope_id: "up_02", recurrence: "daily", expires_at_ms: null, schedule_json: JSON.stringify({ windows: [{ start: "22:00", end: "06:00" }] }), note: "每日 22:00-06:00 例行维护", created_at_ms: Date.parse("2026-11-15T09:00:00") },
 ];
 
-const billingRequests: CostEntry[] = Array.from({ length: 12 }, (_, i) => {
+export const billingRequests: CostEntry[] = Array.from({ length: 12 }, (_, i) => {
   const modelIds = ["um_01", "um_02", "um_04"];
   const modelId = modelIds[i % 3]!;
   const unpriced = i === 3;
@@ -528,7 +538,7 @@ const billingRequests: CostEntry[] = Array.from({ length: 12 }, (_, i) => {
   };
 });
 
-const revenueRows: ChargeEntry[] = Array.from({ length: 14 }, (_, i) => {
+export const revenueRows: ChargeEntry[] = Array.from({ length: 14 }, (_, i) => {
   const users = ["eu_01", "eu_02", "eu_03"];
   const pms = ["pm_01", "pm_02", "pm_03"];
   const unpriced = i === 5;
@@ -547,7 +557,7 @@ const revenueRows: ChargeEntry[] = Array.from({ length: 14 }, (_, i) => {
   };
 });
 
-const upstreamPrices: UpstreamPrice[] = [
+export const upstreamPrices: UpstreamPrice[] = [
   { id: "upr_01", upstream_model_id: "um_01", item: "input", unit_price_micro: 2000000, currency: "CNY", effective_from_ms: Date.parse("2026-11-01T00:00:00"), version: 3 },
   { id: "upr_02", upstream_model_id: "um_01", item: "output", unit_price_micro: 8000000, currency: "CNY", effective_from_ms: Date.parse("2026-11-01T00:00:00"), version: 3 },
   { id: "upr_03", upstream_model_id: "um_02", item: "input", unit_price_micro: 300000, currency: "CNY", effective_from_ms: Date.parse("2026-11-01T00:00:00"), version: 1 },
@@ -557,14 +567,14 @@ const upstreamPrices: UpstreamPrice[] = [
   { id: "upr_07", upstream_model_id: "um_03", item: "request", unit_price_micro: 1000, currency: "USD", effective_from_ms: Date.parse("2026-10-15T00:00:00"), version: 1 },
 ];
 
-const chargePrices: ChargePrice[] = [
+export const chargePrices: ChargePrice[] = [
   { id: "cp_01", public_model: "glm-5.3", item: "input", mode: "markup", value: 12000, currency: "CNY", effective_from: "2026-11-01T00:00:00", version: 2 },
   { id: "cp_02", public_model: "glm-5.3", item: "output", mode: "markup", value: 12000, currency: "CNY", effective_from: "2026-11-01T00:00:00", version: 2 },
   { id: "cp_03", public_model: "glm-flash", item: "input", mode: "markup", value: 15000, currency: "CNY", effective_from: "2026-11-01T00:00:00", version: 1 },
   { id: "cp_04", public_model: "embed-v4", item: "request", mode: "fixed", value: 500000, currency: "CNY", effective_from: "2026-11-05T00:00:00", version: 1 },
 ];
 
-const unpricedRows: UnpricedList = {
+export const unpricedRows: UnpricedList = {
   cost: [
     { id: "ce_5020", gateway_event_id: "gev_9020", upstream_model_id: "um_90", input_tokens: 912, output_tokens: 233, amount_micro: 0, currency: "CNY", price_version_id: null, status: "unpriced" },
   ],
@@ -573,13 +583,13 @@ const unpricedRows: UnpricedList = {
   ],
 };
 
-const configRevisions: ConfigRevision[] = [
+export const configRevisions: ConfigRevision[] = [
   { id: "cr_03", artifact_hash: "h3f9a2c1e5", adapter_id: "openai-chat", operator: "admin", reason: "新增 embed-v4 目标", status: "active", previous_revision_id: "cr_02", created_at_ms: Date.parse("2026-11-17T01:05:12") },
   { id: "cr_02", artifact_hash: "h7b1e8d0f2", adapter_id: "openai-chat", operator: "admin", reason: "OpenRouter 密钥更换", status: "superseded", previous_revision_id: "cr_01", created_at_ms: Date.parse("2026-11-16T15:40:00") },
   { id: "cr_01", artifact_hash: "h5c0a9f2d8", adapter_id: "openai-chat", operator: "admin", reason: "校验失败", status: "failed", error_detail: "数据面校验失败：未知字段 model_aliases", previous_revision_id: null, created_at_ms: Date.parse("2026-11-16T15:12:44") },
 ];
 
-const auditLogs: AuditLog[] = [
+export const auditLogs: AuditLog[] = [
   { id: "al_01", actor: "admin", action: "config.apply", target: "rev_20261117_03", created_at: "2026-11-17T01:05:12", detail: "下发成功，hash h3f9a2c1" },
   { id: "al_02", actor: "admin", action: "client_key.create", target: "ck_02", created_at: "2026-11-16T18:22:03", detail: "创建密钥 数据分析组" },
   { id: "al_03", actor: "admin", action: "config.rollback", target: "rev_20261116_01", created_at: "2026-11-16T15:12:44", detail: "热加载确认超时，自动回滚" },
@@ -587,12 +597,12 @@ const auditLogs: AuditLog[] = [
 
 // —— 网关策略三文档（ADR-023；契约 docs/api-contract.md §2.6，shape = lib/policies.ts 页面模型） ——
 // 与后端一致：默认值镜像 l05_service/policy_store.py，存储文档可变，保存走 PUT、恢复默认走 DELETE。
-const POLICY_PROTECTED_HEADERS = [
+export const POLICY_PROTECTED_HEADERS = [
   "api-key", "authorization", "content-length", "content-type", "cookie",
   "host", "set-cookie", "x-api-key", "x-request-id",
 ];
 
-const DEFAULT_POLICY_CONFIG: PolicyConfig = {
+export const DEFAULT_POLICY_CONFIG: PolicyConfig = {
   cors: {
     enabled: false,
     allow_origins: [],
@@ -614,7 +624,7 @@ const DEFAULT_POLICY_CONFIG: PolicyConfig = {
 };
 
 /** 演示存储文档：与默认略有差异（CORS 开 + 超时已配），让只读视图与编辑草稿都有内容可改。 */
-let policyConfig: PolicyConfig = {
+export let policyConfig: PolicyConfig = {
   ...structuredClone(DEFAULT_POLICY_CONFIG),
   cors: {
     enabled: true,
@@ -627,7 +637,13 @@ let policyConfig: PolicyConfig = {
   },
   timeout: { request_timeout: "60s", backend_request_timeout: "55s", response_idle_timeout: "30s" },
 };
-let policyUpdatedAt = Date.parse("2026-11-17T01:05:12");
+export let policyUpdatedAt = Date.parse("2026-11-17T01:05:12");
+
+/** 保存策略文档要写回 export let，统一经此函数。 */
+export function setPolicyConfig(next: PolicyConfig): void {
+  policyConfig = next;
+  policyUpdatedAt = Date.now();
+}
 
 /**
  * mock 数据面能力声明（票05 能力词表中性键；W6 ticket 06 起不再复制具体适配器矩阵）。
@@ -635,9 +651,9 @@ let policyUpdatedAt = Date.parse("2026-11-17T01:05:12");
  * mock 模式里 mock 扮演数据面，note 是 mock 自有的中性 copy（FakeAdapter 的 "fake: ..."
  * 惯例同理）；版本元数据用 mock 自己的版本，不借数据面版本号。
  */
-const MOCK_VERSION = "mock-1.0.0";
+export const MOCK_VERSION = "mock-1.0.0";
 
-const MOCK_POLICY_CAPABILITIES: PoliciesResponse["capabilities"] = {
+export const MOCK_POLICY_CAPABILITIES: PoliciesResponse["capabilities"] = {
   cors: { supported: true, verified: false, since_version: MOCK_VERSION, note: "mock 数据面 CORS（显式配置才渲染）" },
   api_key: { supported: true, verified: true, since_version: MOCK_VERSION, note: "mock：密钥哈希校验，mode: strict；enabled=false 时整段不渲染（匿名）" },
   local_rate_limit: { supported: true, verified: true, since_version: MOCK_VERSION, note: "mock：全局规则限流；无逐用户词元上限（E12）" },
@@ -651,7 +667,7 @@ const MOCK_POLICY_CAPABILITIES: PoliciesResponse["capabilities"] = {
 };
 
 /** 后端 NOTES（routers_policies.py）原文：页级各分区卡的 description。 */
-const POLICY_NOTES: Record<string, string> = {
+export const POLICY_NOTES: Record<string, string> = {
   cors: "控制面 CORS 由 SLIPSTREAM_CORS_ORIGINS 决定；此处的 enabled 控制数据面 llm.policies.cors",
   api_key: "enabled=false 表示数据面匿名放行（不渲染 llm.policies.apiKey），密钥仍保留在台账",
   rate_limit: "请求级限流为全局规则；预付费余额由控制面账本执行，不渲染逐用户桶（E12）",
@@ -664,7 +680,7 @@ const POLICY_NOTES: Record<string, string> = {
 };
 
 /** effective 是下发前的可读预览（l05_service/policy_store.py policy_effective 同构）。 */
-function policyEffective(config: PolicyConfig): PoliciesResponse["effective"] {
+export function policyEffective(config: PolicyConfig): PoliciesResponse["effective"] {
   return {
     cors: {
       enabled: config.cors.enabled,
@@ -708,7 +724,7 @@ function policyEffective(config: PolicyConfig): PoliciesResponse["effective"] {
   };
 }
 
-function policyPayload(): PoliciesResponse {
+export function policyPayload(): PoliciesResponse {
   return {
     config: structuredClone(policyConfig),
     defaults: structuredClone(DEFAULT_POLICY_CONFIG),
@@ -725,9 +741,9 @@ function policyPayload(): PoliciesResponse {
   };
 }
 
-const DEFAULT_GUARDRAIL_CONFIG: GuardrailConfig = { streaming: "Disabled", request: [], response: [] };
+export const DEFAULT_GUARDRAIL_CONFIG: GuardrailConfig = { streaming: "Disabled", request: [], response: [] };
 
-let guardrailConfig: GuardrailConfig = {
+export let guardrailConfig: GuardrailConfig = {
   streaming: "Disabled",
   request: [
     {
@@ -743,10 +759,16 @@ let guardrailConfig: GuardrailConfig = {
   ],
   response: [],
 };
-let guardrailUpdatedAt = Date.parse("2026-11-17T01:05:12");
+export let guardrailUpdatedAt = Date.parse("2026-11-17T01:05:12");
+
+/** 保存护栏文档要写回 export let，统一经此函数。 */
+export function setGuardrailConfig(next: GuardrailConfig): void {
+  guardrailConfig = next;
+  guardrailUpdatedAt = Date.now();
+}
 
 /** 完整能力矩阵（护栏 Tab 的「能力矩阵」表格数据，沿用三期矩阵条目）。 */
-const GUARDRAIL_ITEMS = [
+export const GUARDRAIL_ITEMS = [
   { key: "routing.priority_failover", supported: true, since_version: "1.7.0", note: "分层故障转移", verified: false },
   { key: "routing.weighted", supported: true, since_version: "1.7.0", note: "加权路由 (ADR-014)", verified: false },
   { key: "routing.conditional", supported: true, since_version: "1.7.0", note: "条件路由 CEL (ADR-014)", verified: false },
@@ -759,7 +781,7 @@ const GUARDRAIL_ITEMS = [
   { key: "health.fine_policies", supported: false, since_version: "", note: "精细健康策略仅 backends 层级，简化模式不可配", verified: false },
 ];
 
-function guardrailPayload(): GuardrailsResponse {
+export function guardrailPayload(): GuardrailsResponse {
   return {
     config: structuredClone(guardrailConfig),
     defaults: structuredClone(DEFAULT_GUARDRAIL_CONFIG),
@@ -775,7 +797,7 @@ function guardrailPayload(): GuardrailsResponse {
 }
 
 /** MCP 文档 {servers, port}；transports 是 mock 数据面自有的能力声明（同 policy 端口路径）。 */
-let mcpConfig: { servers: McpServerConfig[]; port: number | null } = {
+export let mcpConfig: { servers: McpServerConfig[]; port: number | null } = {
   servers: [
     {
       name: "docs-sse",
@@ -791,15 +813,21 @@ let mcpConfig: { servers: McpServerConfig[]; port: number | null } = {
   ],
   port: null,
 };
-let mcpUpdatedAt = Date.parse("2026-11-17T01:05:12");
+export let mcpUpdatedAt = Date.parse("2026-11-17T01:05:12");
 
-const MOCK_MCP_TRANSPORTS: McpServersResponse["transports"] = {
+/** 保存 MCP 文档要写回 export let，统一经此函数。 */
+export function setMcpConfig(next: { servers: McpServerConfig[]; port: number | null }): void {
+  mcpConfig = next;
+  mcpUpdatedAt = Date.now();
+}
+
+export const MOCK_MCP_TRANSPORTS: McpServersResponse["transports"] = {
   sse: { supported: true, verified: true, since_version: MOCK_VERSION, note: "sse target 使用 host" },
   stdio: { supported: true, verified: true, since_version: MOCK_VERSION, note: "mock：stdio target 走 cmd/args/env/clear_env" },
   http: { supported: false, verified: true, since_version: "", note: "mock：http 传输未支持，保存时会被 422 拒绝" },
 };
 
-function mcpPayload(): McpServersResponse {
+export function mcpPayload(): McpServersResponse {
   return {
     servers: structuredClone(mcpConfig.servers),
     port: mcpConfig.port,
@@ -811,7 +839,7 @@ function mcpPayload(): McpServersResponse {
   };
 }
 
-const settings: SettingItem[] = [
+export const settings: SettingItem[] = [
   { key: "base_currency", value: "CNY", label: "基准币", updated_at: "2026-11-15T09:00:00" },
   { key: "timezone", value: "Asia/Shanghai", label: "展示时区", updated_at: "2026-11-15T09:00:00" },
   { key: "log_retention_days", value: "30", label: "请求日志保留", updated_at: "2026-11-15T09:00:00" },
@@ -826,7 +854,7 @@ const settings: SettingItem[] = [
 ];
 
 /** 与 l05_service/settings_schema.py 同形；演示时由 mock 路由下发。 */
-const settingsSchema = {
+export const settingsSchema = {
   groups: [
     {
       key: "money",
@@ -886,7 +914,7 @@ const settingsSchema = {
   ],
 };
 
-const overview: OverviewStats = {
+export const overview: OverviewStats = {
   requests: 12846,
   input_tokens: 18422300,
   output_tokens: 2415800,
@@ -900,7 +928,7 @@ const overview: OverviewStats = {
   estimate_note: "近似值：按价目快照折算",
 };
 
-const sampleTransforms: UpstreamTransforms = {
+export const sampleTransforms: UpstreamTransforms = {
   request_headers: [
     { op: "update", name: "x-trace", value: "slipstream", conditions: [] },
     {
@@ -916,7 +944,7 @@ const sampleTransforms: UpstreamTransforms = {
 };
 
 /** 旧 /admin/admins mock（ADR-019 后由统一用户表取代）：仅保留读取桩，角色键与 admin_roles 对齐。 */
-const adminAccounts: AdminAccount[] = [
+export const adminAccounts: AdminAccount[] = [
   { id: "ad_01", username: "legacy-admin", role: "admin", enabled: true, created_at: "2026-10-01T08:00:00", last_login_at: "2026-11-17T02:00:00" },
   { id: "ad_02", username: "ops-admin", role: "admin", enabled: true, created_at: "2026-10-12T08:00:00", last_login_at: "2026-11-16T23:30:00" },
   { id: "ad_03", username: "audit-viewer", role: "customer", enabled: false, created_at: "2026-11-01T08:00:00", last_login_at: null },
@@ -926,7 +954,7 @@ const adminAccounts: AdminAccount[] = [
  * ADR-019 统一用户表（GET /admin/users 与 /admin/users/tree 同行形，见 UserTreeNode）。
  * 每个用户都是登录账号（W7）：username 非空即表示可登录，没有「无登录帐户」的行。
  */
-const mockUsers: UserTreeNode[] = [
+export const mockUsers: UserTreeNode[] = [
   { id: "eu_01", name: "内部平台", username: "internal", balance_micro: 1148659200, role: "admin", parent_user_id: null, status: "active", depth: 0, direct_children: 3, subtree_size: 5, created_at_ms: Date.parse("2026-11-01T10:00:00"), updated_at_ms: Date.parse("2026-11-17T01:22:00") },
   { id: "eu_02", name: "数据分析组", username: "data-team", balance_micro: 480000000, role: "reseller", parent_user_id: "eu_01", status: "active", depth: 1, direct_children: 1, subtree_size: 2, created_at_ms: Date.parse("2026-11-10T14:30:00"), updated_at_ms: Date.parse("2026-11-12T09:00:00") },
   { id: "eu_03", name: "试用-临时", username: "trial", balance_micro: 0, role: "customer", parent_user_id: "eu_02", status: "disabled", depth: 2, direct_children: 0, subtree_size: 1, created_at_ms: Date.parse("2026-10-20T09:00:00"), updated_at_ms: Date.parse("2026-11-14T18:00:00") },
@@ -935,10 +963,16 @@ const mockUsers: UserTreeNode[] = [
 ];
 
 /** mock 用户序号：创建新用户时递增（id eu_NN）。 */
-let mockUserSeq = mockUsers.length;
+export let mockUserSeq = mockUsers.length;
+
+/** 创建用户时取下一个 id；写回序号只能经由 fixtures，导入方不可直接赋值。 */
+export function nextMockUserId(): string {
+  mockUserSeq += 1;
+  return "eu_" + String(mockUserSeq).padStart(2, "0");
+}
 
 /** ADR-019：没填登录帐户时按用户名称派生，重名追加 -2 后缀（与后端 _resolve_username 同口径）。 */
-function deriveMockUsername(name: string): string {
+export function deriveMockUsername(name: string): string {
   const base = (name.trim() || "user").slice(0, 120);
   let candidate = base;
   let suffix = 2;
@@ -952,11 +986,11 @@ function deriveMockUsername(name: string): string {
 // —— 角色管理（ADR-023 #4；契约 docs/api-contract.md：GET/POST/PATCH/DELETE /admin/roles） ——
 // 内存 admin_roles：与 lib/roles.ts 的 RoleDefinition 模型同形；member_count 按 mockUsers 实时计算，
 // 与后端 roles.member_count 同口径（删除有成员的角色会被拒）。
-const MOCK_RESELLER_PERMISSIONS = [...MOCK_CUSTOMER_PERMISSIONS, "users:create", "users:update", "billing:subtree"];
+export const MOCK_RESELLER_PERMISSIONS = [...MOCK_CUSTOMER_PERMISSIONS, "users:create", "users:update", "billing:subtree"];
 /** 后端保留键：内置角色（l05_service/rbac.py RESERVED_ROLE_KEYS）；旧名不再保留 alias。 */
-const RESERVED_ROLE_KEYS = new Set(["admin", "customer", "reseller"]);
+export const RESERVED_ROLE_KEYS = new Set(["admin", "customer", "reseller"]);
 
-const adminRoles: RoleDefinition[] = [
+export const adminRoles: RoleDefinition[] = [
   {
     id: "rol_admin",
     key: "admin",
@@ -1001,7 +1035,7 @@ const adminRoles: RoleDefinition[] = [
 ];
 
 /** 行内权限排序 + 成员数实时化（后端 role_payload 同构）。 */
-function rolePayload(row: RoleDefinition): RoleDefinition {
+export function rolePayload(row: RoleDefinition): RoleDefinition {
   return {
     ...row,
     permissions: [...row.permissions].sort(),
@@ -1009,13 +1043,13 @@ function rolePayload(row: RoleDefinition): RoleDefinition {
   };
 }
 
-function roleFromId(roleId: string): RoleDefinition {
+export function roleFromId(roleId: string): RoleDefinition {
   const row = adminRoles.find((r) => r.id === roleId);
   if (!row) throw new Error("角色不存在: " + roleId);
   return row;
 }
 
-function ledgerFor(userId: string) {
+export function ledgerFor(userId: string): LedgerEntry[] {
   const base = 1200000000;
   return [
     { id: userId + "-lg1", kind: "topup", delta_micro: 1000000000, balance_after_micro: base, currency: "CNY", ref_type: null, ref_id: null, note: "充值", created_by: "admin", created_at_ms: Date.parse("2026-11-15T09:00:00") },
@@ -1026,7 +1060,7 @@ function ledgerFor(userId: string) {
 }
 
 /** 用户偏好（GET/PUT /admin/auth/preferences）：mock 会话内可变，演示顶栏/设置页主题服务端持久化。 */
-let mockPreferences: UserPreferences = {
+export let mockPreferences: UserPreferences = {
   theme: "system",
   notify_email: true,
   notify_browser: false,
@@ -1034,8 +1068,13 @@ let mockPreferences: UserPreferences = {
   bio: "",
 };
 
+/** 偏好保存要写回 export let，统一经此函数。 */
+export function setMockPreferences(next: UserPreferences): void {
+  mockPreferences = next;
+}
+
 /** mock 一次性初始密码：随机生成，仅演示 ADR-019「仅显示一次」。 */
-function mockOneTimePassword(): string {
+export function mockOneTimePassword(): string {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*";
   let out = "";
   for (let i = 0; i < 12; i += 1) out += alphabet[Math.floor(Math.random() * alphabet.length)];
@@ -1043,7 +1082,7 @@ function mockOneTimePassword(): string {
 }
 
 /** 公开模型列表视图：按契约默认内嵌 targets[]（服务端按 priority 升序）。 */
-function publicModelsView(): PublicModel[] {
+export function publicModelsView(): PublicModel[] {
   return publicModels.map((publicModel) => ({
     ...publicModel,
     target_count: modelTargets.filter((target) => target.public_model_id === publicModel.id).length,
@@ -1054,7 +1093,7 @@ function publicModelsView(): PublicModel[] {
 }
 
 /** 公开模型价格 = 成员有效单价（成本 × 倍率）加权平均；与后端 pricing.public_model_price_rows 同口径。 */
-function derivePublicModelPrices(): PublicModelPrice[] {
+export function derivePublicModelPrices(): PublicModelPrice[] {
   return publicModels.map((publicModel) => {
     const targets = modelTargets.filter(
       (target) => target.public_model_id === publicModel.id && target.enabled,
@@ -1105,719 +1144,3 @@ function derivePublicModelPrices(): PublicModelPrice[] {
   });
 }
 
-const routes: Array<[RegExp, unknown]> = [
-  [/^\/admin\/upstreams\/[^/]+\/transforms$/, { upstream_id: "up_01", transforms: sampleTransforms }],
-  [/^\/admin\/reports\/overview/, overview],
-  [/^\/admin\/reports\/trend/, { metric: "requests", range: "today", points: [], estimate_note: "近似值：按价目快照折算" }],
-  [/^\/admin\/reports\/flow/, { nodes: [], links: [], estimate_note: "近似值：按价目快照折算" }],
-  [/^\/admin\/health/, { status: "ok", ir_version: "ir-7", adapter: "openai-chat", now_ms: Date.now(), data_plane_port: 3600 }],
-  [/^\/admin\/upstreams$/, upstreams],
-  [/^\/admin\/upstream-models$/, upstreamModels],
-  [/^\/admin\/public-models$/, publicModels],
-  [/^\/admin\/api-keys$/, clientKeys],
-  [/^\/admin\/availability-rules$/, availabilityRules],
-  [/^\/admin\/cost\/entries$/, billingRequests],
-  [/^\/admin\/charge\/entries$/, revenueRows],
-  [/^\/admin\/prices\/upstream$/, upstreamPrices],
-  [/^\/admin\/prices\/charge$/, chargePrices],
-  [/^\/admin\/unpriced$/, unpricedRows],
-  [/^\/admin\/config\/revisions/, configRevisions],
-  [/^\/admin\/audit-logs$/, { items: auditLogs, total: auditLogs.length }],
-  [/^\/admin\/admins$/, adminAccounts],
-  [/^\/admin\/users$/, mockUsers],
-  [/^\/admin\/settings\/schema$/, settingsSchema],
-  [/^\/admin\/settings$/, { items: settings }],
-  [/^\/admin\/my\/models$/, myModels],
-];
-
-const PREVIEW_BODY = JSON.stringify({
-  model: "glm-5.3",
-  temperature: 0.9,
-  messages: [{ role: "user", content: "hi" }],
-});
-
-/** mock 模式：按路径返回内置数据，模拟网络延迟，保证后端未就绪也能演示。 */
-export async function mockRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  await delay(220);
-  const routePath = path.split("?")[0] ?? "";
-  // 登录（演示）：admin/user01 均为 admin12345；旧 owner 账号不再兼容。
-  if (init?.method === "POST" && path === "/admin/auth/login") {
-    const body = JSON.parse(String(init.body ?? "{}")) as { username?: string; password?: string };
-    const knownPassword = body.password === "admin12345" || body.password === "admin123";
-    const knownUser =
-      body.username === "admin" || body.username === "user01";
-    if (knownUser && knownPassword) {
-      mockSession = body.username === "user01" ? MOCK_CUSTOMER : MOCK_ADMIN;
-      mockLoggedIn = true;
-      return { user: mockSession } as T;
-    }
-    throw new Error("用户名或密码错误（mock 演示账号：admin / user01，密码 admin12345）");
-  }
-  if (init?.method === "GET" && path === "/admin/auth/me") {
-    if (!mockLoggedIn) throw new Error("未登录或会话已失效");
-    return mockSession as T;
-  }
-  if (init?.method === "POST" && path === "/admin/auth/logout") {
-    mockLoggedIn = false;
-    return { ok: true } as T;
-  }
-  if (init?.method === "POST" && /\/transforms\/preview$/.test(path)) {
-    const result: TransformPreviewResult = {
-      upstream_id: "up_01",
-      before: JSON.parse(PREVIEW_BODY) as unknown,
-      after: {
-        request: { set: { "x-trace": '"slipstream"' } },
-        conditional: [{ predicate: "json(request.body).model == 'glm-5.3'", set: {} }],
-      },
-      skipped: [],
-      notes: [],
-    };
-    return result as T;
-  }
-  if (init?.method === "PUT" && /\/transforms$/.test(path)) {
-    return { saved: true } as T;
-  }
-  // 明文只在点击复制时经 reveal 取一次，mock 返回固定明文，前端不落状态
-  if (init?.method === "POST" && /\/api-keys\/[^/]+\/reveal$/.test(path)) {
-    return { key: "sk-A1B2C3D4E5F6G7H8" } as T;
-  }
-  // 待补价：补价并重算只写 cost/charge，不重复写 usage event（billing.md §7）
-  if (init?.method === "POST" && /\/unpriced\/[^/]+\/reprice$/.test(path)) {
-    const id = (path.split("?")[0] ?? "").split("/")[3] ?? "";
-    let removed = 0;
-    for (let i = unpricedRows.cost.length - 1; i >= 0; i--) {
-      const r = unpricedRows.cost[i];
-      if (r && r.id === id) { unpricedRows.cost.splice(i, 1); removed += 1; }
-    }
-    for (let i = unpricedRows.charge.length - 1; i >= 0; i--) {
-      const r = unpricedRows.charge[i];
-      if (r && r.id === id) { unpricedRows.charge.splice(i, 1); removed += 1; }
-    }
-    return { resolved: removed, remaining: unpricedRows.cost.length + unpricedRows.charge.length } as T;
-  }
-  // —— W4-E：ADR-019 统一用户表 CRUD（require 键对齐 routers_apikeys.py） ——
-  if (init?.method === "GET" && routePath === "/admin/users/tree") {
-    const visible = new Set(mockUsers.filter((u) => u.status !== "deleted").map((u) => u.id));
-    const rootIds = mockUsers
-      .filter((u) => u.status !== "deleted" && (u.parent_user_id === null || !visible.has(u.parent_user_id)))
-      .map((u) => u.id);
-    return {
-      root_id: rootIds[0] ?? null,
-      root_ids: rootIds,
-      total: visible.size,
-      nodes: structuredClone(mockUsers),
-    } as T;
-  }
-  if (init?.method === "POST" && path === "/admin/users") {
-    const body = JSON.parse(String(init.body ?? "{}")) as {
-      name?: string; username?: string; role?: string; parent_user_id?: string | null; status?: string;
-    };
-    const parent = body.parent_user_id ? mockUsers.find((u) => u.id === body.parent_user_id) : undefined;
-    const now = Date.now();
-    const created: UserTreeNode = {
-      id: "eu_" + String(++mockUserSeq).padStart(2, "0"),
-      name: body.name ?? "未命名用户",
-      // 每个用户都是登录账号（W7）：留空则按用户名称派生，绝不产生空登录名。
-      username: body.username?.trim() || deriveMockUsername(body.name ?? "未命名用户"),
-      balance_micro: 0,
-      role: body.role ?? "customer",
-      parent_user_id: parent?.id ?? null,
-      status: body.status ?? "active",
-      depth: (parent?.depth ?? -1) + 1,
-      direct_children: 0,
-      subtree_size: 1,
-      created_at_ms: now,
-      updated_at_ms: now,
-    };
-    mockUsers.push(created);
-    if (parent) {
-      parent.direct_children += 1;
-      parent.subtree_size += 1;
-    }
-    // initial_password 只在创建响应里出现一次（ADR-019），不留在列表数据里
-    return { ...structuredClone(created), initial_password: mockOneTimePassword() } as T;
-  }
-  if (init?.method === "PATCH" && /^\/admin\/users\/[^/?]+$/.test(routePath)) {
-    const id = routePath.split("/")[3] ?? "";
-    const row = mockUsers.find((u) => u.id === id);
-    if (!row) return { error: "not_found" } as T;
-    const body = JSON.parse(String(init.body ?? "{}")) as {
-      name?: string; role?: string; parent_user_id?: string | null; status?: string;
-    };
-    if (body.name !== undefined) row.name = body.name;
-    if (body.role !== undefined) row.role = body.role;
-    if (body.parent_user_id !== undefined) row.parent_user_id = body.parent_user_id;
-    if (body.status !== undefined) row.status = body.status;
-    row.updated_at_ms = Date.now();
-    return structuredClone(row) as T;
-  }
-  if (init?.method === "DELETE" && /^\/admin\/users\/[^/?]+$/.test(routePath)) {
-    const id = routePath.split("/")[3] ?? "";
-    const row = mockUsers.find((u) => u.id === id);
-    if (!row) return { error: "not_found" } as T;
-    row.status = "deleted";
-    row.updated_at_ms = Date.now();
-    return { id: row.id, status: row.status } as T;
-  }
-  if (init?.method === "PUT" && /^\/admin\/users\/[^/]+\/password$/.test(routePath)) {
-    const id = routePath.split("/")[3] ?? "";
-    const row = mockUsers.find((u) => u.id === id);
-    if (!row) return { error: "not_found" } as T;
-    return { id: row.id, username: row.username } as T;
-  }
-  if (init?.method === "POST" && /\/admin\/users\/[^/]+\/balance\/adjust$/.test(routePath)) {
-    const body = JSON.parse(String(init.body ?? "{}")) as { delta_micro?: number };
-    const delta = Number(body.delta_micro ?? 0);
-    const uid = routePath.split("/")[3] ?? "";
-    const u = mockUsers.find((x) => x.id === uid);
-    if (u) u.balance_micro += delta;
-    return { balance_after_micro: u ? u.balance_micro : 0 } as T;
-  }
-  if (init?.method === "POST" && /\/admin\/users\/[^/]+\/balance$/.test(routePath)) {
-    const body = JSON.parse(String(init.body ?? "{}")) as { amount_micro?: number };
-    const amount = Number(body.amount_micro ?? 0);
-    const uid = routePath.split("/")[3] ?? "";
-    const u = mockUsers.find((x) => x.id === uid);
-    if (u) u.balance_micro += amount;
-    return { balance_after_micro: u ? u.balance_micro : 0 } as T;
-  }
-  // —— 用户偏好（顶栏/用户设置主题同源写服务端） ——
-  if (init?.method === "GET" && routePath === "/admin/auth/preferences") {
-    return structuredClone(mockPreferences) as T;
-  }
-  if (init?.method === "PUT" && routePath === "/admin/auth/preferences") {
-    const body = JSON.parse(String(init.body ?? "{}")) as UserPreferences;
-    mockPreferences = { ...mockPreferences, ...body };
-    return structuredClone(mockPreferences) as T;
-  }
-  if (init?.method === "PUT" && path === "/admin/settings") {
-    const body = JSON.parse(String(init.body ?? "{}")) as { values?: Record<string, string> };
-    for (const [k, v] of Object.entries(body.values ?? {})) {
-      const row = settings.find((x) => x.key === k);
-      if (row) row.value = v;
-    }
-    return { values: body.values ?? {} } as T;
-  }
-  // —— GET /admin/connection（契约 §2.7）：统一连接地址，读 settings 里的 gateway_base_url ——
-  // 空串 = 未配置（前端回退浏览器 host + 3600）；editable 随 mock 会话权限走（真实后端同语义）。
-  if (init?.method === "GET" && routePath === "/admin/connection") {
-    const row = settings.find((item) => item.key === "gateway_base_url");
-    const base = row?.value ?? "";
-    return {
-      base_url: base,
-      configured: base.trim().length > 0,
-      default_port: 3600,
-      endpoints: ["/v1/chat/completions", "/v1/models", "/v1/embeddings"],
-      updated_at: base.trim().length > 0 ? row?.updated_at ?? "" : "",
-      editable: mockSession.permissions.includes("settings:write"),
-    } as T;
-  }
-  // —— 网关策略三文档（契约 §2.6）：GET/PUT/DELETE + validate；保存后由 POST /admin/config/apply 下发 ——
-  if (init?.method === "POST" && (routePath === "/admin/policies/validate" || routePath === "/admin/guardrails/validate" || routePath === "/admin/mcp-servers/validate")) {
-    // mock 演示：文档级 AG 校验始终通过（页面级成对校验已在前端拦截）
-    return { ok: true, errors: [], warnings: [] } as T;
-  }
-  if (init?.method === "GET" && routePath === "/admin/policies") {
-    return policyPayload() as T;
-  }
-  if (init?.method === "PUT" && routePath === "/admin/policies") {
-    const body = JSON.parse(String(init.body ?? "{}")) as { config?: PolicyConfig };
-    if (!body.config) throw new Error("body 必须是 {config}");
-    policyConfig = structuredClone(body.config);
-    policyUpdatedAt = Date.now();
-    return policyPayload() as T;
-  }
-  if (init?.method === "DELETE" && routePath === "/admin/policies") {
-    policyConfig = structuredClone(DEFAULT_POLICY_CONFIG);
-    policyUpdatedAt = 0;
-    return policyPayload() as T;
-  }
-  if (init?.method === "GET" && routePath === "/admin/guardrails") {
-    return guardrailPayload() as T;
-  }
-  if (init?.method === "PUT" && routePath === "/admin/guardrails") {
-    const body = JSON.parse(String(init.body ?? "{}")) as { config?: GuardrailConfig };
-    if (!body.config) throw new Error("body 必须是 {config}");
-    guardrailConfig = structuredClone(body.config);
-    guardrailUpdatedAt = Date.now();
-    return guardrailPayload() as T;
-  }
-  if (init?.method === "DELETE" && routePath === "/admin/guardrails") {
-    guardrailConfig = structuredClone(DEFAULT_GUARDRAIL_CONFIG);
-    guardrailUpdatedAt = 0;
-    return guardrailPayload() as T;
-  }
-  if (init?.method === "GET" && routePath === "/admin/mcp-servers") {
-    return mcpPayload() as T;
-  }
-  if (init?.method === "PUT" && routePath === "/admin/mcp-servers") {
-    const body = JSON.parse(String(init.body ?? "{}")) as { servers?: McpServerConfig[]; port?: number | null };
-    const servers = body.servers ?? [];
-    const names = servers.map((server) => server.name);
-    if (new Set(names).size !== names.length) throw new Error("MCP 服务器名称重复");
-    mcpConfig = { servers: structuredClone(servers), port: body.port ?? null };
-    mcpUpdatedAt = Date.now();
-    return mcpPayload() as T;
-  }
-  // 保存链终点：渲染/校验/下发 → 配置修订留档（config_revisions 列表同步可见）
-  if (init?.method === "POST" && routePath === "/admin/config/apply") {
-    const body = JSON.parse(String(init.body ?? "{}")) as { reason?: string };
-    const revision: ConfigRevision = {
-      id: "cr_" + String(configRevisions.length + 1).padStart(2, "0"),
-      artifact_hash: "h" + Math.random().toString(16).slice(2, 11),
-      adapter_id: "openai-chat",
-      operator: mockSession.username,
-      reason: body.reason ?? "网关策略下发",
-      status: "active",
-      previous_revision_id: configRevisions.find((r) => r.status === "active")?.id ?? null,
-      created_at_ms: Date.now(),
-    };
-    for (const row of configRevisions) {
-      if (row.status === "active") row.status = "superseded";
-    }
-    configRevisions.unshift(revision);
-    return { id: revision.id, status: revision.status, artifact_hash: revision.artifact_hash } as T;
-  }
-  // —— 角色 CRUD（契约：内置角色权限不可改、内置/有成员角色不可删，错误信息与后端同文） ——
-  if (init?.method === "GET" && routePath === "/admin/roles") {
-    return { items: adminRoles.map(rolePayload), total: adminRoles.length } as T;
-  }
-  if (init?.method === "POST" && routePath === "/admin/roles") {
-    const body = JSON.parse(String(init.body ?? "{}")) as {
-      name?: string; description?: string; permissions?: string[]; key?: string;
-    };
-    const name = (body.name ?? "").trim();
-    if (name.length === 0) throw new Error("角色名称不能为空");
-    if (name.length > 64) throw new Error("角色名称过长");
-    if (adminRoles.some((r) => r.name === name)) throw new Error("角色名称已存在: " + name);
-    let key = (body.key ?? "").trim();
-    if (key.length > 0) {
-      if (!/^[a-z][a-z0-9_]{2,31}$/.test(key)) {
-        throw new Error("角色标识须为 3-32 位小写字母/数字/下划线且以字母开头");
-      }
-      if (RESERVED_ROLE_KEYS.has(key) || adminRoles.some((r) => r.key === key)) {
-        throw new Error("角色标识已保留或存在: " + key);
-      }
-    } else {
-      key = "custom_" + Math.random().toString(16).slice(2, 10);
-    }
-    const created: RoleDefinition = {
-      id: "rol_" + Math.random().toString(16).slice(2, 10),
-      key,
-      name,
-      description: (body.description ?? "").trim().slice(0, 255),
-      builtin: false,
-      all_permissions: false,
-      permissions: [...new Set(body.permissions ?? [])],
-      member_count: 0,
-    };
-    adminRoles.push(created);
-    return rolePayload(created) as T;
-  }
-  if (init?.method === "PATCH" && /^\/admin\/roles\/[^/?]+$/.test(routePath)) {
-    const row = roleFromId(routePath.split("/")[3] ?? "");
-    const body = JSON.parse(String(init.body ?? "{}")) as {
-      name?: string; description?: string; permissions?: string[];
-    };
-    if (body.permissions !== undefined && row.builtin) throw new Error("内置角色的权限不可修改（" + row.key + "）");
-    if (body.name !== undefined) {
-      const name = body.name.trim();
-      if (name.length === 0) throw new Error("角色名称不能为空");
-      if (adminRoles.some((r) => r.id !== row.id && r.name === name)) throw new Error("角色名称已存在: " + name);
-      row.name = name;
-    }
-    if (body.description !== undefined) row.description = body.description.trim().slice(0, 255);
-    if (body.permissions !== undefined) row.permissions = [...new Set(body.permissions)];
-    return rolePayload(row) as T;
-  }
-  if (init?.method === "DELETE" && /^\/admin\/roles\/[^/?]+$/.test(routePath)) {
-    const row = roleFromId(routePath.split("/")[3] ?? "");
-    if (row.builtin) throw new Error("内置角色不可删除");
-    const used = rolePayload(row).member_count;
-    if (used > 0) throw new Error("仍有 " + used + " 个用户使用该角色，无法删除");
-    adminRoles.splice(adminRoles.indexOf(row), 1);
-    return { deleted: true } as T;
-  }
-  if (init?.method === "GET" && /\/admin\/users\/[^/]+\/ledger$/.test(routePath)) {
-    const uid = routePath.split("/")[3] ?? "";
-    return ledgerFor(uid) as T;
-  }
-  // —— B2 CRUD：上游 ——
-  // 上游详情 GET：详情页整页编辑器依赖（mock 早前只有列表）
-  if (init?.method === "GET" && /^\/admin\/upstreams\/[^/?]+$/.test(path.split("?")[0] ?? "")) {
-    const id = (path.split("?")[0] ?? "").split("/")[3] ?? "";
-    const row = upstreams.find((u) => u.id === id);
-    if (!row) return { error: "not_found" } as T;
-    return {
-      ...structuredClone(row),
-      model_count: upstreamModels.filter((m) => m.upstream_id === id).length,
-    } as T;
-  }
-  // 密钥组列表（演示空表；真实形状见 UpstreamKeyList，UI 归 D 波）
-  if (init?.method === "GET" && /^\/admin\/upstreams\/[^/?]+\/keys$/.test(path.split("?")[0] ?? "")) {
-    return { items: [], limit: 100 } as T;
-  }
-  // 契约 3.2：POST body {name?, base_url, api_style, api_key}；name 缺省由 base_url 生成（ADR-023 #6）
-  if (init?.method === "POST" && (path.split("?")[0] ?? "") === "/admin/upstreams") {
-    const body = JSON.parse(String(init.body ?? "{}")) as { name?: string; alias?: string; base_url?: string; api_style?: string; api_key?: string };
-    const created: Upstream = {
-      id: "up_" + String(upstreams.length + 1).padStart(2, "0"),
-      name: body.name?.trim() || upstreamNameFromBaseUrl(body.base_url ?? "", upstreams),
-      alias: body.alias?.trim() ?? "",
-      base_url: body.base_url ?? "",
-      api_style: body.api_style ?? "openai_chat",
-      transforms: null,
-      max_buffer_bytes: 2097152,
-      enabled: true,
-      created_at_ms: Date.now(),
-    };
-    upstreams.push(created);
-    return created as T;
-  }
-  // 契约 3.2 PATCH：可改 name（留空保持原名，与后端一致）/alias/base_url/api_style/enabled；DELETE 契约未定义，mock 保留容错
-  if ((init?.method === "PATCH" || init?.method === "PUT" || init?.method === "DELETE") && /^\/admin\/upstreams\/[^/?]+$/.test(path.split("?")[0] ?? "")) {
-    const id = (path.split("?")[0] ?? "").split("/")[3] ?? "";
-    const idx = upstreams.findIndex((u) => u.id === id);
-    if (idx < 0) return { error: "not_found" } as T;
-    if (init.method === "DELETE") {
-      upstreams.splice(idx, 1);
-      return { deleted: true } as T;
-    }
-    const body = JSON.parse(String(init.body ?? "{}")) as { base_url?: string; api_style?: string; enabled?: boolean; name?: string; alias?: string };
-    const row = upstreams[idx];
-    if (row) {
-      if (body.base_url !== undefined) row.base_url = body.base_url;
-      if (body.api_style !== undefined) row.api_style = body.api_style;
-      if (body.enabled !== undefined) row.enabled = body.enabled;
-      // W7 t04：标志/别名随保存提交；重名 422 由真实后端执行，mock 演示模式不模拟。
-      if (body.name !== undefined && body.name.trim() !== "") row.name = body.name.trim();
-      if (body.alias !== undefined) row.alias = body.alias.trim();
-    }
-    return row as T;
-  }
-  // —— B2 CRUD：上游模型 ——
-  if (init?.method === "POST" && (path.split("?")[0] ?? "") === "/admin/upstream-models") {
-    const body = JSON.parse(String(init.body ?? "{}")) as { upstream_id?: string; name?: string; model_type?: string; enabled?: boolean };
-    const created: UpstreamModel = {
-      id: "um_" + String(upstreamModels.length + 1).padStart(2, "0"),
-      upstream_id: body.upstream_id ?? "",
-      name: body.name ?? "未命名模型",
-      model_type: body.model_type ?? "chat",
-      enabled: body.enabled ?? true,
-      created_at_ms: Date.now(),
-    };
-    upstreamModels.push(created);
-    return created as T;
-  }
-  // 上游模型 PATCH：成本/倍率（价目管理，显式 null 清空）+ 编辑字段与启停/冷却（省略字段保持不动）
-  if (init?.method === "PATCH" && /^\/admin\/upstream-models\/(?!batch$)[^/?]+$/.test(path.split("?")[0] ?? "")) {
-    const id = (path.split("?")[0] ?? "").split("/")[3] ?? "";
-    const row = upstreamModels.find((x) => x.id === id);
-    if (!row) return { error: "not_found" } as T;
-    const body = JSON.parse(String(init.body ?? "{}")) as Partial<UpstreamModel>;
-    if (body.cost_input_per_1m !== undefined) row.cost_input_per_1m = body.cost_input_per_1m;
-    if (body.cost_output_per_1m !== undefined) row.cost_output_per_1m = body.cost_output_per_1m;
-    if (body.markup !== undefined) row.markup = body.markup;
-    if (body.name !== undefined) row.name = body.name;
-    if (body.model_type !== undefined) row.model_type = body.model_type;
-    if (body.model_type_source !== undefined) row.model_type_source = body.model_type_source;
-    if (body.parameters !== undefined) row.parameters = body.parameters;
-    if (body.enabled !== undefined) row.enabled = body.enabled;
-    if (body.enabled === true) row.cooldown_until_ms = 0; // 启用同时清掉冷却（GLOSSARY §3）
-    if (body.cooldown_until_ms !== undefined) row.cooldown_until_ms = body.cooldown_until_ms;
-    return row as T;
-  }
-  if (init?.method === "PUT" && /^\/admin\/upstream-models\/[^/?]+$/.test(path.split("?")[0] ?? "")) {
-    const id = (path.split("?")[0] ?? "").split("/")[3] ?? "";
-    const row = upstreamModels.find((x) => x.id === id);
-    if (!row) return { error: "not_found" } as T;
-    const body = JSON.parse(String(init.body ?? "{}")) as Partial<UpstreamModel>;
-    if (body.name !== undefined) row.name = body.name;
-    if (body.model_type !== undefined) row.model_type = body.model_type;
-    if (body.enabled !== undefined) row.enabled = body.enabled;
-    return row as T;
-  }
-  // 模型探测（W5 ticket 07）：不落库；mock 逐模型给出成功/失败示例，便于演示会话内结果。
-  if (init?.method === "POST" && /^\/admin\/upstreams\/[^/?]+\/models\/probe$/.test(path.split("?")[0] ?? "")) {
-    const body = JSON.parse(String(init.body ?? "{}")) as { model_ids?: string[]; model_id?: string; key_id?: string };
-    const ids = body.model_ids ?? (body.model_id ? [body.model_id] : []);
-    const items = ids
-      .map((modelId) => upstreamModels.find((m) => m.id === modelId))
-      .filter((m): m is UpstreamModel => Boolean(m))
-      .map((m, index) => {
-        const failed = m.model_type === "embedding" || index % 3 === 2;
-        return {
-          model_id: m.id,
-          model: m.name,
-          ok: !failed,
-          status: failed ? 400 : 200,
-          latency_ms: failed ? 240 : 320 + index * 15,
-          error_type: failed ? "http" : "",
-          message: failed ? "上游返回 HTTP 400：model not supported" : "",
-        };
-      });
-    return { upstream_id: (path.split("?")[0] ?? "").split("/")[3] ?? "", key_id: body.key_id ?? "", items } as T;
-  }
-  // —— B2 CRUD：对外模型 ——
-  // GET 实时组装（契约默认内嵌 targets[]），不能用路由表的模块级快照
-  if (init?.method === "GET" && (path.split("?")[0] ?? "") === "/admin/public-models") {
-    return publicModelsView() as T;
-  }
-  if (init?.method === "POST" && (path.split("?")[0] ?? "") === "/admin/public-models") {
-    const body = JSON.parse(String(init.body ?? "{}")) as {
-      name?: string; routing_mode?: string; note?: string | null; enabled?: boolean;
-      targets?: Array<{ upstream_model_id?: string; priority?: number | null; weight?: number | null; when?: string | null }>;
-    };
-    const created: PublicModel = {
-      id: "pm_" + String(publicModels.length + 1).padStart(2, "0"),
-      name: body.name ?? "未命名公开模型",
-      routing_mode: (body.routing_mode ?? "failover") as PublicModel["routing_mode"],
-      note: body.note ?? null,
-      enabled: body.enabled ?? true,
-      created_at_ms: Date.now(),
-    };
-    publicModels.push(created);
-    for (const t of body.targets ?? []) {
-      const member = upstreamModels.find((m) => m.id === t.upstream_model_id);
-      mtSeq += 1;
-      modelTargets.push({
-        id: "mt_" + String(mtSeq).padStart(2, "0"),
-        public_model_id: created.id,
-        upstream_model_id: t.upstream_model_id ?? "",
-        upstream_model_name: member?.name ?? "",
-        upstream_name: member?.upstream_name ?? "",
-        priority: t.priority ?? null,
-        weight: t.weight ?? null,
-        when: t.when ?? null,
-        enabled: true,
-      });
-    }
-    return created as T;
-  }
-  // 编辑公开模型：基本字段 + 可选 targets 整批替换（ticket 12 单 PATCH；旧 PUT .../targets 已删除）
-  if (init?.method === "PATCH" && /^\/admin\/public-models\/(?!batch$)[^/?]+$/.test(path.split("?")[0] ?? "")) {
-    const id = (path.split("?")[0] ?? "").split("/")[3] ?? "";
-    const row = publicModels.find((p) => p.id === id);
-    if (!row) return { error: "not_found" } as T;
-    const body = JSON.parse(String(init.body ?? "{}")) as Partial<PublicModel> & {
-      targets?: Array<{ upstream_model_id?: string; priority?: number | null; weight?: number | null; when?: string | null }>;
-    };
-    if (body.name !== undefined) row.name = body.name;
-    if (body.routing_mode !== undefined) row.routing_mode = body.routing_mode;
-    if (body.note !== undefined) row.note = body.note;
-    if (body.enabled !== undefined) row.enabled = body.enabled;
-    if (body.enabled === true) row.cooldown_until_ms = 0; // 启用同时清掉冷却（GLOSSARY §3）
-    if (body.cooldown_until_ms !== undefined) row.cooldown_until_ms = body.cooldown_until_ms;
-    if (body.targets !== undefined) {
-      // 与真实后端一致：成员清空非法，且整批替换是这一张 PATCH 的一部分。
-      if (body.targets.length === 0) return { error: "at_least_one_member" } as T;
-      for (let i = modelTargets.length - 1; i >= 0; i--) {
-        const mt = modelTargets[i];
-        if (mt && mt.public_model_id === id) modelTargets.splice(i, 1);
-      }
-      for (const t of body.targets) {
-        const member = upstreamModels.find((m) => m.id === t.upstream_model_id);
-        mtSeq += 1;
-        modelTargets.push({
-          id: "mt_" + String(mtSeq).padStart(2, "0"),
-          public_model_id: id,
-          upstream_model_id: t.upstream_model_id ?? "",
-          upstream_model_name: member?.name ?? "",
-          upstream_name: member?.upstream_name ?? "",
-          priority: t.priority ?? null,
-          weight: t.weight ?? null,
-          when: t.when ?? null,
-          enabled: true,
-        });
-      }
-    }
-    return row as T;
-  }
-  if (init?.method === "DELETE" && /^\/admin\/public-models\/[^/?]+$/.test(path.split("?")[0] ?? "")) {
-    const id = (path.split("?")[0] ?? "").split("/")[3] ?? "";
-    const idx = publicModels.findIndex((p) => p.id === id);
-    if (idx < 0) return { error: "not_found" } as T;
-    publicModels.splice(idx, 1);
-    for (let i = modelTargets.length - 1; i >= 0; i--) {
-      const mt = modelTargets[i];
-      if (mt && mt.public_model_id === id) modelTargets.splice(i, 1);
-    }
-    return { deleted: true } as T;
-  }
-  // —— 目标绑定：GET 按 public_model_id 过滤；PUT 整批替换 ——
-  if (init?.method === "GET" && (path.split("?")[0] ?? "") === "/admin/model-targets") {
-    const pmid = new URLSearchParams(path.split("?")[1] ?? "").get("public_model_id") ?? "";
-    return modelTargets.filter((mt) => mt.public_model_id === pmid) as T;
-  }
-  if (init?.method === "PUT" && (path.split("?")[0] ?? "") === "/admin/model-targets") {
-    const body = JSON.parse(String(init.body ?? "{}")) as { public_model_id?: string; targets?: Array<{ upstream_model_name?: string; upstream_name?: string; priority?: number | null; weight?: number | null; when?: string | null; enabled?: boolean }> };
-    const pmid = body.public_model_id ?? "";
-    for (let i = modelTargets.length - 1; i >= 0; i--) {
-      const mt = modelTargets[i];
-      if (mt && mt.public_model_id === pmid) modelTargets.splice(i, 1);
-    }
-    for (const t of body.targets ?? []) {
-      mtSeq += 1;
-      modelTargets.push({
-        id: "mt_" + String(mtSeq).padStart(2, "0"),
-        public_model_id: pmid,
-        upstream_model_name: t.upstream_model_name ?? "",
-        upstream_name: t.upstream_name ?? "",
-        priority: t.priority ?? null,
-        weight: t.weight ?? null,
-        when: t.when ?? null,
-        enabled: t.enabled ?? true,
-      });
-    }
-    return { saved: modelTargets.filter((mt) => mt.public_model_id === pmid).length } as T;
-  }
-
-  if (init?.method === "GET" && (path.split("?")[0] ?? "") === "/admin/prices/public-models") {
-    return derivePublicModelPrices() as T;
-  }
-
-  // —— ADR-004 规则表：周期冷却由模型页创建/删除 ——
-  if (init?.method === "POST" && routePath === "/admin/availability-rules") {
-    const body = JSON.parse(String(init.body ?? "{}")) as Partial<AvailabilityRule>;
-    const created: AvailabilityRule = {
-      id: "ar_" + String(availabilityRules.length + 1).padStart(2, "0"),
-      kind: (body.kind ?? "cooldown") as AvailabilityRule["kind"],
-      scope: body.scope ?? "upstream_model",
-      scope_id: body.scope_id ?? "",
-      recurrence: (body.recurrence ?? "once") as AvailabilityRule["recurrence"],
-      expires_at_ms: body.expires_at_ms ?? null,
-      schedule_json: body.schedule_json ?? null,
-      note: body.note ?? "",
-      created_at_ms: Date.now(),
-    };
-    availabilityRules.push(created);
-    return created as T;
-  }
-  if ((init?.method === "PATCH" || init?.method === "DELETE") && /^\/admin\/availability-rules\/[^/?]+$/.test(routePath)) {
-    const id = routePath.split("/")[3] ?? "";
-    const idx = availabilityRules.findIndex((rule) => rule.id === id);
-    if (idx < 0) return { error: "not_found" } as T;
-    if (init.method === "DELETE") {
-      availabilityRules.splice(idx, 1);
-      return { deleted: true } as T;
-    }
-    const body = JSON.parse(String(init.body ?? "{}")) as Partial<AvailabilityRule>;
-    const row = availabilityRules[idx];
-    if (row) Object.assign(row, body);
-    return row as T;
-  }
-
-  if (init?.method === "GET" && routePath === "/admin/audit-logs") {
-    const params = new URLSearchParams(path.split("?")[1] ?? "");
-    const limit = Number(params.get("limit") ?? auditLogs.length);
-    const offset = Number(params.get("offset") ?? 0);
-    return { items: auditLogs.slice(offset, offset + limit), total: auditLogs.length } as T;
-  }
-
-  // —— 使用日志：筛选/排序/分页（W6 补桩，对齐 routers_ops.search_logs） ——
-  if (init?.method === "GET" && routePath === "/admin/logs") {
-    return queryMockLogs(new URLSearchParams(path.split("?")[1] ?? "")) as T;
-  }
-  // —— ADR-028：日志详情 + 路由链（GET /admin/logs/{id} 与 /admin/logs/{id}/attempts） ——
-  if (init?.method === "GET" && /^\/admin\/logs\/[^/]+$/.test(routePath)) {
-    const eventId = routePath.split("/")[3] ?? "";
-    const row = mockLogs.find((item) => item.event_id === eventId);
-    if (!row) throw new Error("日志不存在：" + eventId);
-    return structuredClone(row) as T;
-  }
-  if (init?.method === "GET" && /^\/admin\/logs\/[^/]+\/attempts$/.test(routePath)) {
-    const eventId = decodeURIComponent(routePath.split("/")[3] ?? "");
-    const row = mockLogs.find((item) => item.event_id === eventId);
-    if (!row) throw new Error("日志不存在：" + eventId);
-    const detail = mockAttempts[row.correlation_key];
-    if (!detail) return { event_id: eventId, correlation_key: "", attempts: [] } as T;
-    return { ...structuredClone(detail), event_id: eventId } as T;
-  }
-
-  // —— 批量操作：上游/公开模型 enable/disable/delete（契约 3.3） ——
-  if (init?.method === "PATCH" && /^\/admin\/(upstream-models|public-models)\/batch$/.test(routePath)) {
-    const body = JSON.parse(String(init.body ?? "{}")) as { ids?: string[]; action?: string };
-    const isPublic = routePath.startsWith("/admin/public-models");
-    const list = isPublic ? publicModels : upstreamModels;
-    const changed: string[] = [];
-    const missing: string[] = [];
-    const failed: Array<{ id: string; code: string; message: string }> = [];
-    for (const id of body.ids ?? []) {
-      const idx = list.findIndex((row) => row.id === id);
-      if (idx < 0) {
-        missing.push(id);
-        continue;
-      }
-      if (body.action === "delete") {
-        list.splice(idx, 1);
-        if (isPublic) {
-          for (let i = modelTargets.length - 1; i >= 0; i--) {
-            if (modelTargets[i]?.public_model_id === id) modelTargets.splice(i, 1);
-          }
-        }
-      } else {
-        list[idx]!.enabled = body.action !== "disable";
-      }
-      changed.push(id);
-    }
-    return { action: body.action ?? "", changed, missing, failed } as T;
-  }
-
-  // 契约 3.4：DELETE /admin/api-keys/{key_id} 直接删除（ADR-023）
-  if (init?.method === "DELETE" && /^\/admin\/api-keys\/[^/?]+$/.test(routePath)) {
-    const id = routePath.split("/")[3] ?? "";
-    const idx = clientKeys.findIndex((k) => k.id === id);
-    if (idx < 0) return { error: "not_found" } as T;
-    clientKeys.splice(idx, 1);
-    return { deleted: true } as T;
-  }
-
-  // —— ADR-020 价目导出/导入（W6 补桩） ——
-  if (init?.method === "GET" && routePath === "/admin/prices/export") {
-    return {
-      schema_version: 1,
-      exported_at_ms: Date.now(),
-      meta: { cache_prices: "out-of-scope-v1" },
-      upstream_models: upstreamModels.map((m) => ({
-        id: m.id,
-        name: m.name,
-        model_type: m.model_type,
-        cost_input_per_1m: m.cost_input_per_1m ?? null,
-        cost_output_per_1m: m.cost_output_per_1m ?? null,
-        markup: m.markup ?? null,
-      })),
-    } as T;
-  }
-  if (init?.method === "POST" && routePath === "/admin/prices/import") {
-    const body = JSON.parse(String(init.body ?? "{}")) as {
-      upstream_models?: Array<{
-        id?: string | null;
-        name?: string | null;
-        cost_input_per_1m?: string | null;
-        cost_output_per_1m?: string | null;
-        markup?: string | null;
-      }>;
-    };
-    let changed = 0;
-    let skipped = 0;
-    for (const item of body.upstream_models ?? []) {
-      const row = upstreamModels.find((m) => (item.id ? m.id === item.id : m.name === item.name));
-      if (!row) continue; // mock 演示：未知行静默跳过（真实后端整批 422）
-      const patch: Partial<UpstreamModel> = {};
-      if (item.cost_input_per_1m !== undefined && item.cost_input_per_1m !== null) patch.cost_input_per_1m = item.cost_input_per_1m;
-      if (item.cost_output_per_1m !== undefined && item.cost_output_per_1m !== null) patch.cost_output_per_1m = item.cost_output_per_1m;
-      if (item.markup !== undefined && item.markup !== null) patch.markup = item.markup;
-      if (Object.keys(patch).length === 0) {
-        skipped += 1;
-        continue;
-      }
-      Object.assign(row, patch);
-      changed += 1;
-    }
-    return { changed, missing: [], skipped } as T;
-  }
-
-  const hit = routes.find(([re]) => re.test(routePath));
-  if (!hit) throw new Error("mock 未覆盖该路径：" + path);
-  return structuredClone(hit[1]) as T;
-}

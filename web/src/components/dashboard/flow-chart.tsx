@@ -13,7 +13,7 @@ import { usePermissions } from "@/lib/permissions";
 
 import { fmtMoney } from "./chart-format";
 import { useChartPalette, type ChartPalette } from "./chart-theme";
-import { flowSearchView } from "./flow-search";
+import { flowSearchView } from "@/lib/reports/flow-search";
 import type { FlowReportOut } from "@/generated/contract";
 
 import { FLOW_STAGES } from "./report-types";

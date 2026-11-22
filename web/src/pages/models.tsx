@@ -32,20 +32,14 @@ import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { StatusIcon } from "@/components/ui/status-icon";
 import { Tabs } from "@/components/ui/tabs";
-import { api, apiList, ENDPOINTS } from "@/lib/api";
+import { controlPlane } from "@/lib/control-plane";
+
 import { fmtInt, fmtMarkup, fmtMs, fmtPricePerM, fmtUnitPriceMicro } from "@/lib/format";
 import { ACTION_ICONS } from "@/lib/icons";
 import { usePermissions } from "@/lib/permissions";
 import { useDialogDraftGuard } from "@/lib/use-dialog-draft-guard";
 import { SELECT_ALL_VALUE } from "@/lib/select-sentinels";
-import type {
-  AdoptModelsDevBatchResult,
-  ModelsDevSnapshotStatus,
-  PublicModel,
-  RoutingMode,
-  Upstream,
-  UpstreamModel,
-} from "@/types";
+import type { PublicModel, RoutingMode, UpstreamModel } from "@/types";
 
 /** 周期冷却窗口语义增强（窗口期内启用=仅跳过当前窗口）待后端合入；本页文案按现行为描述。 */
 const ENABLE_SEMANTICS_NOTE =
@@ -66,7 +60,7 @@ interface UpstreamPriceRow {
   upstream_model_id: string;
   item: string;
   unit_price_micro: number;
-  effective_from_ms: number;
+  effective_from_ms?: number;
 }
 
 interface CachePrice {
@@ -80,9 +74,10 @@ function cacheMapOf(items: UpstreamPriceRow[] | undefined): Map<string, CachePri
   const map = new Map<string, CachePrice>();
   for (const price of items ?? []) {
     if (price.item !== "cache_read") continue;
+    const fromMs = price.effective_from_ms ?? 0;
     const prev = map.get(price.upstream_model_id);
-    if (!prev || price.effective_from_ms >= prev.fromMs) {
-      map.set(price.upstream_model_id, { micro: price.unit_price_micro, fromMs: price.effective_from_ms });
+    if (!prev || fromMs >= prev.fromMs) {
+      map.set(price.upstream_model_id, { micro: price.unit_price_micro, fromMs });
     }
   }
   return map;
@@ -130,7 +125,7 @@ function BatchPriceDialog({
       if (output.trim() !== "") body.cost_output_per_1m = output.trim();
       if (markup.trim() !== "") body.markup = markup.trim();
       const results = await Promise.allSettled(
-        ids.map((id) => api.patch<UpstreamModel>(ENDPOINTS.upstreamModelUpdate(id), body)),
+        ids.map((id) => controlPlane.models.updateUpstreamModel(id, body as never)),
       );
       const failed = results.filter((r) => r.status === "rejected").length;
       const firstError = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
@@ -195,18 +190,18 @@ function UpstreamTab() {
   const qc = useQueryClient();
   const q = useQuery({
     queryKey: ["upstream-models"],
-    queryFn: () => apiList<UpstreamModel>(ENDPOINTS.upstreamModels),
+    queryFn: () => controlPlane.models.listUpstreamModels(),
     refetchInterval: 30_000,
   });
-  const qUpstreams = useQuery({ queryKey: ["upstreams"], queryFn: () => apiList<Upstream>(ENDPOINTS.upstreams) });
+  const qUpstreams = useQuery({ queryKey: ["upstreams"], queryFn: () => controlPlane.upstreams.list() });
   // ADR-020：缓存价不在模型行，只有上游价目表的 cache_read 版本行；有 prices:read 才附显。
   const qPrices = useQuery({
     queryKey: ["upstream-prices"],
-    queryFn: () => apiList<UpstreamPriceRow>(ENDPOINTS.pricesUpstream + "?page_size=200"),
+    queryFn: () => controlPlane.prices.upstreamPrices(),
     enabled: canCost && can("prices:read"),
     staleTime: 60_000,
   });
-  const cachePrices = useMemo(() => cacheMapOf(qPrices.data?.items), [qPrices.data]);
+  const cachePrices = useMemo(() => cacheMapOf(qPrices.data), [qPrices.data]);
 
   const availability = useAvailabilityMutation("upstream");
   const batch = useBatchMutation("upstream");
@@ -221,7 +216,7 @@ function UpstreamTab() {
   const [batchDelete, setBatchDelete] = useState(false);
   const [batchPrice, setBatchPrice] = useState(false);
 
-  const allItems = q.data?.items ?? [];
+  const allItems = q.data ?? [];
   const needle = search.trim().toLowerCase();
   const rows = useMemo(
     () => allItems.filter((row) => {
@@ -253,7 +248,7 @@ function UpstreamTab() {
   };
 
   const del = useMutation({
-    mutationFn: (id: string) => api.del<void>(ENDPOINTS.upstreamModelUpdate(id)),
+    mutationFn: (id: string) => controlPlane.models.removeUpstreamModel(id),
     onSuccess: () => {
       toast.success("上游模型已删除");
       void qc.invalidateQueries({ queryKey: ["upstream-models"] });
@@ -265,7 +260,7 @@ function UpstreamTab() {
 
   // W4-H：工具条「同步 models.dev」——批量兑入端点（只填空键，手改不覆盖）。
   const syncModelsDev = useMutation({
-    mutationFn: () => api.post<AdoptModelsDevBatchResult>(ENDPOINTS.upstreamModelsAdopt),
+    mutationFn: () => controlPlane.models.adoptAllModelsDev(),
     onSuccess: (result) => {
       const source = result.refreshed ? "已拉取 models.dev 快照" : "拉取失败，使用库内快照";
       if (result.filled_models > 0) {
@@ -286,7 +281,7 @@ function UpstreamTab() {
   // W4-H：工具条常显「上次同步」——读库内快照摘要，不发网络请求；同步成功后刷新。
   const modelsDevStatus = useQuery({
     queryKey: ["modelsdev-status"],
-    queryFn: () => api.get<ModelsDevSnapshotStatus>(ENDPOINTS.upstreamModelsModelsDevStatus),
+    queryFn: () => controlPlane.models.modelsDevStatus(),
     staleTime: 60_000,
   });
 
@@ -534,14 +529,14 @@ function UpstreamTab() {
         toolbarEnd={toolbarEnd}
         emptyText="还没有登记上游模型"
         emptyAction={canWrite ? (
-          <Button size="sm" disabled={(qUpstreams.data?.items.length ?? 0) === 0} onClick={() => setDrawer({ open: true, initial: null })}>登记模型</Button>
+          <Button size="sm" disabled={(qUpstreams.data?.length ?? 0) === 0} onClick={() => setDrawer({ open: true, initial: null })}>登记模型</Button>
         ) : undefined}
         onClearFilters={clearFilters}
       />
       {drawer.open ? (
         <UpstreamModelDrawer
           initial={drawer.initial}
-          upstreams={qUpstreams.data?.items ?? []}
+          upstreams={qUpstreams.data ?? []}
           canCost={canCost}
           onClose={() => setDrawer({ open: false, initial: null })}
         />
@@ -654,7 +649,7 @@ function PublicModelCreateDialog({
   }, [form.name, upstreamModels]);
   const errors = validateMembers(members, form.routing_mode);
   const save = useMutation({
-    mutationFn: () => api.post<PublicModel>(ENDPOINTS.publicModels, {
+    mutationFn: () => controlPlane.models.createPublicModel({
       name: form.name.trim(),
       routing_mode: form.routing_mode,
       note: form.note.trim(),
@@ -749,10 +744,10 @@ function PublicTab() {
   const qc = useQueryClient();
   const q = useQuery({
     queryKey: ["public-models"],
-    queryFn: () => apiList<PublicModel>(ENDPOINTS.publicModels),
+    queryFn: () => controlPlane.models.listPublicModels(),
     refetchInterval: 30_000,
   });
-  const qModels = useQuery({ queryKey: ["upstream-models"], queryFn: () => apiList<UpstreamModel>(ENDPOINTS.upstreamModels) });
+  const qModels = useQuery({ queryKey: ["upstream-models"], queryFn: () => controlPlane.models.listUpstreamModels() });
   const availability = useAvailabilityMutation("public");
   const batch = useBatchMutation("public");
 
@@ -762,7 +757,7 @@ function PublicTab() {
   const [deleting, setDeleting] = useState<PublicModel | null>(null);
   const [batchDelete, setBatchDelete] = useState(false);
 
-  const allItems = q.data?.items ?? [];
+  const allItems = q.data ?? [];
   const needle = search.trim().toLowerCase();
   const rows = useMemo(
     () => allItems.filter((row) => {
@@ -789,7 +784,7 @@ function PublicTab() {
   const toggleAll = () => setSelected(allSelected ? new Set() : new Set(rows.map((row) => row.id)));
 
   const del = useMutation({
-    mutationFn: (id: string) => api.del<void>(ENDPOINTS.publicModelUpdate(id)),
+    mutationFn: (id: string) => controlPlane.models.removePublicModel(id),
     onSuccess: () => {
       toast.success("公开模型已删除");
       void qc.invalidateQueries({ queryKey: ["public-models"] });
@@ -972,7 +967,7 @@ function PublicTab() {
         onRowClick={canWrite ? openEditor : undefined}
       />
       {createOpen ? (
-        <PublicModelCreateDialog upstreamModels={qModels.data?.items ?? []} onClose={() => setCreateOpen(false)} />
+        <PublicModelCreateDialog upstreamModels={qModels.data ?? []} onClose={() => setCreateOpen(false)} />
       ) : null}
       <ConfirmDialog
         open={deleting !== null}

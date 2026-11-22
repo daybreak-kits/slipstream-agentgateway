@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import { api, ENDPOINTS } from "@/lib/api";
+import { controlPlane } from "@/lib/control-plane";
 import { ACTION_ICONS } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 import type {
@@ -22,7 +22,6 @@ import type {
   TransformRule,
   TransformSection,
   UpstreamTransforms,
-  UpstreamTransformsResponse,
 } from "@/types";
 
 /** 契约 §4 不变量 1：保护头 UI 侧直接拦截，不等后端报错 */
@@ -143,7 +142,7 @@ function SectionEditor({ config, rules, allTransforms, onChange, upstreamId }: S
 
   const previewMut = useMutation({
     mutationFn: () =>
-      api.post<TransformPreviewResult>(ENDPOINTS.transformsPreview(upstreamId), {
+      controlPlane.upstreams.previewTransforms(upstreamId, {
         ...allTransforms,
         [config.section]: rules,
       }),
@@ -579,7 +578,7 @@ export function TransformsEditor({
   const loaded = useQuery({
     queryKey: ["upstream-transforms", upstreamId],
     queryFn: async (): Promise<UpstreamTransforms> => {
-      const data = await api.get<UpstreamTransformsResponse>(ENDPOINTS.transforms(upstreamId));
+      const data = await controlPlane.upstreams.getTransforms(upstreamId);
       return (
         data.transforms ?? {
           request_headers: [],
@@ -606,7 +605,10 @@ export function TransformsEditor({
   useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
 
   const saveMut = useMutation({
-    mutationFn: () => api.put<{ saved: boolean }>(ENDPOINTS.transforms(upstreamId), value),
+    mutationFn: () => {
+      if (!value) throw new Error("改写规则尚未加载");
+      return controlPlane.upstreams.saveTransforms(upstreamId, value);
+    },
     onSuccess: () => {
       toast.success("改写规则已保存");
       setDraft(null);

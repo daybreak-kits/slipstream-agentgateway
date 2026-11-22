@@ -1,58 +1,17 @@
 /** 上游渠道列表页与整页编辑器共用的小件：类型扩展、协议词表、探测展示、地址推导。
  *  放本目录而不是 types.ts：types.ts 归并行工位 F5（写锁），合流后可回迁。 */
 
-import { ApiError } from "@/lib/api";
-import type { Upstream, UpstreamProbe } from "@/types";
+import { ApiError } from "@/lib/control-plane/errors";
+import type { ProbeResultView, ProbeStep } from "@/lib/control-plane/operations/upstreams";
 
-/** 详情带 api_style_source。ADR-026 后 has_api_key 由密钥行数量派生
- *  （`key_count > 0`，不再读退役的 api_key_enc 镜像列），前端不再读取。 */
-export type UpstreamRow = Upstream & {
-  has_api_key?: boolean;
-  api_style_source?: string;
-};
-
-/** 逐把测试（POST /{id}/keys/test，ADR-026 ③）的单把结果。 */
-export interface KeyTestItem {
-  key_id: string;
-  ok: boolean;
-  status_code: number;
-  latency_ms: number;
-  error: string;
-}
-
-/** 逐把测试响应：每把密钥一条结果，同步落库到各密钥行。 */
-export interface KeyTestResult {
-  upstream_id: string;
-  api_style: string;
-  items: KeyTestItem[];
-}
-
-/** 协议探测单步（后端 C probe_steps 的项，l05_service/upstream_ops.detect_api_style）。 */
-export interface ProbeStep {
-  order: number;
-  protocol: string;
-  method: string;
-  url: string;
-  http_status: number;
-  latency_ms: number;
-  ok: boolean;
-  detail?: string;
-}
-
-/** test-connection / discover-models 响应：历史探测行 + 协议三字段（向后兼容，读取方兜底）。 */
-export interface ProbeResultView {
-  kind?: string;
-  status: UpstreamProbe["status"];
-  http_status: number;
-  latency_ms: number;
-  message?: string;
-  model_count?: number;
-  tested_at_ms?: number;
-  models?: string[];
-  protocol?: string | null;
-  protocol_source?: string;
-  probe_steps?: ProbeStep[];
-}
+// 响应类型归 control-plane（W4 票04）：页面从操作层取类型，不再在组件里维护 wire 形状。
+export type {
+  KeyTestItem,
+  KeyTestResult,
+  ProbeResultView,
+  ProbeStep,
+  UpstreamRow,
+} from "@/lib/control-plane/operations/upstreams";
 
 /** 新建上游时的草稿（名称/别名可随提交一起写，见 api-contract §3.2 / ADR-023 #6）。
  *  name 是唯一「上游标志」（重名 422）；alias 是仅展示的「上游别名」，可为空。 */

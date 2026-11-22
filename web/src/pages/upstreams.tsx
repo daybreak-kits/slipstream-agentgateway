@@ -23,14 +23,13 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { PAGE_SIZE_OPTIONS } from "@/components/ui/pagination";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { api, apiList, ENDPOINTS } from "@/lib/api";
+import { controlPlane } from "@/lib/control-plane";
 import { ACTION_ICONS } from "@/lib/icons";
 import { formatDateTime, useTimezone } from "@/lib/time";
 import { usePermissions } from "@/lib/permissions";
 import { partitionClosedLast } from "@/lib/table-order";
 import type { TableRowTone } from "@/lib/table-columns";
 import { API_STYLE_LABELS, probeStatusView, upstreamRoutingHref, type UpstreamRow } from "@/components/upstreams/shared";
-import type { UpstreamBatchResult } from "@/types";
 import { PageHeader } from "@/components/layout/page-header";
 
 type BatchAction = "enable" | "disable" | "delete";
@@ -109,7 +108,7 @@ export function UpstreamsPage() {
   const canWrite = can("upstreams:write");
   const { mode: timezone } = useTimezone();
 
-  const q = useQuery({ queryKey: ["upstreams"], queryFn: () => apiList<UpstreamRow>(ENDPOINTS.upstreams) });
+  const q = useQuery({ queryKey: ["upstreams"], queryFn: () => controlPlane.upstreams.list() });
 
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
@@ -119,7 +118,7 @@ export function UpstreamsPage() {
   const [deleting, setDeleting] = useState<UpstreamRow | null>(null);
   const [batchDelete, setBatchDelete] = useState(false);
 
-  const allItems = q.data?.items ?? [];
+  const allItems = q.data ?? [];
 
   const needle = search.trim().toLowerCase();
   const rows = useMemo(
@@ -172,16 +171,16 @@ export function UpstreamsPage() {
 
   const toggle = useMutation({
     mutationFn: (upstream: UpstreamRow) =>
-      api.patch<UpstreamRow>(ENDPOINTS.upstreamDetail(upstream.id), { enabled: !upstream.enabled }),
+      controlPlane.upstreams.update(upstream.id, { enabled: !upstream.enabled }),
     onSuccess: (upstream) => {
       toast.success(upstream.enabled ? "上游已启用" : "上游已关闭");
       refresh();
     },
-    onError: () => { /* api.ts 已统一提示 */ },
+    onError: () => { /* control-plane 已统一提示 */ },
   });
 
   const del = useMutation({
-    mutationFn: (upstream: UpstreamRow) => api.del<{ deleted: string }>(ENDPOINTS.upstreamDetail(upstream.id)),
+    mutationFn: (upstream: UpstreamRow) => controlPlane.upstreams.remove(upstream.id),
     onSuccess: () => {
       toast.success("上游渠道已删除");
       setDeleting(null);
@@ -191,7 +190,7 @@ export function UpstreamsPage() {
 
   const batch = useMutation({
     mutationFn: (vars: { ids: string[]; action: BatchAction }) =>
-      api.patch<UpstreamBatchResult>(ENDPOINTS.upstreamBatch, { ids: vars.ids, action: vars.action }),
+      controlPlane.upstreams.batch({ ids: vars.ids, action: vars.action }),
     onSuccess: (result, vars) => {
       const nameOf = (rowId: string) => allItems.find((row) => row.id === rowId)?.name ?? rowId;
       const parts = ["成功 " + result.changed.length + " 个"];
@@ -209,7 +208,7 @@ export function UpstreamsPage() {
       setBatchDelete(false);
       refresh();
     },
-    onError: () => { /* api.ts 已统一提示 */ },
+    onError: () => { /* control-plane 已统一提示 */ },
   });
 
   const openEditor = (row: UpstreamRow) => navigate("/upstreams/" + row.id);

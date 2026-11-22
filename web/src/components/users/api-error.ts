@@ -1,4 +1,4 @@
-import { ApiError } from "@/lib/api";
+import { ApiError } from "@/lib/control-plane/errors";
 
 /**
  * API 错误的可读文案（DESIGN-AUDIT 三期规范 §4：API 错误统一 describeApiError）。

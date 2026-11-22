@@ -81,7 +81,7 @@
 | MCP | ✅ sse/stdio | 顶层 `mcp.targets` 可增删改；sse 用 host，stdio 用 cmd/args/env；http 被 pinned AG 1.7 拒绝（`mcp.transport.http=false`，保存 422） |
 | 404 页 | ✅ | `web/src/pages/not-found.tsx`，由 `app.tsx` 的 `path="*"` 路由兜底 |
 | 占位页 | ✅ 已移除 | `web/src/pages/placeholders.tsx` 已删除，不再有「敬请期待」假页面 |
-| mock 开关 | ✅ | `web/src/lib/mock.ts:12`：只有 `VITE_MOCK=1`（或 `true`）才启用 mock，默认全部走真实 `/admin` 接口 |
+| mock 开关 | ✅ | `web/src/lib/control-plane/index.ts`（组合根）：只有 `VITE_MOCK=1`（或 `true`）才启用内存适配器，默认全部走真实 `/admin` 接口；页面不再感知 mock |
 
 ### 6.2 改写编辑器的三处未跟随已修复（Lead 12:40 复核）
 

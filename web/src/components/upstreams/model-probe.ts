@@ -7,26 +7,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { api, ApiError, ENDPOINTS } from "@/lib/api";
+import { controlPlane } from "@/lib/control-plane";
+import { ApiError } from "@/lib/control-plane/errors";
+import type { ModelProbeItem } from "@/lib/control-plane/operations/upstreams";
 
-/** 后端 probe 单项：{model_id, model, ok, status, latency_ms, error_type, message}。 */
-export interface ModelProbeItem {
-  model_id: string;
-  model: string;
-  ok: boolean;
-  status: number;
-  latency_ms: number;
-  /** "" | "http" | "timeout" | "connection" */
-  error_type: string;
-  /** 后端截断 + 脱敏后的一行说明 */
-  message: string;
-}
-
-export interface ModelProbeResponse {
-  upstream_id: string;
-  key_id: string;
-  items: ModelProbeItem[];
-}
+// 探测响应类型归 control-plane（W4 票04）：页面不再维护 wire 形状。
+export type { ModelProbeItem, ModelProbeResponse } from "@/lib/control-plane/operations/upstreams";
 
 /** 单模型请求的超时上限：后端每个模型 20s，留出控制面余量。 */
 export const MODEL_PROBE_REQUEST_TIMEOUT_MS = 25_000;
@@ -134,7 +120,7 @@ export function probeSummary(session: ModelProbeSession): ModelProbeSummary {
   };
 }
 
-/** 批次级错误的人话说明（api.ts 已统一 toast，这里只给行内摘要）。 */
+/** 批次级错误的人话说明（control-plane 已统一提示，这里只给行内摘要）。 */
 export function probeErrorMessage(error: unknown): string {
   if (error instanceof ApiError) return error.message;
   const message = error instanceof Error ? error.message : String(error);
@@ -180,11 +166,10 @@ export function useModelProbe(upstreamId: string): ModelProbeController {
           try {
             const body: { model_ids: string[]; key_id?: string } = { model_ids: [target.id] };
             if (keyId !== "") body.key_id = keyId;
-            const result = await api.post<ModelProbeResponse>(
-              ENDPOINTS.upstreamModelsProbe(upstreamId),
-              body,
-              { signal: controller.signal, timeoutMs: MODEL_PROBE_REQUEST_TIMEOUT_MS },
-            );
+            const result = await controlPlane.upstreams.probeModels(upstreamId, body, {
+              signal: controller.signal,
+              timeoutMs: MODEL_PROBE_REQUEST_TIMEOUT_MS,
+            });
             const item = result.items[0];
             if (item) setSession((prev) => probeReducer(prev, { type: "item", item }));
           } catch (error) {

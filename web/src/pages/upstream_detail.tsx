@@ -22,7 +22,8 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { TabBar } from "@/components/ui/tabs";
-import { ApiError, api, ENDPOINTS } from "@/lib/api";
+import { controlPlane } from "@/lib/control-plane";
+import { ApiError } from "@/lib/control-plane/errors";
 import { ACTION_ICONS } from "@/lib/icons";
 import { useDirtyGuard } from "@/lib/use-dirty-guard";
 import { formatDateTime, useTimezone } from "@/lib/time";
@@ -74,7 +75,7 @@ export function UpstreamDetailPage() {
 
   const upstreamQ = useQuery({
     queryKey: ["upstream", id],
-    queryFn: () => api.get<UpstreamRow>(ENDPOINTS.upstreamDetail(id)),
+    queryFn: () => controlPlane.upstreams.get(id),
     enabled: id !== "",
   });
 
@@ -159,7 +160,7 @@ export function UpstreamDetailPage() {
   const save = useMutation({
     mutationFn: async (): Promise<{ row: UpstreamRow; failedKeys: number }> => {
       if (isNew) {
-        const created = await api.post<UpstreamRow>(ENDPOINTS.upstreamCreate, {
+        const created = await controlPlane.upstreams.create({
           ...(draft.name.trim() !== "" ? { name: draft.name.trim() } : {}),
           alias: draft.alias.trim(),
           base_url: draft.baseUrl.trim(),
@@ -169,14 +170,14 @@ export function UpstreamDetailPage() {
         let failedKeys = 0;
         for (const key of pendingKeys.slice(1)) {
           try {
-            await api.post(ENDPOINTS.upstreamKeys(created.id), { label: key.label, api_key: key.apiKey.trim() });
+            await controlPlane.upstreams.createKey(created.id, { label: key.label, api_key: key.apiKey.trim() });
           } catch {
             failedKeys += 1;
           }
         }
         return { row: created, failedKeys };
       }
-      const row = await api.patch<UpstreamRow>(ENDPOINTS.upstreamDetail(id), {
+      const row = await controlPlane.upstreams.update(id, {
         base_url: draft.baseUrl.trim(),
         api_style: draft.apiStyle,
         enabled: draft.enabled,
@@ -222,7 +223,7 @@ export function UpstreamDetailPage() {
 
   // ── 测试连接：逐把测（ADR-026 ③），每把密钥按 base_url 发最小鉴权请求 ──
   const test = useMutation({
-    mutationFn: () => api.post<KeyTestResult>(ENDPOINTS.upstreamKeysTest(id), { api_style: draft.apiStyle }),
+    mutationFn: () => controlPlane.upstreams.testKeys(id, { api_style: draft.apiStyle }),
     onSuccess: (result) => {
       setKeyTests(result);
       const okCount = result.items.filter((item) => item.ok).length;
@@ -248,7 +249,7 @@ export function UpstreamDetailPage() {
 
   // ── 启用开关：已存上游立即写库（可逆不确认）；新建只改草稿 ──
   const toggleEnabled = useMutation({
-    mutationFn: (enabled: boolean) => api.patch<UpstreamRow>(ENDPOINTS.upstreamDetail(id), { enabled }),
+    mutationFn: (enabled: boolean) => controlPlane.upstreams.update(id, { enabled }),
     onSuccess: (row) => {
       toast.success(row.enabled ? "上游已启用" : "上游已关闭");
       setDraft((prev) => ({ ...prev, enabled: row.enabled }));
@@ -259,7 +260,7 @@ export function UpstreamDetailPage() {
   });
 
   const del = useMutation({
-    mutationFn: () => api.del<{ deleted: string }>(ENDPOINTS.upstreamDetail(id)),
+    mutationFn: () => controlPlane.upstreams.remove(id),
     onSuccess: () => {
       toast.success("上游渠道已删除");
       setDeleteConfirm(false);

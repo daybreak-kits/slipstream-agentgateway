@@ -8,8 +8,9 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableWrap, TD, TH, THead, TR } from "@/components/ui/table";
 import { invalidatePricing } from "@/components/pricing/queries";
-import { api, ENDPOINTS } from "@/lib/api";
-import { ApiError } from "@/lib/api";
+import type { PriceExportFile } from "@/lib/control-plane/operations/prices";
+import { controlPlane } from "@/lib/control-plane";
+import { ApiError } from "@/lib/control-plane/errors";
 import { formatDateTime, useTimezone } from "@/lib/time";
 
 /**
@@ -18,12 +19,6 @@ import { formatDateTime, useTimezone } from "@/lib/time";
  * exported_at_ms, meta, upstream_models[]}，导入成功 {changed, skipped}，失败 422
  * details.errors 逐行 {index, id, name, message}。
  */
-
-interface PriceExportFile {
-  schema_version?: number;
-  exported_at_ms?: number;
-  upstream_models: Array<Record<string, unknown>>;
-}
 
 interface ImportErrorRow {
   index: number;
@@ -52,7 +47,7 @@ export function PriceIoActions({ canExport, canImport }: { canExport: boolean; c
 
   const exportMutation = useMutation({
     mutationFn: async () => {
-      const file = await api.get<PriceExportFile>(ENDPOINTS.pricesExport);
+      const file = await controlPlane.prices.exportPrices();
       const blob = new Blob([JSON.stringify(file, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
@@ -126,7 +121,7 @@ function ImportDialog({ onClose, queryClient }: { onClose: () => void; queryClie
   }
 
   const importMutation = useMutation({
-    mutationFn: (body: PriceExportFile) => api.post<{ changed: number; skipped?: number }>(ENDPOINTS.pricesImport, body),
+    mutationFn: (body: PriceExportFile) => controlPlane.prices.importPrices(body),
     onSuccess: async (result) => {
       toast.success("价目导入成功", {
         description: "已更新 " + result.changed + " 项" +
