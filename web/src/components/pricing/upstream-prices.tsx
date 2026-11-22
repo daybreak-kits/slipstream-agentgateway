@@ -2,19 +2,34 @@ import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/lib/notify";
 
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useDialogDraftGuard } from "@/lib/use-dialog-draft-guard";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { PriceJsonView } from "@/components/pricing/price-json-view";
 import { PriceTable, type PriceColumn } from "@/components/pricing/table";
 import { UNIT_HINT, deriveSpendMicro, priceMicro } from "@/components/pricing/money";
 import { invalidatePricing, useUpstreamModels } from "@/components/pricing/queries";
 import { controlPlane } from "@/lib/control-plane";
+import { ApiError } from "@/lib/control-plane/errors";
 import { fmtPriceAmount, fmtUnitPriceMicro } from "@/lib/format";
 import { ACTION_ICONS } from "@/lib/icons";
+import {
+  draftsFromPriceDocument,
+  formatPriceDocument,
+  normalizePriceImportErrors,
+  parsePriceDocumentJson,
+  type PriceDocument,
+  type PriceDocumentIssue,
+  type PriceImportErrorRow,
+} from "@/lib/pricing/document";
+import { actionColumnWidth } from "@/lib/table-columns";
 import { usePermissions } from "@/lib/permissions";
 import { useDirtyGuard } from "@/lib/use-dirty-guard";
 import type { UpstreamModel } from "@/types";
@@ -98,6 +113,18 @@ export function UpstreamPricesSection() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [batchOpen, setBatchOpen] = useState(false);
 
+  // W8 ticket 07：同一份价目既有表格视图也有页内 JSON 视图。jsonText 承载「由表格生成」与
+  // 用户手改；合法 JSON 立即回写 drafts，非法文本只留 issues、不覆盖已加载草稿（与改写规则
+  // 编辑器的视图切换同一模式）。保存复用整批导入端点，任一行失败整批不落库。
+  const [view, setView] = useState<"table" | "json">("table");
+  const [jsonText, setJsonText] = useState("");
+  const [jsonIssues, setJsonIssues] = useState<PriceDocumentIssue[]>([]);
+  const [jsonDocument, setJsonDocument] = useState<PriceDocument | null>(null);
+  const [jsonTouched, setJsonTouched] = useState(false);
+  const [jsonConfirm, setJsonConfirm] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importRowErrors, setImportRowErrors] = useState<PriceImportErrorRow[] | null>(null);
+
   const filtered = useMemo(() => {
     const query = searchText.trim().toLowerCase();
     return models.filter((model) => {
@@ -123,7 +150,10 @@ export function UpstreamPricesSection() {
     }),
     [models, drafts],
   );
-  const leaveGuard = useDirtyGuard(rowsDirty, "离开将丢失未保存的价目修改；Enter 或「保存」可先落盘。");
+  // JSON 里未修正的非法文本尚未应用到表格，也算未保存修改（离页确认沿用同一个 guard）。
+  const hasPendingJson = jsonTouched && jsonIssues.length > 0;
+  const pageDirty = rowsDirty || hasPendingJson;
+  const leaveGuard = useDirtyGuard(pageDirty, "离开将丢失未保存的价目修改；Enter 或「保存」可先落盘。");
   const allSelected = filtered.length > 0 && filtered.every((model) => selected.has(model.id));
   const someSelected = selected.size > 0 && !allSelected;
 
@@ -151,6 +181,35 @@ export function UpstreamPricesSection() {
     },
   });
 
+  // 保存 JSON 复用 POST /admin/prices/import（ADR-020）：后端先整批校验再单事务写库，
+  // 任一行失败 422 且整批不生效；这里把 details.errors 逐行展示，不逐条 PATCH。
+  const importJson = useMutation({
+    mutationFn: (body: PriceDocument) => controlPlane.prices.importPrices(body),
+    onSuccess: (result, body) => {
+      toast.success("价目 JSON 已保存", {
+        description:
+          "已更新 " + result.changed + " 项" +
+          (result.skipped ? "；跳过 " + result.skipped + " 项（无字段变更）" : ""),
+      });
+      setDrafts({});
+      setImportError(null);
+      setImportRowErrors(null);
+      setJsonDocument(body);
+      setJsonIssues([]);
+      setJsonText(JSON.stringify(body, null, 2));
+      void invalidatePricing(queryClient);
+    },
+    onError: (error: Error) => {
+      if (error instanceof ApiError) {
+        setImportError(error.message);
+        setImportRowErrors(normalizePriceImportErrors(error));
+      } else {
+        setImportError(error.message);
+        setImportRowErrors([]);
+      }
+    },
+  });
+
   function setField(model: UpstreamModel, field: keyof Draft, value: string) {
     setDrafts((prev) => ({
       ...prev,
@@ -173,6 +232,47 @@ export function UpstreamPricesSection() {
     if (!isDirty(model, draft) || !draftValid(draft) || save.isPending) return;
     event.preventDefault();
     save.mutate({ model, draft });
+  }
+
+  /** 应用 JSON 文本：合法则回写表格草稿（切换保留未保存 edits），非法则只展示问题。 */
+  function applyJsonText(text: string) {
+    setJsonText(text);
+    setJsonTouched(true);
+    setImportError(null);
+    setImportRowErrors(null);
+    const result = parsePriceDocumentJson(text, models);
+    setJsonIssues(result.issues);
+    setJsonDocument(result.document);
+    if (result.document !== null) {
+      setDrafts((prev) => ({
+        ...prev,
+        ...draftsFromPriceDocument(result.document!, models, prev),
+      }));
+    }
+  }
+
+  /** 用当前表格草稿重建 JSON 文本（表格是草稿真相源，JSON 只是同一份数据的另一种视图）。 */
+  function reloadJsonFromTable() {
+    applyJsonText(formatPriceDocument(models, drafts));
+  }
+
+  function changeView(next: "table" | "json") {
+    if (next === view) return;
+    // 模型还没加载出来时没有可编辑的价目行，不进入 JSON 视图（避免生成空文件报错）。
+    if (next === "json" && models.length === 0) return;
+    // 首次进入、或上一次 JSON 文本已合法时，以当前草稿为准重建；存在未修正的非法文本时
+    // 保留文本与错误，避免切换视图丢掉手改（与 transforms 编辑器一致）。
+    if (next === "json" && (!jsonTouched || jsonIssues.length === 0)) reloadJsonFromTable();
+    setView(next);
+  }
+
+  /** 操作列常驻「编辑」入口：定位并聚焦该行入价输入框（JSX 里 id=price-input-<model.id>）。 */
+  function focusPriceInput(modelId: string) {
+    const input = document.getElementById("price-input-" + modelId);
+    if (!(input instanceof HTMLInputElement)) return;
+    input.scrollIntoView({ block: "center", behavior: "smooth" });
+    input.focus({ preventScroll: true });
+    input.select();
   }
 
   function toggleRow(model: UpstreamModel, checked: boolean) {
@@ -211,6 +311,7 @@ export function UpstreamPricesSection() {
       key: "select",
       label: "选择",
       hideable: false,
+      width: "2.5rem",
       headerClassName: "w-9",
       header: (
         <Checkbox
@@ -245,6 +346,7 @@ export function UpstreamPricesSection() {
       key: "upstream",
       label: "所属上游",
       hideable: true,
+      width: "8rem",
       sortable: true,
       sortValue: (model) => model.upstream_name ?? "",
       cell: (model) => (
@@ -255,12 +357,14 @@ export function UpstreamPricesSection() {
       key: "type",
       label: "类型",
       hideable: true,
+      width: "6rem",
       cell: (model) => <Badge tone="neutral">{model.model_type}</Badge>,
     },
     {
       key: "input",
       label: "入价",
       header: priceHeader("入价"),
+      width: "8.5rem",
       sortable: true,
       sortValue: (model) => priceMicro(model.cost_input_per_1m),
       className: "text-right",
@@ -288,6 +392,7 @@ export function UpstreamPricesSection() {
       key: "output",
       label: "出价",
       header: priceHeader("出价"),
+      width: "8.5rem",
       sortable: true,
       sortValue: (model) => priceMicro(model.cost_output_per_1m),
       className: "text-right",
@@ -313,6 +418,7 @@ export function UpstreamPricesSection() {
     {
       key: "markup",
       label: "倍率",
+      width: "7rem",
       sortable: true,
       sortValue: (model) => numeric(model.markup ?? ""),
       className: "text-right",
@@ -342,6 +448,7 @@ export function UpstreamPricesSection() {
     {
       key: "derived",
       label: "派生售价（入·出）",
+      width: "10rem",
       header: (
         <span className="flex flex-col leading-tight">
           <span>派生售价（入·出）</span>
@@ -380,24 +487,40 @@ export function UpstreamPricesSection() {
       hideable: false,
       align: "right",
       sticky: "right",
+      // W8 t03 固定槽位：常驻「编辑」+ 有草稿时的「撤销 / 保存」共 3 个 dense 按钮，
+      // 宽度按按钮数固定，行内状态切换不会再挤动其它列。
+      width: actionColumnWidth(3, 3.5),
       cell: (model) => {
         if (!canEdit) return <span className="text-2xs text-faint">只读</span>;
         const draft = drafts[model.id] ?? draftOf(model);
         const dirty = isDirty(model, draft);
         const saving = save.isPending && save.variables?.model.id === model.id;
-        if (!dirty) return <span className="text-2xs text-faint">-</span>;
         return (
           <div className="flex items-center justify-end gap-1">
-            <Button size="dense" variant="ghost" onClick={() => resetDraft(model.id)} disabled={saving}>
-              <ACTION_ICONS.undo className="h-3.5 w-3.5" /> 撤销
-            </Button>
+            {/* W8 ticket 07：编辑入口常驻（不再用「-」占位），点击定位到该行入价输入框。 */}
             <Button
               size="dense"
-              onClick={() => save.mutate({ model, draft })}
-              disabled={!draftValid(draft) || saving}
+              variant="ghost"
+              aria-label={"编辑 " + model.name + " 的价目"}
+              title="定位到该行入价输入框"
+              onClick={() => focusPriceInput(model.id)}
             >
-              <ACTION_ICONS.save className="h-3.5 w-3.5" /> {saving ? "保存中…" : "保存"}
+              <ACTION_ICONS.edit className="h-3.5 w-3.5" />
             </Button>
+            {dirty ? (
+              <>
+                <Button size="dense" variant="ghost" onClick={() => resetDraft(model.id)} disabled={saving}>
+                  <ACTION_ICONS.undo className="h-3.5 w-3.5" /> 撤销
+                </Button>
+                <Button
+                  size="dense"
+                  onClick={() => save.mutate({ model, draft })}
+                  disabled={!draftValid(draft) || saving}
+                >
+                  <ACTION_ICONS.save className="h-3.5 w-3.5" /> {saving ? "保存中…" : "保存"}
+                </Button>
+              </>
+            ) : null}
           </div>
         );
       },
@@ -413,6 +536,59 @@ export function UpstreamPricesSection() {
         <ACTION_ICONS.batchPrice className="h-3.5 w-3.5" /> 批量改价
       </Button>
     </>
+  ) : null;
+
+  // JSON 导入语义是「null / 空串 = 不改」，表达不了表格的「清空价格」；有这种待保存草稿时
+  // 禁用 JSON 保存并提示切回表格，避免清空意图被静默丢掉。
+  const pendingClears = useMemo(
+    () =>
+      models.filter((model) => {
+        const draft = drafts[model.id];
+        if (draft === undefined) return false;
+        return (
+          (draft.input.trim() === "" && (model.cost_input_per_1m ?? "") !== "") ||
+          (draft.output.trim() === "" && (model.cost_output_per_1m ?? "") !== "")
+        );
+      }).length,
+    [models, drafts],
+  );
+  const invalidDraftRows = useMemo(
+    () =>
+      models.filter((model) => {
+        const draft = drafts[model.id];
+        return draft !== undefined && !draftValid(draft);
+      }).length,
+    [models, drafts],
+  );
+  const jsonSaveBlocker =
+    jsonIssues.length > 0
+      ? "先修正 JSON 校验未通过的问题"
+      : jsonDocument === null
+        ? "JSON 尚未通过校验"
+        : pendingClears > 0
+          ? "表格视图有 " + pendingClears + " 行待清空价格；JSON 导入不能清空价格，请先切回表格保存"
+          : invalidDraftRows > 0
+            ? "表格视图有 " + invalidDraftRows + " 行非法草稿；请先切回表格修正或撤销"
+            : !rowsDirty && !hasPendingJson
+              ? "没有未保存的修改"
+              : null;
+
+  const viewToggle = canEdit && models.length > 0 ? (
+    <ToggleGroup
+      type="single"
+      variant="outline"
+      size="sm"
+      value={view}
+      onValueChange={(next) => changeView(next === "json" ? "json" : "table")}
+      aria-label="价目视图"
+    >
+      <ToggleGroupItem value="table" aria-label="表格视图">
+        表格
+      </ToggleGroupItem>
+      <ToggleGroupItem value="json" aria-label="JSON 视图">
+        <ACTION_ICONS.rawJson className="h-3.5 w-3.5" /> JSON
+      </ToggleGroupItem>
+    </ToggleGroup>
   ) : null;
 
   const modelError = modelsQuery.error instanceof Error
@@ -452,36 +628,63 @@ export function UpstreamPricesSection() {
           权限：后端不会返回成本与倍率字段，本段只读；公开模型售价仍可在下方查看。
         </p>
       ) : (
-        <PriceTable
-          columns={columns}
-          rows={filtered}
-          totalCount={models.length}
-          loading={modelsQuery.isLoading}
-          error={modelError}
-          onRetry={() => void modelsQuery.refetch()}
-          sectionKey="upstream"
-          searchText={searchText}
-          onSearchChange={setSearchText}
-          searchPlaceholder="筛选模型 / 上游 / 类型"
-          toolbarStart={
-            <label className="flex h-8 items-center gap-2 text-2sm text-body">
-              <Switch
-                checked={unpricedOnly}
-                onCheckedChange={setUnpricedOnly}
-                aria-label="只看未配价"
+        <>
+          {view === "table" && hasPendingJson ? (
+            <Alert variant="warning">
+              <AlertTitle>JSON 视图还有 {jsonIssues.length} 处未应用的问题</AlertTitle>
+              <AlertDescription>
+                切回 JSON 修正后才能保存 JSON；表格行内保存不受影响。
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          <PriceTable
+            columns={columns}
+            rows={filtered}
+            totalCount={models.length}
+            loading={modelsQuery.isLoading}
+            error={modelError}
+            onRetry={() => void modelsQuery.refetch()}
+            sectionKey="upstream"
+            searchText={searchText}
+            onSearchChange={setSearchText}
+            searchPlaceholder="筛选模型 / 上游 / 类型"
+            toolbarStart={
+              <label className="flex h-8 items-center gap-2 text-2sm text-body">
+                <Switch
+                  checked={unpricedOnly}
+                  onCheckedChange={setUnpricedOnly}
+                  aria-label="只看未配价"
+                />
+                只看未配价
+              </label>
+            }
+            toolbarEnd={batchBar}
+            emptyText={unpricedOnly ? "所有上游模型都已配价" : "还没有上游模型"}
+            onClearFilters={() => {
+              setSearchText("");
+              setUnpricedOnly(false);
+              setSelected(new Set());
+            }}
+            rowKey={(model) => model.id}
+            view={view}
+            viewToggle={viewToggle}
+            layout="fixed"
+            jsonView={
+              <PriceJsonView
+                text={jsonText}
+                issues={jsonIssues}
+                serverMessage={importError}
+                serverRows={importRowErrors}
+                rowCount={jsonDocument?.upstream_models.length ?? 0}
+                saving={importJson.isPending}
+                saveBlocker={jsonSaveBlocker}
+                onChange={applyJsonText}
+                onSave={() => setJsonConfirm(true)}
+                onReload={reloadJsonFromTable}
               />
-              只看未配价
-            </label>
-          }
-          toolbarEnd={batchBar}
-          emptyText={unpricedOnly ? "所有上游模型都已配价" : "还没有上游模型"}
-          onClearFilters={() => {
-            setSearchText("");
-            setUnpricedOnly(false);
-            setSelected(new Set());
-          }}
-          rowKey={(model) => model.id}
-        />
+            }
+          />
+        </>
       )}
 
       {batchOpen && selected.size > 0 ? (
@@ -489,6 +692,23 @@ export function UpstreamPricesSection() {
           ids={[...selected]}
           onClose={() => setBatchOpen(false)}
           onDone={() => setSelected(new Set())}
+        />
+      ) : null}
+      {jsonConfirm && jsonDocument !== null ? (
+        <ConfirmDialog
+          open
+          onOpenChange={(open) => { if (!open) setJsonConfirm(false); }}
+          title="确认保存价目 JSON？"
+          description={
+            "文件含 " + jsonDocument.upstream_models.length + " 个上游模型条目：" +
+            "校验通过的行将覆盖对应模型的现行成本与倍率，历史账目不重算；" +
+            "任一行校验失败则整批不生效。"
+          }
+          confirmLabel="确认保存"
+          onConfirm={() => {
+            setJsonConfirm(false);
+            importJson.mutate(jsonDocument);
+          }}
         />
       ) : null}
       {leaveGuard}

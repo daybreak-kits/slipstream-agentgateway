@@ -890,6 +890,92 @@ check("W8 t03：密钥/路由/模型表接线固定布局原语（页面行为�
   );
 });
 
+// ---------- 4.6.1 价目表格 / JSON 双视图与常驻编辑（W8 t07） ----------
+check("W8 t07：价目页提供表格/JSON 双视图与常驻编辑入口（源码接线）", () => {
+  const upstream = read("src/components/pricing/upstream-prices.tsx");
+  includesAll(
+    upstream,
+    [
+      'layout="fixed"',
+      "viewToggle={viewToggle}",
+      "jsonView={",
+      "<PriceJsonView",
+      'aria-label={"编辑 " + model.name + " 的价目"}',
+      'confirmLabel="确认保存"',
+    ],
+    "价目页 JSON 视图",
+  );
+  expect(
+    !/className="text-2xs text-faint">-</.test(upstream),
+    "操作列不得再用「-」空占位：编辑入口必须常驻",
+  );
+  const table = read("src/components/pricing/table.tsx");
+  includesAll(
+    table,
+    [
+      "viewToggle?: ReactNode",
+      "jsonView?: ReactNode",
+      'layout?: "auto" | "fixed"',
+      "STABLE_ACTION_CELL_WRAPPER_CLASS",
+      "tableColumnWidthStyle",
+    ],
+    "PriceTable 双视图/固定布局 props",
+  );
+  const jsonView = read("src/components/pricing/price-json-view.tsx");
+  includesAll(jsonView, ["保存 JSON", "JSON 校验未通过", "整批未生效"], "价目 JSON 编辑器");
+});
+
+check("W8 t07：PriceTable JSON 视图替换表体、表格视图默认不变（SSR 渲染）", async () => {
+  const { PriceTable } = await load("/src/components/pricing/table.tsx");
+  const columns = [
+    { key: "name", label: "名称", cell: (row) => row.name },
+    {
+      key: "actions",
+      label: "操作",
+      hideable: false,
+      align: "right",
+      sticky: "right",
+      width: "8rem",
+      cell: () => "编辑",
+    },
+  ];
+  const baseProps = {
+    columns,
+    rows: [{ id: "a", name: "alpha" }],
+    totalCount: 1,
+    sectionKey: "gate-t07",
+    searchText: "",
+    onSearchChange: () => {},
+    searchPlaceholder: "搜索",
+    emptyText: "暂无数据",
+    onClearFilters: () => {},
+    rowKey: (row) => row.id,
+  };
+  const jsonHtml = render(
+    createElement(PriceTable, {
+      ...baseProps,
+      view: "json",
+      viewToggle: createElement("span", null, "表格 / JSON 切换"),
+      jsonView: createElement("div", { "data-testid": "price-json-editor" }, "价目 JSON 编辑器"),
+    }),
+  );
+  expect(jsonHtml.includes("price-json-editor"), "JSON 视图必须渲染 jsonView 内容");
+  expect(jsonHtml.includes("表格 / JSON 切换"), "视图切换控件必须在工具条渲染（列设置旁）");
+  expect(!jsonHtml.includes("data-table-body"), "JSON 视图不得渲染表格表体");
+  expect(!jsonHtml.includes('aria-label="搜索"'), "JSON 视图隐藏搜索框");
+  expect(jsonHtml.includes("列设置"), "JSON 视图仍保留列设置占位按钮（切换控件位置不抖动）");
+  expect(jsonHtml.includes('disabled=""'), "JSON 视图下列设置按钮必须禁用");
+
+  const tableHtml = render(createElement(PriceTable, { ...baseProps, view: "table" }));
+  expect(tableHtml.includes("data-table-body"), "默认表格视图仍渲染表体（缓存价/公开价表行为不变）");
+  expect(tableHtml.includes('aria-label="搜索"'), "默认表格视图仍渲染搜索框");
+
+  const fixedHtml = render(createElement(PriceTable, { ...baseProps, layout: "fixed" }));
+  expect(/<table[^>]*class="[^"]*table-fixed/.test(fixedHtml), "layout=fixed 的价目表必须渲染 table-fixed 固定布局");
+  expect(fixedHtml.includes('style="width:'), "固定布局必须把列宽写进表头（列宽不随内容变化）");
+  expect(fixedHtml.includes("min-w-14"), "固定布局操作列按钮必须有固定最小宽度");
+});
+
 check("table-order：partitionClosedLast 稳定分区——关闭行置尾、启用行保持原序、不原地改入参", async () => {
   const { partitionClosedLast } = await load("/src/lib/table-order.ts");
   const rows = [

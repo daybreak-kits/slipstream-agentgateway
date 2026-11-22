@@ -14,8 +14,10 @@ import { SortIndicator } from "@/components/ui/sort-indicator";
 import { Table, TableWrap, TD, TH, THead, TR } from "@/components/ui/table";
 import {
   ACTION_CELL_WRAPPER_CLASS,
+  STABLE_ACTION_CELL_WRAPPER_CLASS,
   tableColumnCellClass,
   tableColumnHeaderClass,
+  tableColumnWidthStyle,
   type TableColumnLayoutMeta,
 } from "@/lib/table-columns";
 import { cn } from "@/lib/utils";
@@ -88,6 +90,21 @@ interface PriceTableProps<T> {
   emptyAction?: ReactNode;
   onClearFilters: () => void;
   rowKey: (row: T) => string;
+  /**
+   * 价目页视图切换（W8 ticket 07）：json 时表体与分页换成 jsonView，筛选/批量区隐藏，
+   * 但列设置按钮保留占位（禁用）以稳定视图切换控件的位置。默认 table 行为不变。
+   */
+  view?: "table" | "json";
+  /** 视图切换控件，渲染在列设置旁（ticket 07：表格 / JSON）。 */
+  viewToggle?: ReactNode;
+  /** JSON 视图内容（页面提供，表格只负责放到表体位置）。 */
+  jsonView?: ReactNode;
+  /**
+   * t03 固定表格槽位：fixed 时表头/单元格按列 width 固定、操作列按钮最小宽度稳定，
+   * 避免「编辑/撤销/保存」这类常驻操作列在行内切换时挤动列宽。默认 auto 保持缓存价/
+   * 公开价表既有行为。
+   */
+  layout?: "auto" | "fixed";
 }
 
 type SortDir = "asc" | "desc";
@@ -98,7 +115,10 @@ export function PriceTable<T>({
   columns, rows, totalCount, loading = false, error, onRetry,
   sectionKey, searchText, onSearchChange, searchPlaceholder,
   toolbarStart, toolbarEnd, emptyText, emptyAction, onClearFilters, rowKey,
+  view = "table", viewToggle, jsonView, layout = "auto",
 }: PriceTableProps<T>) {
+  const jsonViewMode = view === "json";
+  const fixedLayout = layout === "fixed";
   const [hiddenCols, setHiddenCols] = useState<string[]>(() => readHiddenCols(sectionKey));
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>("asc");
@@ -166,19 +186,34 @@ export function PriceTable<T>({
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
-        <Input
-          value={searchText}
-          onChange={(event) => onSearchChange(event.target.value)}
-          placeholder={searchPlaceholder}
-          aria-label="搜索"
-          className="h-8 w-56"
-        />
-        {toolbarStart}
+        {jsonViewMode ? (
+          <p className="text-2xs text-faint">
+            JSON 视图：直接编辑整份价目文件，保存走整批导入（任一行有误则整批不生效）。
+          </p>
+        ) : (
+          <>
+            <Input
+              value={searchText}
+              onChange={(event) => onSearchChange(event.target.value)}
+              placeholder={searchPlaceholder}
+              aria-label="搜索"
+              className="h-8 w-56"
+            />
+            {toolbarStart}
+          </>
+        )}
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          {toolbarEnd}
+          {jsonViewMode ? null : toolbarEnd}
+          {viewToggle}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" aria-label="列设置">
+              <Button
+                variant="outline"
+                size="sm"
+                aria-label="列设置"
+                disabled={jsonViewMode}
+                title={jsonViewMode ? "JSON 视图下没有可配置的列" : undefined}
+              >
                 <Settings2 className="h-3.5 w-3.5" /> 列设置
               </Button>
             </DropdownMenuTrigger>
@@ -200,9 +235,13 @@ export function PriceTable<T>({
           </DropdownMenu>
         </div>
       </div>
+      {jsonViewMode ? (
+        jsonView
+      ) : (
+        <>
       {/* 表体内部滚动（DESIGN-AUDIT 四期 §3/§9）：高度公式与 DataTable 一致（17rem 起步，不设最小高度）。 */}
       <TableWrap className="table-responsive overflow-y-auto rounded-lg border border-border bg-surface">
-        <Table>
+        <Table fixed={fixedLayout}>
           <THead>
             <tr>
               {visibleColumns.map((col) => (
@@ -214,6 +253,7 @@ export function PriceTable<T>({
                     col.sortable && col.sortValue && "cursor-pointer hover:text-body",
                     tableColumnHeaderClass(col),
                   )}
+                  style={fixedLayout ? tableColumnWidthStyle(col) : undefined}
                 >
                   <span className="inline-flex items-center gap-1">
                     {col.header ?? col.label}
@@ -274,7 +314,15 @@ export function PriceTable<T>({
                       {/* W6 ticket 11：操作列（sticky 尾列）内容统一 flex justify-end 贴右边缘，
                           与 DataTable/ModelsTable 同一机制，页面不再各自手写对齐。 */}
                       {col.sticky === "right" ? (
-                        <div className={ACTION_CELL_WRAPPER_CLASS}>{col.cell(row)}</div>
+                        <div
+                          className={
+                            fixedLayout
+                              ? STABLE_ACTION_CELL_WRAPPER_CLASS
+                              : ACTION_CELL_WRAPPER_CLASS
+                          }
+                        >
+                          {col.cell(row)}
+                        </div>
                       ) : (
                         col.cell(row)
                       )}
@@ -297,6 +345,8 @@ export function PriceTable<T>({
         }}
         className="rounded-lg border border-border bg-surface"
       />
+        </>
+      )}
     </div>
   );
 }

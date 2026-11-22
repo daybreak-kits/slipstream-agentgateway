@@ -11,6 +11,10 @@ import { invalidatePricing } from "@/components/pricing/queries";
 import type { PriceExportFile } from "@/lib/control-plane/operations/prices";
 import { controlPlane } from "@/lib/control-plane";
 import { ApiError } from "@/lib/control-plane/errors";
+import {
+  normalizePriceImportErrors,
+  type PriceImportErrorRow,
+} from "@/lib/pricing/document";
 import { formatDateTime, useTimezone } from "@/lib/time";
 
 /**
@@ -19,27 +23,6 @@ import { formatDateTime, useTimezone } from "@/lib/time";
  * exported_at_ms, meta, upstream_models[]}，导入成功 {changed, skipped}，失败 422
  * details.errors 逐行 {index, id, name, message}。
  */
-
-interface ImportErrorRow {
-  index: number;
-  id: string | null;
-  name: string | null;
-  message: string;
-}
-
-function normalizeImportErrors(error: ApiError): ImportErrorRow[] {
-  const raw = error.details.errors;
-  if (!Array.isArray(raw)) return [];
-  return raw.map((item, position) => {
-    const row = (item ?? {}) as Record<string, unknown>;
-    return {
-      index: typeof row.index === "number" ? row.index : position,
-      id: row.id === null || row.id === undefined ? null : String(row.id),
-      name: row.name === null || row.name === undefined ? null : String(row.name),
-      message: String(row.message ?? "未知错误"),
-    };
-  });
-}
 
 export function PriceIoActions({ canExport, canImport }: { canExport: boolean; canImport: boolean }) {
   const queryClient = useQueryClient();
@@ -90,7 +73,7 @@ function ImportDialog({ onClose, queryClient }: { onClose: () => void; queryClie
   const [rawText, setRawText] = useState("");
   const [parsed, setParsed] = useState<PriceExportFile | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
-  const [rowErrors, setRowErrors] = useState<ImportErrorRow[] | null>(null);
+  const [rowErrors, setRowErrors] = useState<PriceImportErrorRow[] | null>(null);
   const [serverMessage, setServerMessage] = useState<string | null>(null);
   // W4-G 确认校准：「开始导入」先出覆盖行数确认，再发请求。
   const [importConfirm, setImportConfirm] = useState(false);
@@ -133,7 +116,7 @@ function ImportDialog({ onClose, queryClient }: { onClose: () => void; queryClie
     onError: (error) => {
       // 后端逐行校验全批拒绝（422）：不落库已由后端保证，这里展示逐行错误
       if (error instanceof ApiError) {
-        setRowErrors(normalizeImportErrors(error));
+        setRowErrors(normalizePriceImportErrors(error));
         setServerMessage(error.message);
       }
     },
