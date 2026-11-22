@@ -6,10 +6,27 @@
 
 **状态**：v1 内部交付，持续迭代中。**许可**：Apache-2.0（见 `LICENSE`）。
 
+## 界面预览
+
+| 数据看板 | 使用日志与请求尝试链 |
+|---|---|
+| ![数据看板：请求量、词元、费用与延迟分位](docs/images/readme-dashboard.png) | ![使用日志：请求尝试链可展开查看每一轮状态与耗时](docs/images/readme-logs.png) |
+
+| 上游渠道详情 | 模型管理 |
+|---|---|
+| ![上游渠道详情：连接地址、协议、密钥与模型](docs/images/readme-upstream.png) | ![模型管理：上游模型与公开模型的统一入口](docs/images/readme-models.png) |
+
+| 价目管理 | 网关策略 |
+|---|---|
+| ![价目管理：成本价与售价的表格/JSON 双向编辑](docs/images/readme-pricing.png) | ![网关策略：全局开关、IP 规则与路由策略](docs/images/readme-policies.png) |
+
+
 ## 目录
 
 - [核心能力](#核心能力)
+- [界面预览](#界面预览)
 - [快速开始](#快速开始)
+- [Docker 部署](#docker-部署)
 - [端口](#端口)
 - [仓库结构](#仓库结构)
 - [常用配置](#常用配置)
@@ -128,6 +145,20 @@ ops/start-data-plane.sh
 - 启动报 `ZoneInfoNotFoundError: Asia/Shanghai`：Windows 精简环境缺时区数据包，`uv pip install tzdata`（或重跑依赖安装，pyproject 已声明）。
 - PowerShell 里 `PYTHONPATH=src python ...` 报「无法识别」：这是 bash 写法，PowerShell 应为 `$env:PYTHONPATH="src"`；editable 安装后一般不需要 PYTHONPATH。
 - 端口被占用：换 `--port`，并注意别与其它 agentgateway/控制面实例共用数据目录。
+
+## Docker 部署
+
+仓库自带 `Dockerfile` 和 `docker-compose.yml`，可直接启动 PostgreSQL、控制面与 agentgateway 数据面：
+
+```bash
+cp .env.docker.example .env
+# 本地体验可保持默认 admin/admin；生产必须修改 POSTGRES_PASSWORD 与 SLIPSTREAM_ADMIN_PASSWORD
+docker compose up -d --build
+```
+
+打开 `http://localhost:3700`，默认登录 **admin / admin**。默认 `SLIPSTREAM_SEED_DEMO=0`：空库只初始化管理员账号，不写演示数据；需要演示数据时把 `.env` 中的值改为 `1` 后重启，或执行 `docker compose exec app python scripts/seed_demo.py`。WSL2 下从 Windows 浏览器访问用 `localhost`，不要用 `127.0.0.1`。
+
+空库首次登录后没有上游和公开模型：按「快速上手」创建上游渠道、公开模型并保存下发，agentgateway 才开始监听数据面端口 3600。完整说明见 [docs/DEPLOY-DOCKER.md](docs/DEPLOY-DOCKER.md)。
 
 ## 端口
 
@@ -262,6 +293,7 @@ node ops/checks/acceptance_browser.mjs --strict   # Playwright 全站验收
 | `docs/plans/w5-correctness-rework.md` | 五期（W5）实施计划与工票记录 |
 | `docs/DESIGN-AUDIT.md` | 设计巡检、设计规范与五期实现清单 |
 | `docs/DELIVERY.md` | 交付说明与各期门禁基线 |
+| `docs/DEPLOY-DOCKER.md` | Docker / PostgreSQL / agentgateway 部署 |
 | `ops/README.md` | 质量闸门与实验脚本说明 |
 
 ## 贡献
