@@ -18,6 +18,7 @@ import { PublicModelEditor } from "@/components/models/public-model-editor";
 import { UpstreamModelDrawer } from "@/components/models/upstream-model-drawer";
 import { PageHeader } from "@/components/layout/page-header";
 import { ModelsTable, type ModelColumn } from "@/components/models/table";
+import { actionColumnWidth } from "@/lib/table-columns";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -310,7 +311,8 @@ function UpstreamTab() {
     key: "select",
     label: "选择",
     hideable: false,
-    headerClassName: "w-10",
+    // W8 t03：固定布局下改由 width 声明列宽（w-10 在 table-fixed 下不生效）。
+    width: "2.5rem",
     header: (
       <Checkbox
         checked={allSelected ? true : someSelected ? "indeterminate" : false}
@@ -354,6 +356,7 @@ function UpstreamTab() {
     {
       key: "type",
       label: "类型 / 来源",
+      width: "9rem",
       cell: (row) => (
         <div className="space-y-1">
           <Badge tone="info">{row.model_type}</Badge>
@@ -367,21 +370,22 @@ function UpstreamTab() {
     ...(canCost ? [{
       key: "price",
       label: "价格（入 / 出）",
+      width: "11rem",
       className: "whitespace-nowrap text-right tnum",
-      headerClassName: "whitespace-nowrap",
       cell: priceCell,
     } as ModelColumn<UpstreamModel>] : []),
     {
       key: "params",
       label: "参数",
+      width: "12rem",
       // W7 t09：列里只留输入/输出上限；模态、能力、思考档位进悬浮详情。
       cell: (row) => <ModelParamsCell row={row} />,
     },
     {
       key: "targets",
       label: "被引用",
+      width: "4.5rem",
       className: "text-right tnum",
-      headerClassName: "whitespace-nowrap",
       cell: (row) => <span className="text-2sm">{fmtInt(row.target_count ?? 0)}</span>,
     },
     ...(canWrite ? [{
@@ -390,7 +394,8 @@ function UpstreamTab() {
       // 操作列 = 最后一列 + 尾部冻结（W5 D1）：sticky 由 lib/table-columns 同时上 th 与 td。
       sticky: "right",
       hideable: false,
-      headerClassName: "min-w-64",
+      // 最多 5 个 dense 操作按钮（编辑/关闭|启用/解除/删除/周期），列宽按按钮数固定。
+      width: actionColumnWidth(5),
       cell: (row: UpstreamModel) => (
         <div className="flex gap-1">
           <ActionButton action="edit" size="dense" onClick={() => setDrawer({ open: true, initial: row })}>
@@ -508,6 +513,7 @@ function UpstreamTab() {
         {ENABLE_SEMANTICS_NOTE}
       </p>
       <ModelsTable<UpstreamModel>
+        layout="fixed"
         columns={columns}
         rows={rows}
         totalCount={allItems.length}
@@ -800,7 +806,7 @@ function PublicTab() {
     key: "select",
     label: "选择",
     hideable: false,
-    headerClassName: "w-10",
+    width: "2.5rem",
     header: (
       <Checkbox
         checked={allSelected ? true : someSelected ? "indeterminate" : false}
@@ -822,6 +828,7 @@ function PublicTab() {
     {
       key: "name",
       label: "公开名 / 备注",
+      width: "10rem",
       cell: (row) => (
         <div>
           {/* W7 t10：与上游模型同一口径——关闭的公开模型在名字旁出状态图标。 */}
@@ -860,6 +867,7 @@ function PublicTab() {
     {
       key: "members",
       label: "成员",
+      width: "14rem",
       // 数值列右对齐（对齐镜像：className 头身同用，DESIGN-AUDIT 四期 §2）。
       className: "text-right tnum",
       cell: (row) => {
@@ -879,7 +887,8 @@ function PublicTab() {
       // 操作列 = 最后一列 + 尾部冻结（W5 D1）：sticky 由 lib/table-columns 同时上 th 与 td。
       sticky: "right",
       hideable: false,
-      headerClassName: "min-w-56",
+      // 复制公开名（图标按钮）+ 编辑/关闭|启用/删除，列宽按按钮数固定。
+      width: actionColumnWidth(4),
       cell: (row: PublicModel) => (
         <div className="flex gap-1">
           <Button
@@ -961,6 +970,7 @@ function PublicTab() {
         公开模型是运营对外发放的别名：策略 + 成员（priority / weight）+ 启停。可用性措施（冷却/周期）只作用于上游模型（ADR-025），行内「编辑」进入整页编辑器合并维护成员。
       </p>
       <ModelsTable<PublicModel>
+        layout="fixed"
         columns={columns}
         rows={rows}
         totalCount={allItems.length}

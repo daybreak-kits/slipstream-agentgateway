@@ -18,11 +18,16 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableWrap, TD, TH, THead, TR } from "@/components/ui/table";
+import { ResultCell, Table, TableWrap, TD, TH, THead, TR } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { controlPlane } from "@/lib/control-plane";
 import { ACTION_ICONS } from "@/lib/icons";
-import { ACTION_CELL_WRAPPER_CLASS, FROZEN_COLUMN_CELL_CLASS, FROZEN_COLUMN_HEADER_CLASS } from "@/lib/table-columns";
+import {
+  actionColumnWidth,
+  FROZEN_COLUMN_CELL_CLASS,
+  FROZEN_COLUMN_HEADER_CLASS,
+  STABLE_ACTION_CELL_WRAPPER_CLASS,
+} from "@/lib/table-columns";
 import { formatDateTime, useTimezone } from "@/lib/time";
 import { parseKeyLines, type PendingKey } from "./shared";
 import type { UpstreamKey } from "@/types";
@@ -160,31 +165,41 @@ interface KeyRowModel {
   pending?: boolean;
 }
 
-/** 逐把测试结果（ADR-026 ③）：失效标红 danger、成功标绿、未测中性，含测试时间。 */
+/** 逐把测试结果（ADR-026 ③）：失效标红 danger、成功标绿、未测中性，含测试时间。
+ * W8 t03：统一走 ResultCell 固定两行槽位（第一行徽章、第二行时间，空槽也占位）——
+ * 结果从无到有只填充槽位，行高与列宽不变；ticket 04 的行内单把测试直接复用该槽位。 */
 function KeyTestCell({ row }: { row: KeyRowModel }) {
   const { mode: timezone } = useTimezone();
   if (row.pending || row.lastTest === null || row.lastTest === undefined) {
-    return <Badge tone="neutral">未测试</Badge>;
+    return <ResultCell primary={<Badge tone="neutral">未测试</Badge>} />;
   }
   const testedAt = row.lastTestAtMs > 0 ? formatDateTime(row.lastTestAtMs, timezone) : "";
   if (row.lastTest.ok) {
     return (
-      <span className="space-y-0.5">
-        <Badge tone="success">HTTP {row.lastTest.status_code} · {row.lastTest.latency_ms} ms</Badge>
-        {testedAt ? <p className="text-2xs text-faint tnum">{testedAt}</p> : null}
-      </span>
+      <ResultCell
+        primary={<Badge tone="success">HTTP {row.lastTest.status_code} · {row.lastTest.latency_ms} ms</Badge>}
+        secondary={testedAt}
+        secondaryClassName="tnum text-faint"
+      />
     );
   }
   const reason = row.lastTest.error || (row.lastTest.status_code > 0 ? "HTTP " + row.lastTest.status_code : "连接失败");
   return (
-    <span className="space-y-0.5">
-      <Badge tone="danger">{reason}</Badge>
-      {testedAt ? <p className="text-2xs text-danger-text tnum">{testedAt}</p> : null}
-    </span>
+    <ResultCell
+      primary={
+        <Badge tone="danger" title={reason}>
+          {reason}
+        </Badge>
+      }
+      secondary={testedAt}
+      secondaryClassName="tnum text-danger-text"
+    />
   );
 }
 
-function KeysTable({
+/** 密钥裸表（W8 t03 起固定列宽）：勾选/编号/密钥/结果/创建时间/操作列宽写死，备注列吸收剩余宽度；
+ * 操作列始终最后一列 + sticky right，结果列固定两行槽位——测试结果出现时行高、列宽均不跳。 */
+export function KeysTable({
   rows,
   selected,
   onToggle,
@@ -202,11 +217,11 @@ function KeysTable({
   const allSelected = selectable && rows.length > 0 && rows.every((row) => selected.has(row.id));
   return (
     <TableWrap>
-      <Table>
+      <Table fixed>
         <THead>
           <tr>
             {selectable ? (
-              <TH className="w-8">
+              <TH style={{ width: "2.5rem" }}>
                 <Checkbox
                   checked={allSelected}
                   onCheckedChange={(checked) => onToggleAll(checked === true)}
@@ -214,14 +229,19 @@ function KeysTable({
                 />
               </TH>
             ) : null}
-            <TH className="w-10">编号</TH>
+            <TH style={{ width: "2.5rem" }}>编号</TH>
             <TH>备注</TH>
-            <TH>密钥</TH>
-            <TH>测试结果</TH>
-            <TH>创建时间</TH>
+            <TH style={{ width: "4rem" }}>密钥</TH>
+            <TH style={{ width: "9.5rem" }}>测试结果</TH>
+            <TH style={{ width: "9rem" }}>创建时间</TH>
             {/* 操作列 = 最后一列 + 尾部冻结（W5 D1）：裸表也复用 lib/table-columns 的冻结列类；
                 W6 ticket 11：表头与内容同右对齐（贴边规则与三套表格组件一致）。 */}
-            <TH className={FROZEN_COLUMN_HEADER_CLASS + " text-right"}>操作</TH>
+            <TH
+              className={FROZEN_COLUMN_HEADER_CLASS + " text-right"}
+              style={{ width: actionColumnWidth(3, 3.5) }}
+            >
+              操作
+            </TH>
           </tr>
         </THead>
         <tbody>
@@ -253,7 +273,8 @@ function KeysTable({
               {/* W6 ticket 11：操作单元格内容统一由 KeysTable 套 justify-end 包装（user story 38），
                   两个调用点不再各自手写对齐。 */}
               <TD className={FROZEN_COLUMN_CELL_CLASS}>
-                <div className={ACTION_CELL_WRAPPER_CLASS}>{actions(row)}</div>
+                {/* W8 t03：固定最小按钮宽度（min-w-14），「测试/测试中」文案切换不改变操作列。 */}
+                <div className={STABLE_ACTION_CELL_WRAPPER_CLASS}>{actions(row)}</div>
               </TD>
             </TR>
           ))}
@@ -496,7 +517,7 @@ export function UpstreamKeysPanel({ upstreamId }: { upstreamId: string }) {
                 title="对本上游全部密钥逐把发起最小鉴权请求"
                 onClick={() => testKeys.mutate()}
               >
-                {testKeys.isPending ? "测试中…" : "测试"}
+                {testKeys.isPending ? "测试中" : "测试"}
               </Button>
               <Button
                 variant="ghost"
