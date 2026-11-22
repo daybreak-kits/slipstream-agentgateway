@@ -336,20 +336,24 @@ export interface RewriteCondition {
 
 export interface TransformRule {
   op: TransformOp;
-  /** 高级逃生舱：直接写 CEL；仍存为规则行，预览与审计口径一致 */
-  mode?: "custom_cel";
-  /** 头：名称（大小写不敏感）；体：目标路径 a.b.0.c */
+  /** 头规则的目标头名（大小写不敏感）；体规则的目标路径 a.b.0.c */
   name?: string;
-  /** 体动作的目标路径 */
+  /** 体规则的目标路径（copy 用 target_path，不用该字段） */
   path?: string;
-  /** 目标值 / custom_cel 表达式（regex_replace 不使用该字段） */
+  /** 目标值（regex_replace 不使用该字段） */
   value?: string;
-  /** regex_replace 的正则源串（编译为 CEL regexReplaceAll(ref, regex, replacement)） */
+  /** regex_replace 的正则源串（编译为 regexReplaceAll(ref, regex, replacement)） */
   regex?: string;
   /** regex_replace 的替换文本；空串表示删除匹配 */
   replacement?: string;
-  /** copy 的源（头的源头名 / 体的源路径） */
+  /** 头 copy 的源头名（wire 字段 source_name） */
+  source_name?: string;
+  /** 头 copy 的目标头名（可省略；省略时用 name） */
+  target_name?: string;
+  /** 体 copy 的源路径（wire 字段 source_path） */
   source_path?: string;
+  /** 体 copy 的目标路径（wire 字段 target_path） */
+  target_path?: string;
   conditions: RewriteCondition[];
 }
 
@@ -373,6 +377,43 @@ export interface TransformPreviewResult {
   after: unknown;
   skipped: string[];
   notes: string[];
+}
+
+/** 样例测试的一段（请求或响应）：粘贴的头与 JSON 体。 */
+export interface TransformSamplePhase {
+  headers: Record<string, string>;
+  body: unknown;
+}
+
+/** POST .../transforms/sample 的输入：规则文档 + 请求/响应样例；不访问上游、不落库。 */
+export interface TransformSampleInput {
+  transforms: UpstreamTransforms;
+  request: TransformSamplePhase;
+  response: TransformSamplePhase;
+}
+
+/** 一条字段级 before/after 差异；头值恒为字符串，体值保留 JSON 类型。 */
+export interface TransformFieldDiff {
+  segment: TransformSection;
+  kind: "header" | "body";
+  path: string;
+  op: TransformOp;
+  before: unknown;
+  after: unknown;
+}
+
+/** 样例测试的前/后快照（未改动的段保持原样）。 */
+export interface TransformSampleSnapshot {
+  request: TransformSamplePhase;
+  response: TransformSamplePhase;
+}
+
+/** POST .../transforms/sample 的结果：样例前后快照与字段 diff。 */
+export interface TransformSampleResult {
+  upstream_id: string;
+  before: TransformSampleSnapshot;
+  after: TransformSampleSnapshot;
+  diff: TransformFieldDiff[];
 }
 
 export interface SettingItem {

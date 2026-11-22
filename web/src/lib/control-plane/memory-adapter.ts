@@ -355,6 +355,34 @@ export function createMemoryUpstreams(): UpstreamsOperations {
         notes: [],
       };
     },
+
+    // 演示数据无法真正执行规则；给一个可预期的字段 diff（与预览的 x-trace 假数据同源），
+    // 保证离线演示里样例测试的交互与真实后端一致。
+    sampleTransforms: async (id, input) => {
+      requireUpstream(id);
+      const before = {
+        request: clone(input.request),
+        response: clone(input.response),
+      };
+      const after = clone(before);
+      const previous = after.request.headers["x-trace"];
+      after.request.headers["x-trace"] = "slipstream";
+      return {
+        upstream_id: id,
+        before,
+        after,
+        diff: [
+          {
+            segment: "request_headers" as const,
+            kind: "header" as const,
+            path: "x-trace",
+            op: "update" as const,
+            before: previous ?? null,
+            after: "slipstream",
+          },
+        ],
+      };
+    },
   };
 }
 

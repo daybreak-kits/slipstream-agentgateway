@@ -20,6 +20,8 @@ import type {
 } from "@/generated/contract";
 import type {
   TransformPreviewResult,
+  TransformSampleInput,
+  TransformSampleResult,
   Upstream,
   UpstreamBatchResult,
   UpstreamImportResult,
@@ -144,4 +146,6 @@ export interface UpstreamsOperations {
   getTransforms(id: string): Promise<UpstreamTransformsResponse>;
   saveTransforms(id: string, value: UpstreamTransforms): Promise<{ saved: boolean }>;
   previewTransforms(id: string, value: UpstreamTransforms): Promise<TransformPreviewResult>;
+  /** 用粘贴的请求/响应样例回放规则（不访问上游、不落库），返回 before/after 与字段 diff。 */
+  sampleTransforms(id: string, input: TransformSampleInput): Promise<TransformSampleResult>;
 }

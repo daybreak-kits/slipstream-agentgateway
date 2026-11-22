@@ -199,4 +199,25 @@ describe("改写规则", () => {
     expect(preview.before).toMatchObject({ model: "glm-5.3" });
     expect(preview.after).toMatchObject({ request: { set: { "x-trace": '"slipstream"' } } });
   });
+
+  it("sampleTransforms 返回演示 before/after 与字段 diff，不改写传入样例", async () => {
+    const ops = memory.createMemoryUpstreams();
+    const sample = {
+      transforms: fixtures.sampleTransforms,
+      request: { headers: { "x-trace": "old" }, body: { model: "glm-5.3" } },
+      response: { headers: {}, body: null },
+    };
+    const result = await ops.sampleTransforms("up_01", sample);
+    expect(result.upstream_id).toBe("up_01");
+    expect(result.before.request.headers["x-trace"]).toBe("old");
+    expect(result.diff).toHaveLength(1);
+    expect(result.diff[0]).toMatchObject({
+      segment: "request_headers",
+      kind: "header",
+      path: "x-trace",
+      before: "old",
+      after: "slipstream",
+    });
+    expect(sample.request.headers["x-trace"]).toBe("old");
+  });
 });

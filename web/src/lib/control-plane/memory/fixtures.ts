@@ -929,15 +929,14 @@ export const overview: OverviewStats = {
 };
 
 export const sampleTransforms: UpstreamTransforms = {
-  request_headers: [
-    { op: "update", name: "x-trace", value: "slipstream", conditions: [] },
+  request_headers: [{ op: "update", name: "x-trace", value: "slipstream", conditions: [] }],
+  request_body: [
     {
       op: "update", path: "temperature", value: "0.2",
       conditions: [{ field: "model", mode: "full", value: "glm-5.3" }],
     },
-  ],
-  request_body: [
-    { op: "copy", path: "top_p", source_path: "temperature", conditions: [] },
+    // 体 copy 的 wire 字段是 source_path → target_path（path 不参与编译）。
+    { op: "copy", source_path: "temperature", target_path: "top_p", conditions: [] },
   ],
   response_headers: [],
   response_body: [],

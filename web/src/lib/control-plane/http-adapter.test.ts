@@ -104,6 +104,22 @@ describe("上游域 HTTP adapter 的路径与载荷", () => {
       "POST /admin/upstreams/up_01/transforms/preview",
     ]);
   });
+
+  it("改写规则样例测试走独立 sample 端点，body 原样提交", async () => {
+    const { calls, request } = capture({ upstream_id: "up_01", before: {}, after: {}, diff: [] });
+    const ops = createHttpUpstreams(request);
+    const input = {
+      transforms: { request_headers: [], request_body: [], response_headers: [], response_body: [] },
+      request: { headers: { "x-trace": "old" }, body: { model: "glm-5.3" } },
+      response: { headers: {}, body: null },
+    };
+    await ops.sampleTransforms("up 01", input);
+    expect(calls[0]).toMatchObject({
+      method: "POST",
+      path: "/admin/upstreams/up%2001/transforms/sample",
+      body: input,
+    });
+  });
 });
 
 describe("createHttpRequester", () => {
