@@ -22,7 +22,6 @@ import {
   LATENCY_TONE_BAR_CLASS, LATENCY_TONE_TEXT_CLASS, latencyTone,
 } from "@/components/logs/latency-tone";
 import { LogDetailDrawer } from "@/components/logs/log-detail-drawer";
-import { rowErrorText } from "@/components/logs/error-summary";
 import { SortIndicator } from "@/components/ui/sort-indicator";
 import { RequestAttemptChainPopover } from "@/components/logs/request-attempt-chain";
 import {
@@ -518,20 +517,26 @@ function buildLogColumns(spec: LogColumnSpec): ColumnDef<LogRow, unknown>[] {
       header: () => <SortHeader label="日期时间" field="started_at" sort={sort} onSort={onSort} />,
       enableSorting: false,
       cell: ({ row }) => {
-        // ticket 04：失败行的错误摘要。服务层只回事实字段，摘要统一由 rowErrorText 拼装
-        //（原始日志文本优先，缺失时用最近一次失败尝试兜底），整行扫读即可定位失败点。
-        const errorText = rowErrorText(row.original);
+        const status = row.original.http_status;
+        const badge = <Badge tone={statusTone(status)}>{statusLabel(status)}</Badge>;
         return (
           <div className="min-w-0 whitespace-nowrap">
             <p className="tnum text-2sm text-body">{formatDateTime(row.original.started_at_ms, mode)}</p>
             <p className="mt-0.5">
-              <Badge tone={statusTone(row.original.http_status)}>{statusLabel(row.original.http_status)}</Badge>
+              {status >= 400 ? (
+                <button
+                  type="button"
+                  className="rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                  onClick={() => onOpen(row.original)}
+                  title="查看错误详情"
+                  aria-label={"查看 " + statusLabel(status) + " 错误详情"}
+                >
+                  {badge}
+                </button>
+              ) : (
+                badge
+              )}
             </p>
-            {errorText ? (
-              <p className="mt-0.5 max-w-[180px] truncate text-2xs text-danger-text" title={errorText}>
-                {errorText}
-              </p>
-            ) : null}
           </div>
         );
       },

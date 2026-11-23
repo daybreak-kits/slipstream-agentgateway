@@ -20,7 +20,12 @@ from l01_core.crypto import AesGcmBox
 from l01_core.errors import AppError, ErrorCode
 from l01_core.settings import get_settings
 from l03_adapters.spi import DataPlaneAdapter
-from l04_repo.orm import GatewayUsageEventORM, UpstreamModelORM, UpstreamORM
+from l04_repo.orm import (
+    ConfigRevisionORM,
+    GatewayUsageEventORM,
+    UpstreamModelORM,
+    UpstreamORM,
+)
 from l05_service import auto_public
 from l05_service.playground_identity import ensure_test_identity
 from l05_service.usage_pull import pull_once
@@ -43,6 +48,17 @@ def _display_error(response: httpx.Response) -> str:
         text = response.text[:500]
     text = " ".join(text.split())
     return text[:500]
+
+
+def _data_plane_auth_failure(message: str) -> bool:
+    """agentgateway rejects an unknown client key with a plain-text 401.
+
+    Upstream 401s carry a provider-specific message instead; only the exact
+    gateway wording is rewritten so a genuinely bad upstream key keeps showing
+    the provider's own error.
+    """
+    lowered = message.strip().lower()
+    return lowered == "authentication failed" or "api key authentication failure" in lowered
 
 
 def _public_names(session: Session, models: list[UpstreamModelORM]) -> dict[str, str]:
@@ -133,6 +149,16 @@ def test_upstream_models(
         )
     key = ensure_test_identity(session)
     test_key = AesGcmBox(get_settings().secret_key).decrypt(key.key_enc)
+    active_revision = session.scalars(
+        select(ConfigRevisionORM)
+        .where(ConfigRevisionORM.status == "active")
+        .order_by(ConfigRevisionORM.created_at_ms.desc())
+    ).first()
+    test_key_loaded = bool(
+        active_revision
+        and key.key_hash
+        and key.key_hash in (active_revision.artifact or "")
+    )
     names = _public_names(session, models)
     base_url = contract.base_url()
 
@@ -150,6 +176,17 @@ def test_upstream_models(
             message = (
                 "数据面还没有这个公开模型；请先保存并下发配置。"
                 + (f"（上游返回：{message}）" if message else "")
+            )
+        elif (
+            not ok
+            and status == 401
+            and not test_key_loaded
+            and _data_plane_auth_failure(message)
+        ):
+            message = (
+                "数据面尚未加载测试专用凭据，模型测试被网关拒绝（401）；"
+                "请先在网关策略页保存并下发配置后重试。"
+                + (f"（数据面返回：{message}）" if message else "")
             )
         items.append(
             {

@@ -231,7 +231,7 @@ export function UpstreamModelsPanel({
   ];
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-2xs text-faint">
           已接入 <span className="tnum">{rows.length}</span> 个模型；公开模型通过成员引用这里的行。

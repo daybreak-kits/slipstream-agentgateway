@@ -105,6 +105,25 @@ def test_upstream_error_is_reported_without_raising(
     assert "Incorrect API key" in item["message"]
 
 
+def test_data_plane_auth_failure_points_at_missing_config_apply(
+    client, engine_and_sessionmaker, monkeypatch
+):
+    engine, factory = engine_and_sessionmaker
+    ids = seed_channel(engine, factory)
+    plane = _DataPlane([httpx.Response(401, text="authentication failed")])
+    monkeypatch.setattr(model_test.httpx, "Client", plane)
+    response = client.post(
+        f"/admin/upstreams/{ids['upstream_id']}/models/probe",
+        json={"model_ids": [ids["upstream_model_id"]]},
+    )
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+    assert item["ok"] is False
+    assert item["status"] == 401
+    assert "尚未加载测试专用凭据" in item["message"]
+    assert "保存并下发" in item["message"]
+
+
 def test_unknown_model_and_foreign_model_are_422(
     client, engine_and_sessionmaker
 ):

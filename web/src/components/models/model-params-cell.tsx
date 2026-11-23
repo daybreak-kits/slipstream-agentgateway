@@ -34,10 +34,10 @@ export function ModelParamsCell({ row }: { row: { parameters?: ModelParameters }
         </dl>
       }
     >
-      <span className="block min-w-0 text-2xs leading-tight">
+      <span className="block min-w-0 space-y-1 text-2xs leading-snug">
         {pairs.map((pair) => (
-          <span key={pair.label} className="flex items-baseline gap-1.5 whitespace-nowrap">
-            <span className="w-4 shrink-0 text-faint">{pair.label}</span>
+          <span key={pair.label} className="flex items-baseline gap-2 whitespace-nowrap">
+            <span className="w-6 shrink-0 text-faint">{pair.label}</span>
             <span className="tnum text-body">{pair.value}</span>
           </span>
         ))}
