@@ -9,10 +9,14 @@ routes surface ITS contract values, not hardcoded agentgateway numbers.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from tests.conftest import make_admin, new_session_token, seed_channel
@@ -160,6 +164,101 @@ def test_fake_adapter_health_and_connection_surface_its_contract(fake_dataplane)
     connection = client.get("/admin/connection").json()
     assert connection["default_port"] == contract.default_port
     assert connection["endpoints"] == list(contract.endpoint_paths())
+
+
+class _SlowFirstByteSSEHandler(BaseHTTPRequestHandler):
+    """SSE responder that withholds response headers until released."""
+
+    started = threading.Event()
+    release = threading.Event()
+    sse_payload = b"data: slow-chunk-1\n\ndata: [DONE]\n\n"
+
+    def do_POST(self) -> None:  # noqa: N802 - http.server API
+        length = int(self.headers.get("Content-Length", "0"))
+        self.rfile.read(length)
+        type(self).started.set()
+        type(self).release.wait(2)
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Content-Length", str(len(self.sse_payload)))
+        self.end_headers()
+        try:
+            self.wfile.write(self.sse_payload)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def log_message(self, *args: object) -> None:
+        pass
+
+
+@pytest.fixture()
+def slow_first_byte_upstream():
+    """A data plane that accepts the request but delays the response headers."""
+    _SlowFirstByteSSEHandler.started.clear()
+    _SlowFirstByteSSEHandler.release.clear()
+    server = HTTPServer(("127.0.0.1", 0), _SlowFirstByteSSEHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server
+    finally:
+        _SlowFirstByteSSEHandler.release.set()
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.asyncio
+async def test_playground_slow_first_byte_does_not_block_the_event_loop(
+    fake_dataplane, slow_first_byte_upstream
+):
+    """The SSE relay must not execute blocking network I/O on the event loop.
+
+    A data plane that withholds response headers used to freeze the whole async
+    control plane for as long as the first token took (observed: ~295s on a real
+    upstream). A heartbeat task on the same loop records the starvation gap; it
+    must stay small while the relay is waiting for the upstream headers.
+    """
+    app, client = fake_dataplane
+    app.dependency_overrides[get_adapter] = lambda: FakeAdapter(
+        contract=_fake_contract(slow_first_byte_upstream)
+    )
+    token = client.cookies.get(SESSION_COOKIE)
+    transport = httpx.ASGITransport(app=app)
+    tick_times: list[float] = []
+
+    async def heartbeat() -> None:
+        while True:
+            await asyncio.sleep(0.01)
+            tick_times.append(time.perf_counter())
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as ac:
+        ac.cookies.set(SESSION_COOKIE, token)
+        beat = asyncio.create_task(heartbeat())
+        await asyncio.sleep(0.05)  # let the heartbeat record baseline ticks
+        started_at = time.perf_counter()
+        stream_task = asyncio.create_task(
+            ac.post(
+                "/admin/playground/stream",
+                json={"model": "flagship", "messages": [{"role": "user", "content": "hello"}]},
+                timeout=10,
+            )
+        )
+        try:
+            response = await stream_task
+        finally:
+            elapsed = time.perf_counter() - started_at
+            beat.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await beat
+    assert response.status_code == 200, response.text
+    assert b"slow-chunk-1" in response.content
+    gaps = [later - earlier for earlier, later in zip(tick_times, tick_times[1:], strict=False)]
+    max_gap = max(gaps, default=elapsed)
+    assert max_gap < 0.5, (
+        "event loop was starved for "
+        f"{max_gap:.2f}s while the relay waited for upstream headers "
+        f"(request took {elapsed:.2f}s, {len(tick_times)} heartbeat ticks)"
+    )
 
 
 def test_playground_relays_over_the_contract_endpoint_and_stub_upstream(

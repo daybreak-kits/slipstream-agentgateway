@@ -548,16 +548,20 @@ async def playground_stream(
     # responses become a real control-plane error and the UI can show it.
     body = relay_body(payload)
     headers = {"Authorization": "Bearer " + plaintext, "Content-Type": "application/json"}
-    client = httpx.Client(timeout=300)
+    # Async I/O is mandatory here: this is an async route on the single event
+    # loop. The old sync httpx.Client.send(stream=True) blocked the loop until
+    # the upstream sent response headers; a slow first token (~295s observed on
+    # a real upstream) froze every other admin request for the whole wait.
+    client = httpx.AsyncClient(timeout=300)
     try:
-        upstream = client.send(
+        upstream = await client.send(
             client.build_request(
                 "POST", base_url + endpoint.path, json=body, headers=headers
             ),
             stream=True,
         )
     except httpx.HTTPError as exc:
-        client.close()
+        await client.aclose()
         raise AppError(
             ErrorCode.DATA_PLANE_UNAVAILABLE,
             f"数据面不可达：{exc}",
@@ -565,9 +569,9 @@ async def playground_stream(
         ) from exc
 
     if upstream.status_code < 200 or upstream.status_code >= 300:
-        raw = upstream.read()
-        upstream.close()
-        client.close()
+        raw = await upstream.aread()
+        await upstream.aclose()
+        await client.aclose()
         text = raw.decode("utf-8", errors="replace")[:800]
         message = "数据面拒绝了模型试验请求"
         try:
@@ -592,11 +596,12 @@ async def playground_stream(
 
     content_type = upstream.headers.get("content-type", "text/event-stream")
 
-    def relay():
+    async def relay():
         try:
-            yield from upstream.iter_text()
+            async for chunk in upstream.aiter_text():
+                yield chunk
         finally:
-            upstream.close()
-            client.close()
+            await upstream.aclose()
+            await client.aclose()
 
     return StreamingResponse(relay(), media_type=content_type)
