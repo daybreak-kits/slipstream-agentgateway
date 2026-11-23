@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from l01_core.errors import AppError, ErrorCode
+from l01_core.settings import get_settings
 from l02_domain.ir import GatewayIR, TransformsSpec
 from l02_domain.validation import ValidationResult, validate_gateway_ir
 from l03_adapters.agentgateway import credentials
@@ -18,13 +19,13 @@ from l03_adapters.agentgateway.transforms import (
     compile_transforms,
     compile_warnings,
 )
-from l03_adapters.sample_replay import replay_transform_sample
 from l03_adapters.agentgateway.usage import (
     cleanup_expired_logs,
     fetch_events,
     fetch_request_payload,
     open_readonly,
 )
+from l03_adapters.sample_replay import replay_transform_sample
 from l03_adapters.spi import (
     AdapterInfo,
     ApplyResult,
@@ -463,6 +464,7 @@ class AgentgatewayAdapter:
     def client_contract(self) -> ClientContract:
         return ClientContract(
             default_port=self._llm_port,
+            base_url_hint=get_settings().data_plane_base_url,
             endpoints=(
                 ClientEndpoint("/v1/chat/completions", ("POST",), "chat.completions"),
                 ClientEndpoint("/v1/models", ("GET",), "models.list"),

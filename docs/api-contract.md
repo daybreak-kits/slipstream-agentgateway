@@ -154,14 +154,14 @@ sanitize。W6 票05 起 API 不再返回字符串化的原始 wire 行（`raw_js
 ```json
 {
   "items": [
-    {"key": "base_currency", "value": "CNY", "label": "基准币", "updated_at": "2026-11-17T03:10:00+00:00"}
+    {"key": "base_currency", "value": "USD"
   ]
 }
 ```
 
 - `updated_at` 为 ISO8601；从未写入的键为空字符串 ""。
 - 受支持键（唯一来源 `l05_service/settings_schema.py:SETTING_FIELDS`，分组/标签/类型/范围由 §2.2 下发）：
-  base_currency（CNY|USD，默认 CNY）、timezone（默认 Asia/Shanghai）、log_retention_days（int 1..365，默认 30）、
+  base_currency（CNY|USD，默认 USD）、timezone（默认 Asia/Shanghai）、log_retention_days（int 1..365，默认 30）、
   audit_retention_days（int 7..3650，默认 180）、default_tokens_per_minute（int 0..1_000_000，默认 60000）、
   default_concurrency（int 0..1000，默认 8）、gateway_base_url（http(s) URL，留空自动取当前 host+3600）、
   ag_access_log_llm（metadata|full，默认 metadata；ADR-021 请求正文日志全局开关：metadata 只存元数据，
@@ -183,7 +183,7 @@ sanitize。W6 票05 起 API 不再返回字符串化的原始 wire 行（`raw_js
           "label": "基准币",
           "description": "账单与看板的展示币种",
           "kind": "select",
-          "default": "CNY",
+          "default": "USD",
           "unit": "",
           "min": null,
           "max": null,
@@ -382,7 +382,8 @@ AG 1.7 拒绝（`mcp.transport.http=false`），保存即 422。渲染到顶层 
 | POST | /admin/upstreams/{id}/keys/batch-delete | upstreams:write | body {ids[]}；逐把删除并返回逐把结果 `{items:[{key_id, ok, error?}], deleted}`；最后一把以 per-item 错误拒绝 |
 | POST | /admin/upstreams/{id}/keys/test | upstreams:write | body {api_style?}；逐把按 base_url 发最小鉴权请求，返回 `{items:[{key_id, ok, status_code, latency_ms, error}]}`；结果落每把的 last_test_json/last_test_at_ms |
 | POST | /admin/upstreams/{id}/test-connection | upstreams:write | **整体连通性探测**：8s 超时，写 `upstream_probes`；返回 kind/status/http_status/latency_ms/model_count/tested_at_ms + 协议探测三字段（见下）。与逐模型「模型探测」不同（见下一行） |
-| POST | /admin/upstreams/{id}/models/probe | upstream_models:write | **模型探测**（ticket 05）：body `{model_id?, model_ids?: string[≤200], key_id?}`（`extra=forbid`，请求不能带 base_url/api_style/自由凭证，只能是库内 id）；`model_id` 会补在 `model_ids` 前、去重后按顺序探测，空列表 422「model_ids 不能为空」。只接受本上游已保存的上游模型：未知 id/他上游 id → 422 `VALIDATION_ERROR`「只能探测该上游已存在的模型」，details 仅在命中时带 `unknown_model_ids` / `foreign_model_ids`。`api_style` 仍是 `auto`（尚未解析）→ 422「api_style 尚未解析（auto），无法探测」。`key_id` 指定该上游的一把密钥，缺省取第一把密钥行。服务端**串行**逐模型发一次最小 chat，单模型 20s 超时（`MODEL_PROBE_TIMEOUT_SECONDS`）；返回 `{upstream_id, key_id, items:[{model_id, model, ok, status, latency_ms, error_type, message}]}`，`error_type ∈ http / timeout / connection`（2xx 时为空串），message 已按密钥脱敏。**不落库、不写 `upstream_probes`/密钥测试结果/审计、不触发配置下发**，结果只用于本次响应 |
+| POST | /admin/upstreams/{id}/models/probe | upstream_models:write | **模型探测（W9）**：body `{model_id?, model_ids?: string[≤200]}`（`extra=forbid`）；逐模型经数据面以自动公开名 `<上游>/<模型>` 和内置“测试专用”凭据发一次非流式 chat（`hi`、`max_tokens=16`、单模型 60s），请求经 AG 鉴权/路由并写用量日志；返回 `{upstream_id, key_id, pulled_events, items:[{model_id, model, public_model, ok, status, latency_ms, error_type, message, usage}]}`。不再管理面直连上游、不再写私有 probe 表。 |
+| GET | /admin/upstreams/{id}/models/test-results | upstream_models:read | **模型测试结果（W9）**：按测试专用凭据与公开模型名从 `gateway_usage_events` 取每模型最近一条，返回 `{upstream_id, items:[{model_id, model, public_model, ok, status, latency_ms, started_at_ms, input_tokens, output_tokens, error}]}`；无日志时该模型省略（日志尚未拉取时可能暂时为空）。 |
 | POST | /admin/upstreams/{id}/discover-models | upstreams:write | **模型拉取**：拉取候选模型清单，不自动建记录；响应同样带协议探测三字段 |
 | POST | /admin/upstreams/{id}/import-models | upstreams:write | body {names, model_type}，创建缺失的上游模型 |
 | PATCH | /admin/upstreams/batch | upstreams:write | body {ids, action: enable\|disable\|delete}；逐项处理，被引用的删除单独失败 |
@@ -434,7 +435,7 @@ AG 1.7 拒绝（`mcp.transport.http=false`），保存即 422。渲染到顶层 
 W4-H 兑入语义：
 
 - 参数来源徽章：upstream-models 列表/创建/PATCH 出参新增 `params_source`（`manual`=人工录入 / `models.dev`=最近一次兑入填过空键；PATCH 真改参数块会翻回 manual，无操作保存不翻）。
-- models.dev 价格是 USD/1M，进价账本是 CNY/1M：兑入按 `fx_snapshots` 最新 USD 汇率换算，无汇率时成本键报 `skipped-no-fx` 不填（参数照填）。
+- models.dev 价格是 USD/1M；W9 起直接写入 USD 进价账本，**不再按 `fx_snapshots` 换算成 CNY**，无汇率也可写；`skipped-no-fx` 仅保留为历史契约状态，正常 flow 不产生。
 - 每日 job：`l07_jobs/models_dev_sync.py`（24h）拉快照+自动兑入，失败保留旧快照并记 warning。
 
 ### 3.3.1 用户侧模型参数（W4-H）
@@ -684,7 +685,7 @@ legacy `/admin/reports/trend` 未声明 response_model（保留旧线格式）�
 ### 4.6 Playground
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | /admin/playground/stream | SSE 透传数据面，text/event-stream；非 2xx 时按错误信封返回 JSON。转发地址与对话端点来自适配器 `client_contract()`（ADR-029 ticket 04，`endpoint_for("chat.completions")`；适配器无对话端点时 409 `CONFLICT`），系统层不硬编数据面端口与路径 |
+| POST | /admin/playground/stream | SSE 透传数据面，text/event-stream；W9 起在构造响**之前**打开上游请求，非 2xx 返回控制面错误信封（通常 503 `DATA_PLANE_UNAVAILABLE`，`details.upstream_status` 为上游真实状态），不再把 401/404/503 伪装成 200 空 SSE。转发地址与对话端点来自适配器 `client_contract()`（ADR-029 ticket 04，`endpoint_for("chat.completions")`；适配器无对话端点时 409 `CONFLICT`），系统层不硬编数据面端口与路径 |
 
 body（`PlaygroundRequest`，全部采样旋钮缺省即不进上游 body）：
 
@@ -734,7 +735,7 @@ seed 覆盖（连续跑两次后的真实计数，幂等；W7 t14 实测）：**
 4 上游（`name` 由连接地址生成：open-bigmodel-cn 是**一个上游三把等权密钥**，api-nebula-example
 与两个本地 127-0-0-1:800x 各一把，共 6 条上游密钥；每行带可选 `alias` 字段，seed 默认留空；ADR-026 多密钥平权）/
 16 上游模型（15 个带成本 cost_input/output_per_1m + 1.2 倍率 markup，1 个故意未定价）/
-8 公开模型（6 failover + 2 weighted）/ 16 目标 / 6 用户（根用户 D + 两层分销树，5 把 sk- 客户端密钥 + 充值流水）/
+24 公开模型（16 个 W9 自动直调 + 8 个手建：6 failover + 2 weighted）/ 32 目标 / 6 用户（根用户 D + 两层分销树，5 把 sk- 客户端密钥 + 充值流水）/
 15 个模型带进价（另 30 条缓存价，挂 `upstream_model_id`：cache_read / cache_write 各 15）/
 7 天 252 条用量事件（cost 与 charge 各 3 条缺价 unpriced）/ 245 条计费流水 /
 2 条配置版本（operator 张三 superseded / 李四 active）/ 61 条审计 / 13 条 app_settings /
@@ -744,7 +745,7 @@ lisi（数据分析组，分销商 `reseller`）、wangwu（试用-临时，客�
 loadtest（压测环境，客户 `customer`）。默认密码 admin12345，可用 `SLIPSTREAM_DEMO_ADMIN_PASSWORD` 覆盖，
 首次登录后修改。
 
-settings 六个可编辑键均已有值：base_currency=CNY、timezone=Asia/Shanghai、
+settings 六个可编辑键均已有值：base_currency=USD、timezone=Asia/Shanghai、
 log_retention_days=30、audit_retention_days=180、default_tokens_per_minute=60000、default_concurrency=8。
 另有策略/护栏/MCP 三份可编辑样例（policy_config / guardrail_config / mcp_config）与
 `priority_semantics=v2` 标记。旧库升级：priority 语义用 `PYTHONPATH=src python scripts/migrate_priority_v2.py`，
@@ -882,7 +883,7 @@ curl -s -b "$J" "$B/reports/trend?metric=requests&range=7d"
 curl -s -b "$J" $B/settings
 ```
 ```json
-{"items":[{"key":"base_currency","value":"CNY","label":"基准币","updated_at":"2026-11-17T00:35:43.844Z"},
+{"items":[{"key":"base_currency","value":"USD"
  {"key":"timezone","value":"Asia/Shanghai","label":"展示时区","updated_at":"2026-11-17T00:35:43.844Z"},
  {"key":"log_retention_days","value":"30","label":"请求日志保留天数","updated_at":"..."},
  {"key":"audit_retention_days","value":"180","label":"审计日志保留天数","updated_at":"..."},

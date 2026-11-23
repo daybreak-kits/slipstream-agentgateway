@@ -49,8 +49,16 @@ export const FROZEN_COLUMN_HEADER_CLASS =
  * 操作列单元格内容的统一包装（W6 ticket 10 / user story 38）：表格组件对 sticky 列的
  * 单元格内容套一层 flex justify-end，让按钮组贴近表格右边缘，而不是停在列左侧留白。
  * 只对 td 内容生效（th 由 align 控制文本对齐）。
+ *
+ * W9：全局回到 auto 布局后，操作列不再按「按钮数 × 固定按钮宽」估算宽度（那条公式在
+ * 按钮少时会留下整列空白，按钮多时又可能装不下）。改为让列宽由真实内容决定：
+ * w-[1%] 把该列的期望宽度压到最小，whitespace-nowrap 让按钮组保持单行，
+ * 浏览器 auto 布局下该列宽即等于内容 max-content；其余列分走剩余宽度。
  */
-export const ACTION_CELL_WRAPPER_CLASS = "flex justify-end";
+export const ACTION_CELL_WRAPPER_CLASS = "flex flex-nowrap justify-end";
+
+/** 操作列（sticky 尾列）按内容 max-content 收缩：w-[1%] + 不换行，列宽随行内按钮组实际宽度。 */
+export const ACTION_COLUMN_SIZING_CLASS = "w-[1%] whitespace-nowrap";
 
 /**
  * 固定布局表格（W8 t03）：table-layout: fixed —— 列宽只由列定义 width 决定，
@@ -79,11 +87,16 @@ export const RESULT_CELL_SECONDARY_CLASS = "block truncate text-2xs";
 export const RESULT_CELL_LINE_COUNT = 2;
 
 /**
- * 列宽 → 表头/单元格内联样式（table-fixed 取首行表头宽度）。未声明 width 时不出样式，
- * 由固定布局把剩余宽度留给唯一未声明宽度的弹性列。
+ * 列宽 → 表头内联样式。fixed 布局把 width 写成固定列宽（table-fixed 取首行表头宽度）；
+ * auto 布局（W9 默认）改用 minWidth：列可以随内容变宽（自适应），但不会被压得比声明值更窄。
+ * 未声明 width 时不出样式，列宽完全由内容与容器宽度决定。
  */
-export function tableColumnWidthStyle(meta?: TableColumnLayoutMeta): CSSProperties | undefined {
-  return meta?.width ? { width: meta.width } : undefined;
+export function tableColumnWidthStyle(
+  meta?: TableColumnLayoutMeta,
+  layout: "auto" | "fixed" = "auto",
+): CSSProperties | undefined {
+  if (!meta?.width) return undefined;
+  return layout === "fixed" ? { width: meta.width } : { minWidth: meta.width };
 }
 
 /**
@@ -108,23 +121,25 @@ function resolvedAlign(meta: TableColumnLayoutMeta): TableColumnAlign | undefine
   return meta.align ?? (meta.sticky === "right" ? "right" : undefined);
 }
 
-/** th 完整类：对齐 + 冻结表头 + 逃生通道（调用方需在 cn 中最后合并本返回值以覆盖默认类）。 */
+/** th 完整类：对齐 + 冻结表头/操作列 max-content + 逃生通道（调用方需在 cn 中最后合并本返回值以覆盖默认类）。 */
 export function tableColumnHeaderClass(meta?: TableColumnLayoutMeta): string | undefined {
   if (!meta) return undefined;
   return cn(
     tableColumnAlignClass(resolvedAlign(meta)),
     meta.sticky === "right" && FROZEN_COLUMN_HEADER_CLASS,
+    meta.sticky === "right" && ACTION_COLUMN_SIZING_CLASS,
     meta.className,
     meta.headerClassName,
   );
 }
 
-/** td 完整类：对齐 + 冻结单元格 + 逃生通道。 */
+/** td 完整类：对齐 + 冻结单元格/操作列 max-content + 逃生通道。 */
 export function tableColumnCellClass(meta?: TableColumnLayoutMeta): string | undefined {
   if (!meta) return undefined;
   return cn(
     tableColumnAlignClass(resolvedAlign(meta)),
     meta.sticky === "right" && FROZEN_COLUMN_CELL_CLASS,
+    meta.sticky === "right" && ACTION_COLUMN_SIZING_CLASS,
     meta.className,
   );
 }

@@ -41,6 +41,7 @@ import type {
   KeyBatchDeleteResult,
   KeyTestResult,
   ModelProbeResponse,
+  ModelTestResultsResponse,
   ProbeResultView,
   UpstreamRow,
   UpstreamsOperations,
@@ -333,6 +334,11 @@ export function createMemoryUpstreams(): UpstreamsOperations {
       return { upstream_id: id, api_style: upstream.api_style, items: clone(items) };
     },
 
+    listModelTestResults: async (id): Promise<ModelTestResultsResponse> => {
+      requireUpstream(id);
+      return { upstream_id: id, items: [] };
+    },
+
     probeModels: async (id, input): Promise<ModelProbeResponse> => {
       requireUpstream(id);
       const modelIds = input.model_ids ?? [];
@@ -352,7 +358,7 @@ export function createMemoryUpstreams(): UpstreamsOperations {
             message: failed ? "上游返回 HTTP 400：model not supported" : "",
           };
         });
-      return { upstream_id: id, key_id: input.key_id ?? "", items };
+      return { upstream_id: id, key_id: "", items };
     },
 
     getTransforms: async (id) => {

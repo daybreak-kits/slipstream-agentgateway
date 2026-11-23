@@ -23,6 +23,8 @@ from l04_repo.repository import get_setting, put_setting
 from l05_service import client_keys
 
 SETTING_KEY = "playground_user_id"
+TEST_KEY_SETTING = "model_test_key_id"
+TEST_KEY_NAME = "测试专用"
 
 
 def ensure_playground_identity(
@@ -80,3 +82,53 @@ def ensure_playground_identity(
     if key is None:  # pragma: no cover - flush/commit guarantees the row
         raise RuntimeError("playground identity key was not persisted")
     return key, True
+
+
+def ensure_test_identity(session: Session, *, commit: bool = False) -> ApiKeyORM:
+    """Return the internal "测试专用" key used only by server-side model tests.
+
+    It belongs to the hidden Playground user, is never listed by the user/key
+    APIs (that user is filtered out) and its plaintext is only decrypted inside
+    the control plane. The AG config includes it because every active ApiKey is
+    rendered, so a model test can go through the data plane like a real call.
+    """
+    stored = get_setting(session, TEST_KEY_SETTING)
+    if stored:
+        key = session.get(ApiKeyORM, stored)
+        if key is not None and key.status == "active":
+            return key
+    _playground_key, _created = ensure_playground_identity(session, commit=False)
+    settings = get_settings()
+    user = session.scalars(
+        select(UserORM)
+        .where(UserORM.name == "playground", UserORM.username.is_(None))
+        .order_by(UserORM.created_at_ms)
+    ).first()
+    if user is None:  # pragma: no cover - ensure_playground_identity created it
+        raise RuntimeError("playground user missing")
+    existing = session.scalars(
+        select(ApiKeyORM)
+        .where(
+            ApiKeyORM.user_id == user.id,
+            ApiKeyORM.name == TEST_KEY_NAME,
+            ApiKeyORM.status == "active",
+        )
+        .order_by(ApiKeyORM.created_at_ms)
+    ).first()
+    if existing is None:
+        issued = client_keys.issue_client_key(
+            session,
+            user_id=user.id,
+            box=AesGcmBox(settings.secret_key),
+            name=TEST_KEY_NAME,
+        )
+        key_id = issued.key_id
+    else:
+        key_id = existing.id
+    put_setting(session, TEST_KEY_SETTING, key_id, now_ms())
+    if commit:
+        session.commit()
+    key = session.get(ApiKeyORM, key_id)
+    if key is None:  # pragma: no cover
+        raise RuntimeError("test identity key was not persisted")
+    return key

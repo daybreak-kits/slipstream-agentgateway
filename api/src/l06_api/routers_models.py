@@ -38,7 +38,7 @@ from l04_repo.repository import (
     PUBLIC_MODEL_REPO,
     UPSTREAM_MODEL_REPO,
 )
-from l05_service import crud, models_dev, pricing, rbac
+from l05_service import auto_public, crud, models_dev, pricing, rbac
 from l05_service.availability import (
     PUBLIC_MODEL_COOLDOWN_MESSAGE,
     SCOPE_PUBLIC_MODEL,
@@ -149,6 +149,7 @@ def _pm_body(
         "routing_mode": row.routing_mode,
         "note": row.note,
         "enabled": row.enabled,
+        "auto_generated": bool(row.auto_generated),
         "cooldown_until_ms": state.cooldown_until_ms,
         "availability": state.as_dict(),
         "target_count": len(targets),
@@ -333,7 +334,9 @@ def update_upstream_model(
         name = (payload.name or "").strip()
         if not name:
             raise AppError(ErrorCode.VALIDATION_ERROR, "模型名称不能为空")
+        old_name = row.name
         row.name = name
+        auto_public.rename_for_upstream_model(session, row, old_model_name=old_name)
     if "model_type" in provided:
         if payload.model_type is None:
             raise AppError(ErrorCode.VALIDATION_ERROR, "model_type 不能为空")

@@ -14,7 +14,8 @@ from l01_core.cors import cors_origins
 from l01_core.errors import AppError, ErrorCode
 from l01_core.settings import get_settings
 from l04_repo.base import init_db, make_engine, make_sessionmaker
-from l05_service import auth, availability, roles, user_tree
+from l05_service import auth, auto_public, availability, roles, user_tree
+from l05_service.playground_identity import ensure_playground_identity, ensure_test_identity
 from l06_api.auth_middleware import AdminSessionMiddleware
 from l06_api.money_filter import MoneyVisibilityMiddleware
 from l06_api.routers_apikeys import router as apikeys_router
@@ -94,9 +95,20 @@ def create_app(
         # ADR-019 bootstrap: create the initial admin from .env only while no
         # admin-role user with a password exists; afterwards env never applies.
         auth.ensure_bootstrap_admin(seed_session)
+        # W9: the server-side Playground and 测试专用 keys must exist before the
+        # first render/apply; otherwise the data plane 401s until the next save.
+        ensure_playground_identity(seed_session)
+        ensure_test_identity(seed_session)
         # ADR-004: adopt any pre-existing row deadline into its managed rule so
         # availability_rules is the only write authority (idempotent, additive).
         availability.migrate_legacy_cooldowns(seed_session)
+        # W9: existing databases get the direct-call <upstream>/<model> rows
+        # backfilled once; new models are created by crud.create_upstream_model.
+        try:
+            auto_public.ensure_all(seed_session)
+        except AppError:
+            seed_session.rollback()
+            raise
         seed_session.commit()
     for router in ALL_ROUTERS:
         app.include_router(router)

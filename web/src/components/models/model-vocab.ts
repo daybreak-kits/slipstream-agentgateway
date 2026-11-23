@@ -4,9 +4,9 @@ import type { ModelParameters, ModelTypeSource, RoutingMode } from "@/types";
 
 /** 路由策略词表：标签 + 说明（列表策略列、编辑弹窗与整页编辑器共用）。 */
 export const ROUTING_LABELS: Record<RoutingMode, { label: string; desc: string }> = {
-  failover: { label: "failover · 故障转移", desc: "按 priority 层级顺序选择；priority 数值小优先，同层由数据面按健康与延迟选择" },
-  weighted: { label: "weighted · 加权分流", desc: "按 weight 整数相对比例分配（1 与 3 = 1:3）；该模式没有跨层兜底" },
-  conditional: { label: "conditional · 条件路由", desc: "按 when 表达式匹配成员，只有末位成员可以留空；该模式没有跨层兜底" },
+  failover: { label: "failover · 故障转移", desc: "按优先级层级顺序选择；优先级数值小优先，同层由数据面按健康与延迟选择" },
+  weighted: { label: "weighted · 加权分流", desc: "按权重整数相对比例分配（1 与 3 = 1:3）；该模式没有跨层兜底" },
+  conditional: { label: "conditional · 条件路由", desc: "按条件表达式匹配成员，只有末位成员可以留空；该模式没有跨层兜底" },
 };
 
 /** 旧系统 catalog 的七种模型类型（l02_domain/models.ModelType）。 */
@@ -70,12 +70,21 @@ export function toggleReasoningLevel(parameters: ModelParameters, level: string)
 /** 参数列只显示输入/输出上限（W7 t09 · D9）：0 = 未声明 → 明确写「未配置」，不留空也不画成输入框。 */
 export const PARAM_MISSING = "未配置";
 
-/** 参数列文本：「输入 200,000 / 输出 128,000」（千分位走 fmtInt，与全站数字口径一致）。 */
-export function parameterLimitsText(row: { parameters?: ModelParameters }): string {
+/** 参数列两行文本的取值（W9）：输入/输出上限分开，各自一行；千分位走 fmtInt 统一口径。
+ * 大数（1,000,000 级）不再挤在一行里被列宽截断，也不需要 K/M 缩写（DESIGN-AUDIT §5）。 */
+export function parameterLimitPairs(
+  row: { parameters?: ModelParameters },
+): Array<{ label: string; value: string }> {
   const p = parametersOf(row);
-  const input = p.max_input_tokens > 0 ? fmtInt(p.max_input_tokens) : PARAM_MISSING;
-  const output = p.max_output_tokens > 0 ? fmtInt(p.max_output_tokens) : PARAM_MISSING;
-  return "输入 " + input + " / 输出 " + output;
+  return [
+    { label: "输入", value: p.max_input_tokens > 0 ? fmtInt(p.max_input_tokens) : PARAM_MISSING },
+    { label: "输出", value: p.max_output_tokens > 0 ? fmtInt(p.max_output_tokens) : PARAM_MISSING },
+  ];
+}
+
+/** 参数列文本（单行拼接，悬浮标题等场景用）：「输入 200,000 / 输出 128,000」。 */
+export function parameterLimitsText(row: { parameters?: ModelParameters }): string {
+  return parameterLimitPairs(row).map((item) => item.label + " " + item.value).join(" / ");
 }
 
 /** 档位原值 → 展示文案（与编辑抽屉同一张档位表；未知值原样透出）。 */

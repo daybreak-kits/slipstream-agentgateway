@@ -198,7 +198,7 @@ def create_user(
             session,
             user_id=row.id,
             amount_micro=payload.balance_micro,
-            currency="CNY",
+            currency="USD",
             created_by=principal.username,
             note="initial balance at user creation",
         )

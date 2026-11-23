@@ -19,25 +19,25 @@ function memberInputs(
     <>
       <Input
         className="col-span-2"
-        aria-label="priority"
+        aria-label="优先级"
         inputMode="numeric"
-        placeholder="priority"
+        placeholder="优先级"
         value={member.priority}
         onChange={(e) => update(index, { priority: e.target.value })}
       />
       <Input
         className="col-span-2"
-        aria-label="weight"
+        aria-label="权重"
         inputMode="numeric"
-        placeholder="weight"
+        placeholder="权重"
         value={member.weight}
         disabled={mode !== "weighted"}
         onChange={(e) => update(index, { weight: e.target.value })}
       />
       <Input
         className="col-span-3"
-        aria-label="when"
-        placeholder="when 条件"
+        aria-label="条件"
+        placeholder="条件表达式"
         value={member.when}
         disabled={mode !== "conditional"}
         onChange={(e) => update(index, { when: e.target.value })}
@@ -92,7 +92,7 @@ export function MemberEditor({
         >
           <ACTION_ICONS.add className="h-3.5 w-3.5" /> 添加成员
         </Button>
-        <span className="text-2xs text-faint">priority 数值小优先；weighted 用 weight 整数比例。</span>
+        <span className="text-2xs text-faint">优先级数值小优先；加权分流按权重整数比例。</span>
       </div>
       <div className="max-h-64 space-y-2 overflow-auto pr-1">
         {members.map((member, index) => (

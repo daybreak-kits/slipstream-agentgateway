@@ -194,6 +194,8 @@ export interface PublicModel {
   routing_mode: RoutingMode;
   note: string | null;
   enabled: boolean;
+  /** W9：由上游模型自动注册的直接调用名（<上游>/<模型>） */
+  auto_generated?: boolean;
   created_at_ms: number;
   /** ticket 10：行级可用性，与上游模型同一套语义 */
   cooldown_until_ms?: number;

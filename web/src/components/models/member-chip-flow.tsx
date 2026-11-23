@@ -23,8 +23,8 @@ import type { RoutingMode, UpstreamModel } from "@/types";
 /** 分层提示：同层语义随渲染策略变化（failover 平权 / weighted 比例 / conditional 顺序）。 */
 const LAYER_NOTES: Record<RoutingMode, string> = {
   failover: "同层 P2C 平权（带偏置随机）",
-  weighted: "同层按 weight 整数比例分配",
-  conditional: "按 when 顺序 first-match",
+  weighted: "同层按权重整数比例分配",
+  conditional: "按条件表达式顺序 first-match",
 };
 
 /**
@@ -33,20 +33,17 @@ const LAYER_NOTES: Record<RoutingMode, string> = {
  * W7 票05：提示不再挂在输入框 title 上，收进行内展开区（「更多配置」）。
  */
 const FIELD_HINTS = {
-  priority: "数值小优先；同值即同层",
-  weight: "整数比例，如 1 与 3 = 1:3",
-  when: "CEL 谓词；末位留空即兜底",
+  priority: "优先级：数值小优先；同值即同层",
+  weight: "权重：整数比例，如 1 与 3 = 1:3（仅加权分流模式使用）",
+  when: "条件：CEL 谓词；末位留空即兜底（仅条件路由模式使用）",
 } as const;
 
 /**
- * 桌面表格列模板（输入前置：优先级/权重/表达式在成员信息之前）；窄屏同一套 DOM
- * 退化为卡片堆叠，模板只在 lg 以上生效。列：展开 | 优先级 | 权重或表达式 | 成员/上游 | 移除。
+ * 成员卡列模板（W9：底部成员编辑改为横向小卡片，每张卡都有优先级/权重/条件与删除按钮）；
+ * 窄屏同一套 DOM 退化为卡片堆叠，模板只在 lg 以上生效。
+ * 列：展开 | 优先级 | 权重 | 条件 | 成员/上游 | 移除。
  */
-const ROW_GRID: Record<RoutingMode, string> = {
-  failover: "lg:grid-cols-[2.25rem_5.5rem_minmax(0,1fr)_2.25rem]",
-  weighted: "lg:grid-cols-[2.25rem_5.5rem_5.5rem_minmax(0,1fr)_2.25rem]",
-  conditional: "lg:grid-cols-[2.25rem_5.5rem_minmax(9rem,1.1fr)_minmax(0,1fr)_2.25rem]",
-};
+const ROW_GRID = "lg:grid-cols-[2rem_4.5rem_4.5rem_minmax(6.5rem,1fr)_minmax(0,1.15fr)_2rem]";
 
 /**
  * 候选 chip 渲染预算：几百上游、上千模型时两栏高度由 max-height 兜底，但 DOM 仍会
@@ -95,10 +92,9 @@ function MemberRow({ chip, mode, expanded, onToggle, onPatch, onRemove }: Member
       data-fallback={chip.fallback ? "true" : "false"}
       className={cn(
         "mb-2 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-2 rounded-md border border-border bg-surface p-2.5 last:mb-0",
-        "lg:mb-0 lg:items-center lg:gap-2 lg:rounded-none lg:bg-transparent lg:p-0 lg:px-2 lg:py-1.5",
-        "lg:border-x-0 lg:border-t-0 lg:border-b lg:border-border",
-        ROW_GRID[mode],
-        expanded ? "lg:border-b-0" : null,
+        "lg:items-center lg:gap-2",
+        ROW_GRID,
+        expanded ? "rounded-b-none" : null,
       )}
     >
       <div role="cell" className={cn("flex items-center", CELL_CARD_ROW1)}>
@@ -118,40 +114,43 @@ function MemberRow({ chip, mode, expanded, onToggle, onPatch, onRemove }: Member
       <div role="cell" className={cn("min-w-0", CELL_CARD, "row-start-2")}>
         <CellLabel>优先级</CellLabel>
         <Input
-          aria-label="priority"
+          aria-label="优先级"
           inputMode="numeric"
           placeholder="1"
+          title={FIELD_HINTS.priority}
           className="w-full tnum"
           value={member.priority}
           onChange={(event) => onPatch({ priority: event.target.value })}
         />
       </div>
-      {mode === "weighted" ? (
-        <div role="cell" className={cn("min-w-0", CELL_CARD, "row-start-3")}>
-          <CellLabel>权重</CellLabel>
-          <Input
-            aria-label="weight"
-            inputMode="numeric"
-            placeholder="0"
-            className="w-full tnum"
-            value={member.weight}
-            onChange={(event) => onPatch({ weight: event.target.value })}
-          />
-        </div>
-      ) : null}
-      {mode === "conditional" ? (
-        <div role="cell" className={cn("min-w-0", CELL_CARD, "row-start-3")}>
-          <CellLabel>表达式</CellLabel>
-          <Input
-            aria-label="when"
-            placeholder={'request.tier == "pro"'}
-            className="w-full"
-            value={member.when}
-            onChange={(event) => onPatch({ when: event.target.value })}
-          />
-        </div>
-      ) : null}
-      <div role="cell" className={cn("min-w-0", CELL_CARD_ROW1)}>
+      {/* W9：每张成员卡都展示优先级/权重/条件三项；非当前策略的字段禁用（不隐藏），
+          让「这张卡能配什么」一眼可见，也不会让行高随策略变化。 */}
+      <div role="cell" className={cn("min-w-0", CELL_CARD, "row-start-3")}>
+        <CellLabel>权重</CellLabel>
+        <Input
+          aria-label="权重"
+          inputMode="numeric"
+          placeholder="0"
+          title={FIELD_HINTS.weight}
+          className="w-full tnum"
+          value={member.weight}
+          disabled={mode !== "weighted"}
+          onChange={(event) => onPatch({ weight: event.target.value })}
+        />
+      </div>
+      <div role="cell" className={cn("min-w-0", CELL_CARD, "row-start-4")}>
+        <CellLabel>条件</CellLabel>
+        <Input
+          aria-label="条件"
+          placeholder={'request.tier == "pro"'}
+          title={FIELD_HINTS.when}
+          className="w-full"
+          value={member.when}
+          disabled={mode !== "conditional"}
+          onChange={(event) => onPatch({ when: event.target.value })}
+        />
+      </div>
+      <div role="cell" className={cn("min-w-0 lg:min-w-24", CELL_CARD_ROW1)}>
         <div className="flex min-w-0 items-center gap-1.5">
           {mode === "conditional" ? (
             <span
@@ -206,10 +205,7 @@ function MemberRowDetail({ chip, upstreamName, typeLabel, hint }: MemberRowDetai
     <div
       role="row"
       data-slot="member-row-detail"
-      className={cn(
-        "mb-2 rounded-md border border-dashed border-border bg-surface-2/40 p-2.5 last:mb-0",
-        "lg:mb-0 lg:rounded-none lg:border-x-0 lg:border-t-0 lg:border-b lg:border-solid lg:border-border lg:bg-transparent lg:p-0 lg:px-2 lg:pb-2",
-      )}
+      className="mb-2 rounded-b-md border border-t-0 border-border bg-surface-2/40 p-2.5 last:mb-0"
     >
       <div role="cell">
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-2xs">
@@ -261,7 +257,8 @@ export function MemberChipFlow({
       return model ? labels.get(model.model_type) ?? model.model_type : "未记录";
     };
   }, [modelById]);
-  const hint = mode === "weighted" ? FIELD_HINTS.weight : mode === "conditional" ? FIELD_HINTS.when : FIELD_HINTS.priority;
+  // 三张策略字段都常驻在卡片上，展开区的字段说明给出全部三项的中文口径。'
+  const hint = FIELD_HINTS.priority + "；" + FIELD_HINTS.weight + "；" + FIELD_HINTS.when;
   const e20Hint = useMemo(
     () => (mode === "conditional" ? conditionalMultiKeyHint(members, upstreamModels, upstreams) : null),
     [mode, members, upstreamModels, upstreams],
@@ -305,11 +302,11 @@ export function MemberChipFlow({
 
   return (
     <div className="space-y-3" data-slot="member-chip-flow">
-      {/* W7 票05 容器骨架（沿用 W5/W6）：桌面左 6 右 6（左=已选成员表格，右=候选分组），
+      {/* W7 票05 容器骨架（沿用 W5/W6）：桌面左 7 右 5（W9：左栏加宽让成员名可读），
        * 窄屏上下堆叠；两栏各自 max-h min(60vh,560px) 内部滚动，列头/表头与候选搜索
        * 固定在滚动区外，左右列头行等高、表头同一水平线。 */}
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-12" data-slot="member-board-grid">
-        <section data-slot="member-board-left" className="min-w-0 lg:col-span-6">
+        <section data-slot="member-board-left" className="min-w-0 lg:col-span-7">
           <div
             data-slot="member-column-head"
             data-column="left"
@@ -331,18 +328,14 @@ export function MemberChipFlow({
                   role="row"
                   data-slot="member-table-head"
                   className={cn(
-                    "hidden h-9 items-center gap-2 border-border bg-surface-2/60 px-2 lg:grid lg:border-y",
-                    ROW_GRID[mode],
+                    "hidden h-9 items-center gap-2 border-x border-t border-border bg-surface-2/60 px-2 lg:grid",
+                    ROW_GRID,
                   )}
                 >
                   <span role="columnheader" className="text-2xs font-medium text-faint">展开</span>
                   <span role="columnheader" className="text-2xs font-medium text-faint">优先级</span>
-                  {mode === "weighted" ? (
-                    <span role="columnheader" className="text-2xs font-medium text-faint">权重</span>
-                  ) : null}
-                  {mode === "conditional" ? (
-                    <span role="columnheader" className="text-2xs font-medium text-faint">表达式</span>
-                  ) : null}
+                  <span role="columnheader" className="text-2xs font-medium text-faint">权重</span>
+                  <span role="columnheader" className="text-2xs font-medium text-faint">条件</span>
                   <span role="columnheader" className="text-2xs font-medium text-faint">成员 / 上游</span>
                   <span role="columnheader" className="sr-only">移除</span>
                 </div>
@@ -377,7 +370,7 @@ export function MemberChipFlow({
           </div>
         </section>
 
-        <section data-slot="member-board-right" className="min-w-0 lg:col-span-6">
+        <section data-slot="member-board-right" className="min-w-0 lg:col-span-5">
           <div
             data-slot="member-column-head"
             data-column="right"

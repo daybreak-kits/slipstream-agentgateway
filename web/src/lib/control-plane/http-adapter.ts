@@ -87,6 +87,7 @@ import type {
   KeyBatchDeleteResult,
   KeyTestResult,
   ModelProbeResponse,
+  ModelTestResultsResponse,
   ProbeResultView,
   UpstreamRow,
   UpstreamsOperations,
@@ -263,6 +264,8 @@ export function createHttpUpstreams(request: HttpRequester): UpstreamsOperations
     testKeys: (id, input) => request<KeyTestResult>({ method: "POST", path: keys(id) + "/test", body: input }),
     probeModels: (id, input, opts) =>
       request<ModelProbeResponse>({ method: "POST", path: one(id) + "/models/probe", body: input, options: opts }),
+    listModelTestResults: (id, opts) =>
+      request<ModelTestResultsResponse>({ method: "GET", path: one(id) + "/models/test-results", options: opts }),
     getTransforms: (id) => request({ method: "GET", path: one(id) + "/transforms" }),
     saveTransforms: (id, value) => request({ method: "PUT", path: one(id) + "/transforms", body: value }),
     previewTransforms: (id, value) => request({ method: "POST", path: one(id) + "/transforms/preview", body: value }),

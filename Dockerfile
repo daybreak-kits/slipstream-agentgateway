@@ -46,4 +46,4 @@ EXPOSE 3700
 HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=6 \
     CMD curl -fsS http://127.0.0.1:3700/admin/health || exit 1
 ENTRYPOINT ["/usr/local/bin/slipstream-entrypoint"]
-CMD ["uvicorn", "l06_api.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "3700"]
+CMD ["uvicorn", "server:create_app", "--factory", "--host", "0.0.0.0", "--port", "3700"]

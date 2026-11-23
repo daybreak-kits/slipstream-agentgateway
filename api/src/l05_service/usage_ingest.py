@@ -230,10 +230,10 @@ def _touch_api_keys_last_used(session: Session, stamps: dict[str, int]) -> None:
     from sqlalchemy import inspect
 
     existing = {
-        column["name"] for column in inspect(session.get_bind()).get_columns("api_keys")
+        column["name"] for column in inspect(session.connection()).get_columns("api_keys")
     }
     column = "last_used_at_ms" if "last_used_at_ms" in existing else None
-    if column is None and existing:
+    if column is None and "last_used_at" in existing:
         column = "last_used_at"
     if column is None:
         return  # W1b 列尚未合入：跳过更新，不阻塞采集
@@ -530,7 +530,7 @@ def _build_cost_entry(
         # pricing.cost_micro already rounds to the integer micro boundary; the
         # cache term is micro-per-1M x tokens, so the sum needs no second rounding.
         amount_micro=numerator,
-        currency="CNY",
+        currency="USD",
         price_version_id=version,
         status="ok",
         **base,
@@ -587,7 +587,7 @@ def _build_charge_entry(
         amount = pricing.spend_micro(int(numerator), model.markup)
         if amount is not None:
             entry.amount_micro = amount
-            entry.currency = "CNY"
+            entry.currency = "USD"
             entry.price_version_id = model.id
             entry.status = "free" if amount == 0 else "ok"
     session.add(entry)

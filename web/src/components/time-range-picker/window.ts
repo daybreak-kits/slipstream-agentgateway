@@ -148,9 +148,10 @@ export function timeWindowBounds(
 
 /**
  * 触发按钮/副标题用的区间文本：预设也展开成完整到「年 + 秒」的本地区间，
- * 分隔符固定为 " - "（W8 票 02：预设、自定义同一展示口径）。
+ * 分隔符固定为「至」（W9：用户要求「yyyy/MM/dd HH:mm:ss 至 yyyy/MM/dd HH:mm:ss」；
+ * 预设与自定义同一展示口径）。
  */
 export function timeWindowLabel(window: TimeWindow, now = Date.now()): string {
   const { fromMs, toMs } = timeWindowBounds(window, now);
-  return `${stamp(fromMs)} - ${stamp(toMs)}`;
+  return `${stamp(fromMs)} 至 ${stamp(toMs)}`;
 }

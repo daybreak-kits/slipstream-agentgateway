@@ -29,7 +29,7 @@ import { ACTION_ICONS } from "@/lib/icons";
 import { formatDateTime, useTimezone } from "@/lib/time";
 import { usePermissions } from "@/lib/permissions";
 import { partitionClosedLast } from "@/lib/table-order";
-import { actionColumnWidth, type TableRowTone } from "@/lib/table-columns";
+import type { TableRowTone } from "@/lib/table-columns";
 import { API_STYLE_LABELS, probeStatusView, upstreamRoutingHref, type UpstreamRow } from "@/components/upstreams/shared";
 import { PageHeader } from "@/components/layout/page-header";
 
@@ -351,8 +351,7 @@ export function UpstreamsPage() {
         // 统一给 th 与 td 上类（不透明底 + 左分割阴影 + 行悬浮同步），窄屏横向滚动时仍可见。
         hideable: false,
         sticky: "right",
-        // 4 个 dense 操作按钮（关闭|启用/测试/编辑/删除），列宽固定。
-        width: actionColumnWidth(4),
+        // W9：不估算固定列宽——auto 布局按真实按钮组内容 max-content 收缩。
       },
       cell: ({ row }) => {
         const item = row.original;
@@ -459,7 +458,6 @@ export function UpstreamsPage() {
       {/* 裸表迁移到 DataTable（W4-A1）：列设置 + 持久化 + 内部滚动；分页/筛选行为保持不变 ——
           页面自持 search/status 筛选与 page/pageSize 状态，经 server 分页模式只下发当前页。 */}
       <DataTable
-        layout="fixed"
         columns={columns}
         data={pagedRows}
         loading={q.isPending}

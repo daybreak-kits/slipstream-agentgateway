@@ -166,7 +166,6 @@ export function PublicPricesSection() {
         searchText={searchText}
         onSearchChange={setSearchText}
         searchPlaceholder="筛选公开模型"
-        layout="fixed"
         emptyText="还没有公开模型"
         onClearFilters={() => setSearchText("")}
         rowKey={(price) => price.public_model_id}

@@ -20,7 +20,12 @@ def adapter(tmp_path) -> AgentgatewayAdapter:
     return AgentgatewayAdapter(config_dir=str(tmp_path), ag_binary="")
 
 
-def run(adapter: AgentgatewayAdapter, rules: dict, request: dict | None = None, response: dict | None = None) -> dict:
+def run(
+    adapter: AgentgatewayAdapter,
+    rules: dict,
+    request: dict | None = None,
+    response: dict | None = None,
+) -> dict:
     result = adapter.replay_transform_sample(
         parse_transforms(rules),
         request=request,
@@ -48,7 +53,11 @@ def test_header_verbs_apply_to_the_request_headers_snapshot(adapter):
     result = run(adapter, rules, request=request)
 
     # 行序即应用顺序：先 update 成 slip，再 prepend/append 包住当前值。
-    assert result["after"]["request"]["headers"] == {"x-trace": "pre-slip-suf", "x-new": "n", "x-up": "LOW"}
+    assert result["after"]["request"]["headers"] == {
+        "x-trace": "pre-slip-suf",
+        "x-new": "n",
+        "x-up": "LOW",
+    }
     assert result["after"]["request"]["body"] == {"model": "glm-5.3"}
     paths = {(item["segment"], item["path"], item["op"]) for item in result["diff"]}
     assert ("request_headers", "x-trace", "update") in paths
@@ -159,7 +168,10 @@ def test_conditions_gate_rows_per_segment_and_phase(adapter):
     result = run(
         adapter,
         rules,
-        request={"headers": {"x-route": "chat", "x-model": "old"}, "body": {"model": "glm-5.3", "temperature": 0.9}},
+        request={
+            "headers": {"x-route": "chat", "x-model": "old"},
+            "body": {"model": "glm-5.3", "temperature": 0.9},
+        },
         response={"headers": {}, "body": {"usage": {"prompt_tokens": 12}}},
     )
 
@@ -198,5 +210,12 @@ def test_diff_entries_carry_segment_kind_path_op_and_values(adapter):
         response={"headers": {"x-out": "0"}},
     )
     assert result["diff"] == [
-        {"segment": "response_headers", "kind": "header", "path": "x-out", "op": "update", "before": "0", "after": "1"},
+        {
+            "segment": "response_headers",
+            "kind": "header",
+            "path": "x-out",
+            "op": "update",
+            "before": "0",
+            "after": "1",
+        },
     ]

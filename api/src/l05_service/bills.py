@@ -48,7 +48,7 @@ def _currency(value: str | None) -> str:
 
 def _rates(session: Session) -> tuple[str, dict[str, int]]:
     """Report currency plus the latest fx rate per currency (report currency = 1)."""
-    report_currency = _currency(get_settings().report_currency) or "CNY"
+    report_currency = _currency(get_settings().report_currency) or "USD"
     rates: dict[str, int] = {report_currency: MICRO}
     for snapshot in session.scalars(
         select(FxSnapshotORM).order_by(FxSnapshotORM.as_of_ms.desc())

@@ -36,6 +36,8 @@ def seeded_ids(client, engine_and_sessionmaker):
     engine, factory = engine_and_sessionmaker
     ids = seed_channel(engine, factory)
     with factory() as session:
+        # W9: cost adoption stores USD directly, so this rate must be IGNORED
+        # (it stays here to prove no fx conversion happens any more).
         session.add(
             FxSnapshotORM(
                 currency="USD", as_of_ms=now_ms(), rate_micro=7_200_000, created_at_ms=now_ms()
@@ -76,7 +78,9 @@ def test_adopt_single_fills_blank_and_reports_keys(client, seeded_ids):
     row = next(item for item in listed if item["id"] == created["id"])
     assert row["params_source"] == "models.dev"
     assert row["parameters"]["max_input_tokens"] == 204_800
-    assert Decimal(row["cost_input_per_1m"]) == Decimal("4.32")
+    # USD as published by models.dev (the seeded 7.2 fx rate must not apply).
+    assert Decimal(row["cost_input_per_1m"]) == Decimal("0.6")
+    assert Decimal(row["cost_output_per_1m"]) == Decimal("2.2")
 
 
 def test_adopt_manual_edit_flips_source_back(client, seeded_ids):

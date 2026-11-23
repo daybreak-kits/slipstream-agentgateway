@@ -208,7 +208,7 @@ export function ModelsTable<T>({
               {visibleColumns.map((col) => (
                 <TH
                   key={col.key}
-                  style={tableColumnWidthStyle(col)}
+                  style={tableColumnWidthStyle(col, layout)}
                   className={cn(
                     "sticky top-0 z-[var(--z-sticky)] bg-surface-2 h-8",
                     tableColumnHeaderClass(col),

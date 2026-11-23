@@ -86,7 +86,10 @@ def _user_rows(payload: object) -> list[dict]:
 
 def test_every_seeded_user_has_credentials_and_can_log_in(seeded_db, seeded_client):
     """No "无登录帐户" row: every seeded user has a username, a hash and a login."""
-    rows = _query(seeded_db, "SELECT username, password_hash FROM users")
+    rows = _query(
+        seeded_db,
+        "SELECT username, password_hash FROM users WHERE name <> 'playground'",
+    )
     assert rows, "the seed must write users"
     for username, password_hash in rows:
         assert username, "every seeded user needs a login name"

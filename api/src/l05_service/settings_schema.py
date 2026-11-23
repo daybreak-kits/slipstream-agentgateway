@@ -48,8 +48,8 @@ class SettingGroup:
 
 
 _CURRENCY_OPTIONS = (
-    SettingOption("CNY", "CNY 人民币"),
     SettingOption("USD", "USD 美元"),
+    SettingOption("CNY", "CNY 人民币"),
 )
 _TIMEZONE_OPTIONS = (
     SettingOption("Asia/Shanghai", "Asia/Shanghai（UTC+8）"),
@@ -70,7 +70,7 @@ SETTING_GROUPS: tuple[SettingGroup, ...] = (
                 description="报表与账单的展示币种。USD 仅用于展示，请求级强制仍按账本 micro 记账。",
                 kind="select",
                 value_type="currency",
-                default="CNY",
+                default="USD",
                 options=_CURRENCY_OPTIONS,
             ),
         ),

@@ -57,7 +57,8 @@ def test_sample_preview_returns_before_after_and_field_diff(client, engine_and_s
     assert diff[("request_body", "temperature")]["after"] == 0.2
 
     # Non-destructive: the rule document in the store is unchanged.
-    assert client.get(f"/admin/upstreams/{upstream_id}/transforms").json()["transforms"] == before_store
+    path = f"/admin/upstreams/{upstream_id}/transforms"
+    assert client.get(path).json()["transforms"] == before_store
 
 
 def test_sample_preview_rejects_unknown_rule_fields_with_readable_validation(client):
@@ -81,10 +82,16 @@ def test_sample_preview_requires_an_authenticated_transforms_reader(anon_client)
 
 def test_sample_preview_rejects_unknown_top_level_and_phase_fields(client):
     unknown_top = {**SAMPLE, "surprise": 1}
-    assert client.post("/admin/upstreams/ups_any/transforms/sample", json=unknown_top).status_code == 422
+    response = client.post(
+        "/admin/upstreams/ups_any/transforms/sample", json=unknown_top
+    )
+    assert response.status_code == 422
 
     unknown_phase = {**SAMPLE, "request": {"headers": {}, "body": None, "url": "/v1/chat"}}
-    assert client.post("/admin/upstreams/ups_any/transforms/sample", json=unknown_phase).status_code == 422
+    response = client.post(
+        "/admin/upstreams/ups_any/transforms/sample", json=unknown_phase
+    )
+    assert response.status_code == 422
 
 
 def test_sample_preview_tolerates_an_empty_sample_and_no_rules(client):

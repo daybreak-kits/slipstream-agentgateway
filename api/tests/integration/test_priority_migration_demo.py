@@ -131,7 +131,8 @@ def _assert_migrated_plan_is_renderable(db_path: Path) -> None:
 
     A priority scale where "bigger wins" sorted descending; v2 sorts ascending,
     so a successful migration is only useful if every failover model still has
-    non-negative, ascending priorities and the render plan covers all 8 models.
+    non-negative, ascending priorities and the render plan covers all 24
+    public models (8 hand-authored + 16 auto).
     """
     from l01_core.settings import get_settings, reset_settings_cache
     from l03_adapters.agentgateway.adapter import AgentgatewayAdapter
@@ -152,7 +153,7 @@ def _assert_migrated_plan_is_renderable(db_path: Path) -> None:
     finally:
         engine.dispose()
         reset_settings_cache()
-    assert len(ir.public_models) == 8
+    assert len(ir.public_models) == 24
     assert key_files
     for model in ir.public_models:
         if model.routing_mode != "failover":
@@ -169,7 +170,7 @@ def test_migration_on_demo_db_copy_preserves_rows_and_flips_once(tmp_path: Path)
     assert seeded.returncode == 0, seeded.stderr[-2000:]
     _make_legacy(db_path)
     counts_before = _counts(db_path)
-    assert counts_before["model_targets"] == 16
+    assert counts_before["model_targets"] == 32
     priority_before = _priorities(db_path)
     model_of = dict(_query(db_path, "SELECT id, public_model_id FROM model_targets"))
     failover = {

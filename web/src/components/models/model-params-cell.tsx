@@ -1,6 +1,6 @@
 import { Fragment } from "react";
 
-import { parameterDetailRows, parameterLimitsText } from "@/components/models/model-vocab";
+import { parameterDetailRows, parameterLimitPairs, parameterLimitsText } from "@/components/models/model-vocab";
 import { HoverInfo } from "@/components/ui/hover-info";
 import type { ModelParameters } from "@/types";
 
@@ -16,6 +16,7 @@ import type { ModelParameters } from "@/types";
  */
 export function ModelParamsCell({ row }: { row: { parameters?: ModelParameters } }) {
   const text = parameterLimitsText(row);
+  const pairs = parameterLimitPairs(row);
   const details = parameterDetailRows(row);
   return (
     <HoverInfo
@@ -33,7 +34,14 @@ export function ModelParamsCell({ row }: { row: { parameters?: ModelParameters }
         </dl>
       }
     >
-      <span className="tnum whitespace-nowrap text-2xs text-body">{text}</span>
+      <span className="block min-w-0 text-2xs leading-tight">
+        {pairs.map((pair) => (
+          <span key={pair.label} className="flex items-baseline gap-1.5 whitespace-nowrap">
+            <span className="w-4 shrink-0 text-faint">{pair.label}</span>
+            <span className="tnum text-body">{pair.value}</span>
+          </span>
+        ))}
+      </span>
     </HoverInfo>
   );
 }

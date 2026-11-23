@@ -32,8 +32,9 @@ export interface TransformOpMeta {
 export const TRANSFORM_OPS: readonly TransformOpMeta[] = [
   { value: "create", label: "创建字段", hint: "不存在才写，已存在保持不变" },
   { value: "update", label: "更新字段", hint: "存在才覆盖，不存在保持不变（请求头同理）" },
-  { value: "delete", label: "删除", hint: "删除；不存在视为成功" },
-  { value: "copy", label: "复制", hint: "从源复制到目标（头填源头名 / 体填源路径）" },
+  // W9：操作菜单用「动词 + 字段」的完整说法，避免「删除/复制」与行操作（删除本行/复制规则）混淆。
+  { value: "delete", label: "删除字段", hint: "删除该字段；不存在视为成功" },
+  { value: "copy", label: "复制字段", hint: "从源字段复制到目标字段（头填源头名 / 体填源路径）" },
   { value: "prepend", label: "头部添加", hint: "字符串开头插入" },
   { value: "append", label: "尾部添加", hint: "字符串结尾追加" },
   { value: "regex_replace", label: "正则替换", hint: "按正则替换；填写正则与替换文本（CEL regexReplaceAll）" },

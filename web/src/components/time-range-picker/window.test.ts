@@ -90,17 +90,17 @@ describe("timeWindowBounds：本地起止毫秒", () => {
   });
 });
 
-describe("timeWindowLabel：完整区间（预设与自定义同口径）", () => {
-  /** 唯一展示形状：YYYY/MM/DD HH:mm:ss - YYYY/MM/DD HH:mm:ss，两端都到秒。 */
-  const FULL_RANGE = /^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2} - \d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}$/;
+describe("timeWindowLabel：完整区间（预设与自定义同口径、W9 起用「至」连接）", () => {
+  /** 唯一展示形状：YYYY/MM/DD HH:mm:ss 至 YYYY/MM/DD HH:mm:ss，两端都到秒。 */
+  const FULL_RANGE = /^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2} 至 \d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}$/;
 
-  it("自定义窗显示 YYYY/MM/DD HH:mm:ss - YYYY/MM/DD HH:mm:ss", () => {
+  it("自定义窗显示 YYYY/MM/DD HH:mm:ss 至 YYYY/MM/DD HH:mm:ss", () => {
     const label = timeWindowLabel({
       kind: "custom",
       fromMs: at(2026, 11, 22, 19, 51, 50),
       toMs: at(2026, 11, 22, 20, 1, 5),
     });
-    expect(label).toBe("2026/11/22 19:51:50 - 2026/11/22 20:01:05");
+    expect(label).toBe("2026/11/22 19:51:50 至 2026/11/22 20:01:05");
     expect(label).toMatch(FULL_RANGE);
   });
 
@@ -110,44 +110,44 @@ describe("timeWindowLabel：完整区间（预设与自定义同口径）", () =
       fromMs: at(2025, 12, 31, 23, 59, 59),
       toMs: at(2026, 1, 1, 0, 0, 0),
     });
-    expect(label).toBe("2025/12/31 23:59:59 - 2026/01/01 00:00:00");
+    expect(label).toBe("2025/12/31 23:59:59 至 2026/01/01 00:00:00");
     expect(label).toMatch(FULL_RANGE);
   });
 
   it("起止相等时两端各自完整显示（不做折叠）", () => {
     const same = at(2026, 11, 22, 12, 30, 0);
     expect(timeWindowLabel({ kind: "custom", fromMs: same, toMs: same })).toBe(
-      "2026/11/22 12:30:00 - 2026/11/22 12:30:00",
+      "2026/11/22 12:30:00 至 2026/11/22 12:30:00",
     );
   });
 
   it("预设区间也展开成完整本地区间，不再只显示预设名", () => {
     const now = at(2026, 11, 22, 20, 1, 5);
     expect(timeWindowLabel({ kind: "range", value: "today" }, now)).toBe(
-      "2026/11/22 00:00:00 - 2026/11/22 20:01:05",
+      "2026/11/22 00:00:00 至 2026/11/22 20:01:05",
     );
     expect(timeWindowLabel({ kind: "range", value: "24h" }, now)).toBe(
-      "2026/11/21 20:01:05 - 2026/11/22 20:01:05",
+      "2026/11/21 20:01:05 至 2026/11/22 20:01:05",
     );
     expect(timeWindowLabel({ kind: "range", value: "7d" }, now)).toBe(
-      "2026/11/15 20:01:05 - 2026/11/22 20:01:05",
+      "2026/11/15 20:01:05 至 2026/11/22 20:01:05",
     );
     expect(timeWindowLabel({ kind: "range", value: "30d" }, now)).toBe(
-      "2026/10/23 20:01:05 - 2026/11/22 20:01:05",
+      "2026/10/23 20:01:05 至 2026/11/22 20:01:05",
     );
     for (const value of ["today", "24h", "7d", "30d"] as const) {
       expect(timeWindowLabel({ kind: "range", value }, now)).toMatch(FULL_RANGE);
     }
   });
 
-  it("分隔符固定为「空格-空格」，不用中文连接词或其他破折号", () => {
+  it("分隔符固定为「空格 至 空格」，不用连字符或其他破折号", () => {
     const label = timeWindowLabel({
       kind: "custom",
       fromMs: at(2026, 11, 22, 0, 0, 0),
       toMs: at(2026, 11, 22, 1, 2, 3),
     });
-    expect(label.split(" - ")).toHaveLength(2);
-    expect(label).not.toContain(" 至 ");
+    expect(label.split(" 至 ")).toHaveLength(2);
+    expect(label).not.toContain(" - ");
     expect(label).toMatch(FULL_RANGE);
   });
 });

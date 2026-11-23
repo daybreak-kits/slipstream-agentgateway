@@ -148,6 +148,10 @@ class PublicModelORM(Base):
     routing_mode: Mapped[str] = mapped_column(String(16), default="failover")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     note: Mapped[str] = mapped_column(Text, default="")
+    # W9: upstream models are auto-exposed under `<upstream>/<model>`; the flag
+    # keeps those rows separate from hand-authored public models (UI badge and
+    # safe cascade on upstream-model deletion).
+    auto_generated: Mapped[bool] = mapped_column(Boolean, default=False)
     # Ticket 10: a public model cools down as a whole (all members skipped), the
     # same deadline semantics as its upstream models.
     cooldown_until_ms: Mapped[int] = mapped_column(BigInteger, default=0)
@@ -343,7 +347,7 @@ class UpstreamPriceORM(Base):
     )
     item: Mapped[str] = mapped_column(String(16))  # input|output|cache_read|cache_write|request
     unit_price_micro: Mapped[int] = mapped_column(BigInteger)  # per 1M tokens, or per request
-    currency: Mapped[str] = mapped_column(String(8), default="CNY")
+    currency: Mapped[str] = mapped_column(String(8), default="USD")
     effective_from_ms: Mapped[int] = mapped_column(BigInteger, index=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
     created_at_ms: Mapped[int] = mapped_column(BigInteger, default=0)
@@ -361,7 +365,7 @@ class ChargePriceORM(Base):
     mode: Mapped[str] = mapped_column(String(8))  # markup|fixed
     # markup: ratio in ten-thousandths; fixed: micro unit
     value: Mapped[int] = mapped_column(BigInteger)
-    currency: Mapped[str] = mapped_column(String(8), default="CNY")
+    currency: Mapped[str] = mapped_column(String(8), default="USD")
     effective_from_ms: Mapped[int] = mapped_column(BigInteger, index=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
     created_at_ms: Mapped[int] = mapped_column(BigInteger, default=0)
@@ -418,7 +422,7 @@ class LedgerEntryORM(Base):
     kind: Mapped[str] = mapped_column(String(16), index=True)  # charge|topup|refund|adjust
     delta_micro: Mapped[int] = mapped_column(BigInteger)
     balance_after_micro: Mapped[int] = mapped_column(BigInteger)
-    currency: Mapped[str] = mapped_column(String(8), default="CNY")
+    currency: Mapped[str] = mapped_column(String(8), default="USD")
     ref_type: Mapped[str] = mapped_column(String(32), default="")
     ref_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     note: Mapped[str] = mapped_column(Text, default="")

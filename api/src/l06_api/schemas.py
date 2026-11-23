@@ -228,20 +228,20 @@ class ApiKeyStatusPatch(BaseModel):
 
 class BalanceTopup(BaseModel):
     amount_micro: int = Field(gt=0)
-    currency: str = Field(default="CNY", min_length=1, max_length=8)
+    currency: str = Field(default="USD", min_length=1, max_length=8)
     note: str = ""
 
 
 class BalanceAdjust(BaseModel):
     delta_micro: int
-    currency: str = Field(default="CNY", min_length=1, max_length=8)
+    currency: str = Field(default="USD", min_length=1, max_length=8)
     note: str = ""
 
 
 class RefundCreate(BaseModel):
     user_id: str
     amount_micro: int = Field(gt=0)
-    currency: str = Field(default="CNY", min_length=1, max_length=8)
+    currency: str = Field(default="USD", min_length=1, max_length=8)
     charge_entry_id: str | None = None
     note: str = ""
 
@@ -256,7 +256,7 @@ class UpstreamPriceCreate(BaseModel):
     upstream_model_id: str = Field(min_length=1)
     item: str = Field(pattern=r"^(input|output|cache_read|cache_write|request)$")
     unit_price_micro: int = Field(ge=0)
-    currency: str = Field(default="CNY", min_length=1, max_length=8)
+    currency: str = Field(default="USD", min_length=1, max_length=8)
     effective_from_ms: int | None = None
 
 
@@ -495,19 +495,19 @@ class UpstreamProbeIn(BaseModel):
 
 
 class UpstreamModelProbeIn(BaseModel):
-    """POST /admin/upstreams/{id}/models/probe body (ticket 05).
+    """POST /admin/upstreams/{id}/models/probe body (W9).
 
-    model_ids (stored model row ids) or the single model_id spelling; key_id
-    picks one credential, absent means the first key row. extra="forbid" is the
-    security boundary made explicit: the request can never supply base_url,
-    api_style or an arbitrary credential - those come from stored rows only.
+    model_ids (stored model row ids) or the single model_id spelling. W9 tests
+    through the data plane with the internal 测试专用 credential, so the request
+    cannot choose an upstream key. extra="forbid" is the security boundary made
+    explicit: the request can never supply base_url, api_style or an arbitrary
+    credential - those come from stored rows only.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     model_id: str | None = Field(default=None, min_length=1, max_length=64)
     model_ids: list[str] = Field(default_factory=list, max_length=200)
-    key_id: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class TransformSamplePhaseIn(BaseModel):

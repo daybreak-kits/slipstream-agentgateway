@@ -3,7 +3,6 @@ import { ArrowLeft, ChevronDown } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { SectionCard } from "@/components/governance/panel";
-import { PageHeader } from "@/components/layout/page-header";
 import { availabilityText, availabilityTone } from "@/components/models/availability";
 import { Field } from "@/components/models/field";
 import { conditionalFallback, memberLabeler } from "@/components/models/member-chip";
@@ -41,6 +40,8 @@ export interface PublicModelPageViewProps {
   /** 服务端 targets 的 id → 名称兜底（上游模型列表不含已被删除的引用行时仍可显示）。 */
   fallbackNames: Map<string, string>;
   dirty: DirtyFieldsState<PublicModelForm>;
+  /** W9：成员草稿相对 baseline 的差异条数（页头公开模型名旁展示）。 */
+  memberDiffCount: number;
   saving: boolean;
   saveError: string | null;
   missingPermissions: string[];
@@ -66,6 +67,7 @@ export function PublicModelPageView({
   upstreamModels,
   fallbackNames,
   dirty,
+  memberDiffCount,
   saving,
   saveError,
   missingPermissions,
@@ -116,10 +118,27 @@ export function PublicModelPageView({
         data-slot="page-head"
         className="sticky top-0 z-[var(--z-sticky)] -mx-4 border-b border-border bg-surface px-4 pb-3 pt-2 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8"
       >
-        <PageHeader
-          title={form.name.trim() || model.name}
-          description="公开模型 · 一次保存提交基本信息、策略、启用与成员；服务端单事务，失败整页回滚。"
-          actions={
+        <div className="space-y-1">
+          <div className="flex flex-wrap items-end justify-between gap-x-3" data-slot="page-head-row">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <h1
+                className="min-w-0 truncate text-h1 font-semibold tracking-tight text-title"
+                title={form.name.trim() || model.name}
+              >
+                {form.name.trim() || model.name}
+              </h1>
+              {/* W9：成员差异条数紧挨公开模型名（不进页头右侧动作区）。 */}
+              {memberDiffCount > 0 ? (
+                <Badge
+                  tone="warning"
+                  className="tnum shrink-0"
+                  data-slot="member-diff-count"
+                  title="成员草稿相对已保存版本的差异条数"
+                >
+                  成员已修改 {memberDiffCount} 项
+                </Badge>
+              ) : null}
+            </div>
             <div className="flex flex-wrap items-center gap-2" data-slot="header-save">
               <Badge tone="primary">{routing.label}</Badge>
               <Badge tone={statusTone}>{statusText}</Badge>
@@ -140,8 +159,11 @@ export function PublicModelPageView({
                 保存
               </DirtySaveButton>
             </div>
-          }
-        />
+          </div>
+          <p className="max-w-[76ch] text-pretty text-sm leading-5 text-faint">
+            公开模型 · 一次保存提交基本信息、策略、启用与成员；服务端单事务，失败整页回滚。
+          </p>
+        </div>
       </header>
 
       {readOnly ? (
@@ -223,19 +245,20 @@ export function PublicModelPageView({
             <RadioGroup
               value={form.routing_mode}
               onValueChange={(value) => onFormChange({ routing_mode: value as RoutingMode })}
-              className="grid grid-cols-1 gap-2 md:grid-cols-3"
+              // W9：三张策略卡等宽等高（grid items-stretch + 卡片 h-full），每张都带一句短说明。
+              className="grid grid-cols-1 items-stretch gap-2 md:grid-cols-3"
               data-slot="strategy-cards"
             >
               {(Object.keys(ROUTING_LABELS) as RoutingMode[]).map((modeKey) => (
                 <label
                   key={modeKey}
                   data-slot="strategy-card"
-                  className="flex items-start gap-2 rounded-md border border-border p-2.5 text-2sm"
+                  className="flex h-full items-start gap-2 rounded-md border border-border p-2.5 text-2sm"
                 >
-                  <RadioGroupItem value={modeKey} className="mt-0.5" />
-                  <span className="min-w-0">
+                  <RadioGroupItem value={modeKey} className="mt-0.5 shrink-0" />
+                  <span className="flex min-w-0 flex-col gap-1">
                     <span className="block font-medium text-body">{ROUTING_LABELS[modeKey].label}</span>
-                    <span className="block text-2xs text-faint">{ROUTING_LABELS[modeKey].desc}</span>
+                    <span className="block text-2xs leading-4 text-faint">{ROUTING_LABELS[modeKey].desc}</span>
                   </span>
                 </label>
               ))}
@@ -244,7 +267,7 @@ export function PublicModelPageView({
         </fieldset>
       </SectionCard>
 
-      <SectionCard title="成员编排" description="保存时按 priority 整批替换；priority 数值小优先，同层 P2C 平权。">
+      <SectionCard title="成员编排" description="保存时按优先级整批替换；优先级数值小优先，同层 P2C 平权。">
         <DirtyField
           dirty={dirty.isDirtyField("members")}
           onReset={() => onResetField("members")}
@@ -252,7 +275,7 @@ export function PublicModelPageView({
         >
           <div className="space-y-3">
             <p className="text-2xs text-faint" data-slot="member-rules">
-              规则：至少保留 1 个成员；成员不可重复；conditional 模式只有末位成员可以留空 when（兜底）。
+              规则：至少保留 1 个成员；成员不可重复；条件路由模式下只有末位成员可以留空条件（兜底）。
             </p>
             <fieldset disabled={controlsDisabled} className="m-0 min-w-0 border-0 p-0">
               <MemberChipFlow
@@ -265,7 +288,7 @@ export function PublicModelPageView({
             </fieldset>
             {fallbackLabel !== null ? (
               <p className="text-2xs text-info-text" data-slot="conditional-fallback">
-                条件路由末位兜底：{fallbackLabel}（when 留空，前面成员都不命中时使用）
+                条件路由末位兜底：{fallbackLabel}（条件留空，前面成员都不命中时使用）
               </p>
             ) : null}
             {memberErrors.length > 0 ? (
@@ -302,13 +325,13 @@ export function PublicModelPageView({
           <SummaryRow label="成员构成">
             {form.members.length} 个成员
             {form.members.length > 0
-              ? "；" + layerPriorities.length + " 个 priority 层（" + layerPriorities.join(" / ") + "）"
+              ? "；" + layerPriorities.length + " 个优先级层（" + layerPriorities.join(" / ") + "）"
               : ""}
-            {form.routing_mode === "failover" ? "；按 priority 数值小优先逐层尝试" : null}
+            {form.routing_mode === "failover" ? "；按优先级数值小优先逐层尝试" : null}
           </SummaryRow>
           {form.routing_mode === "conditional" ? (
             <SummaryRow label="末位兜底">
-              {fallbackLabel !== null ? fallbackLabel + "（when 留空）" : "缺少兜底：末位成员必须留空 when"}
+              {fallbackLabel !== null ? fallbackLabel + "（条件留空）" : "缺少兜底：末位成员必须留空条件"}
             </SummaryRow>
           ) : null}
           <SummaryRow label="启用状态">

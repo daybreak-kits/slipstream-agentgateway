@@ -750,7 +750,7 @@ check("PublicModelPageView：单页三段 + 页头 h1/状态/脏标记 + 唯一�
   const summaryHtml = html.slice(summaryStart);
   expect(summaryStart > headerSave, "只读摘要折叠容器必须在页头之后（不占主编辑区）");
   expect(!/<input|<textarea|<select/i.test(summaryHtml), "只读摘要内不得有可编辑控件");
-  includesAll(summaryHtml, ["priority", "冷却", "上游模型"], "只读摘要必须说明渲染语义与冷却归属");
+  includesAll(summaryHtml, ["渲染策略", "优先级", "冷却", "上游模型"], "只读摘要必须说明渲染语义与冷却归属（中文口径）");
 });
 
 check("PublicModelPageView：保存失败保留脏标记、保存中进度、缺权限禁用保存并点名权限键", async () => {
@@ -782,7 +782,7 @@ check("PublicModelPageView：成员校验与 conditional 末位兜底提示", as
   const { PublicModelPageView } = await load("/src/components/models/public-model-page.tsx");
   includesAll(
     render(createElement(PublicModelPageView, pageProps())),
-    ["至少保留 1 个成员", "成员不可重复", "末位成员可以留空 when"],
+    ["至少保留 1 个成员", "成员不可重复", "只有末位成员可以留空条件"],
     "成员规则提示",
   );
   const empty = render(createElement(PublicModelPageView, pageProps({ form: pageForm({ members: [] }) })));
@@ -824,7 +824,7 @@ check("PublicModelPageView：成员校验与 conditional 末位兜底提示", as
   });
   includesAll(
     render(createElement(PublicModelPageView, pageProps({ form: badConditional }))),
-    ["只有末位成员可以留空 when"],
+    ["只有末位成员可以留空条件"],
     "末位兜底校验提示",
   );
 });
@@ -923,10 +923,13 @@ check("MemberChipFlow：已选成员表格化、候选全量原位灰显（SSR�
   );
   expect(!html.includes("glm-5.3 · zai-01") && !html.includes("zai-01 · glm-5.3"), "成员命名不能再用「模型名 · 上游名」");
   expect((html.match(/data-slot="member-row"/g) ?? []).length === 3, "每个成员一行");
-  // failover 行内只渲染 priority：weight/when 输入完全不出现（disabled 也不行）。
-  expect(inputTags(html, "priority").length === 3, "每行必须有一个 priority 行内输入");
-  expect(!html.includes('aria-label="weight"'), "failover 行不得渲染 weight 输入");
-  expect(!html.includes('aria-label="when"'), "failover 行不得渲染 when 输入");
+  // W9：三字段始终渲染（优先级/权重/条件，中文 aria-label）；非当前策略的字段 disabled，
+  // 不再隐藏列——表头与列宽在策略切换时保持稳定。
+  expect(inputTags(html, "优先级").length === 3, "每行必须有一个 优先级 行内输入");
+  expect(inputTags(html, "权重").length === 3, "每行也必须渲染 权重 输入（failover 下 disabled）");
+  expect(inputTags(html, "条件").length === 3, "每行也必须渲染 条件 输入（failover 下 disabled）");
+  expect(inputTags(html, "权重").every((tag) => tag.includes('disabled=""')), "failover 的 权重 输入必须 disabled");
+  expect(inputTags(html, "条件").every((tag) => tag.includes('disabled=""')), "failover 的 条件 输入必须 disabled");
   expect((html.match(/data-slot="member-row-remove"/g) ?? []).length === 3, "每行一个移除按钮");
   expect((html.match(/data-slot="member-row-expand"/g) ?? []).length === 3, "每行一个显式展开 chevron");
   includesAll(html, ["移除 zai-01/glm-5.3", "移除 nebula-01/nebula-chat-1", "展开更多配置 zai-01/glm-5.3"], "移除/展开按钮必须点名成员");
@@ -950,10 +953,11 @@ check("MemberChipFlow：已选成员表格化、候选全量原位灰显（SSR�
     ],
     upstreamModels: chipUpstreamModels, fallbackNames: new Map(), mode: "weighted", onChange: () => {},
   }));
-  const weightInputs = inputTags(weighted, "weight");
-  expect(weightInputs.length === 2, "weighted 每行必须可编辑 weight");
-  expect(weightInputs.some((tag) => tag.includes('value="60"')), "weight 输入必须回显草稿值");
-  expect(!weighted.includes('aria-label="when"'), "weighted 行不得渲染 when 输入");
+  const weightInputs = inputTags(weighted, "权重");
+  expect(weightInputs.length === 2, "weighted 每行必须可编辑 权重");
+  expect(weightInputs.every((tag) => !tag.includes('disabled=""')), "weighted 的 权重 输入必须可编辑");
+  expect(weightInputs.some((tag) => tag.includes('value="60"')), "权重 输入必须回显草稿值");
+  expect(inputTags(weighted, "条件").every((tag) => tag.includes('disabled=""')), "weighted 的 条件 输入必须 disabled");
   includesAll(weighted, ["权重"], "weighted 表头出现中文「权重」");
   expect(!weighted.includes("表达式"), "weighted 表头不得出现「表达式」");
 
@@ -962,10 +966,11 @@ check("MemberChipFlow：已选成员表格化、候选全量原位灰显（SSR�
   }));
   expect((conditional.match(/data-slot="chip-order"/g) ?? []).length === 3, "conditional 每行必须显示顺序徽标");
   expect((conditional.match(/data-slot="chip-fallback"/g) ?? []).length === 1, "只有末位成员显示兜底标签");
-  expect(inputTags(conditional, "when").length === 3, "conditional 每行可编辑 when");
-  expect(inputTags(conditional, "when").some((tag) => tag.includes('value="request.tier')), "when 输入必须回显 CEL 谓词");
-  expect(!conditional.includes('aria-label="weight"'), "conditional 行不得渲染 weight 输入");
-  includesAll(conditional, ["末位兜底", "request.tier", "表达式"], "conditional 必须显示 when 与兜底，表头为中文「表达式」");
+  expect(inputTags(conditional, "条件").length === 3, "conditional 每行渲染 条件 输入");
+  expect(inputTags(conditional, "条件").every((tag) => !tag.includes('disabled=""')), "conditional 的 条件 输入必须可编辑");
+  expect(inputTags(conditional, "条件").some((tag) => tag.includes('value="request.tier')), "条件 输入必须回显 CEL 谓词");
+  expect(inputTags(conditional, "权重").every((tag) => tag.includes('disabled=""')), "conditional 的 权重 输入必须 disabled");
+  includesAll(conditional, ["末位兜底", "request.tier", "条件"], "conditional 必须显示 条件 与兜底，表头为中文「条件」");
 });
 
 check("PublicModelPageView：成员表格新命名、末位兜底与成员脏标记", async () => {

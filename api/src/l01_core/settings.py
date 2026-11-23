@@ -90,6 +90,10 @@ class Settings(BaseSettings):
         ),
     )
 
+    # Client-callable data-plane root (Docker: http://gateway:3600). Empty =
+    # co-located 127.0.0.1:<adapter port>, the local single-process default.
+    data_plane_base_url: str = ""
+
     # Single-port deployment: admin UI static assets; empty = auto-detect <repo>/web/dist.
     web_dist_dir: str = ""
 
@@ -118,7 +122,7 @@ class Settings(BaseSettings):
     # Billing (ADR-011): amounts are integer micro units; reports convert into
     # report_currency via manual fx_snapshots. The data-plane bucket is token
     # denominated, so rendering derives bucket tokens = balance_micro // micro_per_token.
-    report_currency: str = "CNY"
+    report_currency: str = "USD"
     bucket_micro_per_token: int = 1000
 
     # Background job cadence (seconds). The app starts one JobRunner in-process
@@ -131,7 +135,7 @@ class Settings(BaseSettings):
     # pointed at without a code change; the adopt pass degrades to the last
     # stored snapshot whenever the fetch fails.
     models_dev_url: str = "https://models.dev/api.json"
-    models_dev_timeout_seconds: float = 30.0
+    models_dev_timeout_seconds: float = 60.0
 
     @model_validator(mode="after")
     def _resolve_config_dir(self) -> Settings:

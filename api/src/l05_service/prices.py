@@ -238,7 +238,7 @@ def margin_report(session: Session, from_ms: int = 0, to_ms: int = 0) -> dict:
     tests/integration/test_reports_sql_parity.py.
     """
     settings = get_settings()
-    report_currency = (settings.report_currency or "").strip() or "CNY"
+    report_currency = (settings.report_currency or "").strip() or "USD"
     effective_from = max(int(from_ms or 0), 0)
     effective_to = int(to_ms or 0) if int(to_ms or 0) > 0 else now_ms() + 1
 

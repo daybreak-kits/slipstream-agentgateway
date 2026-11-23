@@ -105,6 +105,31 @@ export function validateForm(form: PublicModelForm): string[] {
   return Array.from(new Set(errors));
 }
 
+/** 成员差异条数（W9：页头名称旁展示）：逐位比较草稿与 baseline，顺序变化按位计差异。 */
+export function changedMemberCount(
+  before: MemberDraft[] | null | undefined,
+  after: MemberDraft[],
+): number {
+  const base = before ?? [];
+  const max = Math.max(base.length, after.length);
+  let changed = 0;
+  for (let index = 0; index < max; index += 1) {
+    const left = base[index];
+    const right = after[index];
+    if (!left || !right) {
+      changed += 1;
+      continue;
+    }
+    const same =
+      left.upstream_model_id === right.upstream_model_id &&
+      left.priority === right.priority &&
+      left.weight === right.weight &&
+      left.when === right.when;
+    if (!same) changed += 1;
+  }
+  return changed;
+}
+
 /** 成员草稿列表的内容比较（useDirtyFields 的 equals.members）：顺序也算变化。 */
 export function sameMemberDrafts(before: unknown, after: unknown): boolean {
   if (!Array.isArray(before) || !Array.isArray(after)) return false;

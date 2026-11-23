@@ -253,7 +253,7 @@ export function PriceTable<T>({
                     col.sortable && col.sortValue && "cursor-pointer hover:text-body",
                     tableColumnHeaderClass(col),
                   )}
-                  style={fixedLayout ? tableColumnWidthStyle(col) : undefined}
+                  style={tableColumnWidthStyle(col, layout)}
                 >
                   <span className="inline-flex items-center gap-1">
                     {col.header ?? col.label}

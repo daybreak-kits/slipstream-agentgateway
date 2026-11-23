@@ -7,6 +7,7 @@ import { EmptyState, ErrorState } from "@/components/governance/panel";
 import { PageHeader } from "@/components/layout/page-header";
 import { PublicModelPageView } from "@/components/models/public-model-page";
 import {
+  changedMemberCount,
   EMPTY_PUBLIC_MODEL_FORM,
   formOf,
   missingPermissions,
@@ -70,6 +71,11 @@ export function PublicModelEditor({ id }: { id: string }) {
   }, [model, hydratedId]);
 
   const dirty = useDirtyFields(baseline, form, { equals: { members: sameMemberDrafts } });
+  // W9：成员差异条数放在页头公开模型名旁（成员是整页最容易改乱的一段）。
+  const memberDiffCount = useMemo(
+    () => changedMemberCount(baseline?.members, form.members),
+    [baseline, form.members],
+  );
   const permissionGaps = missingPermissions(can);
 
   // 服务端 targets 的 id → 名称兜底：上游模型列表不含已被删除的引用行时仍可显示。
@@ -175,6 +181,7 @@ export function PublicModelEditor({ id }: { id: string }) {
         upstreamModels={upstreamModels}
         fallbackNames={fallbackNames}
         dirty={dirty}
+        memberDiffCount={memberDiffCount}
         saving={save.isPending}
         saveError={saveError}
         missingPermissions={permissionGaps}

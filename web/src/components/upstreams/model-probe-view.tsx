@@ -7,7 +7,7 @@ import { ResultCell } from "@/components/ui/table";
 import { ACTION_ICONS } from "@/lib/icons";
 import { probeResultView, probeSummary, type ModelProbeItem, type ModelProbeSession } from "./model-probe";
 
-/** 会话内单项结果：成功绿/失败红/超时琥珀 + 延迟 + 脱敏错误行。
+/** 单项结果：成功绿/失败红/超时琥珀 + 延迟 + 脱敏错误行。
  * W8 t03：结果走共享 ResultCell 固定两行槽位——失败行的错误详情落在第二行，
  * 结果出现/消失（未测试 → 有结果）时行高不跳；data-probe-tone 供探测量产断言。 */
 export function ModelProbeBadge({ item }: { item: ModelProbeItem }) {

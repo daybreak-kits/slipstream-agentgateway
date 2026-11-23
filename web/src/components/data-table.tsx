@@ -332,7 +332,7 @@ export function DataTable<T>({
                       key={header.id}
                       onClick={canSort ? header.column.getToggleSortingHandler() : undefined}
                       aria-sort={dir === "asc" ? "ascending" : dir === "desc" ? "descending" : undefined}
-                      style={tableColumnWidthStyle(meta)}
+                      style={tableColumnWidthStyle(meta, layout)}
                       className={cn(
                         "sticky top-0 z-[var(--z-sticky)] bg-surface-2",
                         canSort && "cursor-pointer hover:text-body",

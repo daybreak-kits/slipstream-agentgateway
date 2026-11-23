@@ -39,12 +39,13 @@
 
 ## 核心能力
 
-- **三层寻址 + 三种路由**：Vendor → Upstream（上游，最多 20 把平权密钥；每把密钥展开为独立数据面上游，ADR-026）→ UpstreamModel；对外只暴露 PublicModel（公开模型）→ 有序 ModelTarget。路由支持 `failover`（priority 低值先试）/ `weighted` / `conditional`（CEL）。
+- **三层寻址与直调名**：Upstream（上游，最多 20 把平权密钥；每把密钥展开为独立数据面上游，ADR-026）→ UpstreamModel → PublicModel（公开模型）→ 有序 ModelTarget；每个上游模型还会自动生成 `<上游名>/<模型名>` 的直调公开模型，客户不必先手建公开模型即可调用。路由支持 `failover`（priority 低值先试）/ `weighted` / `conditional`（CEL）。
+- **模型测试走数据面（W9）**：在「模型管理」点测试时，控制面用自动公开名和内置“测试专用”凭据请求 agentgateway，由数据面鉴权、路由并写用量日志；结果从日志回读，token 消耗可在使用日志看到，不再由管理面直连上游。
 - **请求内重试与健康驱逐**（ADR-024，默认关，未配置 = 现行为）：route 级 retry 渲染为顶层 `policies[]`，挂到数据面内部路由；`codes` 含 4xx 时必须成对配置健康表达式与 `consecutive_failures`，否则保存被 422 拒绝（E16/E17 的「4xx 三件套」）。
 - **下发安全链**：文档 → GatewayIR → `validate_gateway_ir` → `adapter.validate` → `adapter.render` 的 dry-run，再用 pinned AG `--validate-only` 预校验候选配置，全部通过才原子替换；任一步失败返回 422，不落盘、不静默丢弃。
 - **计费与额度**：上游成本 / 下游收费双账本、两条价目与汇率快照；预付余额由控制面账本权威，数据面 localRateLimit 只做单实例快速拦截（ADR-007/011）。
-- **密钥与权限**：控制台 `sk-` 密钥加密落库、仅以 sha256 keyHash 下发数据面；DB 会话 cookie + RBAC（41 个权限键、三角色 + 自建角色、字段级金额裁剪）。
-- **管理台**：Vite + React 19 + TypeScript strict；生产构建 `web/dist` 由控制面 3700 同源托管，开发期用 5173。五期能力：日志请求尝试链（模型列两行 +「N 次尝试」popover）、分流图隐藏阶段（后端投影）、公开模型单页（单 PATCH 整页保存 + 成员 chip）、上游模型 100vh 抽屉与逐模型探测/逐把密钥测试、冷却单次/周期互斥（409，ADR-027）、表格操作列 sticky/头身对齐、语义色五档 + 字段级脏标记 + 统一 toast、看板 8 KPI 卡。
+- **密钥与权限**：控制台 `sk-` 密钥加密落库、仅以 sha256 keyHash 下发数据面；DB 会话 cookie + RBAC（39 个权限键、三角色 + 自建角色、字段级金额裁剪）。
+- **管理台**：Vite + React 19 + TypeScript strict；生产构建 `web/dist` 由控制面 3700 同源托管，开发期用 5173。管理台能力（W5 至 W9）：日志请求尝试链（模型列两行 +「N 次尝试」popover）、分流图隐藏阶段（后端投影）、公开模型单页（单 PATCH 整页保存 + 成员 chip）、上游模型 100vh 抽屉与模型测试（走数据面、日志回读）/逐把密钥测试、冷却单次/周期互斥（409，ADR-027）、表格操作列 sticky/头身对齐、语义色五档 + 字段级脏标记 + 统一 toast、看板 8 KPI 卡。
 
 ## 快速开始
 
@@ -89,7 +90,7 @@ python scripts/seed_demo.py
 默认 **DROP 重建**（会清空当前数据库，先停掉占用数据库的 API 进程）；成功输出包含：
 
 ```text
-写入: 厂商 3 / 上游 4（上游密钥 6，其中 zai-01 一个上游 3 把等权密钥）/ 上游模型 16 / 公开模型 8 / 目标 16 / 用户 6 / 用量事件 252（其中未定价 3）/ 计费流水 245 / 审计 64
+写入: 上游 4（上游密钥 6，其中 open-bigmodel-cn 一个上游 3 把等权密钥）/ 上游模型 16 / 公开模型 24（16 个自动直调 + 8 个手建）/ 目标 32 / 用户 6 / 用量事件 252（其中未定价 3）/ 计费流水 245 / 审计 64
 登录账号: admin / admin12345（可用 SLIPSTREAM_DEMO_ADMIN_PASSWORD 覆盖）← 首次登录后请立即修改
 演示账号另有 lisi（代理用户）/ wangwu（普通用户）；管理员引导账号可用 SLIPSTREAM_ADMIN_USERNAME / SLIPSTREAM_ADMIN_PASSWORD 覆盖（系统环境 > .env > 默认，ADR-019）
 ```

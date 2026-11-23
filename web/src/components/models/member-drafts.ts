@@ -50,16 +50,16 @@ export function validateMembers(members: MemberDraft[], mode: RoutingMode): stri
     if (seen.has(member.upstream_model_id)) errors.push("成员重复");
     seen.add(member.upstream_model_id);
     const priority = Number(member.priority);
-    if (!Number.isInteger(priority) || priority < 0 || priority > 100) errors.push("priority 必须是 0-100 的整数（数值小优先）");
+    if (!Number.isInteger(priority) || priority < 0 || priority > 100) errors.push("优先级必须是 0-100 的整数（数值小优先）");
     if (mode === "weighted") {
       const weight = Number(member.weight);
-      if (!Number.isInteger(weight) || weight < 1) errors.push("weighted 模式下 weight 必须是 >= 1 的整数");
+      if (!Number.isInteger(weight) || weight < 1) errors.push("加权分流模式下权重必须是 >= 1 的整数");
     }
   }
   if (mode === "conditional") {
     const sorted = [...members].sort((a, b) => Number(a.priority) - Number(b.priority));
     sorted.forEach((member, index) => {
-      if (index < sorted.length - 1 && member.when.trim() === "") errors.push("conditional 模式只有末位成员可以留空 when");
+      if (index < sorted.length - 1 && member.when.trim() === "") errors.push("条件路由模式下只有末位成员可以留空条件");
     });
   }
   return Array.from(new Set(errors));

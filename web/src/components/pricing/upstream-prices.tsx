@@ -32,7 +32,6 @@ import {
   type PriceDocumentIssue,
   type PriceImportErrorRow,
 } from "@/lib/pricing/document";
-import { actionColumnWidth } from "@/lib/table-columns";
 import { usePermissions } from "@/lib/permissions";
 import { useDirtyGuard } from "@/lib/use-dirty-guard";
 import type { UpstreamModel } from "@/types";
@@ -491,9 +490,7 @@ export function UpstreamPricesSection() {
       hideable: false,
       align: "right",
       sticky: "right",
-      // W8 t03 固定槽位：常驻「编辑」+ 有草稿时的「撤销 / 保存」共 3 个 dense 按钮，
-      // 宽度按按钮数固定，行内状态切换不会再挤动其它列。
-      width: actionColumnWidth(3, 3.5),
+      // W9：auto 布局操作列按内容 max-content 收缩，行内状态切换不再挤动其它列。
       cell: (model) => {
         if (!canEdit) return <span className="text-2xs text-faint">只读</span>;
         const draft = drafts[model.id] ?? draftOf(model);
@@ -674,7 +671,6 @@ export function UpstreamPricesSection() {
             rowKey={(model) => model.id}
             view={view}
             viewToggle={viewToggle}
-            layout="fixed"
             jsonView={
               <PriceJsonView
                 text={jsonText}

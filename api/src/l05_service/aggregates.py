@@ -305,7 +305,7 @@ def _local_ms_expr(segments: list[tuple[int, int, int]], column: str = "e.starte
 def _fx_rates(session: Session) -> tuple[str, dict[str, int]]:
     """Report currency plus the latest rate per currency (MICRO-scaled)."""
     settings = get_settings()
-    report_currency = ((settings.report_currency or "").strip() or "CNY").upper()
+    report_currency = ((settings.report_currency or "").strip() or "USD").upper()
     rates = {report_currency: _MICRO}
     for snapshot in session.scalars(
         select(FxSnapshotORM).order_by(FxSnapshotORM.as_of_ms.desc())

@@ -11,6 +11,11 @@ from __future__ import annotations
 from l05_service import settings_schema
 
 
+def test_product_default_base_currency_is_usd() -> None:
+    """The product default is USD; the API test fixture pins CNY for legacy assertions."""
+    assert settings_schema.SETTING_FIELDS["base_currency"].default == "USD"
+
+
 def test_schema_covers_every_served_setting(client):
     schema = client.get("/admin/settings/schema")
     assert schema.status_code == 200, schema.text
@@ -75,7 +80,7 @@ def test_validation_edges_are_422_and_do_not_overwrite(client):
     served = {item["key"]: item["value"] for item in client.get("/admin/settings").json()["items"]}
     assert served["gateway_base_url"] == ""
     assert served["timezone"] == "Asia/Shanghai"
-    assert served["base_currency"] == "CNY"
+    assert served["base_currency"] == "USD"
 
 
 def test_unknown_key_still_rejected_and_errors_name_known_set(client):

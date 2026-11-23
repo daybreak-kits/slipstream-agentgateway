@@ -50,7 +50,7 @@ MAX_RECOMPUTE_SELECTS = 25
 # W7 t03 / ADR-030: the digest tuple dropped the retired vendor_id bucket and the
 # cache price rows now key on upstream_model_id; the pinned value moved with the
 # tuple shape while every amount/row count/balance stayed identical.
-EXPECTED_DIGEST = "fe2e29d9c7fa94e6f4b5e6257b4e30236d81de228a601e6520d74e6f9d42b080"
+EXPECTED_DIGEST = "c1faec21e0d49fe022cd62490f3ee138c168f08db6c8557ef6265370951573d7"
 
 
 class _SelectCounter:
@@ -127,7 +127,7 @@ def _billed_channel(engine_and_sessionmaker) -> tuple:
                     created_at_ms=now,
                 ),
                 # Failed rows keep currency "" on their 0-amount cost entry while
-                # priced rows carry "CNY"; cost_daily's PK has no currency column,
+                # priced rows carry "USD"; cost_daily's PK has no currency column,
                 # so one model/day cannot mix the two (pre-existing shape, out of
                 # scope here): failed rows use their own model row.
                 UpstreamModelORM(

@@ -14,7 +14,6 @@ import { UNIT_HINT, priceMicro } from "@/components/pricing/money";
 import { invalidatePricing, pricingKeys, useUpstreamModels } from "@/components/pricing/queries";
 import { controlPlane } from "@/lib/control-plane";
 import { fmtUnitPriceMicro } from "@/lib/format";
-import { actionColumnWidth } from "@/lib/table-columns";
 import { formatDateTime, useTimezone } from "@/lib/time";
 import { usePermissions } from "@/lib/permissions";
 import type { UpstreamModel } from "@/types";
@@ -197,8 +196,7 @@ export function CachePricesSection() {
       hideable: false,
       align: "right",
       sticky: "right",
-      // W8 t03 固定槽位：单个「编辑」dense 按钮也按固定宽度，只读态与可编辑态切换不抖列宽。
-      width: actionColumnWidth(1, 3.5),
+      // W9：auto 布局操作列按内容 max-content 收缩，只读/可编辑切换不再靠估算列宽。
       cell: (pair) =>
         canWrite ? (
           <Button size="dense" variant="outline" onClick={() => setEditing(pair)}>
@@ -241,7 +239,6 @@ export function CachePricesSection() {
         searchText={searchText}
         onSearchChange={setSearchText}
         searchPlaceholder="筛选模型 / 上游"
-        layout="fixed"
         emptyText="还没有缓存价（cache_read / cache_write）"
         emptyAction={
           canCreate ? (

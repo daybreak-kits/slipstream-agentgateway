@@ -36,7 +36,7 @@ from l04_repo.repository import (
     UPSTREAM_REPO,
     USER_REPO,
 )
-from l05_service import availability
+from l05_service import auto_public, availability
 from l05_service.model_params import canonical_parameters, validate_type_source
 from l05_service.upstream_ops import (
     create_initial_key,
@@ -283,6 +283,9 @@ def create_upstream_model(
         created_at_ms=now_ms(),
     )
     UPSTREAM_MODEL_REPO.add(session, model)
+    session.flush()
+    # W9: every upstream model is directly callable as <upstream>/<model>.
+    auto_public.ensure_auto_public_model(session, model, actor=actor)
     _audit(session, actor=actor, action="create", entity_type="upstream_model", entity_id=model.id)
     return model
 
@@ -531,6 +534,9 @@ def delete_upstream_model(
     row = session.get(UpstreamModelORM, upstream_model_id)
     if row is None:
         raise AppError(ErrorCode.NOT_FOUND, f"upstream model not found: {upstream_model_id}")
+    # W9: auto-generated direct-call rows are owned by this model; remove them
+    # before checking hand-authored references.
+    auto_public.remove_for_upstream_model(session, upstream_model_id)
     reference = session.scalars(
         select(ModelTargetORM).where(ModelTargetORM.upstream_model_id == upstream_model_id)
     ).first()

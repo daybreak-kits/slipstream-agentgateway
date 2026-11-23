@@ -112,13 +112,13 @@ def test_seed_is_one_zai_channel_with_three_equal_keys(seeded_demo) -> None:
     assert counts == {
         "upstreams": 4,
         "upstream_models": 16,
-        "public_models": 8,
-        "model_targets": 16,
+        "public_models": 24,
+        "model_targets": 32,
     }
     # The operator-facing summary line must quote the same numbers as the DB.
     assert "上游 4" in seeded.stdout
     assert "上游模型 16" in seeded.stdout
-    assert "目标 16" in seeded.stdout
+    assert "目标 32" in seeded.stdout
 
 
 def test_seeded_usage_rows_carry_requested_model(seeded_demo) -> None:

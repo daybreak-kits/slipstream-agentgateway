@@ -202,7 +202,7 @@ def reconcile_balances(session: Session) -> list[str]:
                     kind="adjust",
                     delta_micro=drift,
                     balance_after_micro=expected,
-                    currency="CNY",
+                    currency="USD",
                     ref_type="reconcile",
                     note="balance drift corrected from ledger sum",
                     created_by="reconcile-job",

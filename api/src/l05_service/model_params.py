@@ -20,9 +20,20 @@ INPUT_TYPES = ("text", "image", "audio", "video", "file")
 OUTPUT_TYPES = ("text", "image", "audio", "embedding")
 MAX_TOKEN_LIMIT = 100_000_000
 
-#: Full reasoning effort level set (ticket 18); "default" means 不传 — the
-#: playground relay drops it instead of forwarding (routers_ops.py).
-REASONING_LEVELS = ("default", "none", "low", "medium", "high", "xhigh", "max")
+#: Full reasoning effort level set (ticket 18, extended W9 with "minimal" to
+#: mirror models.dev effort values); "default" means 不传 — the playground relay
+#: drops it instead of forwarding (routers_ops.py). Keep this tuple in the
+#: canonical low->high order: models.dev reasoning_options are normalized to it.
+REASONING_LEVELS = (
+    "default",
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+)
 
 DEFAULT_PARAMETERS: dict[str, Any] = {
     "max_input_tokens": 0,

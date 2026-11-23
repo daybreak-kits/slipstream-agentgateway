@@ -224,7 +224,7 @@ class LedgerEntry:
     kind: str
     delta_micro: int
     balance_after_micro: int
-    currency: str = "CNY"
+    currency: str = "USD"
     ref_type: str = ""
     ref_id: str | None = None
     note: str = ""

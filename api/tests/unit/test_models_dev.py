@@ -24,7 +24,8 @@ from l04_repo.orm import FxSnapshotORM, UpstreamModelORM, UpstreamORM
 from l05_service import models_dev
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "models_dev_api.json"
-USD_RATE_MICRO = 7_200_000  # micro-CNY per 1 USD used across the assertions
+#: Seeded so the tests can prove W9 cost adoption ignores fx and stores USD.
+USD_RATE_MICRO = 7_200_000  # micro-CNY per 1 USD, deliberately NOT applied
 
 
 @pytest.fixture()
@@ -75,13 +76,31 @@ def _seed_model(factory, *, name: str, parameters_json: str = "", **costs) -> st
 # --------------------------------------------------------------------- fetch
 
 
-def test_fetch_parses_and_enforces_size_cap(monkeypatch):
-    monkeypatch.setattr(models_dev, "FETCH_BACKOFF_SECONDS", 0)
+def test_fetch_is_one_request_with_60s_timeout_and_no_retries():
+    """W9: one GET, hard 60 s timeout, ZERO automatic retries (user clicks again)."""
+    assert models_dev.FETCH_TIMEOUT_SECONDS == 60.0
+    assert not hasattr(models_dev, "FETCH_RETRIES")
+    assert not hasattr(models_dev, "FETCH_BACKOFF_SECONDS")
+
     payload = {"provider": {"models": {}}}
-    ok = httpx.MockTransport(
-        lambda request: httpx.Response(200, content=json.dumps(payload).encode())
-    )
-    assert models_dev.fetch_snapshot(transport=ok) == payload
+    calls = {"n": 0}
+
+    def _ok(request):
+        calls["n"] += 1
+        return httpx.Response(200, content=json.dumps(payload).encode())
+
+    assert models_dev.fetch_snapshot(transport=httpx.MockTransport(_ok)) == payload
+    assert calls["n"] == 1  # exactly one HTTP request for a success
+
+    failures = {"n": 0}
+
+    def _fail(request):
+        failures["n"] += 1
+        return httpx.Response(503)
+
+    with pytest.raises(models_dev.ModelsDevError):
+        models_dev.fetch_snapshot(transport=httpx.MockTransport(_fail))
+    assert failures["n"] == 1  # a failure is surfaced immediately, never retried
 
     oversize = httpx.MockTransport(
         lambda request: httpx.Response(
@@ -94,10 +113,6 @@ def test_fetch_parses_and_enforces_size_cap(monkeypatch):
     bad_json = httpx.MockTransport(lambda request: httpx.Response(200, content=b"{nope"))
     with pytest.raises(models_dev.ModelsDevError):
         models_dev.fetch_snapshot(transport=bad_json)
-
-    server_error = httpx.MockTransport(lambda request: httpx.Response(503))
-    with pytest.raises(models_dev.ModelsDevError):
-        models_dev.fetch_snapshot(transport=server_error)
 
 
 # ------------------------------------------------------------------- refresh
@@ -144,6 +159,59 @@ def test_match_exact_first_then_unique_case_insensitive(session_factory):
         assert not matched
 
 
+def test_match_vendor_prefixed_name_against_bare_models_dev_id(session_factory):
+    """W9: upstream names may be vendor-prefixed; compare the BASENAME.
+
+    minimaxai/minimax-m3.1-flash must match models.dev's bare
+    minimax-m3.1-flash, and the vendor prefix is also a provider clue that
+    prefers the minimax row over the nvidia mirror.
+    """
+    payload = {
+        "nvidia": {
+            "models": {
+                "minimax-m3.1-flash": {
+                    "limit": {"context": 800_000, "output": 64_000},
+                    "cost": {"input": 0.25, "output": 0.9},
+                }
+            }
+        },
+        "minimax": {
+            "models": {
+                "minimax-m3.1-flash": {
+                    "limit": {"context": 1_000_000, "output": 131_072},
+                    "modalities": {"input": ["text", "image"], "output": ["text"]},
+                    "cost": {"input": 0.15, "output": 0.6},
+                    "tool_call": True,
+                }
+            }
+        },
+    }
+    model_id = _seed_model(
+        factory=session_factory, name="minimaxai/minimax-m3.1-flash"
+    )
+    with session_factory() as session:
+        models_dev.refresh_snapshot(session, payload, fetched_at_ms=1)
+        session.commit()
+
+        matched, rows = models_dev.match_snapshots(
+            session, "minimaxai/minimax-m3.1-flash"
+        )
+        assert matched
+        assert {row.provider for row in rows} == {"minimax", "nvidia"}
+
+        row = session.get(UpstreamModelORM, model_id)
+        result = models_dev.adopt_model(session, row, fetch=lambda: payload)
+        session.commit()
+        assert result["matched"] is True
+        assert result["provider"] == "minimax"  # provider clue from the prefix
+        params = json.loads(row.parameters_json)
+        assert params["max_input_tokens"] == 1_000_000  # max of the duplicate group
+        assert params["max_output_tokens"] == 131_072
+        # The matching provider's own quote wins over the pricier mirror.
+        assert row.cost_input_per_1m == Decimal("0.15")
+        assert row.cost_output_per_1m == Decimal("0.6")
+
+
 # -------------------------------------------------------------------- adopt
 
 
@@ -170,9 +238,10 @@ def test_adopt_fills_only_blank_keys(session_factory):
         assert params["max_output_tokens"] == 131_072
         assert params["tool_call"] is True
         assert params["input_types"] == ["text"]
-        # USD 0.6 x 7.2 = CNY 4.32 per 1M
-        assert row.cost_input_per_1m == Decimal("4.32")
-        assert row.cost_output_per_1m == Decimal("15.84")
+        # W9: USD costs are stored AS USD (no fx_snapshots conversion); the
+        # fixture row also carries a USD fx rate, which must be ignored.
+        assert row.cost_input_per_1m == Decimal("0.6")
+        assert row.cost_output_per_1m == Decimal("2.2")
         assert row.params_source == "models.dev"
 
 
@@ -202,24 +271,30 @@ def test_adopt_never_overwrites_manual_values(session_factory):
         assert result["results"]["parameters.max_input_tokens"] == models_dev.SKIPPED_MANUAL
         assert result["results"]["cost_input_per_1m"] == models_dev.SKIPPED_MANUAL
         assert result["results"]["cost_output_per_1m"] == models_dev.FILLED
-        assert row.cost_output_per_1m == Decimal("15.84")
+        assert row.cost_output_per_1m == Decimal("2.2")  # USD, unconverted
         # Nothing became models.dev that the user had typed; at least one param
         # filled flips the badge, so it IS models.dev here but limits stayed.
         assert row.params_source == "models.dev"
 
 
-def test_adopt_skips_cost_without_fx_rate(session_factory):
+def test_adopt_stores_usd_cost_without_fx_conversion(session_factory):
+    """W9: the cost book is USD, so models.dev prices are stored as-is.
+
+    No fx_snapshots rate is needed (and none may be applied): the old CNY
+    conversion would have produced 3 x 7.2 = 21.6 here.
+    """
     model_id = _seed_model(factory=session_factory, name="claude-sonnet-4-5")
-    engine_session = session_factory()
-    with engine_session as session:
+    with session_factory() as session:
         session.query(FxSnapshotORM).delete()
         session.commit()
         row = session.get(UpstreamModelORM, model_id)
         result = models_dev.adopt_model(session, row, fetch=_fixture_payload)
         session.commit()
-        assert result["results"]["cost_input_per_1m"] == models_dev.SKIPPED_NO_FX
-        assert result["results"]["cost_output_per_1m"] == models_dev.SKIPPED_NO_FX
-        assert row.cost_input_per_1m is None  # unpriced stays unpriced, never 0
+        assert result["results"]["cost_input_per_1m"] == models_dev.FILLED
+        assert result["results"]["cost_output_per_1m"] == models_dev.FILLED
+        assert row.cost_input_per_1m == Decimal("3")  # USD, unconverted
+        assert row.cost_output_per_1m == Decimal("15")
+        assert models_dev.SKIPPED_NO_FX not in result["results"].values()
         assert json.loads(row.parameters_json)["max_input_tokens"] == 200_000
         assert row.params_source == "models.dev"
 
@@ -270,3 +345,155 @@ def test_adopt_all_reports_summary(session_factory):
     assert summary["no_match"] == 1
     assert summary["filled_models"] == 1
     assert summary["filled_keys"] == 8
+
+
+# ------------------------------------------------------- duplicate model rows
+
+
+def test_duplicate_group_merges_limits_modalities_and_reasoning(session_factory):
+    """W9: many providers publish the same model id; merge the whole group.
+
+    Limits take the group maximum (including the flat max_* spelling some
+    mirrors use), modalities and effort levels take the union, capability flags
+    OR. reasoning_options entries of type toggle/budget_tokens name no discrete
+    level and must not fabricate one.
+    """
+    payload = {
+        "aaa-provider": {
+            "models": {
+                "merged-model": {
+                    "limit": {"context": 100_000, "output": 8_000},
+                    "modalities": {
+                        "input": ["text", "image"],
+                        "output": ["text"],
+                    },
+                    "reasoning": True,
+                    "reasoning_options": [
+                        {"type": "effort", "values": ["low", "medium"]},
+                        {"type": "toggle"},
+                    ],
+                    "tool_call": True,
+                    "cost": {"input": 1.0, "output": 2.0},
+                }
+            }
+        },
+        "zzz-provider": {
+            "models": {
+                "merged-model": {
+                    "limit": {"context": 200_000, "output": 4_000},
+                    "max_input_tokens": 300_000,  # flat mirror spelling
+                    "modalities": {
+                        "input": ["text", "audio"],
+                        "output": ["text", "embedding"],
+                    },
+                    "reasoning": False,
+                    "reasoning_options": [
+                        {"type": "effort", "values": ["minimal", "high"]},
+                        {"type": "budget_tokens"},
+                    ],
+                    "attachment": True,
+                    "cost": {"input": 0.5, "output": 3.0},
+                }
+            }
+        },
+    }
+    model_id = _seed_model(factory=session_factory, name="merged-model")
+    with session_factory() as session:
+        row = session.get(UpstreamModelORM, model_id)
+        result = models_dev.adopt_model(session, row, fetch=lambda: payload)
+        session.commit()
+        assert result["matched"] is True
+        params = json.loads(row.parameters_json)
+        assert params["max_input_tokens"] == 300_000  # max, not first/last
+        assert params["max_output_tokens"] == 8_000  # max(8000, 4000)
+        assert set(params["input_types"]) == {"text", "image", "audio"}
+        assert set(params["output_types"]) == {"text", "embedding"}
+        assert params["tool_call"] is True and params["attachment"] is True
+        assert params["reasoning"] is True  # OR of the flags
+        assert params["reasoning_levels"] == [
+            "default",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+        ]
+        assert params["default_reasoning_level"] == "default"
+        assert (
+            result["results"]["parameters.reasoning_levels"] == models_dev.FILLED
+        )
+        # No provider clue matches -> conservative max USD fallback, no average.
+        assert row.cost_input_per_1m == Decimal("1.0")
+        assert row.cost_output_per_1m == Decimal("3.0")
+
+
+def test_duplicate_group_prefers_provider_price_then_max_fallback(session_factory):
+    """W9: duplicate prices -> provider-matching row wins; else group maximum.
+
+    An upstream named nvidia must take models.dev's nvidia quote (0.8) instead
+    of the pricier openrouter mirror (3.0); an upstream with no provider match
+    falls back to the conservative group maximum, never an average.
+    """
+    preferred_payload = {
+        "openrouter": {
+            "models": {
+                "preferred-model": {
+                    "limit": {"context": 100_000, "output": 8_000},
+                    "cost": {"input": 3.0, "output": 9.0},
+                }
+            }
+        },
+        "nvidia": {
+            "models": {
+                "preferred-model": {
+                    "limit": {"context": 200_000, "output": 16_000},
+                    "cost": {"input": 0.8, "output": 4.0},
+                }
+            }
+        },
+    }
+    fallback_payload = {
+        "openrouter": {
+            "models": {
+                "fallback-model": {
+                    "limit": {"context": 100_000},
+                    "cost": {"input": 1.0, "output": 9.0},
+                }
+            }
+        },
+        "nvidia": {
+            "models": {
+                "fallback-model": {
+                    "limit": {"context": 200_000},
+                    "cost": {"input": 2.0, "output": 3.0},
+                }
+            }
+        },
+    }
+    preferred_id = _seed_model(factory=session_factory, name="preferred-model")
+    fallback_id = _seed_model(factory=session_factory, name="fallback-model")
+    with session_factory() as session:
+        upstream = session.get(UpstreamORM, "u1")
+        upstream.name = "nvidia"
+        session.commit()
+
+        preferred = session.get(UpstreamModelORM, preferred_id)
+        preferred_result = models_dev.adopt_model(
+            session, preferred, fetch=lambda: preferred_payload
+        )
+        session.commit()
+        assert preferred_result["provider"] == "nvidia"
+        assert preferred.cost_input_per_1m == Decimal("0.8")
+        assert preferred.cost_output_per_1m == Decimal("4.0")
+        # Parameter merge is independent of the provider preference.
+        assert json.loads(preferred.parameters_json)["max_input_tokens"] == 200_000
+
+        upstream.name = "acme-proxy"  # no models.dev provider matches this
+        session.commit()
+        fallback = session.get(UpstreamModelORM, fallback_id)
+        fallback_result = models_dev.adopt_model(
+            session, fallback, fetch=lambda: fallback_payload
+        )
+        session.commit()
+        assert fallback_result["matched"] is True
+        assert fallback.cost_input_per_1m == Decimal("2.0")  # max(1.0, 2.0)
+        assert fallback.cost_output_per_1m == Decimal("9.0")  # max(9.0, 3.0)

@@ -61,15 +61,17 @@ describe("上游域 HTTP adapter 的路径与载荷", () => {
     const signal = new AbortController().signal;
     await ops.discoverModels("up_01", { api_style: "openai_responses" });
     await ops.importModels("up_01", { names: ["glm-5.3"], model_type: "chat" });
-    await ops.probeModels("up_01", { model_ids: ["um_01"], key_id: "uk_01" }, { signal, timeoutMs: 25_000 });
+    await ops.probeModels("up_01", { model_ids: ["um_01"] }, { signal, timeoutMs: 25_000 });
+    await ops.listModelTestResults("up_01");
     expect(calls[0]).toMatchObject({ method: "POST", path: "/admin/upstreams/up_01/discover-models", body: { api_style: "openai_responses" } });
     expect(calls[1]).toMatchObject({ method: "POST", path: "/admin/upstreams/up_01/import-models" });
     expect(calls[2]).toMatchObject({
       method: "POST",
       path: "/admin/upstreams/up_01/models/probe",
-      body: { model_ids: ["um_01"], key_id: "uk_01" },
+      body: { model_ids: ["um_01"] },
       options: { signal, timeoutMs: 25_000 },
     });
+    expect(calls[3]).toMatchObject({ method: "GET", path: "/admin/upstreams/up_01/models/test-results" });
   });
 
   it("密钥组操作路径", async () => {

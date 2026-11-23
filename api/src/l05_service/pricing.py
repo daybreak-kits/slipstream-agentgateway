@@ -206,7 +206,7 @@ def public_model_price(
         "public_model_id": model.id,
         "name": model.name,
         "routing_mode": context,
-        "currency": "CNY",
+        "currency": "USD",
         "price_input_per_1m": decimal_text(price_input),
         "price_output_per_1m": decimal_text(price_output),
         "priced_members": priced_members,

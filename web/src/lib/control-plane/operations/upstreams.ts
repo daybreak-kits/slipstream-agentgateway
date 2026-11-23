@@ -112,6 +112,25 @@ export interface ModelProbeResponse {
   items: ModelProbeItem[];
 }
 
+/** 日志回读的最近一次模型测试结果（GET /admin/upstreams/{id}/models/test-results）。 */
+export interface ModelTestResultItem {
+  model_id: string;
+  model: string;
+  public_model: string;
+  ok: boolean;
+  status: number;
+  latency_ms: number;
+  started_at_ms: number;
+  input_tokens: number;
+  output_tokens: number;
+  error: string;
+}
+
+export interface ModelTestResultsResponse {
+  upstream_id: string;
+  items: ModelTestResultItem[];
+}
+
 /** 上游模型探测的调用选项：后端逐模型 20s，控制面留余量（25s 是页面口径）。 */
 export interface ProbeModelsOptions extends OperationOptions {
   timeoutMs?: number;
@@ -142,6 +161,8 @@ export interface UpstreamsOperations {
   testKeys(id: string, input?: UpstreamKeyTestIn): Promise<KeyTestResult>;
   /** 串行模型探测：一次一批模型 id，页面负责逐模型串行与中止。 */
   probeModels(id: string, input: UpstreamModelProbeIn, options?: ProbeModelsOptions): Promise<ModelProbeResponse>;
+  /** 最近一次模型测试结果（来自数据面用量日志，刷新后仍在）。 */
+  listModelTestResults(id: string, options?: OperationOptions): Promise<ModelTestResultsResponse>;
   /** 请求/响应改写规则。 */
   getTransforms(id: string): Promise<UpstreamTransformsResponse>;
   saveTransforms(id: string, value: UpstreamTransforms): Promise<{ saved: boolean }>;

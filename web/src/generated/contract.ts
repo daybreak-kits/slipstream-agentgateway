@@ -696,7 +696,6 @@ export interface UpstreamModelPatch {
 export interface UpstreamModelProbeIn {
   model_id?: string | null;
   model_ids?: string[];
-  key_id?: string | null;
 }
 
 export interface UpstreamPatch {

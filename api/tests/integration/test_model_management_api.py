@@ -718,7 +718,10 @@ def test_upstream_cooldown_leaves_data_plane_until_expiry(
     assert patched.status_code == 200
     with factory() as session:
         ir, _keys = build_render_plan(session, revision="rev_t10_cool")
-    assert {model.name for model in ir.public_models} == {"healthy-pm"}
+    assert {model.name for model in ir.public_models} == {
+        "healthy-pm",
+        "upstream-example/healthy-model",
+    }
 
     # The deadline passes: the managed rule is the authority, so every read
     # path self-heals from the rule table without a scheduler.
@@ -740,7 +743,11 @@ def test_upstream_cooldown_leaves_data_plane_until_expiry(
     assert listed["availability"]["state"] == "normal"
     with factory() as session:
         ir, _keys = build_render_plan(session, revision="rev_t10_ok")
-    assert {model.name for model in ir.public_models} == {"flagship", "healthy-pm"}
+    assert {model.name for model in ir.public_models} == {
+        "flagship",
+        "healthy-pm",
+        "upstream-example/healthy-model",
+    }
 
 
 def test_batch_availability_and_delete_partial_success(client, engine_and_sessionmaker):

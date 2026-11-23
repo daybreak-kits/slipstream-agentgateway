@@ -1,10 +1,10 @@
-# 交付说明（截至七期（W7），2026-11-22）
+# 交付说明（截至九期（W9），2026-11-23）
 
 本仓为 Slipstream：**agentgateway 当数据面黑盒 + 自建控制面/管理台**（B+ 架构，见 docs/PLAN.md 与 docs/DECISIONS.md）。
 
 状态：二期 ticket 01 至 22 **全部合入** `phase2/integration`；三期（W1 至 W7）、四期（多密钥平权/路由链/看板八卡等，M1 至 M4）与五期（W5 ticket 01 至 16）已合入本地 `w5/integration`；六期（W6 ticket 01 至 21）已合入本地 `w6/integration`；七期（W7 ticket 01 至 14）已合入本地 `w7/integration`（均未 push），七期门禁与验收基线见 §9。历史逐项变更见 `docs/CHANGELOG-phase2.md`、`docs/CHANGELOG-phase4.md`；五期变更见 §7 与 `docs/CHANGELOG-phase4.md`「五期（W5）变更记录」；六期变更见 §8；七期变更见 §9（取代关系：W7 spec 收口了 W4/W5/W6 计划中与「厂商域、用户两 Tab、成员 chip 流、状态列、登录渐变低对比」相关的旧条目，历史计划文档保留原样）。
 
-> 阅读提示：§1 已按五期现状更新（OpenAPI/pytest/路由/包体等基线数字）；§3 是二期验收证据原样保留，五期复跑证据见 §7；§6 为三期历史交付段。
+> 阅读提示：§1 已按五期现状更新（OpenAPI/pytest/路由/包体等基线数字）；§3 是二期验收证据原样保留，五期复跑证据见 §7；§6 为三期历史交付段；**§10 为九期（W9）最新交付段**，W5 至 W7 的历史条目按当时口径保留。
 
 ## 1. 交付范围
 
@@ -146,7 +146,7 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 - **01 看板分流**：分流桑基图支持图例隐藏阶段，隐藏由后端 `collapse` 按完整五段路径投影重算（守恒、至少 2 段），前端删除旧 splice。
 - **02 可用性**：上游模型行内单按钮「冷却」双模式（单次/周期）；单次与周期互斥 409（ADR-027）；解除只删一次性规则、周期窗口只跳过当前窗口；公开模型无冷却（写操作 422）；写后立即下发。
 - **03/04 日志**：模型列两行（公开模型 / 请求模型 → 上游模型），新增「N 次尝试」popover 与尝试链（ADR-028）；费用两行（计费/成本）；日志行新增 `requested_model / attempts_count / has_attempts / last_failure_status / last_failure_error_type / last_failure_error_message`（服务层只回事实字段，错误摘要由前端唯一拼装）。
-- **05 模型探测**：上游模型逐模型主动探测（串行、单模型 20s、不落库）；与「模型拉取」`discover-models` 术语分工。
+- **05 模型探测**：五期口径为上游模型逐模型主动探测（串行、单模型 20s、不落库）；W9 已改为经数据面的模型测试（见 §10）；与「模型拉取」`discover-models` 术语分工。
 - **06 表格**：操作列 `sticky right-0` 冻结、头身对齐一致、行节奏统一（`lib/table-columns.ts` 单一来源）。
 - **08 数字口径**：计数/词元/TPM/尝试次数千分位整数、RPM 两位、百分比一位、金额两位（`lib/format.ts` 单一来源）。
 - **09 语义色/脏标记/toast**：语义色五档 token + `ACTION_TONES`；`dirty-fields` 原语与字段级脏标记；toast 统一 3s/右上 80px/最多 3 条。
@@ -166,7 +166,7 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 
 ### 7.3 新端点 / 新字段
 
-- `POST /admin/upstreams/{id}/models/probe`：模型探测（权限 `upstream_models:write`；串行 20s；不落库）。
+- `POST /admin/upstreams/{id}/models/probe`：五期模型探测（权限 `upstream_models:write`；串行 20s；不落库）；W9 语义见 §10。
 - `GET /admin/logs/{event_id}/attempts`：请求尝试链（升序 attempt；空记录 200 空列表）。
 - `GET /admin/reports/flow?collapse=...`：分流隐藏阶段后端投影（422 未知阶段/不足 2 段）。
 - 日志列表行：`requested_model`、`attempts_count`、`has_attempts`、`last_failure_status`、`last_failure_error_type`、`last_failure_error_message`（动态 dict，不进入 `contract.ts`，由 pytest 与文档字段表约束；摘要由前端 `components/logs/error-summary.ts` 拼装）。
@@ -187,7 +187,7 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 4. **分流隐藏至少保留 2 段**：最多隐藏 3 段，隐藏后不足 2 段返回 422；mock 不重算投影（浏览器冒烟走真实 API）。
 5. **`request_logs` 仍 1 请求 1 行**：尝试链单独存 `request_attempts`，两者按 `trace_id` join；不把尝试写进日志行。
 6. **公开模型无冷却**：公开模型冷却写操作 422；上游模型冷却互斥生效期间另一形状创建/改期 409，UI 以 toast + 阻塞规则提示。
-7. **模型探测不落库**：结果只用于本次响应，不写 `upstream_probes`/密钥测试/审计；`api_style` 仍为 `auto` 时 422；串行探测大批模型耗时线性增长（单模型 20s 上限）。
+7. **五期模型探测不落库（W9 已改）**：五期结果只用于本次响应，不写 `upstream_probes`/密钥测试/审计；W9 起改为经数据面的模型测试，结果从用量日志回读（见 §10）。
 
 ## 8. 六期（W6）交付段（2026-11-21 收口）
 
@@ -305,3 +305,37 @@ npm run build          # 产物 web/dist；控制面启动时自动挂载（先�
 3. **浏览器验收脚本全部要求隔离端口**：W7 十脚本各自默认 3885 至 3907（双端口），`w6_acceptance` 3779、`responsive_matrix` 3777；脚本显式拒绝 3700/3600，数据库/ag-config 落在各脚本证据目录，跑完即弃。
 4. **登录渐变以截图取样为准**（DESIGN-AUDIT §20）：浅色最大 RGB 差 28、深色 38，均在「可见且克制」区间；不以 CSS 类存在为准。
 5. 弹框键盘、脏字段零位移、HoverInfo 三路触发均以浏览器脚本断言为准（w7_dialog_keyboard / w7_dirty_field / w7_hover_info），静态门禁只做接线与源码契约补充。
+
+
+## 10. 九期（W9）交付段（2026-11-23）
+
+九期主题：**模型测试走数据面、日志为结果事实源、自动公开模型、USD 默认与表格/公开模型编辑修复**。W8 的 7 张票（端口/时间选择器/表格稳定性/key 测试/transform 编辑器/模型 dirty/价目 JSON）与 W9 本轮逻辑修复一起构成当前基线。
+
+### 10.1 W9 变更
+
+- **自动公开模型**：创建/导入上游模型时自动生成 `<上游名>/<模型名>` 直调公开模型（`auto_generated=true`），客户不必先手建公开模型；手建同名行不被劫持（冲突 422）；上游模型删除时只清理自动行；上游模型改名时同步自动公开名。
+- **模型测试走数据面**：`POST /admin/upstreams/{id}/models/probe` 不再由管理面直连上游；改用自动公开名 + 内置“测试专用”凭据请求 agentgateway，非流式 `hi`、最多 16 输出 token、单模型 60s。请求经 AG 鉴权/路由/故障转移并写用量日志，token 可在使用日志看到。
+- **日志回读**：`GET /admin/upstreams/{id}/models/test-results` 从 `gateway_usage_events` 取测试专用凭据下每个模型最近一条，返回 ok/status/latency/started_at_ms/input_tokens/output_tokens/error；无日志时省略该模型。
+- **Playground 错误**：先在构造 StreamingResponse 前打开数据面请求；上游 401/404/503 等返回控制面 503 `DATA_PLANE_UNAVAILABLE` + `details.upstream_status`，不再伪装为 200 空 SSE。
+- **USD 默认**：产品默认 `report_currency/base_currency=USD`；models.dev 价格是 USD/1M，W9 起直接写 USD 进价账本，不再经 fx 换算；`skipped-no-fx` 只保留历史契约状态。CNY 仍可由运营设置切回。
+- **管理台修复**：表格默认 auto 布局 + 操作列 nowrap/sticky（不再为每表手估固定 px）；公开模型列表常显「新建公开模型」、列名「公开模型」、成员数量图标+popover；编辑页三策略卡等高且中文、成员差异 Badge 靠标题、底部保存栏；密钥「未测试」垂直居中、#N 右对齐、批量测试不跳列；时间选择器用“至”并修正弹层方向；transform 操作文案「删除字段/复制字段」。
+
+### 10.2 契约与数据
+
+- `public_models.auto_generated`（bool，默认 false）与 `GET /admin/public-models` 出参同名字段。
+- `GET /admin/upstreams/{id}/models/test-results` 新端点；`POST .../models/probe` 出参增加 `public_model/pulled_events` 等。
+- `model_test` 使用系统隐藏的“测试专用”用户/密钥；Playground 仍用独立 playground 身份。两者都不在前端/用户列表暴露明文。
+- 测试结果以 `gateway_usage_events` 为唯一事实源，不建私有 probe 表；日志拉取延迟时结果可能暂时为空。
+
+### 10.3 已知边界（如实记录）
+
+1. 模型测试是非流式最小请求（16 token、60s），只回答“能不能调通”，不是吞吐/长上下文/流式能力测试。
+2. 自动公开名依赖上游名与模型名；上游名当前 PATCH 接口不接受改名，模型改名会同步自动公开名；历史手建同名冲突会 422 而不是静默覆盖。
+3. 测试结果从 AG 用量日志回读，AG 日志落库与 `pull_once` 之间有短暂延迟；刚点完测试立刻刷新可能少一行，再刷新即可。
+4. 模型测试会真实消耗上游 token，操作入口需要让操作者知情；失败请求也计入使用日志（token 为 0）。
+
+### 10.4 门禁（2026-11-23 复跑）
+
+- 后端：__PYTEST__；`ruff check src tests` EXIT 0。
+- 前端：`npm run typecheck`、`npm run lint`、`npm test`、`npm run build` 均 EXIT 0；`check:bundle` PASS 首包 gzip 约 204 KB；`check-ui-foundation` 146/146；`check-semantic-dirty` 48/48；`check-dashboard-date-guard` 8/8；`check-flow-mock` PASS；`terminology_audit` PASS（error 0）。
+- 真实 E2E（本地 mock 上游 + 真实 agentgateway 1.7）：自动公开模型、模型测试 200/401、test-results 日志回读、Playground 401→503 与 200 SSE 全部通过（证据见 api/.scratch/w9-e2e，提交前清理）。

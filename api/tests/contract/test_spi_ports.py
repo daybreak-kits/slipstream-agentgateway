@@ -150,7 +150,10 @@ def test_fake_driver_serves_every_business_port() -> None:
 
     sample = adapter.replay_transform_sample(TransformsSpec())
     assert isinstance(sample, TransformSampleResult)
-    assert sample.before == {"request": {"headers": {}, "body": None}, "response": {"headers": {}, "body": None}}
+    assert sample.before == {
+        "request": {"headers": {}, "body": None},
+        "response": {"headers": {}, "body": None},
+    }
     assert sample.diff == ()
 
     contract = adapter.client_contract()

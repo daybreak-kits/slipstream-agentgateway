@@ -629,7 +629,7 @@ check("表格操作列：sticky 列默认右对齐（头身同侧）、单元格
   expect(th.includes("pr-2"), "末列表头必须收窄右 padding（贴边节奏）");
   expect(td.includes("text-right"), "操作列单元格必须右对齐");
   expect(td.includes("pr-2"), "末列单元格必须收窄右 padding（最后一个按钮贴近右边缘）");
-  expect(td.includes("flex justify-end"), "操作列单元格内容必须 flex justify-end 靠右");
+  expect(td.includes("flex flex-nowrap justify-end"), "操作列单元格内容必须 flex flex-nowrap justify-end 靠右（W9：单行不换行）");
   expect(
     td.includes("bg-[var(--row-bg,var(--surface))]"),
     "冻结列单元格背景必须走行背景变量 --row-bg（行色时无白底断层），默认回落 --surface",
@@ -662,7 +662,7 @@ check("ModelsTable：操作列同样右对齐贴边（justify-end + pr-2 + 默�
   expect(th.includes("pr-2"), "ModelsTable 末列表头必须收窄右 padding");
   expect(td.includes("text-right"), "ModelsTable 操作列单元格必须右对齐");
   expect(td.includes("pr-2"), "ModelsTable 末列单元格必须收窄右 padding");
-  expect(td.includes("flex justify-end"), "ModelsTable 操作列内容必须 justify-end 靠右");
+  expect(td.includes("flex flex-nowrap justify-end"), "ModelsTable 操作列内容必须 flex flex-nowrap justify-end 靠右（W9：单行不换行）");
   expect(
     td.includes("bg-[var(--row-bg,var(--surface))]"),
     "ModelsTable 冻结列单元格背景必须走行背景变量",
@@ -821,9 +821,8 @@ check("W8 t03：ModelsTable 固定布局——列宽与操作列在两个状态�
   expect(idle.includes("min-w-14"), "固定布局操作列的按钮必须有固定最小宽度");
 });
 
-check("W8 t03：密钥表固定布局——未测试/有结果行高一致，操作列固定且按钮不塌缩", async () => {
+check("W9 密钥表 auto 布局——未测试/有结果行高一致，操作列 max-content + sticky right 且按钮不塌缩", async () => {
   const { KeysTable } = await load("/src/components/upstreams/keys-panel.tsx");
-  const { actionColumnWidth } = await load("/src/lib/table-columns.ts");
   const nowMs = Date.parse("2026-11-22T12:00:00");
   const rowsFor = (lastTest) => [
     {
@@ -850,44 +849,48 @@ check("W8 t03：密钥表固定布局——未测试/有结果行高一致，操
     );
   const idle = renderKeys(null);
   const tested = renderKeys({ ok: true, status_code: 200, latency_ms: 240, error: "" });
-  expect(/<table[^>]*class="[^"]*table-fixed/.test(idle), "密钥表必须使用 table-fixed 固定布局");
-  const idleWidths = headerWidths(idle);
-  const testedWidths = headerWidths(tested);
-  expect(idleWidths.length >= 6, "密钥表必须为各列声明固定宽度，实际 " + JSON.stringify(idleWidths));
-  expect(
-    idleWidths.join("|") === testedWidths.join("|"),
-    "测试结果出现不得改变密钥表列宽：" + idleWidths.join("|") + " vs " + testedWidths.join("|"),
-  );
+  // W9：全部数据表改 auto 布局——列宽随内容自适应，操作列用 w-[1%] whitespace-nowrap 收缩成
+  // max-content 并 sticky right。固定布局（table-fixed）与 header 内联宽度都不再使用。
+  expect(!/<table[^>]*class="[^"]*table-fixed/.test(idle), "密钥表已改 auto 布局，不得再渲染 table-fixed");
+  expect(!/<th[^>]*style="width:/.test(idle), "auto 布局密钥表不得再把固定宽度写进表头（列宽随内容自适应）");
   const idleSlot = resultSlotClass(idle);
   expect(idleSlot.includes("grid-rows-[1.375rem_1.125rem]"), "密钥表结果列必须是固定两行槽位，实际 " + idleSlot);
   expect(idleSlot === resultSlotClass(tested), "未测试/有结果两个状态的结果槽位 class 必须一致");
   const actionTh = lastHeader(idle);
   expect(actionTh.body.includes("操作"), "密钥表操作列必须是最后一列");
   expect(actionTh.attrs.includes("sticky right-0"), "密钥表操作列必须 sticky right-0");
+  expect(actionTh.attrs.includes("w-[1%]"), "W9：操作列必须带 w-[1%]（auto 布局下收缩到内容 max-content）");
+  expect(actionTh.attrs.includes("whitespace-nowrap"), "W9：操作列不得换行（max-content 收缩）");
+  expect(!/style="width:/.test(actionTh.attrs), "W9：操作列不再写固定宽度，实际 " + actionTh.attrs);
   expect(
-    actionTh.attrs.includes('style="width:' + actionColumnWidth(3, 3.5) + '"'),
-    "密钥表操作列必须有固定宽度，实际 " + actionTh.attrs,
+    idle.includes("flex flex-nowrap justify-end") && idle.includes("min-w-14"),
+    "密钥表操作列按钮必须有固定最小宽度且单行靠右（内容变化不抖）",
   );
-  expect(idle.includes("min-w-14"), "密钥表操作列按钮必须有固定最小宽度");
 });
 
-check("W8 t03：密钥/路由/模型表接线固定布局原语（页面行为不变）", () => {
+check("W9：密钥/路由/模型表接线 auto 布局原语（放弃固定宽度估算，改内容自适应）", () => {
+  // W9：页面不再传 layout="fixed"、不再用 actionColumnWidth 估算操作列；操作列统一
+  // meta.sticky="right"（DataTable/ModelsTable/PriceTable 自动追加 w-[1%] + whitespace-nowrap）。
   includesAll(
     read("src/pages/upstreams.tsx"),
-    ['layout="fixed"', "actionColumnWidth(", "ResultCell", "width:"],
+    ['sticky: "right"', "ResultCell"],
     "上游路由表",
   );
-  includesAll(
-    read("src/components/upstreams/models-panel.tsx"),
-    ['layout="fixed"', "actionColumnWidth(", "ResultCell", "width:"],
-    "路由与模型表",
-  );
-  includesAll(read("src/pages/models.tsx"), ['layout="fixed"', "actionColumnWidth(", "width:"], "模型表");
+  expect(!read("src/pages/upstreams.tsx").includes("actionColumnWidth("), "上游路由表不得再用 actionColumnWidth 固定操作列");
+  const modelsPanel = read("src/components/upstreams/models-panel.tsx");
+  includesAll(modelsPanel, ['sticky: "right"', "ResultCell"], "路由与模型表");
+  expect(!modelsPanel.includes("actionColumnWidth("), "路由与模型表不得再用 actionColumnWidth");
+  const models = read("src/pages/models.tsx");
+  includesAll(models, ['sticky: "right"'], "模型表");
+  expect(!models.includes("actionColumnWidth("), "模型表不得再用 actionColumnWidth");
+  expect(!models.includes('layout="fixed"'), "模型表不得再传 layout=fixed（W9 全站 auto）");
   includesAll(
     read("src/components/upstreams/keys-panel.tsx"),
-    ["<Table fixed", "STABLE_ACTION_CELL_WRAPPER_CLASS", "ResultCell", "actionColumnWidth("],
+    ["<Table>", "ACTION_COLUMN_SIZING_CLASS", "STABLE_ACTION_CELL_WRAPPER_CLASS", "ResultCell"],
     "密钥表",
   );
+  expect(!read("src/components/upstreams/keys-panel.tsx").includes("<Table fixed"), "密钥表必须走 auto 布局（不得再 fixed）");
+  expect(!read("src/components/upstreams/keys-panel.tsx").includes("actionColumnWidth("), "密钥表不得再用 actionColumnWidth");
 });
 
 // ---------- 4.6.1 价目表格 / JSON 双视图与常驻编辑（W8 t07） ----------
@@ -896,7 +899,6 @@ check("W8 t07：价目页提供表格/JSON 双视图与常驻编辑入口（源�
   includesAll(
     upstream,
     [
-      'layout="fixed"',
       "viewToggle={viewToggle}",
       "jsonView={",
       "<PriceJsonView",
@@ -905,6 +907,7 @@ check("W8 t07：价目页提供表格/JSON 双视图与常驻编辑入口（源�
     ],
     "价目页 JSON 视图",
   );
+  expect(!upstream.includes('layout="fixed"'), "W9：价目表不再传 layout=fixed（改 auto 列宽）");
   expect(
     !/className="text-2xs text-faint">-</.test(upstream),
     "操作列不得再用「-」空占位：编辑入口必须常驻",
@@ -1246,7 +1249,7 @@ check("PriceTable：sticky 操作列单元格内容由表格统一 flex justify-
     }),
   );
   const td = html.slice(html.lastIndexOf("<td", html.indexOf(">编辑<")), html.indexOf("</td>", html.indexOf(">编辑<")));
-  expect(td.includes("flex justify-end"), "PriceTable 操作列内容必须由表格统一 justify-end 包装，页面不再各自手写");
+  expect(td.includes("flex flex-nowrap justify-end"), "PriceTable 操作列内容必须由表格统一 flex flex-nowrap justify-end 包装（W9：单行靠右），页面不再各自手写");
 });
 
 check("PriceTable：可排列表头常驻未排序 ArrowUpDown（SSR 渲染）", async () => {
@@ -1278,8 +1281,9 @@ check("PriceTable：可排列表头常驻未排序 ArrowUpDown（SSR 渲染）",
 
 check("上游详情密钥裸表：操作列表头右对齐、单元格内容由 KeysTable 统一 justify-end 包装", () => {
   const text = read("src/components/upstreams/keys-panel.tsx");
-  expect(text.includes('FROZEN_COLUMN_HEADER_CLASS + " text-right"'), "裸表操作列表头必须右对齐（与内容同侧）");
+  expect(/FROZEN_COLUMN_HEADER_CLASS\s*\+\s*" text-right/.test(text), "裸表操作列表头必须右对齐（与内容同侧）");
   expect(text.includes("ACTION_CELL_WRAPPER_CLASS"), "KeysTable 必须用共享 ACTION_CELL_WRAPPER_CLASS 包装操作单元格内容，两个调用点不再各自手写");
+  expect(text.includes("ACTION_COLUMN_SIZING_CLASS"), "W9：裸表操作列必须带 ACTION_COLUMN_SIZING_CLASS（w-[1%] whitespace-nowrap，auto 布局下 max-content）");
 });
 
 check("日志页 SortHeader（SSR）：未排序 ArrowUpDown 常驻、升序 ArrowUpNarrowWide，按钮可访问名不被图标污染", async () => {
@@ -1741,12 +1745,12 @@ check("详情页 URL 参数：?tab=routing 定位「路由与模型」，非法�
   includesAll(page, ["useSearchParams", "resolveUpstreamTab", "UPSTREAM_TABS"], "详情页 URL 参数接线");
 });
 
-check("路由与模型面板：单模型/全部测试 + 密钥选择 + 串行进度可取消 + 结果仅会话内", () => {
+check("路由与模型面板：单模型/全部测试 + 内置测试凭据 + 串行进度可取消 + 结果写入日志", () => {
   const panel = read("src/components/upstreams/models-panel.tsx");
   includesAll(
     panel,
     [
-      "全部测试", "拉取模型", "测试结果", "选择测试密钥", "清空结果",
+      "全部测试", "拉取模型", "测试结果", "测试专用", "写入使用日志", "清空结果",
       "probe.run(", "probe.cancel", "probe.clear", "probe.session",
     ],
     "路由与模型面板接线",
@@ -2305,7 +2309,7 @@ check("公开模型页头保存：保存/状态/未保存数量固定页头、�
   expect(!header.includes("flex flex-wrap items-end justify-between gap-3"), "不得恢复说明与 actions 同行互斥占宽的旧布局");
 });
 
-check("成员编排容器：桌面左6右6栅格、两栏 min(60vh,560px) 内部滚动、列头固定", () => {
+check("成员编排容器：桌面左7右5栅格（W9 左侧成员卡加宽）、两栏 min(60vh,560px) 内部滚动、列头固定", () => {
   const flow = read("src/components/models/member-chip-flow.tsx");
   includesAll(
     flow,
@@ -2314,7 +2318,8 @@ check("成员编排容器：桌面左6右6栅格、两栏 min(60vh,560px) 内部
       "lg:grid-cols-12",
       'data-slot="member-board-left"',
       'data-slot="member-board-right"',
-      "lg:col-span-6",
+      "lg:col-span-7",
+      "lg:col-span-5",
       'data-slot="member-column-head"',
       'data-slot="member-scroll"',
       "max-h-[min(60vh,560px)]",
@@ -2327,13 +2332,22 @@ check("成员编排容器：桌面左6右6栅格、两栏 min(60vh,560px) 内部
 // ---------- 十、公开模型成员编排行内编辑与分组候选（W6 ticket 15）----------
 check("成员编排行内编辑：行内字段按策略收敛、候选按上游分组 chip、搜索固定滚动区外", () => {
   const flow = read("src/components/models/member-chip-flow.tsx");
-  // 行内编辑：priority 常驻；weight 仅 weighted、when 仅 conditional——其余模式的字段
-  // 完全不渲染（不是 disabled 摆着误导），票15 的核心契约。
+  // 行内编辑（W9 横向小卡片）：三项字段始终渲染，非当前策略的字段 disabled 并带中文提示，
+  // 标签全部中文（优先级/权重/条件），不再用 priority/weight/when 英文 aria-label。
   includesAll(
     flow,
-    ['data-slot="member-row"', 'aria-label="priority"', 'aria-label="weight"', 'aria-label="when"', 'data-slot="member-row-remove"'],
+    [
+      'data-slot="member-row"',
+      'aria-label="优先级"',
+      'aria-label="权重"',
+      'aria-label="条件"',
+      'data-slot="member-row-remove"',
+      "FIELD_HINTS",
+    ],
     "行内编辑行",
   );
+  expect(/disabled=\{mode !== "weighted"\}/.test(flow), "权重字段必须按策略 disabled（weighted 才可编辑）");
+  expect(/disabled=\{mode !== "conditional"\}/.test(flow), "条件字段必须按策略 disabled（conditional 才可编辑）");
   expect(!flow.includes("@/components/ui/combobox"), "候选区不得再用 Combobox 单控件（票15 换按上游分组 chip）");
   expect(!flow.includes("MemberChipEditor"), "行内编辑直接落在成员行上，不得保留点击展开式编辑器");
   // 候选：按上游渠道分组渲染（candidateGroups + filterCandidateGroups 复用），chip 点击即加入。
@@ -2368,11 +2382,12 @@ check("成员表格（W7 票05）：输入前置表头按策略收敛、行内 c
   const failover = renderMode("failover");
   const weighted = renderMode("weighted");
   const conditional = renderMode("conditional");
-  // 表头按策略收敛且输入前置：展开/优先级在最左，成员信息靠后；字段按当前策略出现。
-  includesAll(failover, ["展开", "优先级", "成员 / 上游"], "failover 表头");
-  expect(!failover.includes("权重") && !failover.includes("表达式"), "failover 不得出现权重/表达式表头");
-  includesAll(weighted, ["权重"], "weighted 表头出现中文「权重」");
-  includesAll(conditional, ["表达式"], "conditional 表头出现中文「表达式」");
+  // W9 表头固定：展开/优先级/权重/条件/成员 / 上游 五列在所有策略下都渲染（列宽稳定），
+  // 非当前策略的字段只是 disabled，不再隐藏列导致表头跳变。
+  for (const [mode, html] of [["failover", failover], ["weighted", weighted], ["conditional", conditional]]) {
+    includesAll(html, ["展开", "优先级", "权重", "条件", "成员 / 上游"], mode + " 表头");
+  }
+  expect(!failover.includes("表达式"), "W9 成员条件列统一叫「条件」，不再有「表达式」列");
   // 每行显式展开控件（chevron），展开态由 aria-expanded 表达。
   expect((failover.match(/data-slot="member-row-expand"/g) ?? []).length === 2, "每行一个展开 chevron");
   expect(failover.includes('aria-expanded="false"'), "chevron 必须 aria-expanded 标记展开态");

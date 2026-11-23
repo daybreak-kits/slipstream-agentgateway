@@ -80,6 +80,8 @@ from l04_repo.orm import (  # noqa: E402
     CostDailyORM,
     CostEntryORM,
     GatewayUsageEventORM,
+    ModelTargetORM,
+    PublicModelORM,
     RequestAttemptORM,
     UserDailyORM,
     UserORM,
@@ -103,8 +105,8 @@ from l05_service.priority_migration import (  # noqa: E402
 )
 
 DAY_MS = 86_400_000
-CNY = "CNY"
-USD = "USD"
+DEFAULT_CURRENCY = "USD"  # W9: product default ledger currency
+CURRENCY = DEFAULT_CURRENCY
 
 # (base_url, api_style, [fake upstream keys])
 # ADR-026: one channel owns N equal-peer keys - the renderer expands each row
@@ -180,11 +182,11 @@ LOGIN_ACCOUNTS = {
     "压测环境": "loadtest",
 }
 
-# Cache items are the one price still held by the book (ADR-020): 0.5 CNY / 1M
+# Cache items are the one price still held by the book (ADR-020): 0.5 USD / 1M
 # cache tokens, same for every model, because a model row has no cache column.
 CACHE_PRICE_MICRO = 500_000
 
-# per-model upstream prices in micro CNY per 1M tokens: (input, output)
+# per-model upstream prices in micro USD per 1M tokens: (input, output)
 UPSTREAM_PRICES = {
     "glm-5.3": (2_000_000, 8_000_000),
     "glm-5.3-flash": (300_000, 1_200_000),
@@ -345,7 +347,7 @@ def seed(session, rng: random.Random) -> dict[str, object]:
                 actor="seed",
             )
             if name in UPSTREAM_PRICES:
-                # ticket 05：模型级成本（CNY/1M 词元）+ 倍率；花费 = 成本 × markup
+                # ticket 05：模型级成本（USD/1M 词元）+ 倍率；花费 = 成本 × markup
                 input_micro, output_micro = UPSTREAM_PRICES[name]
                 model.cost_input_per_1m = Decimal(input_micro) / Decimal(1_000_000)
                 model.cost_output_per_1m = Decimal(output_micro) / Decimal(1_000_000)
@@ -401,13 +403,13 @@ def seed(session, rng: random.Random) -> dict[str, object]:
         # Initial credit is booked as topups so the ledger explains the balance.
         first = topups[0]
         balances.record_topup(
-            session, user_id=user.id, amount_micro=first, currency=CNY,
+            session, user_id=user.id, amount_micro=first, currency=CURRENCY,
             created_by="admin", note="开户充值",
         )
         if len(topups) > 1:
             balances.record_topup(
                 session, user_id=user.id, amount_micro=initial_micro - first,
-                currency=CNY, created_by="admin", note="追加充值",
+                currency=CURRENCY, created_by="admin", note="追加充值",
             )
         else:
             assert first == initial_micro
@@ -426,10 +428,10 @@ def seed(session, rng: random.Random) -> dict[str, object]:
             for item in ("cache_read", "cache_write"):
                 prices.create_upstream_price(
                     session, upstream_model_id=model.id,
-                    item=item, unit_price_micro=CACHE_PRICE_MICRO, currency=CNY,
+                    item=item, unit_price_micro=CACHE_PRICE_MICRO, currency=CURRENCY,
                     effective_from_ms=effective,
                 )
-    prices.put_fx_snapshot(session, currency=USD, rate_micro=7_250_000, source="seed")
+    prices.put_fx_snapshot(session, currency=CURRENCY, rate_micro=1_000_000, source="seed")
 
     # ---------------- 7 days of usage ----------------
     public_names = list(TRAFFIC)
@@ -564,7 +566,10 @@ def seed(session, rng: random.Random) -> dict[str, object]:
                 model=first_model,
                 status_code=500,
                 error_type="upstream_error",
-                error_message="connection reset by peer while reading the response stream (seed route-chain fixture)",
+                error_message=(
+                    "connection reset by peer while reading the response stream "
+                    "(seed route-chain fixture)"
+                ),
                 started_at_ms=event.started_at_ms,
                 duration_ms=first_duration,
                 outcome="error",
@@ -601,7 +606,7 @@ def seed(session, rng: random.Random) -> dict[str, object]:
         _day_of_ms(row.started_at_ms or 0)
         for row in session.scalars(select(GatewayUsageEventORM)).all()
     }
-    _rebuild_daily(session, event_days, CNY)
+    _rebuild_daily(session, event_days, CURRENCY)
     billing["daily_days"] = len(event_days)
 
     # ---------------- availability rules ----------------
@@ -649,9 +654,9 @@ def seed(session, rng: random.Random) -> dict[str, object]:
     session.add_all([revision_one, revision_two])
     session.flush()
     put_setting(session, "active_revision", json.dumps({"id": revision_two.id}), now)
-    put_setting(session, "report_currency", json.dumps(CNY), now)
+    put_setting(session, "report_currency", json.dumps(CURRENCY), now)
     for key, value in (
-        ("base_currency", CNY),
+        ("base_currency", CURRENCY),
         ("timezone", "Asia/Shanghai"),
         ("log_retention_days", 30),
         ("ag_access_log_llm", "metadata"),
@@ -757,8 +762,10 @@ def seed(session, rng: random.Random) -> dict[str, object]:
     return {
         "upstreams": len(upstreams),
         "upstream_models": len(upstream_models),
-        "public_models": len(public_models),
-        "targets": len(targets),
+        # Auto-generated direct-call rows are seeded by crud too; report the DB,
+        # not just the hand-authored dicts, so the summary matches reality.
+        "public_models": session.query(PublicModelORM).count(),
+        "targets": session.query(ModelTargetORM).count(),
         "users": len(users),
         "keys": key_texts,
         "events": event_count,

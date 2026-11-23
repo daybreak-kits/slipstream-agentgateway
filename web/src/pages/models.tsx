@@ -18,7 +18,6 @@ import { PublicModelEditor } from "@/components/models/public-model-editor";
 import { UpstreamModelDrawer } from "@/components/models/upstream-model-drawer";
 import { PageHeader } from "@/components/layout/page-header";
 import { ModelsTable, type ModelColumn } from "@/components/models/table";
-import { actionColumnWidth } from "@/lib/table-columns";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -31,6 +30,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { HoverInfo } from "@/components/ui/hover-info";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { StatusIcon } from "@/components/ui/status-icon";
 import { Tabs } from "@/components/ui/tabs";
@@ -395,7 +395,6 @@ function UpstreamTab() {
       sticky: "right",
       hideable: false,
       // 最多 5 个 dense 操作按钮（编辑/关闭|启用/解除/删除/周期），列宽按按钮数固定。
-      width: actionColumnWidth(5),
       cell: (row: UpstreamModel) => (
         <div className="flex gap-1">
           <ActionButton action="edit" size="dense" onClick={() => setDrawer({ open: true, initial: row })}>
@@ -513,7 +512,6 @@ function UpstreamTab() {
         {ENABLE_SEMANTICS_NOTE}
       </p>
       <ModelsTable<UpstreamModel>
-        layout="fixed"
         columns={columns}
         rows={rows}
         totalCount={allItems.length}
@@ -767,14 +765,17 @@ function PublicTab() {
   const allItems = q.data ?? [];
   const needle = search.trim().toLowerCase();
   const rows = useMemo(
-    () => allItems.filter((row) => {
-      if (needle === "") return true;
-      return (
-        row.name.toLowerCase().includes(needle) ||
-        (row.note ?? "").toLowerCase().includes(needle) ||
-        (row.targets ?? []).some((t) => (t.upstream_model_name || "").toLowerCase().includes(needle))
-      );
-    }),
+    () => allItems
+      .filter((row) => {
+        if (needle === "") return true;
+        return (
+          row.name.toLowerCase().includes(needle) ||
+          (row.note ?? "").toLowerCase().includes(needle) ||
+          (row.targets ?? []).some((t) => (t.upstream_model_name || "").toLowerCase().includes(needle))
+        );
+      })
+      // 手建模型排在自动注册之前，避免自动行淹没运维自己维护的公开模型。
+      .sort((a, b) => Number(Boolean(a.auto_generated)) - Number(Boolean(b.auto_generated)) || a.name.localeCompare(b.name)),
     [allItems, needle],
   );
 
@@ -827,16 +828,16 @@ function PublicTab() {
     ...(canWrite ? [selectColumn] : []),
     {
       key: "name",
-      label: "公开名 / 备注",
-      width: "10rem",
+      label: "公开模型",
       cell: (row) => (
-        <div>
+        <div className="min-w-0">
           {/* W7 t10：与上游模型同一口径——关闭的公开模型在名字旁出状态图标。 */}
-          <div className="flex items-center gap-1.5">
-            <span className="tnum font-medium text-title">{row.name}</span>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className="tnum min-w-0 truncate font-medium text-title" title={row.name}>{row.name}</span>
+            {row.auto_generated ? <Badge tone="neutral" className="shrink-0">自动</Badge> : null}
             <StatusIcon kind={modelStatusKind(row)} cooldownUntilMs={coolingUntil(row)} />
           </div>
-          <div className="text-2xs text-faint">{row.note || "-"}</div>
+          <div className="truncate text-2xs text-faint" title={row.note || undefined}>{row.note || "-"}</div>
         </div>
       ),
     },
@@ -867,17 +868,45 @@ function PublicTab() {
     {
       key: "members",
       label: "成员",
-      width: "14rem",
-      // 数值列右对齐（对齐镜像：className 头身同用，DESIGN-AUDIT 四期 §2）。
-      className: "text-right tnum",
+      // 只显示计数；点击图标查看成员明细，避免长模型名把列撑开。
       cell: (row) => {
         const targets = row.targets ?? [];
-        const names = targets.slice(0, 3).map((t) => t.upstream_model_name || t.upstream_model_id).filter((name) => Boolean(name));
+        const count = row.target_count ?? targets.length;
         return (
-          <div>
-            <span className="tnum text-2sm">{fmtInt(row.target_count ?? targets.length)}</span>
-            <div className="text-2xs text-faint">{names.length > 0 ? names.join(" · ") + (targets.length > 3 ? " …" : "") : "-"}</div>
-          </div>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1 px-1.5"
+                aria-label={"查看 " + row.name + " 的成员"}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <ACTION_ICONS.members className="h-3.5 w-3.5" aria-hidden="true" />
+                <span className="tnum">{fmtInt(count)}</span>
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-80" onClick={(event) => event.stopPropagation()}>
+              <div className="mb-2 text-2sm font-medium text-title">成员 · {count}</div>
+              {targets.length === 0 ? (
+                <p className="text-2xs text-faint">暂无成员</p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {targets.map((target) => (
+                    <li key={target.id} className="flex items-baseline justify-between gap-3 text-2sm">
+                      <span className="min-w-0 truncate text-body" title={target.upstream_model_name || target.upstream_model_id}>
+                        {target.upstream_model_name || target.upstream_model_id}
+                      </span>
+                      <span className="shrink-0 text-2xs text-faint">
+                        优先级 <span className="tnum">{target.priority}</span>
+                        {target.weight ? <> · 权重 <span className="tnum">{target.weight}</span></> : null}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </PopoverContent>
+          </Popover>
         );
       },
     },
@@ -888,7 +917,6 @@ function PublicTab() {
       sticky: "right",
       hideable: false,
       // 复制公开名（图标按钮）+ 编辑/关闭|启用/删除，列宽按按钮数固定。
-      width: actionColumnWidth(4),
       cell: (row: PublicModel) => (
         <div className="flex gap-1">
           <Button
@@ -936,8 +964,10 @@ function PublicTab() {
     setBatchDelete(false);
   };
 
-  const toolbarEnd = canWrite && selected.size > 0 ? (
+  const toolbarEnd = canWrite ? (
     <>
+      {selected.size > 0 ? (
+        <>
       <span className="text-2xs text-faint">已选 <span className="tnum font-medium text-title">{selected.size}</span></span>
       <ActionButton
         action="enable"
@@ -961,6 +991,11 @@ function PublicTab() {
       <Button variant="ghost" size="sm" disabled={batch.isPending} onClick={() => setSelected(new Set())}>
         <ACTION_ICONS.clear className="h-3.5 w-3.5" /> 清除选择
       </Button>
+        </>
+      ) : null}
+      <Button size="sm" onClick={() => setCreateOpen(true)}>
+        <ACTION_ICONS.add className="h-3.5 w-3.5" /> 新建公开模型
+      </Button>
     </>
   ) : null;
 
@@ -970,7 +1005,6 @@ function PublicTab() {
         公开模型是运营对外发放的别名：策略 + 成员（priority / weight）+ 启停。可用性措施（冷却/周期）只作用于上游模型（ADR-025），行内「编辑」进入整页编辑器合并维护成员。
       </p>
       <ModelsTable<PublicModel>
-        layout="fixed"
         columns={columns}
         rows={rows}
         totalCount={allItems.length}
@@ -987,7 +1021,6 @@ function PublicTab() {
         searchPlaceholder="搜索公开名、备注或成员"
         toolbarEnd={toolbarEnd}
         emptyText="还没有公开模型"
-        emptyAction={canWrite ? <Button size="sm" onClick={() => setCreateOpen(true)}>新建公开模型</Button> : undefined}
         onClearFilters={() => setSearch("")}
         onRowClick={canWrite ? openEditor : undefined}
       />

@@ -15,7 +15,7 @@ from l02_domain.transforms_codec import parse_transforms, transforms_to_json
 from l03_adapters.spi import DataPlaneAdapter
 from l04_repo.orm import UpstreamModelORM, UpstreamORM
 from l04_repo.repository import UPSTREAM_REPO
-from l05_service import crud, upstream_ops
+from l05_service import crud, model_test, upstream_ops
 from l06_api.deps import get_adapter, page_params, require, session_of
 from l06_api.schemas import (
     TransformSampleIn,
@@ -321,23 +321,38 @@ def probe_models(
     upstream_id: str,
     payload: UpstreamModelProbeIn,
     session: Session = Depends(session_of),
+    adapter: DataPlaneAdapter = Depends(get_adapter),
 ) -> dict:
-    """Probe this upstream's stored models with one minimal chat each (ticket 05).
+    """Test this upstream's models through the data plane (W9).
 
-    Serial by design (the console shows progress model by model), 20s per model,
-    results returned for this call only - no probe row, key test or model row is
-    written. model_write is upstream_models:write in the permission registry.
+    The request goes to agentgateway under the auto-generated
+    <upstream>/<model> public name using the internal 测试专用 key, so it is
+    authenticated, routed, failover-capable and logged like a real call. Results
+    are also read back from those usage events; no private probe table is used.
     """
     upstream = _load(session, upstream_id)
     model_ids = list(payload.model_ids)
     if payload.model_id:
         model_ids.insert(0, payload.model_id)
-    return upstream_ops.probe_models(
-        session,
-        upstream,
-        model_ids=model_ids,
-        key_id=payload.key_id,
-        secret_box=_secret_box(),
+    result = model_test.test_upstream_models(
+        session, upstream, model_ids=model_ids, adapter=adapter
+    )
+    session.commit()
+    return result
+
+
+@router.get(
+    "/{upstream_id}/models/test-results",
+    dependencies=[Depends(require("upstream_models:read"))],
+)
+def model_test_results(
+    upstream_id: str,
+    model_id: str | None = None,
+    session: Session = Depends(session_of),
+) -> dict:
+    upstream = _load(session, upstream_id)
+    return model_test.latest_test_results(
+        session, upstream, model_ids=[model_id] if model_id else None
     )
 
 

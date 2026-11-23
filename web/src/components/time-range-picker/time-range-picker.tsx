@@ -165,6 +165,14 @@ export function TimeRangePicker({ value, onChange, className, highlighted = fals
   // 自定义窗起点恰为本周一/本月 1 日 00:00 时，把对应预设按钮点亮（起点锚定，不看易漂移的终点）。
   const weekActive = value.kind === "custom" && value.fromMs === startOfWeekMs();
   const monthActive = value.kind === "custom" && value.fromMs === startOfMonthMs();
+  // W9：本周/本月与其它预设一样走 ToggleGroup 单选 chip，不再用两个独立 outline 按钮。
+  const presetValue = value.kind === "range"
+    ? value.value
+    : weekActive
+      ? "week"
+      : monthActive
+        ? "month"
+        : "";
 
   const today = new Date();
   // 日历硬边界（W6 票 16）：超界日期直接禁用，最早可选日由契约上限推导。
@@ -193,7 +201,9 @@ export function TimeRangePicker({ value, onChange, className, highlighted = fals
             />
           </Button>
         </PopoverTrigger>
-        <PopoverContent align="end" sideOffset={8} aria-label="选择时间区间" className="w-auto p-3">
+        {/* W9：align=start——弹层从触发按钮左缘向右展开，不会盖住左侧导航；触发按钮靠近视口
+            右缘时 Radix 会按 collisionPadding（12px）自动向左平移，仍在视口内。 */}
+        <PopoverContent align="start" sideOffset={8} collisionPadding={12} aria-label="选择时间区间" className="w-auto p-3">
           <div className="flex flex-col gap-3 sm:flex-row">
             <Calendar
               mode="range"
@@ -212,9 +222,15 @@ export function TimeRangePicker({ value, onChange, className, highlighted = fals
                 <ToggleGroup
                   type="single"
                   aria-label="预设区间"
-                  value={value.kind === "range" ? value.value : ""}
+                  value={presetValue}
                   onValueChange={(next) => {
                     if (!next) return;
+                    if (next === "week" || next === "month") {
+                      const fromMs = next === "week" ? startOfWeekMs() : startOfMonthMs();
+                      onChange({ kind: "custom", fromMs, toMs: Date.now() });
+                      setOpen(false);
+                      return;
+                    }
                     onChange({ kind: "range", value: next as TimeWindowRange });
                     setOpen(false);
                   }}
@@ -225,31 +241,9 @@ export function TimeRangePicker({ value, onChange, className, highlighted = fals
                       {option.label}
                     </ToggleGroupItem>
                   ))}
+                  <ToggleGroupItem value="week" className={PRESET_CHIP}>本周</ToggleGroupItem>
+                  <ToggleGroupItem value="month" className={PRESET_CHIP}>本月</ToggleGroupItem>
                 </ToggleGroup>
-                <div className="flex items-center gap-1.5">
-                  <Button
-                    variant="outline"
-                    size="dense"
-                    className={cn(weekActive && "border-primary/70 text-primary")}
-                    onClick={() => {
-                      onChange({ kind: "custom", fromMs: startOfWeekMs(), toMs: Date.now() });
-                      setOpen(false);
-                    }}
-                  >
-                    本周
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="dense"
-                    className={cn(monthActive && "border-primary/70 text-primary")}
-                    onClick={() => {
-                      onChange({ kind: "custom", fromMs: startOfMonthMs(), toMs: Date.now() });
-                      setOpen(false);
-                    }}
-                  >
-                    本月
-                  </Button>
-                </div>
               </div>
 
               <div className="rounded-control border border-border bg-surface-2 p-2">

@@ -94,9 +94,13 @@ export function ResultCell({
   className,
   ...rest
 }: ResultCellProps) {
+  // W9：「未测试」这类只有第一行的结果，如果仍固定占两行槽位（22px + 18px），
+  // 徽章会贴在槽位顶部、看起来不垂直居中。无第二行时让第一行跨满两行，
+  // 由 items-center 在整块槽位里居中；槽位 class 本身不变（W8 契约保留）。
+  const hasSecondary = secondary !== undefined && secondary !== null && secondary !== "";
   return (
     <span data-slot="result-cell" className={cn(RESULT_CELL_SLOT_CLASS, className)} {...rest}>
-      <span className={cn(RESULT_CELL_PRIMARY_CLASS, primaryClassName)}>{primary}</span>
+      <span className={cn(RESULT_CELL_PRIMARY_CLASS, !hasSecondary && "row-span-2", primaryClassName)}>{primary}</span>
       <span className={cn(RESULT_CELL_SECONDARY_CLASS, secondaryClassName)}>{secondary}</span>
     </span>
   );

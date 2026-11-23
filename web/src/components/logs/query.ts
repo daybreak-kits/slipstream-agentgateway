@@ -61,7 +61,8 @@ export function logWindowBounds(
 
 export function createDefaultLogFilters(): LogFilterDraft {
   return {
-    window: { kind: "range", value: "24h" },
+    // W9：日志默认窗口改为「今天」（本地 00:00 → 现在），不再默认近 24 小时。
+    window: { kind: "range", value: "today" },
     model: "",
     upstream: "",
     user: "",

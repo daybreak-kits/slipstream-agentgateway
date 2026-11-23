@@ -542,15 +542,61 @@ async def playground_stream(
         )
     base_url = contract.base_url()
 
-    def relay():
-        # One table drives both the request schema and this body (ticket 05):
-        # no per-field hand wiring and no second whitelist here.
-        body = relay_body(payload)
-        headers = {"Authorization": "Bearer " + plaintext, "Content-Type": "application/json"}
-        with httpx.Client(timeout=300) as client:
-            with client.stream(
+    # W9: open the data-plane request BEFORE constructing the StreamingResponse.
+    # Previously an upstream 401/404/503 was relayed as a successful 200 SSE with
+    # an empty body, so the browser showed a fake empty answer. Now non-2xx
+    # responses become a real control-plane error and the UI can show it.
+    body = relay_body(payload)
+    headers = {"Authorization": "Bearer " + plaintext, "Content-Type": "application/json"}
+    client = httpx.Client(timeout=300)
+    try:
+        upstream = client.send(
+            client.build_request(
                 "POST", base_url + endpoint.path, json=body, headers=headers
-            ) as upstream:
-                yield from upstream.iter_text()
+            ),
+            stream=True,
+        )
+    except httpx.HTTPError as exc:
+        client.close()
+        raise AppError(
+            ErrorCode.DATA_PLANE_UNAVAILABLE,
+            f"数据面不可达：{exc}",
+            details={"endpoint": endpoint.path},
+        ) from exc
 
-    return StreamingResponse(relay(), media_type="text/event-stream")
+    if upstream.status_code < 200 or upstream.status_code >= 300:
+        raw = upstream.read()
+        upstream.close()
+        client.close()
+        text = raw.decode("utf-8", errors="replace")[:800]
+        message = "数据面拒绝了模型试验请求"
+        try:
+            parsed = __import__("json").loads(text)
+            error = parsed.get("error") if isinstance(parsed, dict) else None
+            if isinstance(error, dict) and error.get("message"):
+                message += f"：{error['message']}"
+            elif isinstance(parsed, dict) and parsed.get("message"):
+                message += f"：{parsed['message']}"
+            else:
+                message += f"：HTTP {upstream.status_code}"
+        except Exception:
+            if text:
+                message += f"：HTTP {upstream.status_code}，{text}"
+            else:
+                message += f"：HTTP {upstream.status_code}"
+        raise AppError(
+            ErrorCode.DATA_PLANE_UNAVAILABLE,
+            message,
+            details={"upstream_status": upstream.status_code, "endpoint": endpoint.path},
+        )
+
+    content_type = upstream.headers.get("content-type", "text/event-stream")
+
+    def relay():
+        try:
+            yield from upstream.iter_text()
+        finally:
+            upstream.close()
+            client.close()
+
+    return StreamingResponse(relay(), media_type=content_type)

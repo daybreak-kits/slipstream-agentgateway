@@ -19,7 +19,7 @@
 
 | 术语 | 定义 | 易混 |
 |---|---|---|
-| 模型探测 Model probe | `POST /admin/upstreams/{id}/models/probe`：对上游**已保存**的上游模型逐个主动发一次最小 chat，串行、单模型 20s 超时；结果只回本次响应（连通/HTTP 失败/超时/连接失败），**不落库、不写 probe 行或密钥测试结果** | 与「拉取模型」不同：探测是验证已知模型能否调用；与接口风格 `auto` 的「自动探测」也不同：那是配置风格推断，不发起上游调用 |
+| 模型探测 Model probe | `POST /admin/upstreams/{id}/models/probe`：对上游**已保存**模型逐个经数据面发一次最小非流式 chat（16 token、单模型 60s 超时），使用自动公开名 `<上游>/<模型>` 与内置“测试专用”凭据；请求经 AG 鉴权、路由并写入用量日志，返回每模型 `ok/status/latency_ms/error_type/message/usage`。测试结果不再落私有 probe 表，可从 `GET /admin/upstreams/{id}/models/test-results` 按日志回读 | 与「拉取模型」不同：探测验证已知模型能否调用；与接口风格 `auto` 的「自动探测」不同：那是配置风格推断，不发起上游调用；与「连接密钥测试」不同：后者只验证密钥鉴权，不发模型请求 |
 | 模型拉取 Discover models | `POST /admin/upstreams/{id}/discover-models`：从上游拉取候选模型清单，不自动建记录，管理员再选择导入 | 旧名「发现模型」已废；不是探测（不做逐模型调用验证） |
 | 尝试链 / 路由链 RequestAttempt | ADR-028：一次客户端请求的逐次上游尝试（attempt_no、上游、模型、状态码、错误类型/文本、耗时、结果），存 `request_attempts`；数据仍经 `GET /admin/logs/{event_id}/attempts` 读取。W7 t06 起日志页**没有独立「尝试」列**：`attempts_count > 0` 时模型旁显示分叉图标，点开 popover 看每行模型/状态/耗时、可展开错误详情 | 不是请求日志本身（`request_logs` 仍 1 请求 1 行）；历史日志无链路记录时显示「无链路记录」；与 OTel/trace/span 概念无关（系统层不出现） |
 | 冷却互斥 Cooldown exclusivity | 同一 scope 的**单次冷却**与**周期冷却**互斥：一种生效时另一种的创建/改期返回 409 `CONFLICT`，`details` 固定 `{blocking_rule_ids, cooldown_until_ms, window_end_ms}`；仅改 note 的 PATCH 放行（ADR-027，取代 ADR-004 叠加口径） | 批量冷却的冲突项进 `failed[]`，不整体失败；关闭（closed）不参与互斥 |
@@ -36,6 +36,15 @@
 | 悬浮详情 HoverInfo | 统一悬浮详情原语（`web/src/components/ui/hover-info.tsx`，W7 t08）：鼠标悬停 250ms、键盘 Tab 聚焦、触屏轻点三路触发；Portal 到 body、视口碰撞处理、可访问名称。模型参数列完整参数与状态详情都走它 | 不是原生 `title` 属性（不可键盘/触屏）；也不是 Popover 业务组件，它是展示原语，不新增后端接口 |
 | 状态图标 StatusIcon | 模型名旁的三态图标（`web/src/components/ui/status-icon.tsx`，W7 t10）：仅非正常状态显示（关闭/冷却/未知），normal 零占位；悬浮（HoverInfo）给出原因与冷却解除时间（yyyy-mm-dd hh:mm:ss）；有启用/关闭行操作的表格不再保留重复状态列 | 不是新增后端状态字段：状态仍是可用性状态（normal/cooling/closed）投影；与「关闭/启用」行操作互为表达，不互相替代 |
 | 弹框键盘 Dialog keyboard | 创建/保存/确认弹框统一键盘行为（W7 t11）：Enter 主操作（输入法组合中不触发）、Escape 取消、Tab 焦点陷阱、危险确认默认焦点在「取消」、提交中防重复、关闭后焦点还原到触发按钮 | 不是每弹框各自实现：统一原语在 `ui/dialog` / `ui/alert-dialog`；「Esc 直接丢弃脏改动」有脏保护确认 |
+
+## 1.3 九期新增词条（W9）
+
+| 术语 | 定义 | 易混 |
+|---|---|---|
+| 自动公开模型 AutoPublicModel | `public_models.auto_generated=true` 的直调公开模型，名字固定为 `<上游名>/<模型名>`；创建/导入上游模型时自动生成，已有同名手建公开模型时复用或报冲突；上游模型删除时只清理自动行。客户可直接按这个名字调用，不必先手工编排公开模型 | 不是手建公开模型：手建行可自由命名、编排多成员；自动行只有一个成员；`auto_generated` 只表示来源，不改变路由能力 |
+| 测试专用凭据 Test credential | 系统内置的隐藏用户与 `sk-` 密钥（名为“测试专用”），在首次启动/首次下发前创建；只用于经数据面的模型探测。明文仅服务端解密后使用，不出现在用户列表、密钥列表或前端 | 不是客户的连接密钥，也不是「模型试验」使用的 playground 凭据；不要把它暴露给上游或前端 |
+| 模型测试 Model test | 模型探测的实际动作：控制面用自动公开名 + 测试专用凭据请求数据面，非流式、`hi`、最多 16 输出 token；成功/失败都会写 AG 用量日志，因此 token 消耗可在使用日志看到。结果以日志为唯一事实源 | 不是管理面直连上游；不是连接密钥测试；不是拉取模型；不是模型试验对话 |
+| 模型测试结果 Test result | `GET /admin/upstreams/{id}/models/test-results`：按测试专用凭据和公开模型名取最近一条用量事件，返回 `ok/status/latency_ms/started_at_ms/input_tokens/output_tokens/error`；没有日志时省略该模型 | 从 `gateway_usage_events` 回读，不是单独的结果表；日志尚未拉取时可能暂时为空 |
 
 ## 2. 路由
 
@@ -87,8 +96,8 @@
 | 缓存命中率 Cache Hit | 派生（GLOSSARY §5 词元口径） | 缓 ÷（入 + 缓），入为扣除缓存后的净输入；展示 1 位小数百分比（`fmtPct` / `fmtPctPoint`）；无缓存显示「无缓存」 | 分母不含出词元 |
 | 尝试次数 Attempts | `request_attempts` 行数 | 一次请求的逐次上游尝试次数；展示为千分位整数（`fmtInt`，与计数同口径），无记录为 0 且 UI 显示「无链路记录」 | 不是请求数；1 请求可对应 N 次尝试（ADR-028） |
 
-金额一律整数 micro（1 CNY = 1_000_000 micro），字段后缀 `_micro`；货币 `currency` 取 CNY/USD，
-v1 主币种 CNY。
+金额一律整数 micro（1 个货币单位 = 1_000_000 micro），字段后缀 `_micro`；货币 `currency` 取 CNY/USD，系统默认 USD（运营设置 `base_currency` 可改 CNY）。
+
 
 ## 6. 下发
 

@@ -24,7 +24,7 @@ import { controlPlane } from "@/lib/control-plane";
 import { ACTION_ICONS } from "@/lib/icons";
 import { usePermissions } from "@/lib/permissions";
 import {
-  actionColumnWidth,
+  ACTION_COLUMN_SIZING_CLASS,
   FROZEN_COLUMN_CELL_CLASS,
   FROZEN_COLUMN_HEADER_CLASS,
   STABLE_ACTION_CELL_WRAPPER_CLASS,
@@ -207,8 +207,8 @@ function KeyTestCell({ row }: { row: KeyRowModel }) {
   );
 }
 
-/** 密钥裸表（W8 t03 起固定列宽）：勾选/编号/密钥/结果/创建时间/操作列宽写死，备注列吸收剩余宽度；
- * 操作列始终最后一列 + sticky right，结果列固定两行槽位——测试结果出现时行高、列宽均不跳。 */
+/** 密钥裸表（W9：auto 列宽）：各列随内容自适应，备注列吸收剩余宽度；操作列始终最后一列 +
+ * sticky right 且按内容 max-content 收缩；结果列固定两行槽位——测试结果出现时行高不跳。 */
 export function KeysTable({
   rows,
   selected,
@@ -227,11 +227,11 @@ export function KeysTable({
   const allSelected = selectable && rows.length > 0 && rows.every((row) => selected.has(row.id));
   return (
     <TableWrap>
-      <Table fixed>
+      <Table>
         <THead>
           <tr>
             {selectable ? (
-              <TH style={{ width: "2.5rem" }}>
+              <TH className="w-[1%] whitespace-nowrap">
                 <Checkbox
                   checked={allSelected}
                   onCheckedChange={(checked) => onToggleAll(checked === true)}
@@ -239,16 +239,19 @@ export function KeysTable({
                 />
               </TH>
             ) : null}
-            <TH style={{ width: "2.5rem" }}>编号</TH>
-            <TH>备注</TH>
-            <TH style={{ width: "4rem" }}>密钥</TH>
-            <TH style={{ width: "9.5rem" }}>测试结果</TH>
-            <TH style={{ width: "9rem" }}>创建时间</TH>
+            {/* 编号列：右对齐 + 等宽数字，#1/#10 的 # 与数字逐位对齐。 */}
+            <TH className="w-[1%] whitespace-nowrap text-right" title="密钥编号（与数据面 provider #N 同序）">编号</TH>
+            {/* 备注列（W9）：它是唯一的可伸缩文本列——w-full 让它吸收表格剩余宽度，单元格内单行
+                截断（auto 布局下若不给宽度，会被挤成逐字换行）。 */}
+            <TH className="w-full whitespace-nowrap">备注</TH>
+            <TH className="whitespace-nowrap">密钥</TH>
+            <TH className="whitespace-nowrap">测试结果</TH>
+            <TH className="whitespace-nowrap">创建时间</TH>
             {/* 操作列 = 最后一列 + 尾部冻结（W5 D1）：裸表也复用 lib/table-columns 的冻结列类；
-                W6 ticket 11：表头与内容同右对齐（贴边规则与三套表格组件一致）。 */}
+                W6 ticket 11：表头与内容同右对齐（贴边规则与三套表格组件一致）；
+                W9：auto 布局下按内容 max-content 收缩，不再按按钮数估算固定宽度。 */}
             <TH
-              className={FROZEN_COLUMN_HEADER_CLASS + " text-right"}
-              style={{ width: actionColumnWidth(3, 3.5) }}
+              className={FROZEN_COLUMN_HEADER_CLASS + " text-right " + ACTION_COLUMN_SIZING_CLASS}
             >
               操作
             </TH>
@@ -266,23 +269,25 @@ export function KeysTable({
                   />
                 </TD>
               ) : null}
-              <TD>
+              <TD className="text-right">
                 <span className="tnum text-2xs text-faint">#{row.seq}</span>
               </TD>
-              <TD>
-                <span className="font-medium text-title">{row.label || "未命名"}</span>
-                {row.pending ? <Badge tone="warning">待保存</Badge> : null}
+              <TD className="w-full">
+                <span className="flex items-center gap-1.5 truncate font-medium text-title" title={row.label || undefined}>
+                  <span className="truncate">{row.label || "未命名"}</span>
+                  {row.pending ? <Badge tone="warning">待保存</Badge> : null}
+                </span>
               </TD>
-              <TD>
+              <TD className="whitespace-nowrap">
                 <span className="tnum font-mono text-2xs">{row.masked}</span>
               </TD>
               <TD><KeyTestCell row={row} /></TD>
-              <TD>
+              <TD className="whitespace-nowrap">
                 <span className="tnum text-2xs text-body">{row.createdText}</span>
               </TD>
               {/* W6 ticket 11：操作单元格内容统一由 KeysTable 套 justify-end 包装（user story 38），
-                  两个调用点不再各自手写对齐。 */}
-              <TD className={FROZEN_COLUMN_CELL_CLASS}>
+                  两个调用点不再各自手写对齐。W9：操作列按内容 max-content 收缩。 */}
+              <TD className={FROZEN_COLUMN_CELL_CLASS + " " + ACTION_COLUMN_SIZING_CLASS}>
                 {/* W8 t03：固定最小按钮宽度（min-w-14），「测试/测试中」文案切换不改变操作列。 */}
                 <div className={STABLE_ACTION_CELL_WRAPPER_CLASS}>{actions(row)}</div>
               </TD>

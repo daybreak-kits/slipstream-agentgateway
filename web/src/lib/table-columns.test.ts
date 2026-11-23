@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import {
   ACTION_CELL_WRAPPER_CLASS,
+  ACTION_COLUMN_SIZING_CLASS,
   RESULT_CELL_LINE_COUNT,
   RESULT_CELL_SLOT_CLASS,
   STABLE_ACTION_CELL_WRAPPER_CLASS,
   TABLE_FIXED_LAYOUT_CLASS,
   actionColumnWidth,
+  tableColumnCellClass,
+  tableColumnHeaderClass,
   tableColumnWidthStyle,
 } from "./table-columns";
 
@@ -20,14 +23,26 @@ describe("固定表格布局原语（W8 t03）", () => {
     expect(TABLE_FIXED_LAYOUT_CLASS).toBe("table-fixed");
   });
 
-  it("列宽元数据写进表头内联样式；未声明宽度不产生样式", () => {
-    expect(tableColumnWidthStyle({ width: "10rem" })).toEqual({ width: "10rem" });
+  it("列宽元数据：fixed 布局写固定 width，auto 布局写 minWidth 让列随内容变宽；未声明宽度不产生样式", () => {
+    expect(tableColumnWidthStyle({ width: "10rem" }, "fixed")).toEqual({ width: "10rem" });
+    expect(tableColumnWidthStyle({ width: "10rem" }, "auto")).toEqual({ minWidth: "10rem" });
+    // 默认 auto（W9 起全站默认自适应布局）
+    expect(tableColumnWidthStyle({ width: "10rem" })).toEqual({ minWidth: "10rem" });
     expect(tableColumnWidthStyle({ align: "right" })).toBeUndefined();
     expect(tableColumnWidthStyle(undefined)).toBeUndefined();
   });
 
+  it("W9 操作列：sticky 尾列在 auto 布局下按内容 max-content 收缩且不换行", () => {
+    expect(ACTION_COLUMN_SIZING_CLASS).toContain("w-[1%]");
+    expect(ACTION_COLUMN_SIZING_CLASS).toContain("whitespace-nowrap");
+    expect(tableColumnHeaderClass({ sticky: "right" })).toContain(ACTION_COLUMN_SIZING_CLASS);
+    expect(tableColumnCellClass({ sticky: "right" })).toContain(ACTION_COLUMN_SIZING_CLASS);
+    // 非操作列不受影响（内容列继续自动换行/截断）。
+    expect(tableColumnHeaderClass({ align: "right" })).not.toContain(ACTION_COLUMN_SIZING_CLASS);
+  });
+
   it("固定布局操作列追加按钮最小宽度，非固定布局的表格不受影响", () => {
-    expect(ACTION_CELL_WRAPPER_CLASS).toBe("flex justify-end");
+    expect(ACTION_CELL_WRAPPER_CLASS).toBe("flex flex-nowrap justify-end");
     expect(STABLE_ACTION_CELL_WRAPPER_CLASS.startsWith(ACTION_CELL_WRAPPER_CLASS)).toBe(true);
     // dense 按钮 3.5rem：足够「测试」「测试中」两种文案，图标+短词按钮自然宽 4rem 不受限
     expect(STABLE_ACTION_CELL_WRAPPER_CLASS).toContain("[&_button]:min-w-14");

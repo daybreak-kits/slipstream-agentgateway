@@ -329,8 +329,13 @@ def _fresh_login_limiter():
 
 
 @pytest.fixture()
-def client(engine_and_sessionmaker):
+def client(engine_and_sessionmaker, monkeypatch):
     """Authenticated as a default admin; RBAC tests switch roles via login_cookies."""
+    # Legacy tests seed and assert CNY amounts; the product default is USD.
+    # Pin the process-wide setting for this test only (restored by monkeypatch).
+    from l01_core.settings import get_settings
+
+    monkeypatch.setattr(get_settings(), "report_currency", "CNY")
     _, factory = engine_and_sessionmaker
     return _authenticated_client(factory, "admin")
 
